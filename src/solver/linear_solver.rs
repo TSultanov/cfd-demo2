@@ -1,4 +1,4 @@
-// use std::ops::{Add, Mul, Sub};
+use wide::f64x4;
 
 #[derive(Clone, Debug)]
 pub struct SparseMatrix {
@@ -74,8 +74,18 @@ pub fn solve_bicgstab(
     a.mat_vec_mul(x, &mut r);
     
     // r = b - Ax
-    for i in 0..n {
+    let mut i = 0;
+    while i + 4 <= n {
+        let vb = f64x4::from(&b[i..i+4]);
+        let vr = f64x4::from(&r[i..i+4]);
+        let res = vb - vr;
+        let res_arr: [f64; 4] = res.into();
+        r[i..i+4].copy_from_slice(&res_arr);
+        i += 4;
+    }
+    while i < n {
         r[i] = b[i] - r[i];
+        i += 1;
     }
     
     let init_resid = norm(&r);
@@ -112,8 +122,22 @@ pub fn solve_bicgstab(
             p.copy_from_slice(&r);
         } else {
             let beta = (rho_new / rho_old) * (alpha / omega);
-            for i in 0..n {
+            let v_beta = f64x4::splat(beta);
+            let v_omega = f64x4::splat(omega);
+            
+            let mut i = 0;
+            while i + 4 <= n {
+                let vr = f64x4::from(&r[i..i+4]);
+                let vp = f64x4::from(&p[i..i+4]);
+                let vv = f64x4::from(&v[i..i+4]);
+                let res = vr + v_beta * (vp - v_omega * vv);
+                let res_arr: [f64; 4] = res.into();
+                p[i..i+4].copy_from_slice(&res_arr);
+                i += 4;
+            }
+            while i < n {
                 p[i] = r[i] + beta * (p[i] - omega * v[i]);
+                i += 1;
             }
         }
 
@@ -124,13 +148,35 @@ pub fn solve_bicgstab(
         }
         alpha = rho_new / r0_v;
         
-        for i in 0..n {
+        let v_alpha = f64x4::splat(alpha);
+        let mut i = 0;
+        while i + 4 <= n {
+            let vr = f64x4::from(&r[i..i+4]);
+            let vv = f64x4::from(&v[i..i+4]);
+            let res = vr - v_alpha * vv;
+            let res_arr: [f64; 4] = res.into();
+            s[i..i+4].copy_from_slice(&res_arr);
+            i += 4;
+        }
+        while i < n {
             s[i] = r[i] - alpha * v[i];
+            i += 1;
         }
         
         if norm(&s) < tol {
-            for i in 0..n {
+            let v_alpha = f64x4::splat(alpha);
+            let mut i = 0;
+            while i + 4 <= n {
+                let vx = f64x4::from(&x[i..i+4]);
+                let vp = f64x4::from(&p[i..i+4]);
+                let res = vx + v_alpha * vp;
+                let res_arr: [f64; 4] = res.into();
+                x[i..i+4].copy_from_slice(&res_arr);
+                i += 4;
+            }
+            while i < n {
                 x[i] += alpha * p[i];
+                i += 1;
             }
             return (iter, norm(&s), norm(&s) / init_resid);
         }
@@ -143,9 +189,29 @@ pub fn solve_bicgstab(
             omega = dot(&t, &s) / t_t;
         }
         
-        for i in 0..n {
+        let v_alpha = f64x4::splat(alpha);
+        let v_omega = f64x4::splat(omega);
+        let mut i = 0;
+        while i + 4 <= n {
+            let vx = f64x4::from(&x[i..i+4]);
+            let vp = f64x4::from(&p[i..i+4]);
+            let vs = f64x4::from(&s[i..i+4]);
+            let vt = f64x4::from(&t[i..i+4]);
+            
+            let res_x = vx + v_alpha * vp + v_omega * vs;
+            let res_r = vs - v_omega * vt;
+            
+            let res_x_arr: [f64; 4] = res_x.into();
+            let res_r_arr: [f64; 4] = res_r.into();
+            
+            x[i..i+4].copy_from_slice(&res_x_arr);
+            r[i..i+4].copy_from_slice(&res_r_arr);
+            i += 4;
+        }
+        while i < n {
             x[i] += alpha * p[i] + omega * s[i];
             r[i] = s[i] - omega * t[i];
+            i += 1;
         }
         
         resid = norm(&r);
@@ -177,8 +243,19 @@ pub fn solve_cg(
     let n = b.len();
     let mut r = vec![0.0; n];
     a.mat_vec_mul(x, &mut r);
-    for i in 0..n {
+    // r = b - Ax
+    let mut i = 0;
+    while i + 4 <= n {
+        let vb = f64x4::from(&b[i..i+4]);
+        let vr = f64x4::from(&r[i..i+4]);
+        let res = vb - vr;
+        let res_arr: [f64; 4] = res.into();
+        r[i..i+4].copy_from_slice(&res_arr);
+        i += 4;
+    }
+    while i < n {
         r[i] = b[i] - r[i];
+        i += 1;
     }
     
     let init_resid = norm(&r); // Use norm instead of manual dot
@@ -199,9 +276,28 @@ pub fn solve_cg(
         }
         let alpha = rsold / p_q;
         
-        for i in 0..n {
+        let v_alpha = f64x4::splat(alpha);
+        let mut i = 0;
+        while i + 4 <= n {
+            let vx = f64x4::from(&x[i..i+4]);
+            let vp = f64x4::from(&p[i..i+4]);
+            let vr = f64x4::from(&r[i..i+4]);
+            let vq = f64x4::from(&q[i..i+4]);
+            
+            let res_x = vx + v_alpha * vp;
+            let res_r = vr - v_alpha * vq;
+            
+            let res_x_arr: [f64; 4] = res_x.into();
+            let res_r_arr: [f64; 4] = res_r.into();
+            
+            x[i..i+4].copy_from_slice(&res_x_arr);
+            r[i..i+4].copy_from_slice(&res_r_arr);
+            i += 4;
+        }
+        while i < n {
             x[i] += alpha * p[i];
             r[i] -= alpha * q[i];
+            i += 1;
         }
         
         let rsnew = dot(&r, &r);
@@ -210,8 +306,19 @@ pub fn solve_cg(
         }
         
         let p_val = rsnew / rsold;
-        for i in 0..n {
+        let v_pval = f64x4::splat(p_val);
+        let mut i = 0;
+        while i + 4 <= n {
+            let vr = f64x4::from(&r[i..i+4]);
+            let vp = f64x4::from(&p[i..i+4]);
+            let res = vr + v_pval * vp;
+            let res_arr: [f64; 4] = res.into();
+            p[i..i+4].copy_from_slice(&res_arr);
+            i += 4;
+        }
+        while i < n {
             p[i] = r[i] + p_val * p[i];
+            i += 1;
         }
         rsold = rsnew;
     }
@@ -220,7 +327,21 @@ pub fn solve_cg(
 }
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    let mut sum = f64x4::splat(0.0);
+    let mut i = 0;
+    let n = a.len();
+    while i + 4 <= n {
+        let va = f64x4::from(&a[i..i+4]);
+        let vb = f64x4::from(&b[i..i+4]);
+        sum += va * vb;
+        i += 4;
+    }
+    let mut s = sum.reduce_add();
+    while i < n {
+        s += a[i] * b[i];
+        i += 1;
+    }
+    s
 }
 
 fn norm(a: &[f64]) -> f64 {

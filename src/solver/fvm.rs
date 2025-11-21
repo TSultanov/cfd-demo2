@@ -235,7 +235,8 @@ impl Fvm {
                 // d = distance between centers
                 
                 if let Some(neigh) = neighbor_idx {
-                    let d = (mesh.cells[neigh].center - cell.center).norm();
+                    let d_vec = mesh.cells[neigh].center - cell.center;
+                    let d = d_vec.norm();
                     if d < 1e-9 {
                         println!("Warning: Small distance between cells {} and {}: {}", i, neigh, d);
                     }
@@ -247,6 +248,37 @@ impl Fvm {
                     
                     triplets.push((i, i, diff_coeff));
                     triplets.push((i, neigh, -diff_coeff));
+
+                    // Non-orthogonal correction
+                    if let Some(gradients) = &grads {
+                        // S = n * A
+                        // If is_owner, normal points i -> neigh. S is out of i.
+                        // If !is_owner, normal points neigh -> i. S is out of i (so -normal).
+                        let s_vec = if is_owner { face.normal } else { -face.normal } * face.area;
+                        
+                        // Over-relaxed correction vector k
+                        // k = S - (S . d / |d|^2) * d  <-- Minimum correction
+                        // k = S - (|S|/|d|) * d        <-- Over-relaxed correction
+                        // We use Over-relaxed to match the implicit coefficient (gamma * A / d)
+                        // A = |S|. So implicit term is gamma * |S|/|d|.
+                        
+                        let k_vec = s_vec - d_vec * (face.area / d);
+                        
+                        // Interpolate gradient to face
+                        let grad_own = gradients[i];
+                        let grad_neigh = gradients[neigh];
+                        // Linear interpolation based on distance
+                        let d_own = (face.center - mesh.cells[i].center).norm();
+                        let d_neigh = (face.center - mesh.cells[neigh].center).norm();
+                        let f = d_own / (d_own + d_neigh);
+                        let grad_f = grad_own + (grad_neigh - grad_own) * f;
+                        
+                        let correction_flux = gamma * grad_f.dot(&k_vec);
+                        
+                        // Subtract from RHS (since it's -div(flux))
+                        // flux is out of i.
+                        rhs[i] -= correction_flux;
+                    }
                 } else {
                     // Boundary diffusion
                     if let Some(bt) = face.boundary_type {
@@ -277,5 +309,42 @@ impl Fvm {
         }
         
         (SparseMatrix::from_triplets(n_cells, n_cells, &triplets), rhs)
+    }
+    
+    pub fn smooth_gradients(mesh: &Mesh, grads: &[Vector2<f64>]) -> Vec<Vector2<f64>> {
+        let mut smoothed = grads.to_vec();
+        
+        // Simple volume-weighted smoothing
+        for i in 0..mesh.cells.len() {
+            let cell = &mesh.cells[i];
+            let mut sum_g = grads[i] * cell.volume;
+            let mut sum_vol = cell.volume;
+            
+            for &face_idx in &cell.face_indices {
+                let face = &mesh.faces[face_idx];
+                let neighbor = if face.owner == i { face.neighbor } else { Some(face.owner) };
+                
+                if let Some(n) = neighbor {
+                    let n_vol = mesh.cells[n].volume;
+                    sum_g += grads[n] * n_vol;
+                    sum_vol += n_vol;
+                }
+            }
+            
+            smoothed[i] = sum_g / sum_vol;
+        }
+        
+        smoothed
+    }
+    
+    pub fn limit_gradients(grads: &[Vector2<f64>], max_mag: f64) -> Vec<Vector2<f64>> {
+        grads.iter().map(|g| {
+            let mag = g.norm();
+            if mag > max_mag {
+                g * (max_mag / mag)
+            } else {
+                *g
+            }
+        }).collect()
     }
 }

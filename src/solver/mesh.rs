@@ -4,6 +4,7 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub struct Vertex {
     pub pos: Point2<f64>,
+    pub is_fixed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -170,7 +171,7 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
     let mut face_map: HashMap<(usize, usize), usize> = HashMap::new();
 
     // Collect all leaf polygons first
-    let mut all_polys: Vec<Vec<Point2<f64>>> = Vec::new();
+    let mut all_polys: Vec<Vec<(Point2<f64>, bool)>> = Vec::new();
 
     for i in 0..nx {
         for j in 0..ny {
@@ -199,21 +200,22 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
                 let d11 = geo.sdf(&p11);
                 let d01 = geo.sdf(&p01);
                 
-                let all_outside = d00 >= 0.0 && d10 >= 0.0 && d11 >= 0.0 && d01 >= 0.0;
+                let sdf_tol = 1e-9;
+                let all_outside = d00 >= -sdf_tol && d10 >= -sdf_tol && d11 >= -sdf_tol && d01 >= -sdf_tol;
                 
                 if all_outside {
                     continue;
                 }
                 
                 let mut poly_verts = Vec::new();
-                let all_inside = d00 < 0.0 && d10 < 0.0 && d11 < 0.0 && d01 < 0.0;
+                let all_inside = d00 < -sdf_tol && d10 < -sdf_tol && d11 < -sdf_tol && d01 < -sdf_tol;
 
                 if all_inside {
                     // Rectangular cell
-                    poly_verts.push(p00);
-                    poly_verts.push(p10);
-                    poly_verts.push(p11);
-                    poly_verts.push(p01);
+                    poly_verts.push((p00, false));
+                    poly_verts.push((p10, false));
+                    poly_verts.push((p11, false));
+                    poly_verts.push((p01, false));
                 } else {
                     // Cut cell
                     let corners = [p00, p10, p11, p01];
@@ -225,11 +227,11 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
                         let d_curr = dists[k];
                         let d_next = dists[(k + 1) % 4];
                         
-                        if d_curr < 0.0 {
-                            poly_verts.push(p_curr);
+                        if d_curr < -sdf_tol {
+                            poly_verts.push((p_curr, false));
                         }
                         
-                        if (d_curr < 0.0 && d_next >= 0.0) || (d_curr >= 0.0 && d_next < 0.0) {
+                        if (d_curr < -sdf_tol && d_next >= -sdf_tol) || (d_curr >= -sdf_tol && d_next < -sdf_tol) {
                             // Intersection
                             let denom = d_curr - d_next;
                             if denom.abs() < 1e-20 {
@@ -243,7 +245,7 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
                             if p_inter.x.is_nan() || p_inter.y.is_nan() {
                                 println!("Warning: p_inter is NaN. t={}, p_curr={:?}, p_next={:?}", t, p_curr, p_next);
                             }
-                            poly_verts.push(p_inter);
+                            poly_verts.push((p_inter, true));
                         }
                     }
                 }
@@ -256,15 +258,20 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
     }
 
     // 2. Imprint Hanging Nodes
-    // Collect all unique vertices
+    // Collect all unique vertices and their fixed status
     let mut unique_verts: Vec<Point2<f64>> = Vec::new();
+    let mut fixed_map: HashMap<(i64, i64), bool> = HashMap::new();
     let mut vert_set: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
     
     for poly in &all_polys {
-        for p in poly {
+        for (p, fixed) in poly {
             let key = (quantize(p.x), quantize(p.y));
             if vert_set.insert(key) {
                 unique_verts.push(*p);
+            }
+            let entry = fixed_map.entry(key).or_insert(false);
+            if *fixed {
+                *entry = true;
             }
         }
     }
@@ -275,10 +282,10 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
         let n = poly.len();
         
         for k in 0..n {
-            let p_curr = poly[k];
-            let p_next = poly[(k + 1) % n];
+            let (p_curr, fixed_curr) = poly[k];
+            let (p_next, _) = poly[(k + 1) % n];
             
-            new_poly.push(p_curr);
+            new_poly.push((p_curr, fixed_curr));
             
             // Find vertices on this segment
             let mut on_segment = Vec::new();
@@ -312,7 +319,9 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
             on_segment.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             
             for (_, v) in on_segment {
-                new_poly.push(v);
+                let key = (quantize(v.x), quantize(v.y));
+                let is_fixed = *fixed_map.get(&key).unwrap_or(&false);
+                new_poly.push((v, is_fixed));
             }
         }
         *poly = new_poly;
@@ -327,13 +336,14 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
         
         // Get vertex indices
         let mut cell_v_indices = Vec::new();
-        for p in &poly_verts {
+        for (p, _) in &poly_verts {
             let key = (quantize(p.x), quantize(p.y));
             let idx = if let Some(&idx) = vertex_map.get(&key) {
                 idx
             } else {
                 let idx = mesh.vertices.len();
-                mesh.vertices.push(Vertex { pos: *p });
+                let is_fixed = *fixed_map.get(&key).unwrap_or(&false);
+                mesh.vertices.push(Vertex { pos: *p, is_fixed });
                 vertex_map.insert(key, idx);
                 idx
             };
@@ -342,8 +352,8 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
 
         // Polygon area and centroid
         for k in 0..n {
-            let p_i = poly_verts[k];
-            let p_j = poly_verts[(k + 1) % n];
+            let (p_i, _) = poly_verts[k];
+            let (p_j, _) = poly_verts[(k + 1) % n];
             let cross = p_i.x * p_j.y - p_j.x * p_i.y;
             area += cross;
             center += (p_i.coords + p_j.coords) * cross;
@@ -485,3 +495,354 @@ fn collect_leaves<'a>(node: &'a QuadNode, leaves: &mut Vec<&'a QuadNode>) {
     }
 }
 
+impl Mesh {
+    pub fn recalculate_geometry(&mut self) {
+        // 1. Recalculate Faces
+        for face in &mut self.faces {
+            let v0 = self.vertices[face.vertex_indices[0]].pos;
+            let v1 = self.vertices[face.vertex_indices[1]].pos;
+            
+            face.center = Point2::from((v0.coords + v1.coords) * 0.5);
+            let edge_vec = v1 - v0;
+            face.area = edge_vec.norm();
+            
+            // Preserve normal orientation
+            let tangent = edge_vec.normalize();
+            let mut normal = Vector2::new(tangent.y, -tangent.x);
+            
+            if normal.dot(&face.normal) < 0.0 {
+                normal = -normal;
+            }
+            face.normal = normal;
+        }
+        
+        // 2. Recalculate Cells
+        for cell in &mut self.cells {
+            let mut center = Vector2::zeros();
+            let n = cell.vertex_indices.len();
+            
+            // Polygon Area and Centroid
+            // Shoelace formula for area, centroid formula
+            let mut signed_area = 0.0;
+            let mut c_x = 0.0;
+            let mut c_y = 0.0;
+            
+            for i in 0..n {
+                let p0 = self.vertices[cell.vertex_indices[i]].pos;
+                let p1 = self.vertices[cell.vertex_indices[(i + 1) % n]].pos;
+                
+                let cross = p0.x * p1.y - p1.x * p0.y;
+                signed_area += cross;
+                c_x += (p0.x + p1.x) * cross;
+                c_y += (p0.y + p1.y) * cross;
+            }
+            
+            signed_area *= 0.5;
+            let area = signed_area.abs();
+            
+            if area > 1e-12 {
+                c_x /= 6.0 * signed_area;
+                c_y /= 6.0 * signed_area;
+                center = Vector2::new(c_x, c_y);
+            } else {
+                // Fallback to average
+                for i in 0..n {
+                    center += self.vertices[cell.vertex_indices[i]].pos.coords;
+                }
+                center /= n as f64;
+            }
+            
+            cell.center = Point2::from(center);
+            cell.volume = area;
+        }
+    }
+
+    pub fn smooth(&mut self, target_skew: f64, max_iterations: usize) {
+        let n_verts = self.vertices.len();
+        let mut adj = vec![Vec::new(); n_verts];
+        
+        // Build adjacency
+        for face in &self.faces {
+            let v0 = face.vertex_indices[0];
+            let v1 = face.vertex_indices[1];
+            adj[v0].push(v1);
+            adj[v1].push(v0);
+        }
+        
+        // Identify domain boundaries (Box)
+        // We assume the domain is the bounding box of the mesh
+        let mut min_bound = Point2::new(f64::MAX, f64::MAX);
+        let mut max_bound = Point2::new(f64::MIN, f64::MIN);
+        
+        for v in &self.vertices {
+            if v.pos.x < min_bound.x { min_bound.x = v.pos.x; }
+            if v.pos.y < min_bound.y { min_bound.y = v.pos.y; }
+            if v.pos.x > max_bound.x { max_bound.x = v.pos.x; }
+            if v.pos.y > max_bound.y { max_bound.y = v.pos.y; }
+        }
+        
+        let is_on_box = |p: &Point2<f64>| -> bool {
+            let eps = 1e-6;
+            (p.x - min_bound.x).abs() < eps || (p.x - max_bound.x).abs() < eps ||
+            (p.y - min_bound.y).abs() < eps || (p.y - max_bound.y).abs() < eps
+        };
+
+        for iter in 0..max_iterations {
+            // Check skewness
+            self.recalculate_geometry();
+            let current_skew = self.calculate_max_skewness();
+            if current_skew < target_skew {
+                println!("Target skewness reached: {:.6} < {:.6} at iter {}", current_skew, target_skew, iter);
+                return;
+            }
+            if iter % 10 == 0 {
+                 println!("Smoothing iter {}: max skew = {:.6}", iter, current_skew);
+            }
+
+            let mut new_pos = vec![Point2::origin(); n_verts];
+            
+            for i in 0..n_verts {
+                let p_old = self.vertices[i].pos;
+                
+                // If on domain box or obstacle boundary, fix it
+                if is_on_box(&p_old) || self.vertices[i].is_fixed {
+                    new_pos[i] = p_old;
+                    continue;
+                }
+                
+                if adj[i].is_empty() {
+                    new_pos[i] = p_old;
+                    continue;
+                }
+                
+                let mut sum = Vector2::zeros();
+                let mut count = 0;
+
+                // Internal smoothing: consider all neighbors
+                for &neigh in &adj[i] {
+                    sum += self.vertices[neigh].pos.coords;
+                    count += 1;
+                }
+
+                let avg = Point2::from(sum / count as f64);
+                
+                // Relaxation factor
+                let alpha = 0.5;
+                let p_new = p_old + (avg - p_old) * alpha;
+                
+                new_pos[i] = p_new;
+            }
+            
+            for i in 0..n_verts {
+                self.vertices[i].pos = new_pos[i];
+            }
+        }
+        
+        self.recalculate_geometry();
+        println!("Final skewness: {:.6}", self.calculate_max_skewness());
+    }
+
+    pub fn calculate_max_skewness(&self) -> f64 {
+        let mut max_skew = 0.0;
+        for face in &self.faces {
+            let d = if let Some(neigh) = face.neighbor {
+                self.cells[neigh].center - self.cells[face.owner].center
+            } else {
+                // Boundary face: vector from cell center to face center
+                face.center - self.cells[face.owner].center
+            };
+            
+            let d_norm = if d.norm_squared() > 1e-12 {
+                d.normalize()
+            } else {
+                Vector2::zeros()
+            };
+            
+            let skew = 1.0 - d_norm.dot(&face.normal).abs();
+            if skew > max_skew {
+                max_skew = skew;
+            }
+        }
+        max_skew
+    }
+
+    pub fn calculate_cell_skewness(&self, cell_idx: usize) -> f64 {
+        let cell = &self.cells[cell_idx];
+        let mut max_skew = 0.0;
+        for &face_idx in &cell.face_indices {
+            let face = &self.faces[face_idx];
+            
+            let d = if let Some(neigh) = face.neighbor {
+                let c1 = self.cells[face.owner].center;
+                let c2 = self.cells[neigh].center;
+                c2 - c1
+            } else {
+                // Boundary face
+                face.center - self.cells[cell_idx].center
+            };
+
+            let d_norm = if d.norm_squared() > 1e-12 {
+                d.normalize()
+            } else {
+                Vector2::zeros()
+            };
+
+            let skew = 1.0 - d_norm.dot(&face.normal).abs();
+            if skew > max_skew {
+                max_skew = skew;
+            }
+        }
+        max_skew
+    }
+
+    pub fn get_cell_at_pos(&self, p: Point2<f64>) -> Option<usize> {
+        for (i, cell) in self.cells.iter().enumerate() {
+            // Point in polygon test (Ray casting)
+            let mut inside = false;
+            let n = cell.vertex_indices.len();
+            let mut j = n - 1;
+            for k in 0..n {
+                let vi = cell.vertex_indices[k];
+                let vj = cell.vertex_indices[j];
+                let pi = self.vertices[vi].pos;
+                let pj = self.vertices[vj].pos;
+                
+                if ((pi.y > p.y) != (pj.y > p.y)) &&
+                   (p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x) {
+                    inside = !inside;
+                }
+                j = k;
+            }
+            
+            if inside {
+                return Some(i);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nalgebra::{Point2, Vector2};
+
+    struct CircleObstacle {
+        center: Point2<f64>,
+        radius: f64,
+        domain_min: Point2<f64>,
+        domain_max: Point2<f64>,
+    }
+
+    impl Geometry for CircleObstacle {
+        fn is_inside(&self, p: &Point2<f64>) -> bool {
+            self.sdf(p) < 0.0
+        }
+
+        fn sdf(&self, p: &Point2<f64>) -> f64 {
+            // Box SDF (negative inside)
+            let center = (self.domain_min + self.domain_max.coords) * 0.5;
+            let size = (self.domain_max - self.domain_min) * 0.5;
+            let p_rel = p - center;
+            let d = p_rel.abs() - size;
+            let box_dist = d.x.max(d.y).min(0.0) + Vector2::new(d.x.max(0.0), d.y.max(0.0)).norm();
+
+            // Circle SDF (negative inside)
+            let circle_dist = (p - self.center).norm() - self.radius;
+
+            // Fluid is inside box AND outside circle
+            box_dist.max(-circle_dist)
+        }
+    }
+
+    #[test]
+    fn test_mesh_generation_circle_obstacle() {
+        // Use off-center coordinates to generate sliver cells/bad skewness
+        // Coarse mesh relative to curvature might cause issues
+        let geo = CircleObstacle {
+            center: Point2::new(0.5001, 0.5001),
+            radius: 0.2,
+            domain_min: Point2::new(0.0, 0.0),
+            domain_max: Point2::new(1.0, 1.0),
+        };
+        
+        // Generate mesh
+        let domain_size = Vector2::new(1.0, 1.0);
+        // Coarser mesh: 0.1 cell size. Radius is 0.2.
+        let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, domain_size);
+        
+        println!("Generated mesh with {} cells", mesh.cells.len());
+        assert!(mesh.cells.len() > 0);
+        
+        let initial_skew = mesh.calculate_max_skewness();
+        println!("Initial max skewness: {}", initial_skew);
+        
+        // Identify boundary vertices before smoothing
+        let mut boundary_indices = Vec::new();
+        for (i, v) in mesh.vertices.iter().enumerate() {
+            if v.is_fixed {
+                boundary_indices.push(i);
+            }
+        }
+        
+        println!("Found {} fixed boundary vertices", boundary_indices.len());
+        assert!(boundary_indices.len() > 0);
+        
+        // Store initial positions
+        let initial_positions: Vec<Point2<f64>> = boundary_indices.iter()
+            .map(|&i| mesh.vertices[i].pos)
+            .collect();
+
+        // Smooth
+        mesh.smooth(0.05, 50);
+        
+        // Verify positions haven't changed
+        for (k, &idx) in boundary_indices.iter().enumerate() {
+            let p_new = mesh.vertices[idx].pos;
+            let p_old = initial_positions[k];
+            let dist = (p_new - p_old).norm();
+            if dist > 1e-9 {
+                println!("Boundary vertex {} moved by {:.6e}. Old: {:?}, New: {:?}", idx, dist, p_old, p_new);
+            }
+            assert!(dist < 1e-9, "Boundary vertex moved during smoothing!");
+        }
+
+        let final_skew = mesh.calculate_max_skewness();
+        println!("Final max skewness: {}", final_skew);
+        
+        // If smoothing made it worse, we should know.
+        // But for now, let's just check it's not terrible.
+        assert!(final_skew < 0.25);
+    }
+
+    #[test]
+    fn test_mesh_generation_backwards_step() {
+        // Misaligned step to create bad cut cells
+        // Grid lines at 0.1. Step at 0.501 creates 0.001 sliver.
+        let geo = BackwardsStep {
+            length: 2.0,
+            height_inlet: 0.501,
+            height_outlet: 1.0,
+            step_x: 0.501,
+        };
+        
+        let domain_size = Vector2::new(2.0, 1.0);
+        let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, domain_size);
+        
+        println!("Generated mesh with {} cells", mesh.cells.len());
+        assert!(mesh.cells.len() > 0);
+        
+        let initial_skew = mesh.calculate_max_skewness();
+        println!("Initial max skewness: {}", initial_skew);
+        
+        // Target low skewness
+        mesh.smooth(0.1, 50);
+        
+        let final_skew = mesh.calculate_max_skewness();
+        println!("Final max skewness: {}", final_skew);
+        
+        assert!(final_skew <= initial_skew + 1e-10);
+        // Relaxed requirement for sharp corners in step
+        assert!(final_skew < 0.4); 
+    }
+}

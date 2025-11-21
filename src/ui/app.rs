@@ -55,8 +55,8 @@ impl CFDApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             solver: None,
-            min_cell_size: 0.05,
-            max_cell_size: 0.1,
+            min_cell_size: 0.025,
+            max_cell_size: 0.025,
             timestep: 0.01,
             selected_geometry: GeometryType::BackwardsStep,
             plot_field: PlotField::VelocityMag,
@@ -77,7 +77,9 @@ impl CFDApp {
                     height_outlet: 1.0,
                     step_x: 0.5,
                 };
-                generate_cut_cell_mesh(&geo, self.min_cell_size, self.max_cell_size, domain_size)
+                let mut mesh = generate_cut_cell_mesh(&geo, self.min_cell_size, self.max_cell_size, domain_size);
+                mesh.smooth(0.3, 50);
+                mesh
             },
             GeometryType::ChannelObstacle => {
                 let length = 3.0;
@@ -88,7 +90,9 @@ impl CFDApp {
                     obstacle_center: Point2::new(1.0, 0.5),
                     obstacle_radius: 0.2,
                 };
-                generate_cut_cell_mesh(&geo, self.min_cell_size, self.max_cell_size, domain_size)
+                let mut mesh = generate_cut_cell_mesh(&geo, self.min_cell_size, self.max_cell_size, domain_size);
+                mesh.smooth(0.3, 50);
+                mesh
             },
         };
         
@@ -247,6 +251,12 @@ impl eframe::App for CFDApp {
         };
 
         egui::SidePanel::right("legend").show(ctx, |ui| {
+            if let Some(solver) = &self.solver {
+                ui.heading("Mesh Stats");
+                ui.label(format!("Max Skewness: {:.4}", solver.mesh.calculate_max_skewness()));
+                ui.separator();
+            }
+
             if values.is_some() {
                 ui.heading("Legend");
                 ui.label(format!("Max: {:.4}", max_val));
@@ -313,6 +323,23 @@ impl eframe::App for CFDApp {
                                         .fill_color(color)
                                         .stroke(egui::Stroke::new(1.0, egui::Color32::BLACK))
                                 );
+                            }
+                            
+                            if let Some(pointer) = plot_ui.pointer_coordinate() {
+                                let p = Point2::new(pointer.x, pointer.y);
+                                if let Some(idx) = solver.mesh.get_cell_at_pos(p) {
+                                    let skew = solver.mesh.calculate_cell_skewness(idx);
+                                    let val = vals[idx];
+                                    let vol = solver.mesh.cells[idx].volume;
+                                    plot_ui.text(
+                                        egui_plot::Text::new(
+                                            pointer, 
+                                            format!("Cell {}\nVol: {:.6e}\nSkew: {:.4}\nVal: {:.4}", idx, vol, skew, val)
+                                        )
+                                        .color(egui::Color32::WHITE)
+                                        .anchor(egui::Align2::LEFT_BOTTOM)
+                                    );
+                                }
                             }
                         });
                 }

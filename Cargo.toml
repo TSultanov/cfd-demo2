@@ -1,0 +1,14 @@
+[package]
+name = "cfd2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+egui = "0.24"
+eframe = "0.24"
+egui_plot = "0.24"
+nalgebra = "0.32"
+geo = "0.26"
+rand = "0.8"
+log = "0.4"
+env_logger = "0.10"

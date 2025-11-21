@@ -49,6 +49,7 @@ pub struct CFDApp {
     is_running: bool,
     selected_scheme: Scheme,
     current_fluid: Fluid,
+    show_mesh_lines: bool,
 }
 
 impl CFDApp {
@@ -63,6 +64,7 @@ impl CFDApp {
             is_running: false,
             selected_scheme: Scheme::Upwind,
             current_fluid: Fluid::presets()[0].clone(),
+            show_mesh_lines: true,
         }
     }
 
@@ -214,6 +216,9 @@ impl eframe::App for CFDApp {
             ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
             
             ui.separator();
+            ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
+            
+            ui.separator();
             
             if let Some(solver) = &self.solver {
                 ui.label(format!("Time: {:.3}", solver.time));
@@ -321,7 +326,11 @@ impl eframe::App for CFDApp {
                                 plot_ui.polygon(
                                     Polygon::new(PlotPoints::new(polygon_points))
                                         .fill_color(color)
-                                        .stroke(egui::Stroke::new(1.0, egui::Color32::BLACK))
+                                        .stroke(if self.show_mesh_lines {
+                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
+                                        } else {
+                                            egui::Stroke::NONE
+                                        })
                                 );
                             }
                             

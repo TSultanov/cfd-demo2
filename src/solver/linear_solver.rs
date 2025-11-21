@@ -1,5 +1,26 @@
 use wide::f64x4;
 
+pub trait SolverOps {
+    fn dot(&self, a: &[f64], b: &[f64]) -> f64;
+    fn mat_vec_mul(&self, matrix: &SparseMatrix, x: &[f64], y: &mut [f64]);
+    fn norm(&self, a: &[f64]) -> f64 {
+        self.dot(a, a).sqrt()
+    }
+    fn exchange_halo(&self, _data: &[f64]) -> Vec<f64> {
+        Vec::new()
+    }
+}
+
+pub struct SerialOps;
+impl SolverOps for SerialOps {
+    fn dot(&self, a: &[f64], b: &[f64]) -> f64 {
+        dot(a, b)
+    }
+    fn mat_vec_mul(&self, matrix: &SparseMatrix, x: &[f64], y: &mut [f64]) {
+        matrix.mat_vec_mul(x, y);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SparseMatrix {
     pub values: Vec<f64>,
@@ -62,23 +83,24 @@ impl SparseMatrix {
     }
 }
 
-pub fn solve_bicgstab(
+pub fn solve_bicgstab<O: SolverOps>(
     a: &SparseMatrix,
     b: &[f64],
     x: &mut [f64],
     max_iter: usize,
     tol: f64,
+    ops: &O,
 ) -> (usize, f64, f64) {
     let n = b.len();
     let mut r = vec![0.0; n];
-    a.mat_vec_mul(x, &mut r);
+    ops.mat_vec_mul(a, x, &mut r);
     
     // r = b - Ax
     let mut i = 0;
     while i + 4 <= n {
         let vb = f64x4::from(&b[i..i+4]);
-        let vr = f64x4::from(&r[i..i+4]);
-        let res = vb - vr;
+        let _vr = f64x4::from(&r[i..i+4]);
+        let res = vb - _vr;
         let res_arr: [f64; 4] = res.into();
         r[i..i+4].copy_from_slice(&res_arr);
         i += 4;
@@ -88,7 +110,7 @@ pub fn solve_bicgstab(
         i += 1;
     }
     
-    let init_resid = norm(&r);
+    let init_resid = ops.norm(&r);
     if init_resid < tol {
         return (0, init_resid, init_resid);
     }
@@ -100,14 +122,12 @@ pub fn solve_bicgstab(
     let mut v = vec![0.0; n];
     let mut p = vec![0.0; n];
     
-    let mut rho_new = 0.0;
+    let mut rho_new;
     let mut s = vec![0.0; n];
     let mut t = vec![0.0; n];
     
-    let mut resid = init_resid;
-    
     for iter in 0..max_iter {
-        rho_new = dot(&r0, &r);
+        rho_new = ops.dot(&r0, &r);
         
         if rho_new.is_nan() {
             println!("BiCGStab: rho_new is NaN at iter {}", iter);
@@ -141,13 +161,14 @@ pub fn solve_bicgstab(
             }
         }
 
-        a.mat_vec_mul(&p, &mut v);
-        let r0_v = dot(&r0, &v);
+        ops.mat_vec_mul(a, &p, &mut v);
+        let r0_v = ops.dot(&r0, &v);
         if r0_v.abs() < 1e-20 {
             break;
         }
         alpha = rho_new / r0_v;
         
+        // s = r - alpha * v
         let v_alpha = f64x4::splat(alpha);
         let mut i = 0;
         while i + 4 <= n {
@@ -163,43 +184,35 @@ pub fn solve_bicgstab(
             i += 1;
         }
         
-        if norm(&s) < tol {
-            let v_alpha = f64x4::splat(alpha);
-            let mut i = 0;
-            while i + 4 <= n {
-                let vx = f64x4::from(&x[i..i+4]);
-                let vp = f64x4::from(&p[i..i+4]);
-                let res = vx + v_alpha * vp;
-                let res_arr: [f64; 4] = res.into();
-                x[i..i+4].copy_from_slice(&res_arr);
-                i += 4;
-            }
-            while i < n {
-                x[i] += alpha * p[i];
-                i += 1;
-            }
-            return (iter, norm(&s), norm(&s) / init_resid);
-        }
-
-        a.mat_vec_mul(&s, &mut t);
-        let t_t = dot(&t, &t);
-        if t_t.abs() < 1e-20 {
-            omega = 0.0;
-        } else {
-            omega = dot(&t, &s) / t_t;
+        let norm_s = ops.norm(&s);
+        if norm_s < tol {
+            x.iter_mut().zip(p.iter()).for_each(|(x_val, p_val)| *x_val += alpha * p_val);
+            return (iter + 1, norm_s, init_resid);
         }
         
-        let v_alpha = f64x4::splat(alpha);
+        ops.mat_vec_mul(a, &s, &mut t);
+        let t_s = ops.dot(&t, &s);
+        let t_t = ops.dot(&t, &t);
+        
+        if t_t.abs() < 1e-20 {
+             omega = 0.0;
+        } else {
+             omega = t_s / t_t;
+        }
+        
+        // x = x + alpha * p + omega * s
+        // r = s - omega * t
         let v_omega = f64x4::splat(omega);
         let mut i = 0;
         while i + 4 <= n {
             let vx = f64x4::from(&x[i..i+4]);
             let vp = f64x4::from(&p[i..i+4]);
             let vs = f64x4::from(&s[i..i+4]);
+            let _vr = f64x4::from(&r[i..i+4]); // r becomes new r
             let vt = f64x4::from(&t[i..i+4]);
             
             let res_x = vx + v_alpha * vp + v_omega * vs;
-            let res_r = vs - v_omega * vt;
+            let res_r = vs - v_omega * vt; // r = s - omega * t
             
             let res_x_arr: [f64; 4] = res_x.into();
             let res_r_arr: [f64; 4] = res_r.into();
@@ -214,11 +227,7 @@ pub fn solve_bicgstab(
             i += 1;
         }
         
-        resid = norm(&r);
-        if resid > 1e10 {
-             println!("BiCGStab diverging at iter {}: resid={}", iter, resid);
-             return (iter, resid, init_resid);
-        }
+        let resid = ops.norm(&r);
         if resid < tol {
             return (iter + 1, resid, init_resid);
         }
@@ -230,25 +239,27 @@ pub fn solve_bicgstab(
         rho_old = rho_new;
     }
     
-    (max_iter, resid, init_resid)
+    (max_iter, ops.norm(&r), init_resid)
 }
 
-pub fn solve_cg(
+pub fn solve_cg<O: SolverOps>(
     a: &SparseMatrix,
     b: &[f64],
     x: &mut [f64],
     max_iter: usize,
     tol: f64,
+    ops: &O,
 ) -> (usize, f64, f64) {
     let n = b.len();
     let mut r = vec![0.0; n];
-    a.mat_vec_mul(x, &mut r);
+    ops.mat_vec_mul(a, x, &mut r);
+    
     // r = b - Ax
     let mut i = 0;
     while i + 4 <= n {
         let vb = f64x4::from(&b[i..i+4]);
-        let vr = f64x4::from(&r[i..i+4]);
-        let res = vb - vr;
+        let _vr = f64x4::from(&r[i..i+4]);
+        let res = vb - _vr;
         let res_arr: [f64; 4] = res.into();
         r[i..i+4].copy_from_slice(&res_arr);
         i += 4;
@@ -258,10 +269,10 @@ pub fn solve_cg(
         i += 1;
     }
     
-    let init_resid = norm(&r); // Use norm instead of manual dot
+    let init_resid = ops.norm(&r);
     
     let mut p = r.clone();
-    let mut rsold = dot(&r, &r);
+    let mut rsold = ops.dot(&r, &r);
     let mut q = vec![0.0; n];
     
     for iter in 0..max_iter {
@@ -269,8 +280,8 @@ pub fn solve_cg(
             return (iter, rsold.sqrt(), init_resid);
         }
         
-        a.mat_vec_mul(&p, &mut q);
-        let p_q = dot(&p, &q);
+        ops.mat_vec_mul(a, &p, &mut q);
+        let p_q = ops.dot(&p, &q);
         if p_q.abs() < 1e-20 {
             break;
         }
@@ -300,7 +311,7 @@ pub fn solve_cg(
             i += 1;
         }
         
-        let rsnew = dot(&r, &r);
+        let rsnew = ops.dot(&r, &r);
         if rsnew.sqrt() < tol {
             return (iter + 1, rsnew.sqrt(), init_resid);
         }
@@ -326,7 +337,7 @@ pub fn solve_cg(
     (max_iter, rsold.sqrt(), init_resid)
 }
 
-fn dot(a: &[f64], b: &[f64]) -> f64 {
+pub fn dot(a: &[f64], b: &[f64]) -> f64 {
     let mut sum = f64x4::splat(0.0);
     let mut i = 0;
     let n = a.len();
@@ -344,6 +355,7 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     s
 }
 
+#[allow(dead_code)]
 fn norm(a: &[f64]) -> f64 {
     dot(a, a).sqrt()
 }

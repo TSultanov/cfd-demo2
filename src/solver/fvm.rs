@@ -1,6 +1,7 @@
 use crate::solver::mesh::{Mesh, BoundaryType};
 use crate::solver::linear_solver::SparseMatrix;
 use nalgebra::Vector2;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ScalarField {
@@ -36,13 +37,19 @@ pub struct Fvm {
 }
 
 impl Fvm {
-    pub fn compute_gradients<F>(mesh: &Mesh, field: &ScalarField, boundary_value: F) -> Vec<Vector2<f64>> 
+    pub fn compute_gradients<F>(
+        mesh: &Mesh, 
+        field: &ScalarField, 
+        boundary_value: F,
+        ghost_values: Option<&[f64]>,
+        ghost_map: Option<&HashMap<usize, usize>>
+    ) -> Vec<Vector2<f64>> 
     where F: Fn(BoundaryType) -> Option<f64>
     {
         // Green-Gauss Gradient
         let mut grads = vec![Vector2::zeros(); mesh.cells.len()];
         
-        for face in mesh.faces.iter() {
+        for (face_idx, face) in mesh.faces.iter().enumerate() {
             let owner = face.owner;
             let neighbor = face.neighbor;
             
@@ -62,15 +69,34 @@ impl Fvm {
                 val_owner + f * (val_neigh - val_owner)
             } else {
                 // Boundary
+                let mut val = val_owner;
+                let mut handled = false;
+
                 if let Some(bt) = face.boundary_type {
-                    if let Some(bv) = boundary_value(bt) {
-                        bv // Dirichlet
-                    } else {
-                        val_owner // Neumann (Zero Gradient)
+                    // Check Parallel Interface
+                    if let Some(map) = ghost_map {
+                        if let Some(&ghost_idx) = map.get(&face_idx) {
+                            if let Some(ghosts) = ghost_values {
+                                let local_ghost_idx = ghost_idx - mesh.cells.len();
+                                if local_ghost_idx < ghosts.len() {
+                                    let val_neigh = ghosts[local_ghost_idx];
+                                    // Interpolate
+                                    val = 0.5 * (val_owner + val_neigh);
+                                    handled = true;
+                                }
+                            }
+                        }
                     }
-                } else {
-                    val_owner
+
+                    if !handled {
+                        if let Some(bv) = boundary_value(bt) {
+                            val = bv; // Dirichlet
+                        } else {
+                            val = val_owner; // Neumann (Zero Gradient)
+                        }
+                    }
                 }
+                val
             };
             
             let area_vec = face.normal * face.area;
@@ -99,11 +125,13 @@ impl Fvm {
     pub fn assemble_scalar_transport<F>(
         mesh: &Mesh,
         phi_old: &ScalarField,
-        fluxes: &Vec<f64>, // Mass flux at faces
+        fluxes: &Vec<f64>,
         gamma: f64,
         dt: f64,
         scheme: &Scheme,
         boundary_value: F,
+        ghost_map: Option<&HashMap<usize, usize>>,
+        ghost_values: Option<&[f64]>,
     ) -> (SparseMatrix, Vec<f64>) 
     where F: Fn(BoundaryType) -> Option<f64>
     {
@@ -113,7 +141,7 @@ impl Fvm {
         
         // Compute gradients for higher order schemes
         let grads = if matches!(scheme, Scheme::Central | Scheme::QUICK) {
-             Some(Self::compute_gradients(mesh, phi_old, &boundary_value))
+             Some(Self::compute_gradients(mesh, phi_old, &boundary_value, ghost_values, ghost_map))
         } else {
              None
         };
@@ -156,22 +184,36 @@ impl Fvm {
                     } else {
                         // Boundary inflow
                         if let Some(bt) = face.boundary_type {
-                            if let Some(bv) = boundary_value(bt) {
-                                // Dirichlet: flux * val_b. Move to RHS.
-                                rhs[i] -= flux * bv;
-                                bv
-                            } else {
-                                // Neumann (Zero Gradient): phi_b = phi_P
-                                if flux < 0.0 {
-                                    // Inflow with Neumann is unstable and can make diagonal negative.
-                                    // Treat as Dirichlet with value from previous step (Explicit)
-                                    // phi_b = phi_old[i]
-                                    rhs[i] -= flux * phi_old.values[i];
-                                    phi_old.values[i]
+                            // Check for Parallel Interface
+                            let is_parallel = if let Some(map) = ghost_map {
+                                if let Some(&ghost_idx) = map.get(&face_idx) {
+                                    // Treat as inflow from ghost cell
+                                    triplets.push((i, ghost_idx, flux));
+                                    true
+                                } else { false }
+                            } else { false };
+
+                            if !is_parallel {
+                                if let Some(bv) = boundary_value(bt) {
+                                    // Dirichlet: flux * val_b. Move to RHS.
+                                    rhs[i] -= flux * bv;
+                                    bv
                                 } else {
-                                    triplets.push((i, i, flux));
-                                    phi_old.values[i]
+                                    // Neumann (Zero Gradient): phi_b = phi_P
+                                    if flux < 0.0 {
+                                        // Inflow with Neumann is unstable and can make diagonal negative.
+                                        // Treat as Dirichlet with value from previous step (Explicit)
+                                        // phi_b = phi_old[i]
+                                        rhs[i] -= flux * phi_old.values[i];
+                                        phi_old.values[i]
+                                    } else {
+                                        triplets.push((i, i, flux));
+                                        phi_old.values[i]
+                                    }
                                 }
+                            } else {
+                                // Parallel interface handled above, return dummy value
+                                0.0 
                             }
                         } else {
                              triplets.push((i, i, flux));
@@ -286,29 +328,51 @@ impl Fvm {
                         if d < 1e-9 {
                             println!("Warning: Small distance to boundary face {} for cell {}: {}", face_idx, i, d);
                         }
-                        let diff_coeff = gamma * face.area / d;
                         
-                        if diff_coeff.is_nan() {
-                            println!("diff_coeff is NaN for face {}. gamma={}, area={}, d={}", face_idx, gamma, face.area, d);
-                        }
+                        // Check Parallel Interface
+                        let is_parallel = if let Some(map) = ghost_map {
+                            if let Some(&ghost_idx) = map.get(&face_idx) {
+                                // Treat as internal face
+                                // Approx distance: 2 * d (assuming uniform mesh across boundary)
+                                let dist = 2.0 * d;
+                                let diff_coeff = gamma * face.area / dist;
+                                
+                                triplets.push((i, i, diff_coeff));
+                                triplets.push((i, ghost_idx, -diff_coeff));
+                                true
+                            } else { false }
+                        } else { false };
 
-                        if let Some(bv) = boundary_value(bt) {
-                            // Dirichlet: - diff_coeff * (phi_b - phi_P)
-                            // = - diff_coeff * phi_b + diff_coeff * phi_P
-                            // LHS: + diff_coeff * phi_P
-                            // RHS: + diff_coeff * phi_b
-                            triplets.push((i, i, diff_coeff));
-                            rhs[i] += diff_coeff * bv;
-                        } else {
-                            // Neumann (Zero Gradient): grad_phi = 0 -> flux = 0
-                            // No contribution
+                        if !is_parallel {
+                            let diff_coeff = gamma * face.area / d;
+                            
+                            if diff_coeff.is_nan() {
+                                println!("diff_coeff is NaN for face {}. gamma={}, area={}, d={}", face_idx, gamma, face.area, d);
+                            }
+
+                            if let Some(bv) = boundary_value(bt) {
+                                // Dirichlet: - diff_coeff * (phi_b - phi_P)
+                                // = - diff_coeff * phi_b + diff_coeff * phi_P
+                                // LHS: + diff_coeff * phi_P
+                                // RHS: + diff_coeff * phi_b
+                                triplets.push((i, i, diff_coeff));
+                                rhs[i] += diff_coeff * bv;
+                            } else {
+                                // Neumann (Zero Gradient): grad_phi = 0 -> flux = 0
+                                // No contribution
+                            }
                         }
                     }
                 }
             }
         }
         
-        (SparseMatrix::from_triplets(n_cells, n_cells, &triplets), rhs)
+        let n_cols = if let Some(map) = ghost_map {
+            n_cells + map.len()
+        } else {
+            n_cells
+        };
+        (SparseMatrix::from_triplets(n_cells, n_cols, &triplets), rhs)
     }
     
     pub fn smooth_gradients(mesh: &Mesh, grads: &[Vector2<f64>]) -> Vec<Vector2<f64>> {

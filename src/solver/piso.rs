@@ -1,7 +1,8 @@
 use crate::solver::mesh::{Mesh, BoundaryType};
 use crate::solver::fvm::{Fvm, ScalarField, VectorField, Scheme};
-use crate::solver::linear_solver::{solve_bicgstab, SparseMatrix};
+use crate::solver::linear_solver::{solve_bicgstab, SparseMatrix, SerialOps};
 use nalgebra::Vector2;
+use std::collections::HashMap;
 
 pub struct PisoSolver {
     pub mesh: Mesh,
@@ -14,6 +15,7 @@ pub struct PisoSolver {
     pub viscosity: f64,
     pub density: f64,
     pub scheme: Scheme,
+    pub ghost_map: HashMap<usize, usize>, // face_idx -> ghost_col_idx
 }
 
 impl PisoSolver {
@@ -28,15 +30,20 @@ impl PisoSolver {
             dt: 0.001, // Smaller time step
             time: 0.0,
             residuals: Vec::new(),
-            viscosity: 0.01, // Re = 100 if L=1, U=1
+            viscosity: 0.01, // Kinematic viscosity
             density: 1.0,
             scheme: Scheme::Upwind,
+            ghost_map: HashMap::new(),
         };
         solver.check_connectivity();
         solver
     }
 
     pub fn step(&mut self) {
+        self.step_with_ops(&SerialOps)
+    }
+
+    pub fn step_with_ops<O: crate::solver::linear_solver::SolverOps>(&mut self, ops: &O) {
         println!("Starting step at time {:.4}", self.time);
         if self.fluxes.iter().any(|f| f.is_nan()) {
              println!("Fluxes contain NaN at start of step!");
@@ -47,23 +54,34 @@ impl PisoSolver {
             BoundaryType::Inlet => Some(1.0),
             BoundaryType::Wall => Some(0.0),
             BoundaryType::Outlet => None, // Neumann
+            BoundaryType::ParallelInterface(_, _) => None,
         };
         let v_bc = |bt: BoundaryType| match bt {
             BoundaryType::Inlet => Some(0.0),
             BoundaryType::Wall => Some(0.0),
             BoundaryType::Outlet => None, // Neumann
+            BoundaryType::ParallelInterface(_, _) => None,
         };
         let p_bc = |bt: BoundaryType| match bt {
             BoundaryType::Outlet => Some(0.0),
-            _ => None, // Neumann (Inlet, Wall)
+            _ => None, // Neumann (Inlet, Wall, ParallelInterface)
         };
 
         let nu = self.viscosity / self.density;
 
+        // Exchange ghosts
+        let u_x_vals: Vec<f64> = self.u.values.iter().map(|v| v.x).collect();
+        let u_y_vals: Vec<f64> = self.u.values.iter().map(|v| v.y).collect();
+        let p_vals: Vec<f64> = self.p.values.clone();
+        
+        let u_x_ghosts = ops.exchange_halo(&u_x_vals);
+        let u_y_ghosts = ops.exchange_halo(&u_y_vals);
+        let p_ghosts = ops.exchange_halo(&p_vals);
+
         // 1. Momentum Predictor
         
         // Solve Ux
-        let u_x = ScalarField { values: self.u.values.iter().map(|v| v.x).collect() };
+        let u_x = ScalarField { values: u_x_vals };
         let (mat_u, rhs_u_base) = Fvm::assemble_scalar_transport(
             &self.mesh, 
             &u_x, 
@@ -71,19 +89,21 @@ impl PisoSolver {
             nu, 
             self.dt, 
             &self.scheme,
-            u_bc
+            u_bc,
+            Some(&self.ghost_map),
+            Some(&u_x_ghosts)
         );
         
         // Add pressure gradient source term to RHS
         // -grad(p) / rho
-        let grad_p = Fvm::compute_gradients(&self.mesh, &self.p, p_bc);
+        let grad_p = Fvm::compute_gradients(&self.mesh, &self.p, p_bc, Some(&p_ghosts), Some(&self.ghost_map));
         let mut rhs_ux = rhs_u_base.clone();
         
         // Re-assemble for Uy because BC values might be different (though types are same usually)
         // Actually, assemble_scalar_transport uses BC values for Dirichlet.
         // If u_bc and v_bc are different (e.g. Inlet u=1, v=0), we need to re-assemble or just fix RHS.
         // Let's re-assemble to be safe and correct.
-        let u_y = ScalarField { values: self.u.values.iter().map(|v| v.y).collect() };
+        let u_y = ScalarField { values: u_y_vals };
         let (mat_v, mut rhs_uy) = Fvm::assemble_scalar_transport(
             &self.mesh, 
             &u_y, 
@@ -91,7 +111,9 @@ impl PisoSolver {
             nu, 
             self.dt, 
             &self.scheme,
-            v_bc
+            v_bc,
+            Some(&self.ghost_map),
+            Some(&u_y_ghosts)
         );
 
         for i in 0..self.mesh.cells.len() {
@@ -100,15 +122,21 @@ impl PisoSolver {
             rhs_uy[i] -= (grad_p[i].y / self.density) * vol;
         }
         
-        // Solve Ux
+                // Solve Ux
         let mut x_sol = u_x.values.clone();
-        let (_iter_ux, _res_ux, init_res_ux) = solve_bicgstab(&mat_u, &rhs_ux, &mut x_sol, 1000, 1e-6);
+        let (_iter_ux, _res_ux, init_res_ux) = solve_bicgstab(&mat_u, &rhs_ux, &mut x_sol, 1000, 1e-6, ops);
         for i in 0..self.mesh.cells.len() { self.u.values[i].x = x_sol[i]; }
         
         // Solve Uy
         let mut y_sol = u_y.values.clone();
-        let (_iter_uy, _res_uy, init_res_uy) = solve_bicgstab(&mat_v, &rhs_uy, &mut y_sol, 1000, 1e-6);
+        let (_iter_uy, _res_uy, init_res_uy) = solve_bicgstab(&mat_v, &rhs_uy, &mut y_sol, 1000, 1e-6, ops);
         for i in 0..self.mesh.cells.len() { self.u.values[i].y = y_sol[i]; }
+
+        // Exchange U ghosts (updated after predictor)
+        let u_x_vals_pred: Vec<f64> = self.u.values.iter().map(|v| v.x).collect();
+        let u_y_vals_pred: Vec<f64> = self.u.values.iter().map(|v| v.y).collect();
+        let u_x_ghosts_pred = ops.exchange_halo(&u_x_vals_pred);
+        let u_y_ghosts_pred = ops.exchange_halo(&u_y_vals_pred);
         
         // 2. Pressure Corrector
         
@@ -132,11 +160,17 @@ impl PisoSolver {
             }
         }
         
+        // Exchange d_p ghosts
+        let d_p_ghosts = ops.exchange_halo(&d_p);
+        
         // PISO Loop (Corrector steps)
         let mut init_res_p = 0.0;
         for corrector_step in 0..2 {
+            // Exchange p ghosts
+            let p_ghosts_loop = ops.exchange_halo(&self.p.values);
+
             // Recompute grad_p for Rhie-Chow interpolation
-            let grad_p = Fvm::compute_gradients(&self.mesh, &self.p, p_bc);
+            let grad_p = Fvm::compute_gradients(&self.mesh, &self.p, p_bc, Some(&p_ghosts_loop), Some(&self.ghost_map));
             
             // Assemble Pressure Poisson Equation
             let mut p_triplets = Vec::new();
@@ -197,11 +231,27 @@ impl PisoSolver {
                     } else {
                         // Boundary
                         if let Some(bt) = face.boundary_type {
-                            let u_b = Vector2::new(
+                            let mut u_b = Vector2::new(
                                 u_bc(bt).unwrap_or(u_own.x),
                                 v_bc(bt).unwrap_or(u_own.y)
                             );
-                            (u_b.dot(&normal) * face.area, d_p[i])
+                            let mut d_face = d_p[i];
+
+                            // Check Parallel Interface
+                            if let Some(ghost_idx) = self.ghost_map.get(&face_idx) {
+                                let local_ghost_idx = ghost_idx - self.mesh.cells.len();
+                                if local_ghost_idx < u_x_ghosts_pred.len() {
+                                    let u_ghost = Vector2::new(u_x_ghosts_pred[local_ghost_idx], u_y_ghosts_pred[local_ghost_idx]);
+                                    // Interpolate to face
+                                    u_b = 0.5 * (u_own + u_ghost);
+                                    
+                                    if local_ghost_idx < d_p_ghosts.len() {
+                                        d_face = 0.5 * (d_p[i] + d_p_ghosts[local_ghost_idx]);
+                                    }
+                                }
+                            }
+
+                            (u_b.dot(&normal) * face.area, d_face)
                         } else {
                             (u_own.dot(&normal) * face.area, d_p[i])
                         }
@@ -223,7 +273,12 @@ impl PisoSolver {
                         p_triplets.push((i, n, -d_coeff));
                     } else {
                         // Boundary
-                        if let Some(bt) = face.boundary_type {
+                        if let Some(ghost_idx) = self.ghost_map.get(&face_idx) {
+                             let dist = (face.center - cell.center).norm() * 2.0;
+                             let d_coeff = d_face * face.area / dist;
+                             p_triplets.push((i, i, d_coeff));
+                             p_triplets.push((i, *ghost_idx, -d_coeff));
+                        } else if let Some(bt) = face.boundary_type {
                             if let Some(_) = p_bc(bt) {
                                 // Dirichlet (Outlet)
                                 let dist = (face.center - cell.center).norm();
@@ -239,11 +294,15 @@ impl PisoSolver {
                 p_rhs[i] -= div_u_star;
             }
             
-            let mat_p = SparseMatrix::from_triplets(self.mesh.cells.len(), self.mesh.cells.len(), &p_triplets);
+            let n_cols = self.mesh.cells.len() + self.ghost_map.len();
+            let mat_p = SparseMatrix::from_triplets(self.mesh.cells.len(), n_cols, &p_triplets);
             let mut p_prime = vec![0.0; self.mesh.cells.len()];
             // Use BiCGStab for pressure as well, just in case
-            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(&mat_p, &p_rhs, &mut p_prime, 1000, 1e-10);
+            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(&mat_p, &p_rhs, &mut p_prime, 1000, 1e-10, ops);
             
+            // Exchange p_prime ghosts
+            let p_prime_ghosts = ops.exchange_halo(&p_prime);
+
             if corrector_step == 0 {
                 init_res_p = init_res_p_step;
             }
@@ -259,7 +318,7 @@ impl PisoSolver {
                 BoundaryType::Outlet => Some(0.0),
                 _ => None,
             };
-            let grad_p_prime = Fvm::compute_gradients(&self.mesh, &p_prime_field, p_prime_bc_func);
+            let grad_p_prime = Fvm::compute_gradients(&self.mesh, &p_prime_field, p_prime_bc_func, Some(&p_prime_ghosts), Some(&self.ghost_map));
             
             for i in 0..self.mesh.cells.len() {
                 self.u.values[i] -= d_p[i] * grad_p_prime[i];
@@ -330,6 +389,11 @@ impl PisoSolver {
                 let face = &self.mesh.faces[face_idx];
                 if let Some(bt) = face.boundary_type {
                     if matches!(bt, BoundaryType::Outlet) {
+                        visited[i] = true;
+                        queue.push_back(i);
+                        break;
+                    }
+                    if let BoundaryType::ParallelInterface(_, _) = bt {
                         visited[i] = true;
                         queue.push_back(i);
                         break;

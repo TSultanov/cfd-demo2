@@ -39,8 +39,13 @@ impl Fluid {
     }
 }
 
+use crate::solver::parallel::ParallelPisoSolver;
+
 pub struct CFDApp {
     solver: Option<PisoSolver>,
+    parallel_solver: Option<ParallelPisoSolver>,
+    use_parallel: bool,
+    n_threads: usize,
     min_cell_size: f64,
     max_cell_size: f64,
     timestep: f64,
@@ -56,6 +61,9 @@ impl CFDApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             solver: None,
+            parallel_solver: None,
+            use_parallel: false,
+            n_threads: 4,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
             timestep: 0.01,
@@ -98,34 +106,67 @@ impl CFDApp {
             },
         };
         
-        let mut solver = PisoSolver::new(mesh);
-        solver.dt = self.timestep;
-        solver.density = self.current_fluid.density;
-        solver.viscosity = self.current_fluid.viscosity;
-        solver.scheme = match self.selected_scheme {
-            Scheme::Upwind => Scheme::Upwind,
-            Scheme::Central => Scheme::Central,
-            Scheme::QUICK => Scheme::QUICK,
-        };
-        
-        // Set initial BCs (Inlet velocity)
-        for (i, cell) in solver.mesh.cells.iter().enumerate() {
-            if cell.center.x < self.max_cell_size {
-                // Inlet region
-                match self.selected_geometry {
-                    GeometryType::BackwardsStep => {
-                        if cell.center.y > 0.5 {
-                            solver.u.values[i] = Vector2::new(1.0, 0.0);
+        if self.use_parallel {
+            self.parallel_solver = Some(ParallelPisoSolver::new(mesh, self.n_threads));
+            self.solver = None;
+            // Initialize solver params for all sub-solvers
+            if let Some(ps) = &mut self.parallel_solver {
+                for solver in &mut ps.solvers {
+                    solver.dt = self.timestep;
+                    solver.density = self.current_fluid.density;
+                    solver.viscosity = self.current_fluid.viscosity;
+                    solver.scheme = self.selected_scheme;
+                    // BCs
+                    for (i, cell) in solver.mesh.cells.iter().enumerate() {
+                        // Check if cell is in inlet region (global check needed or local?)
+                        // Since we partitioned by X, inlet is likely in rank 0.
+                        // But we should check coordinates.
+                        if cell.center.x < self.max_cell_size {
+                             match self.selected_geometry {
+                                GeometryType::BackwardsStep => {
+                                    if cell.center.y > 0.5 {
+                                        solver.u.values[i] = Vector2::new(1.0, 0.0);
+                                    }
+                                },
+                                GeometryType::ChannelObstacle => {
+                                    solver.u.values[i] = Vector2::new(1.0, 0.0);
+                                }
+                            }
                         }
-                    },
-                    GeometryType::ChannelObstacle => {
-                        solver.u.values[i] = Vector2::new(1.0, 0.0);
                     }
                 }
             }
+        } else {
+            let mut solver = PisoSolver::new(mesh);
+            solver.dt = self.timestep;
+            solver.density = self.current_fluid.density;
+            solver.viscosity = self.current_fluid.viscosity;
+            solver.scheme = match self.selected_scheme {
+                Scheme::Upwind => Scheme::Upwind,
+                Scheme::Central => Scheme::Central,
+                Scheme::QUICK => Scheme::QUICK,
+            };
+            
+            // Set initial BCs (Inlet velocity)
+            for (i, cell) in solver.mesh.cells.iter().enumerate() {
+                if cell.center.x < self.max_cell_size {
+                    // Inlet region
+                    match self.selected_geometry {
+                        GeometryType::BackwardsStep => {
+                            if cell.center.y > 0.5 {
+                                solver.u.values[i] = Vector2::new(1.0, 0.0);
+                            }
+                        },
+                        GeometryType::ChannelObstacle => {
+                            solver.u.values[i] = Vector2::new(1.0, 0.0);
+                        }
+                    }
+                }
+            }
+            
+            self.solver = Some(solver);
+            self.parallel_solver = None;
         }
-        
-        self.solver = Some(solver);
     }
 }
 
@@ -184,6 +225,11 @@ impl eframe::App for CFDApp {
                 ui.label("Solver Parameters");
                 ui.add(egui::Slider::new(&mut self.timestep, 0.001..=0.1).text("Timestep"));
                 
+                ui.checkbox(&mut self.use_parallel, "Use Parallel Solver");
+                if self.use_parallel {
+                    ui.add(egui::Slider::new(&mut self.n_threads, 1..=16).text("Threads"));
+                }
+
                 ui.label("Discretization Scheme");
                 
                 if ui.radio(matches!(self.selected_scheme, Scheme::Upwind), "Upwind").clicked() {
@@ -201,7 +247,7 @@ impl eframe::App for CFDApp {
                 self.init_solver();
             }
             
-            if self.solver.is_some() {
+            if self.solver.is_some() || self.parallel_solver.is_some() {
                 if ui.button(if self.is_running { "Pause" } else { "Run" }).clicked() {
                     self.is_running = !self.is_running;
                 }
@@ -225,6 +271,16 @@ impl eframe::App for CFDApp {
                 ui.label("Residuals:");
                 for (name, val) in &solver.residuals {
                     ui.label(format!("{}: {:.6}", name, val));
+                }
+            } else if let Some(ps) = &self.parallel_solver {
+                // Show residuals from rank 0
+                if !ps.solvers.is_empty() {
+                    let solver = &ps.solvers[0];
+                    ui.label(format!("Time: {:.3}", solver.time));
+                    ui.label("Residuals (Rank 0):");
+                    for (name, val) in &solver.residuals {
+                        ui.label(format!("{}: {:.6}", name, val));
+                    }
                 }
             }
         });
@@ -251,6 +307,27 @@ impl eframe::App for CFDApp {
                 max_val = min_val + 1.0; // Avoid division by zero
             }
             (min_val, max_val, Some(values))
+        } else if let Some(ps) = &self.parallel_solver {
+            // Aggregate values from all solvers
+            let mut min_val = f64::MAX;
+            let mut max_val = f64::MIN;
+            
+            for solver in &ps.solvers {
+                for i in 0..solver.mesh.cells.len() {
+                    let val = match self.plot_field {
+                        PlotField::Pressure => solver.p.values[i],
+                        PlotField::VelocityX => solver.u.values[i].x,
+                        PlotField::VelocityY => solver.u.values[i].y,
+                        PlotField::VelocityMag => solver.u.values[i].norm(),
+                    };
+                    if val < min_val { min_val = val; }
+                    if val > max_val { max_val = val; }
+                }
+            }
+             if (max_val - min_val).abs() < 1e-6 {
+                max_val = min_val + 1.0;
+            }
+            (min_val, max_val, None) // None because we handle values in loop
         } else {
             (0.0, 1.0, None)
         };
@@ -258,11 +335,21 @@ impl eframe::App for CFDApp {
         egui::SidePanel::right("legend").show(ctx, |ui| {
             if let Some(solver) = &self.solver {
                 ui.heading("Mesh Stats");
+                ui.label(format!("Cells: {}", solver.mesh.cells.len()));
                 ui.label(format!("Max Skewness: {:.4}", solver.mesh.calculate_max_skewness()));
+                ui.separator();
+            } else if let Some(ps) = &self.parallel_solver {
+                ui.heading("Mesh Stats");
+                let total_cells: usize = ps.solvers.iter().map(|s| s.mesh.cells.len()).sum();
+                ui.label(format!("Total Cells: {}", total_cells));
+                let max_skew = ps.solvers.iter()
+                    .map(|s| s.mesh.calculate_max_skewness())
+                    .fold(0.0, f64::max);
+                ui.label(format!("Max Skewness: {:.4}", max_skew));
                 ui.separator();
             }
 
-            if values.is_some() {
+            if self.solver.is_some() || self.parallel_solver.is_some() {
                 ui.heading("Legend");
                 ui.label(format!("Max: {:.4}", max_val));
                 
@@ -301,6 +388,9 @@ impl eframe::App for CFDApp {
             if self.is_running {
                 if let Some(solver) = &mut self.solver {
                     solver.step();
+                    ctx.request_repaint();
+                } else if let Some(ps) = &mut self.parallel_solver {
+                    ps.step();
                     ctx.request_repaint();
                 }
             }
@@ -352,6 +442,65 @@ impl eframe::App for CFDApp {
                             }
                         });
                 }
+            } else if let Some(ps) = &self.parallel_solver {
+                Plot::new("cfd_plot")
+                    .data_aspect(1.0)
+                    .show(ui, |plot_ui| {
+                        for solver in &ps.solvers {
+                            for (i, cell) in solver.mesh.cells.iter().enumerate() {
+                                let val = match self.plot_field {
+                                    PlotField::Pressure => solver.p.values[i],
+                                    PlotField::VelocityX => solver.u.values[i].x,
+                                    PlotField::VelocityY => solver.u.values[i].y,
+                                    PlotField::VelocityMag => solver.u.values[i].norm(),
+                                };
+                                let t = (val - min_val) / (max_val - min_val);
+                                let color = get_color(t);
+                                
+                                let polygon_points: Vec<[f64; 2]> = cell.vertex_indices.iter()
+                                    .map(|&v_idx| {
+                                        let p = solver.mesh.vertices[v_idx].pos;
+                                        [p.x, p.y]
+                                    })
+                                    .collect();
+
+                                plot_ui.polygon(
+                                    Polygon::new(PlotPoints::new(polygon_points))
+                                        .fill_color(color)
+                                        .stroke(if self.show_mesh_lines {
+                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
+                                        } else {
+                                            egui::Stroke::NONE
+                                        })
+                                );
+                            }
+                        }
+                        
+                        if let Some(pointer) = plot_ui.pointer_coordinate() {
+                            let p = Point2::new(pointer.x, pointer.y);
+                            for (s_idx, solver) in ps.solvers.iter().enumerate() {
+                                if let Some(idx) = solver.mesh.get_cell_at_pos(p) {
+                                    let skew = solver.mesh.calculate_cell_skewness(idx);
+                                    let val = match self.plot_field {
+                                        PlotField::Pressure => solver.p.values[idx],
+                                        PlotField::VelocityX => solver.u.values[idx].x,
+                                        PlotField::VelocityY => solver.u.values[idx].y,
+                                        PlotField::VelocityMag => solver.u.values[idx].norm(),
+                                    };
+                                    let vol = solver.mesh.cells[idx].volume;
+                                    plot_ui.text(
+                                        egui_plot::Text::new(
+                                            pointer, 
+                                            format!("Part {}\nCell {}\nVol: {:.6e}\nSkew: {:.4}\nVal: {:.4}", s_idx, idx, vol, skew, val)
+                                        )
+                                        .color(egui::Color32::WHITE)
+                                        .anchor(egui::Align2::LEFT_BOTTOM)
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    });
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("Press Initialize to start");

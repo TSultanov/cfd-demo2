@@ -12,6 +12,7 @@ pub enum BoundaryType {
     Inlet,
     Outlet,
     Wall,
+    ParallelInterface(usize, usize), // Rank of the neighbor, Remote Cell Index
 }
 
 #[derive(Clone, Debug)]
@@ -33,7 +34,7 @@ pub struct Cell {
     pub volume: f64, // Area in 2D
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub faces: Vec<Face>,

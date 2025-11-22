@@ -930,6 +930,153 @@ mod tests {
         println!("Total time for 5 steps: {:?}", elapsed);
         println!("Average time per step: {:?}", elapsed / 5);
     }
+
+    #[test]
+    fn test_parallel_vs_serial_channel_with_obstacle() {
+        use crate::solver::mesh::{ChannelWithObstacle, generate_cut_cell_mesh};
+        use std::collections::HashSet;
+
+        fn get_connected_cells(mesh: &Mesh) -> HashSet<usize> {
+            let mut connected = HashSet::new();
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(0);
+            connected.insert(0);
+            while let Some(cell_idx) = queue.pop_front() {
+                let start_face = mesh.cell_face_offsets[cell_idx];
+                let end_face = mesh.cell_face_offsets[cell_idx + 1];
+                for i in start_face..end_face {
+                    let face_idx = mesh.cell_faces[i];
+                    let owner = mesh.face_owner[face_idx];
+                    let neighbor = mesh.face_neighbor[face_idx];
+                    let next_cell = if owner == cell_idx { neighbor } else { Some(owner) };
+                    if let Some(n_idx) = next_cell {
+                        if !connected.contains(&n_idx) {
+                            connected.insert(n_idx);
+                            queue.push_back(n_idx);
+                        }
+                    }
+                }
+            }
+            connected
+        }
+
+        println!("Generating channel with obstacle mesh...");
+        let geo = ChannelWithObstacle {
+            length: 4.0,
+            height: 1.0,
+            obstacle_center: Point2::new(1.0, 0.5),
+            obstacle_radius: 0.1,
+        };
+        let domain_size = Vector2::new(2.0, 1.0);
+        let cell_size = 0.025; 
+        let mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, domain_size);
+        println!("Mesh generated: {} cells", mesh.num_cells());
+
+        // Serial Solver
+        let mut serial_solver = PisoSolver::new(mesh.clone());
+        serial_solver.dt = 0.001;
+        serial_solver.density = 1.0;
+        serial_solver.viscosity = 0.01;
+
+        // Set Serial BCs (Inlet at x=0)
+        for i in 0..serial_solver.mesh.num_cells() {
+            let cx = serial_solver.mesh.cell_cx[i];
+            if cx < cell_size {
+                serial_solver.u.vx[i] = 1.0;
+                serial_solver.u.vy[i] = 0.0;
+            }
+        }
+
+        // Parallel Solver
+        let n_threads = 4;
+        let mut parallel_solver = ParallelPisoSolver::new(mesh.clone(), n_threads);
+        
+        // Set Parallel BCs
+        for partition in &parallel_solver.partitions {
+            let mut s = partition.write().unwrap();
+            s.dt = 0.001;
+            s.density = 1.0;
+            s.viscosity = 0.01;
+            
+            let n_cells = s.mesh.num_cells();
+            for i in 0..n_cells {
+                let cx = s.mesh.cell_cx[i];
+                if cx < cell_size {
+                    s.u.vx[i] = 1.0;
+                    s.u.vy[i] = 0.0;
+                }
+            }
+        }
+
+        let connected_cells = get_connected_cells(&serial_solver.mesh);
+        println!("Connected cells: {}/{}", connected_cells.len(), serial_solver.mesh.num_cells());
+
+        println!("Starting comparison loop...");
+        for step in 0..40 {
+            serial_solver.step();
+            parallel_solver.step();
+
+            let mut max_u_diff = 0.0;
+            let mut max_p_diff = 0.0;
+            let mut max_u_diff_loc = Point2::origin();
+            let mut max_p_diff_loc = Point2::origin();
+            
+            // Calculate pressure offset (mean pressure difference)
+            let mut p_serial_sum = 0.0;
+            let mut p_parallel_sum = 0.0;
+            let mut count = 0;
+
+             for partition in &parallel_solver.partitions {
+                let solver = partition.read().unwrap();
+                for i in 0..solver.mesh.num_cells() {
+                    let center = Point2::new(solver.mesh.cell_cx[i], solver.mesh.cell_cy[i]);
+                    if let Some(serial_idx) = serial_solver.mesh.get_cell_at_pos(center) {
+                        if !connected_cells.contains(&serial_idx) { continue; }
+                        p_serial_sum += serial_solver.p.values[serial_idx];
+                        p_parallel_sum += solver.p.values[i];
+                        count += 1;
+                    }
+                }
+            }
+            let p_offset = if count > 0 { (p_serial_sum - p_parallel_sum) / count as f64 } else { 0.0 };
+
+
+            for partition in &parallel_solver.partitions {
+                let solver = partition.read().unwrap();
+                for i in 0..solver.mesh.num_cells() {
+                    let center = Point2::new(solver.mesh.cell_cx[i], solver.mesh.cell_cy[i]);
+                    if let Some(serial_idx) = serial_solver.mesh.get_cell_at_pos(center) {
+                        if !connected_cells.contains(&serial_idx) { continue; }
+
+                        let u_serial = Vector2::new(serial_solver.u.vx[serial_idx], serial_solver.u.vy[serial_idx]);
+                        let u_parallel = Vector2::new(solver.u.vx[i], solver.u.vy[i]);
+                        let u_diff = (u_serial - u_parallel).norm();
+
+                        let p_serial = serial_solver.p.values[serial_idx];
+                        let p_parallel = solver.p.values[i];
+                        let p_diff = (p_serial - (p_parallel + p_offset)).abs();
+
+                        if u_diff > max_u_diff {
+                            max_u_diff = u_diff;
+                            max_u_diff_loc = center;
+                        }
+                        if p_diff > max_p_diff {
+                            max_p_diff = p_diff;
+                            max_p_diff_loc = center;
+                        }
+                    }
+                }
+            }
+            
+            println!("Step {}: Max U diff = {:.6} at {:?}, Max P diff (adjusted) = {:.6} at {:?}", 
+                step, max_u_diff, max_u_diff_loc, max_p_diff, max_p_diff_loc);
+            
+            // Fail if discrepancies are too large
+             if max_u_diff > 0.1 {
+                println!("Large velocity discrepancy detected!");
+            }
+        }
+    }
 }
 
 pub struct SolverPartition {

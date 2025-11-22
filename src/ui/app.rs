@@ -186,7 +186,7 @@ impl eframe::App for CFDApp {
             
             ui.group(|ui| {
                 ui.label("Mesh Parameters");
-                ui.add(egui::Slider::new(&mut self.min_cell_size, 0.005..=self.max_cell_size).text("Min Cell Size"));
+                ui.add(egui::Slider::new(&mut self.min_cell_size, 0.001..=self.max_cell_size).text("Min Cell Size"));
                 ui.add(egui::Slider::new(&mut self.max_cell_size, self.min_cell_size..=0.5).text("Max Cell Size"));
             });
             

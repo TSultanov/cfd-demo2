@@ -2,6 +2,7 @@ use crate::solver::mesh::{Mesh, BoundaryType};
 use crate::solver::linear_solver::SparseMatrix;
 use nalgebra::Vector2;
 use std::collections::HashMap;
+use wide::f64x4;
 
 #[derive(Clone)]
 pub struct ScalarField {
@@ -135,13 +136,32 @@ impl Fvm {
             }
         }
         
-        for i in 0..n_cells {
+        let mut i = 0;
+        while i + 4 <= n_cells {
+            let v_vol = f64x4::from(&mesh.cell_vol[i..i+4]);
+            let v_grad_x = f64x4::from(&grad_x[i..i+4]);
+            let v_grad_y = f64x4::from(&grad_y[i..i+4]);
+            
+            let res_x = v_grad_x / v_vol;
+            let res_y = v_grad_y / v_vol;
+            
+            let arr_x: [f64; 4] = res_x.into();
+            let arr_y: [f64; 4] = res_y.into();
+            
+            grad_x[i..i+4].copy_from_slice(&arr_x);
+            grad_y[i..i+4].copy_from_slice(&arr_y);
+            
+            i += 4;
+        }
+
+        while i < n_cells {
             let vol = mesh.cell_vol[i];
             if vol < 1e-12 {
                 println!("Warning: Small cell volume for cell {}: {}", i, vol);
             }
             grad_x[i] /= vol;
             grad_y[i] /= vol;
+            i += 1;
         }
         
         VectorField { vx: grad_x, vy: grad_y }
@@ -164,7 +184,7 @@ impl Fvm {
     where F: Fn(BoundaryType) -> Option<f64>
     {
         let n_cells = mesh.num_cells();
-        let mut triplets = Vec::new();
+        let mut triplets = Vec::with_capacity(n_cells + 2 * mesh.num_faces());
         let mut rhs = vec![0.0; n_cells];
         
         // Compute gradients for higher order schemes
@@ -173,6 +193,26 @@ impl Fvm {
         } else {
             None
         };
+
+        // Vectorized Unsteady Term for RHS
+        let mut i = 0;
+        let v_dt = f64x4::splat(dt);
+        while i + 4 <= n_cells {
+             let v_vol = f64x4::from(&mesh.cell_vol[i..i+4]);
+             let v_phi_old = f64x4::from(&phi_old.values[i..i+4]);
+             let v_coeff = v_vol / v_dt;
+             // rhs is zero initially
+             let res = v_coeff * v_phi_old;
+             let res_arr: [f64; 4] = res.into();
+             rhs[i..i+4].copy_from_slice(&res_arr);
+             i += 4;
+        }
+        while i < n_cells {
+             let vol = mesh.cell_vol[i];
+             let coeff = vol / dt;
+             rhs[i] = coeff * phi_old.values[i];
+             i += 1;
+        }
         
         for i in 0..n_cells {
             // Unsteady term: (phi - phi_old)/dt * V
@@ -182,7 +222,7 @@ impl Fvm {
                 println!("coeff_unsteady is NaN for cell {}. vol={}, dt={}", i, vol, dt);
             }
             triplets.push((i, i, coeff_unsteady));
-            rhs[i] += coeff_unsteady * phi_old.values[i];
+            // rhs[i] += coeff_unsteady * phi_old.values[i]; // Handled above
             
             // Loop over faces
             let start = mesh.cell_face_offsets[i];

@@ -411,8 +411,20 @@ impl PisoSolver {
             // Correct Pressure: p = p + p_prime
             // Under-relaxation for pressure (SIMPLE-like, but PISO usually 1.0)
             let alpha_p = 1.0; 
-            for i in 0..self.mesh.num_cells() {
+            let v_alpha_p = f64x4::splat(alpha_p);
+            let mut i = 0;
+            let n_cells = self.mesh.num_cells();
+            while i + 4 <= n_cells {
+                let v_p = f64x4::from(&self.p.values[i..i+4]);
+                let v_prime = f64x4::from(&p_prime[i..i+4]);
+                let res = v_p + v_alpha_p * v_prime;
+                let res_arr: [f64; 4] = res.into();
+                self.p.values[i..i+4].copy_from_slice(&res_arr);
+                i += 4;
+            }
+            while i < n_cells {
                 self.p.values[i] += alpha_p * p_prime[i];
+                i += 1;
             }
             
             // Correct Velocity: u = u - d_p * grad(p_prime)
@@ -427,9 +439,28 @@ impl PisoSolver {
                 Some(&self.ghost_centers)
             );
             
-            for i in 0..self.mesh.num_cells() {
+            let mut i = 0;
+            while i + 4 <= n_cells {
+                let v_ux = f64x4::from(&self.u.vx[i..i+4]);
+                let v_uy = f64x4::from(&self.u.vy[i..i+4]);
+                let v_dp = f64x4::from(&d_p[i..i+4]);
+                let v_gpx = f64x4::from(&grad_p_prime.vx[i..i+4]);
+                let v_gpy = f64x4::from(&grad_p_prime.vy[i..i+4]);
+                
+                let res_ux = v_ux - v_dp * v_gpx;
+                let res_uy = v_uy - v_dp * v_gpy;
+                
+                let arr_ux: [f64; 4] = res_ux.into();
+                let arr_uy: [f64; 4] = res_uy.into();
+                
+                self.u.vx[i..i+4].copy_from_slice(&arr_ux);
+                self.u.vy[i..i+4].copy_from_slice(&arr_uy);
+                i += 4;
+            }
+            while i < n_cells {
                 self.u.vx[i] -= d_p[i] * grad_p_prime.vx[i];
                 self.u.vy[i] -= d_p[i] * grad_p_prime.vy[i];
+                i += 1;
             }
             
             // Correct Fluxes: phi = phi_star - d_face * Area * (grad(p_prime) . n)

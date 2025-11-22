@@ -1,6 +1,7 @@
 use nalgebra::{Point2, Vector2};
 use std::collections::HashMap;
 use rayon::prelude::*;
+use wide::{f64x4, CmpGe, CmpGt, CmpLt};
 
 #[derive(Clone, Debug)]
 pub struct Vertex {
@@ -267,19 +268,53 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
             }
         }
     }
+    
+    // Flatten unique vertices for processing
     let unique_verts: Vec<(Point2<f64>, bool)> = unique_verts_map.values().cloned().collect();
 
-    // Spatial Grid for fast lookup
+    // Spatial Grid with SoA layout for SIMD
     let grid_size = max_cell_size;
     let grid_nx = (domain_size.x / grid_size).ceil() as usize + 1;
     let grid_ny = (domain_size.y / grid_size).ceil() as usize + 1;
-    let mut vert_grid: Vec<Vec<usize>> = vec![Vec::new(); grid_nx * grid_ny];
+    let grid_len = grid_nx * grid_ny;
     
-    for (i, (p, _)) in unique_verts.iter().enumerate() {
+    // 1. Count vertices per cell
+    let mut grid_counts = vec![0; grid_len];
+    let grid_indices: Vec<usize> = unique_verts.iter().map(|(p, _)| {
         let gx = (p.x / grid_size).floor().max(0.0) as usize;
         let gy = (p.y / grid_size).floor().max(0.0) as usize;
         if gx < grid_nx && gy < grid_ny {
-             vert_grid[gy * grid_nx + gx].push(i);
+            let idx = gy * grid_nx + gx;
+            grid_counts[idx] += 1;
+            idx
+        } else {
+            grid_len
+        }
+    }).collect();
+    
+    // 2. Prefix sums for start indices
+    let mut grid_starts = vec![0; grid_len + 1];
+    let mut current = 0;
+    for i in 0..grid_len {
+        grid_starts[i] = current;
+        current += grid_counts[i];
+    }
+    grid_starts[grid_len] = current;
+    
+    // 3. Fill SoA arrays
+    let mut sorted_xs = vec![0.0; unique_verts.len()];
+    let mut sorted_ys = vec![0.0; unique_verts.len()];
+    let mut sorted_fixed = vec![false; unique_verts.len()];
+    
+    let mut current_starts = grid_starts.clone();
+    for (i, (p, fixed)) in unique_verts.iter().enumerate() {
+        let grid_idx = grid_indices[i];
+        if grid_idx < grid_len {
+            let pos = current_starts[grid_idx];
+            sorted_xs[pos] = p.x;
+            sorted_ys[pos] = p.y;
+            sorted_fixed[pos] = *fixed;
+            current_starts[grid_idx] += 1;
         }
     }
 
@@ -301,6 +336,18 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
             
             if seg_len_sq < 1e-12 { continue; }
 
+            // SIMD constants
+            let p_curr_x = f64x4::splat(p_curr.x);
+            let p_curr_y = f64x4::splat(p_curr.y);
+            let p_next_x = f64x4::splat(p_next.x);
+            let p_next_y = f64x4::splat(p_next.y);
+            let seg_vec_x = f64x4::splat(seg_vec.x);
+            let seg_vec_y = f64x4::splat(seg_vec.y);
+            let seg_len_sq_simd = f64x4::splat(seg_len_sq);
+            let epsilon = f64x4::splat(1e-12);
+            let t_min = f64x4::splat(1e-6);
+            let t_max = f64x4::splat(1.0 - 1e-6);
+
             // Bounding box of the segment
             let min_x = p_curr.x.min(p_next.x);
             let max_x = p_curr.x.max(p_next.x);
@@ -315,10 +362,78 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
             for gy in min_gy..=max_gy.min(grid_ny - 1) {
                 for gx in min_gx..=max_gx.min(grid_nx - 1) {
                     let cell_idx = gy * grid_nx + gx;
-                    for &v_idx in &vert_grid[cell_idx] {
-                        let (v, is_fixed) = unique_verts[v_idx];
+                    let start = grid_starts[cell_idx];
+                    let end = grid_starts[cell_idx + 1];
+                    
+                    if start == end { continue; }
+                    
+                    let xs = &sorted_xs[start..end];
+                    let ys = &sorted_ys[start..end];
+                    let fixeds = &sorted_fixed[start..end];
+                    
+                    let mut i = 0;
+                    let chunks_count = xs.len() / 4;
+                    
+                    // SIMD Loop
+                    for _ in 0..chunks_count {
+                        let v_x = f64x4::from(&xs[i..i+4]);
+                        let v_y = f64x4::from(&ys[i..i+4]);
                         
-                        // Check if v is on segment
+                        let dx_curr = v_x - p_curr_x;
+                        let dy_curr = v_y - p_curr_y;
+                        let d_curr = dx_curr * dx_curr + dy_curr * dy_curr;
+                        
+                        let dx_next = v_x - p_next_x;
+                        let dy_next = v_y - p_next_y;
+                        let d_next = dx_next * dx_next + dy_next * dy_next;
+                        
+                        // Check endpoints
+                        let not_endpoint = d_curr.simd_ge(epsilon) & d_next.simd_ge(epsilon);
+                        
+                        if not_endpoint.none() { 
+                            i += 4;
+                            continue; 
+                        }
+
+                        let dot = dx_curr * seg_vec_x + dy_curr * seg_vec_y;
+                        let t = dot / seg_len_sq_simd;
+                        
+                        let t_in_range = t.simd_gt(t_min) & t.simd_lt(t_max);
+                        let mask = not_endpoint & t_in_range;
+                        
+                        if mask.none() {
+                            i += 4;
+                            continue;
+                        }
+                        
+                        let proj_x = p_curr_x + seg_vec_x * t;
+                        let proj_y = p_curr_y + seg_vec_y * t;
+                        
+                        let d_proj_x = v_x - proj_x;
+                        let d_proj_y = v_y - proj_y;
+                        let dist_sq = d_proj_x * d_proj_x + d_proj_y * d_proj_y;
+                        
+                        let is_close = dist_sq.simd_lt(epsilon);
+                        let final_mask = mask & is_close;
+                        
+                        if final_mask.any() {
+                            let t_arr = t.to_array();
+                            let mask_int = final_mask.to_bitmask();
+                            for lane in 0..4 {
+                                if (mask_int & (1 << lane)) != 0 {
+                                    let idx = i + lane;
+                                    on_segment.push((t_arr[lane], Point2::new(xs[idx], ys[idx]), fixeds[idx]));
+                                }
+                            }
+                        }
+                        i += 4;
+                    }
+                    
+                    // Remainder Loop
+                    for j in i..xs.len() {
+                        let v = Point2::new(xs[j], ys[j]);
+                        let is_fixed = fixeds[j];
+                        
                         let d_curr = (v - p_curr).norm_squared();
                         let d_next = (v - p_next).norm_squared();
                         
@@ -346,7 +461,6 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
         }
         *poly = new_poly;
     });
-
     // 3. Create Mesh from Polygons
     mesh.cells.reserve(all_polys.len());
     mesh.vertices.reserve(all_polys.len() * 2);

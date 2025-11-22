@@ -1,7 +1,6 @@
 use nalgebra::{Point2, Vector2};
 use std::collections::HashMap;
 use rayon::prelude::*;
-use wide::{f64x4, CmpGe, CmpGt, CmpLt};
 
 #[derive(Clone, Debug)]
 pub struct Vertex {
@@ -270,10 +269,19 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
     }
     let unique_verts: Vec<(Point2<f64>, bool)> = unique_verts_map.values().cloned().collect();
 
-    // Prepare SoA for SIMD
-    let uv_x: Vec<f64> = unique_verts.iter().map(|(p, _)| p.x).collect();
-    let uv_y: Vec<f64> = unique_verts.iter().map(|(p, _)| p.y).collect();
-    let uv_fixed: Vec<bool> = unique_verts.iter().map(|(_, f)| *f).collect();
+    // Spatial Grid for fast lookup
+    let grid_size = max_cell_size;
+    let grid_nx = (domain_size.x / grid_size).ceil() as usize + 1;
+    let grid_ny = (domain_size.y / grid_size).ceil() as usize + 1;
+    let mut vert_grid: Vec<Vec<usize>> = vec![Vec::new(); grid_nx * grid_ny];
+    
+    for (i, (p, _)) in unique_verts.iter().enumerate() {
+        let gx = (p.x / grid_size).floor().max(0.0) as usize;
+        let gy = (p.y / grid_size).floor().max(0.0) as usize;
+        if gx < grid_nx && gy < grid_ny {
+             vert_grid[gy * grid_nx + gx].push(i);
+        }
+    }
 
     // For each polygon, check if any unique vertex lies on its edges
     all_polys.par_iter_mut().for_each(|poly| {
@@ -293,93 +301,38 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
             
             if seg_len_sq < 1e-12 { continue; }
 
-            let p_curr_x = f64x4::splat(p_curr.x);
-            let p_curr_y = f64x4::splat(p_curr.y);
-            let p_next_x = f64x4::splat(p_next.x);
-            let p_next_y = f64x4::splat(p_next.y);
-            let seg_vec_x = f64x4::splat(seg_vec.x);
-            let seg_vec_y = f64x4::splat(seg_vec.y);
-            let seg_len_sq_simd = f64x4::splat(seg_len_sq);
-            let epsilon = f64x4::splat(1e-12);
-            let t_min = f64x4::splat(1e-6);
-            let t_max = f64x4::splat(1.0 - 1e-6);
-
-            let chunks_x = uv_x.chunks_exact(4);
-            let chunks_y = uv_y.chunks_exact(4);
-            let remainder_x = chunks_x.remainder();
-            let remainder_y = chunks_y.remainder();
+            // Bounding box of the segment
+            let min_x = p_curr.x.min(p_next.x);
+            let max_x = p_curr.x.max(p_next.x);
+            let min_y = p_curr.y.min(p_next.y);
+            let max_y = p_curr.y.max(p_next.y);
             
-            let mut idx_base = 0;
-            for (vx, vy) in chunks_x.zip(chunks_y) {
-                let v_x = f64x4::from(TryInto::<[f64; 4]>::try_into(vx).unwrap());
-                let v_y = f64x4::from(TryInto::<[f64; 4]>::try_into(vy).unwrap());
-                
-                let dx_curr = v_x - p_curr_x;
-                let dy_curr = v_y - p_curr_y;
-                let d_curr = dx_curr * dx_curr + dy_curr * dy_curr;
-                
-                let dx_next = v_x - p_next_x;
-                let dy_next = v_y - p_next_y;
-                let d_next = dx_next * dx_next + dy_next * dy_next;
-                
-                let not_endpoint = d_curr.simd_ge(epsilon) & d_next.simd_ge(epsilon);
-                
-                if not_endpoint.none() { 
-                    idx_base += 4;
-                    continue; 
-                }
-
-                let dot = dx_curr * seg_vec_x + dy_curr * seg_vec_y;
-                let t = dot / seg_len_sq_simd;
-                
-                let t_in_range = t.simd_gt(t_min) & t.simd_lt(t_max);
-                let mask = not_endpoint & t_in_range;
-                
-                if mask.none() {
-                    idx_base += 4;
-                    continue;
-                }
-                
-                let proj_x = p_curr_x + seg_vec_x * t;
-                let proj_y = p_curr_y + seg_vec_y * t;
-                
-                let d_proj_x = v_x - proj_x;
-                let d_proj_y = v_y - proj_y;
-                let dist_sq = d_proj_x * d_proj_x + d_proj_y * d_proj_y;
-                
-                let is_close = dist_sq.simd_lt(epsilon);
-                let final_mask = mask & is_close;
-                
-                if final_mask.any() {
-                    let t_arr = t.to_array();
-                    let mask_int = final_mask.to_bitmask();
-                    for lane in 0..4 {
-                        if (mask_int & (1 << lane)) != 0 {
-                            let idx = idx_base + lane;
-                            on_segment.push((t_arr[lane], Point2::new(uv_x[idx], uv_y[idx]), uv_fixed[idx]));
+            let min_gx = (min_x / grid_size).floor().max(0.0) as usize;
+            let max_gx = (max_x / grid_size).floor().max(0.0) as usize;
+            let min_gy = (min_y / grid_size).floor().max(0.0) as usize;
+            let max_gy = (max_y / grid_size).floor().max(0.0) as usize;
+            
+            for gy in min_gy..=max_gy.min(grid_ny - 1) {
+                for gx in min_gx..=max_gx.min(grid_nx - 1) {
+                    let cell_idx = gy * grid_nx + gx;
+                    for &v_idx in &vert_grid[cell_idx] {
+                        let (v, is_fixed) = unique_verts[v_idx];
+                        
+                        // Check if v is on segment
+                        let d_curr = (v - p_curr).norm_squared();
+                        let d_next = (v - p_next).norm_squared();
+                        
+                        if d_curr < 1e-12 || d_next < 1e-12 { continue; }
+                        
+                        let v_vec = v - p_curr;
+                        let t = v_vec.dot(&seg_vec) / seg_len_sq;
+                        
+                        if t > 1e-6 && t < 1.0 - 1e-6 {
+                            let proj = p_curr + seg_vec * t;
+                            if (v - proj).norm_squared() < 1e-12 {
+                                on_segment.push((t, v, is_fixed));
+                            }
                         }
-                    }
-                }
-                idx_base += 4;
-            }
-
-            for (i, (&vx, &vy)) in remainder_x.iter().zip(remainder_y.iter()).enumerate() {
-                let idx = idx_base + i;
-                let v = Point2::new(vx, vy);
-                let is_fixed = uv_fixed[idx];
-                
-                let d_curr = (v - p_curr).norm_squared();
-                let d_next = (v - p_next).norm_squared();
-                
-                if d_curr < 1e-12 || d_next < 1e-12 { continue; }
-                
-                let v_vec = v - p_curr;
-                let t = v_vec.dot(&seg_vec) / seg_len_sq;
-                
-                if t > 1e-6 && t < 1.0 - 1e-6 {
-                    let proj = p_curr + seg_vec * t;
-                    if (v - proj).norm_squared() < 1e-12 {
-                        on_segment.push((t, v, is_fixed));
                     }
                 }
             }
@@ -395,6 +348,10 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
     });
 
     // 3. Create Mesh from Polygons
+    mesh.cells.reserve(all_polys.len());
+    mesh.vertices.reserve(all_polys.len() * 2);
+    mesh.faces.reserve(all_polys.len() * 4);
+
     for poly_verts in all_polys {
         // Create Cell
         let mut center = Vector2::new(0.0, 0.0);

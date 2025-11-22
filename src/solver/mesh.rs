@@ -1,5 +1,7 @@
 use nalgebra::{Point2, Vector2};
 use std::collections::HashMap;
+use rayon::prelude::*;
+use wide::{f64x4, CmpGe, CmpGt, CmpLt};
 
 #[derive(Clone, Debug)]
 pub struct Vertex {
@@ -158,7 +160,7 @@ impl QuadNode {
     }
 }
 
-pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_size: f64, domain_size: Vector2<f64>) -> Mesh {
+pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, max_cell_size: f64, domain_size: Vector2<f64>) -> Mesh {
     let mut mesh = Mesh::new();
     
     // 1. Build Quadtree and Process Leaves
@@ -172,10 +174,8 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
     let mut face_map: HashMap<(usize, usize), usize> = HashMap::new();
 
     // Collect all leaf polygons first
-    let mut all_polys: Vec<Vec<(Point2<f64>, bool)>> = Vec::new();
-
-    for i in 0..nx {
-        for j in 0..ny {
+    let mut all_polys: Vec<Vec<(Point2<f64>, bool)>> = (0..nx).into_par_iter().flat_map(|i| {
+        (0..ny).into_par_iter().flat_map(move |j| {
             let x0 = i as f64 * max_cell_size;
             let y0 = j as f64 * max_cell_size;
             let x1 = (x0 + max_cell_size).min(domain_size.x);
@@ -187,6 +187,8 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
             let mut leaves = Vec::new();
             collect_leaves(&root, &mut leaves);
             
+            let mut local_polys = Vec::new();
+
             for leaf in leaves {
                 let (min, max) = leaf.bounds;
                 
@@ -236,49 +238,45 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
                             // Intersection
                             let denom = d_curr - d_next;
                             if denom.abs() < 1e-20 {
-                                println!("Warning: denom too small in intersection: d_curr={}, d_next={}", d_curr, d_next);
+                                // println!("Warning: denom too small in intersection: d_curr={}, d_next={}", d_curr, d_next);
                             }
                             let t = d_curr / denom;
-                            if t.is_nan() {
-                                println!("Warning: t is NaN. d_curr={}, d_next={}", d_curr, d_next);
-                            }
                             let p_inter = p_curr + (p_next - p_curr) * t;
-                            if p_inter.x.is_nan() || p_inter.y.is_nan() {
-                                println!("Warning: p_inter is NaN. t={}, p_curr={:?}, p_next={:?}", t, p_curr, p_next);
-                            }
                             poly_verts.push((p_inter, true));
                         }
                     }
                 }
                 
                 if poly_verts.len() >= 3 {
-                    all_polys.push(poly_verts);
+                    local_polys.push(poly_verts);
                 }
             }
-        }
-    }
+            local_polys
+        })
+    }).collect();
 
     // 2. Imprint Hanging Nodes
     // Collect all unique vertices and their fixed status
-    let mut unique_verts: Vec<Point2<f64>> = Vec::new();
-    let mut fixed_map: HashMap<(i64, i64), bool> = HashMap::new();
-    let mut vert_set: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+    let mut unique_verts_map: HashMap<(i64, i64), (Point2<f64>, bool)> = HashMap::new();
     
     for poly in &all_polys {
         for (p, fixed) in poly {
             let key = (quantize(p.x), quantize(p.y));
-            if vert_set.insert(key) {
-                unique_verts.push(*p);
-            }
-            let entry = fixed_map.entry(key).or_insert(false);
+            let entry = unique_verts_map.entry(key).or_insert((*p, false));
             if *fixed {
-                *entry = true;
+                entry.1 = true;
             }
         }
     }
+    let unique_verts: Vec<(Point2<f64>, bool)> = unique_verts_map.values().cloned().collect();
+
+    // Prepare SoA for SIMD
+    let uv_x: Vec<f64> = unique_verts.iter().map(|(p, _)| p.x).collect();
+    let uv_y: Vec<f64> = unique_verts.iter().map(|(p, _)| p.y).collect();
+    let uv_fixed: Vec<bool> = unique_verts.iter().map(|(_, f)| *f).collect();
 
     // For each polygon, check if any unique vertex lies on its edges
-    for poly in &mut all_polys {
+    all_polys.par_iter_mut().for_each(|poly| {
         let mut new_poly = Vec::new();
         let n = poly.len();
         
@@ -295,23 +293,93 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
             
             if seg_len_sq < 1e-12 { continue; }
 
-            for v in &unique_verts {
-                // Check if v is p_curr or p_next
+            let p_curr_x = f64x4::splat(p_curr.x);
+            let p_curr_y = f64x4::splat(p_curr.y);
+            let p_next_x = f64x4::splat(p_next.x);
+            let p_next_y = f64x4::splat(p_next.y);
+            let seg_vec_x = f64x4::splat(seg_vec.x);
+            let seg_vec_y = f64x4::splat(seg_vec.y);
+            let seg_len_sq_simd = f64x4::splat(seg_len_sq);
+            let epsilon = f64x4::splat(1e-12);
+            let t_min = f64x4::splat(1e-6);
+            let t_max = f64x4::splat(1.0 - 1e-6);
+
+            let chunks_x = uv_x.chunks_exact(4);
+            let chunks_y = uv_y.chunks_exact(4);
+            let remainder_x = chunks_x.remainder();
+            let remainder_y = chunks_y.remainder();
+            
+            let mut idx_base = 0;
+            for (vx, vy) in chunks_x.zip(chunks_y) {
+                let v_x = f64x4::from(TryInto::<[f64; 4]>::try_into(vx).unwrap());
+                let v_y = f64x4::from(TryInto::<[f64; 4]>::try_into(vy).unwrap());
+                
+                let dx_curr = v_x - p_curr_x;
+                let dy_curr = v_y - p_curr_y;
+                let d_curr = dx_curr * dx_curr + dy_curr * dy_curr;
+                
+                let dx_next = v_x - p_next_x;
+                let dy_next = v_y - p_next_y;
+                let d_next = dx_next * dx_next + dy_next * dy_next;
+                
+                let not_endpoint = d_curr.simd_ge(epsilon) & d_next.simd_ge(epsilon);
+                
+                if not_endpoint.none() { 
+                    idx_base += 4;
+                    continue; 
+                }
+
+                let dot = dx_curr * seg_vec_x + dy_curr * seg_vec_y;
+                let t = dot / seg_len_sq_simd;
+                
+                let t_in_range = t.simd_gt(t_min) & t.simd_lt(t_max);
+                let mask = not_endpoint & t_in_range;
+                
+                if mask.none() {
+                    idx_base += 4;
+                    continue;
+                }
+                
+                let proj_x = p_curr_x + seg_vec_x * t;
+                let proj_y = p_curr_y + seg_vec_y * t;
+                
+                let d_proj_x = v_x - proj_x;
+                let d_proj_y = v_y - proj_y;
+                let dist_sq = d_proj_x * d_proj_x + d_proj_y * d_proj_y;
+                
+                let is_close = dist_sq.simd_lt(epsilon);
+                let final_mask = mask & is_close;
+                
+                if final_mask.any() {
+                    let t_arr = t.to_array();
+                    let mask_int = final_mask.to_bitmask();
+                    for lane in 0..4 {
+                        if (mask_int & (1 << lane)) != 0 {
+                            let idx = idx_base + lane;
+                            on_segment.push((t_arr[lane], Point2::new(uv_x[idx], uv_y[idx]), uv_fixed[idx]));
+                        }
+                    }
+                }
+                idx_base += 4;
+            }
+
+            for (i, (&vx, &vy)) in remainder_x.iter().zip(remainder_y.iter()).enumerate() {
+                let idx = idx_base + i;
+                let v = Point2::new(vx, vy);
+                let is_fixed = uv_fixed[idx];
+                
                 let d_curr = (v - p_curr).norm_squared();
                 let d_next = (v - p_next).norm_squared();
                 
                 if d_curr < 1e-12 || d_next < 1e-12 { continue; }
                 
-                // Check collinearity and bounds
-                // Project v onto segment
                 let v_vec = v - p_curr;
                 let t = v_vec.dot(&seg_vec) / seg_len_sq;
                 
                 if t > 1e-6 && t < 1.0 - 1e-6 {
-                    // Check distance to line
                     let proj = p_curr + seg_vec * t;
                     if (v - proj).norm_squared() < 1e-12 {
-                        on_segment.push((t, *v));
+                        on_segment.push((t, v, is_fixed));
                     }
                 }
             }
@@ -319,14 +387,12 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
             // Sort by t
             on_segment.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             
-            for (_, v) in on_segment {
-                let key = (quantize(v.x), quantize(v.y));
-                let is_fixed = *fixed_map.get(&key).unwrap_or(&false);
+            for (_, v, is_fixed) in on_segment {
                 new_poly.push((v, is_fixed));
             }
         }
         *poly = new_poly;
-    }
+    });
 
     // 3. Create Mesh from Polygons
     for poly_verts in all_polys {
@@ -343,7 +409,7 @@ pub fn generate_cut_cell_mesh(geo: &impl Geometry, min_cell_size: f64, max_cell_
                 idx
             } else {
                 let idx = mesh.vertices.len();
-                let is_fixed = *fixed_map.get(&key).unwrap_or(&false);
+                let is_fixed = unique_verts_map.get(&key).map(|(_, f)| *f).unwrap_or(false);
                 mesh.vertices.push(Vertex { pos: *p, is_fixed });
                 vertex_map.insert(key, idx);
                 idx

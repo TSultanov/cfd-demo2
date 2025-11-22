@@ -242,6 +242,12 @@ impl PisoSolver {
             // Recompute grad_p for Rhie-Chow interpolation
             let grad_p = Fvm::compute_gradients(&self.mesh, &self.p, p_bc, Some(&p_ghosts_loop), Some(&self.ghost_map));
             
+            // Exchange grad_p ghosts for Rhie-Chow
+            let gp_x_vals: Vec<f64> = grad_p.iter().map(|v| v.x).collect();
+            let gp_y_vals: Vec<f64> = grad_p.iter().map(|v| v.y).collect();
+            let gp_x_ghosts = ops.exchange_halo(&gp_x_vals);
+            let gp_y_ghosts = ops.exchange_halo(&gp_y_vals);
+            
             // Assemble Pressure Poisson Equation
             let mut p_triplets = Vec::new();
             let mut p_rhs = vec![0.0; self.mesh.cells.len()];
@@ -306,6 +312,7 @@ impl PisoSolver {
                                 v_bc(bt).unwrap_or(u_own.y)
                             );
                             let mut d_face = d_p[i];
+                            let mut flux = u_b.dot(&normal) * face.area;
 
                             // Check Parallel Interface
                             if let Some(ghost_idx) = self.ghost_map.get(&face_idx) {
@@ -314,14 +321,29 @@ impl PisoSolver {
                                     let u_ghost = Vector2::new(u_x_ghosts_pred[local_ghost_idx], u_y_ghosts_pred[local_ghost_idx]);
                                     // Interpolate to face
                                     u_b = 0.5 * (u_own + u_ghost);
+                                    flux = u_b.dot(&normal) * face.area;
                                     
                                     if local_ghost_idx < d_p_ghosts.len() {
                                         d_face = 0.5 * (d_p[i] + d_p_ghosts[local_ghost_idx]);
                                     }
+
+                                    // Rhie-Chow Correction
+                                    if local_ghost_idx < gp_x_ghosts.len() {
+                                        let gp_ghost = Vector2::new(gp_x_ghosts[local_ghost_idx], gp_y_ghosts[local_ghost_idx]);
+                                        let grad_p_avg = 0.5 * (grad_p[i] + gp_ghost);
+                                        let grad_p_n = grad_p_avg.dot(&face.normal);
+                                        
+                                        let p_ghost = p_ghosts_loop[local_ghost_idx];
+                                        let dist = (face.center - self.mesh.cells[i].center).norm() * 2.0;
+                                        let p_grad_face = (p_ghost - self.p.values[i]) / dist;
+                                        
+                                        let rc_term = d_face * face.area * (grad_p_n - p_grad_face);
+                                        flux += rc_term;
+                                    }
                                 }
                             }
 
-                            (u_b.dot(&normal) * face.area, d_face)
+                            (flux, d_face)
                         } else {
                             (u_own.dot(&normal) * face.area, d_p[i])
                         }
@@ -419,7 +441,27 @@ impl PisoSolver {
                             let correction = d_p[owner] * (0.0 - p_prime_own) / dist * face.area;
                             self.fluxes[face_idx] = flux_star[face_idx] - correction;
                         } else {
-                            self.fluxes[face_idx] = flux_star[face_idx];
+                            // Check Parallel Interface
+                            if let Some(ghost_idx) = self.ghost_map.get(&face_idx) {
+                                let local_ghost_idx = ghost_idx - self.mesh.cells.len();
+                                let mut p_prime_ghost = 0.0;
+                                let mut d_p_ghost = d_p[owner];
+                                
+                                if local_ghost_idx < p_prime_ghosts.len() {
+                                    p_prime_ghost = p_prime_ghosts[local_ghost_idx];
+                                }
+                                if local_ghost_idx < d_p_ghosts.len() {
+                                    d_p_ghost = d_p_ghosts[local_ghost_idx];
+                                }
+                                
+                                let d_face = 0.5 * (d_p[owner] + d_p_ghost);
+                                let dist = (face.center - self.mesh.cells[owner].center).norm() * 2.0;
+                                
+                                let correction = d_face * (p_prime_ghost - p_prime[owner]) / dist * face.area;
+                                self.fluxes[face_idx] = flux_star[face_idx] - correction;
+                            } else {
+                                self.fluxes[face_idx] = flux_star[face_idx];
+                            }
                         }
                     }
                 }

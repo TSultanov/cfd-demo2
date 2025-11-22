@@ -183,21 +183,33 @@ impl Fvm {
                         phi_old.values[neigh]
                     } else {
                         // Boundary inflow
+                        let mut val = 0.0;
+                        let mut handled = false;
+
                         if let Some(bt) = face.boundary_type {
                             // Check for Parallel Interface
-                            let is_parallel = if let Some(map) = ghost_map {
+                            if let Some(map) = ghost_map {
                                 if let Some(&ghost_idx) = map.get(&face_idx) {
                                     // Treat as inflow from ghost cell
                                     triplets.push((i, ghost_idx, flux));
-                                    true
-                                } else { false }
-                            } else { false };
+                                    
+                                    if let Some(ghosts) = ghost_values {
+                                        let local_ghost_idx = ghost_idx - mesh.cells.len();
+                                        if local_ghost_idx < ghosts.len() {
+                                            val = ghosts[local_ghost_idx];
+                                            // Debug print
+                                            // if i == 0 { println!("Ghost val: {}", val); }
+                                        }
+                                    }
+                                    handled = true;
+                                }
+                            }
 
-                            if !is_parallel {
+                            if !handled {
                                 if let Some(bv) = boundary_value(bt) {
                                     // Dirichlet: flux * val_b. Move to RHS.
                                     rhs[i] -= flux * bv;
-                                    bv
+                                    val = bv;
                                 } else {
                                     // Neumann (Zero Gradient): phi_b = phi_P
                                     if flux < 0.0 {
@@ -205,20 +217,18 @@ impl Fvm {
                                         // Treat as Dirichlet with value from previous step (Explicit)
                                         // phi_b = phi_old[i]
                                         rhs[i] -= flux * phi_old.values[i];
-                                        phi_old.values[i]
+                                        val = phi_old.values[i];
                                     } else {
                                         triplets.push((i, i, flux));
-                                        phi_old.values[i]
+                                        val = phi_old.values[i];
                                     }
                                 }
-                            } else {
-                                // Parallel interface handled above, return dummy value
-                                0.0 
                             }
                         } else {
                              triplets.push((i, i, flux));
-                             phi_old.values[i]
+                             val = phi_old.values[i];
                         }
+                        val
                     }
                 };
                 
@@ -257,13 +267,43 @@ impl Fvm {
                         }
                     } else {
                         // Boundary Face
-                        if flux > 0.0 {
-                            // Outflow: Use Upwind (Zero Gradient) to prevent reflections.
-                            // Extrapolating with gradients at the outlet can be unstable and cause
-                            // unphysical reflections if the gradient is not well-behaved.
-                            // phi_ho = phi_upwind; // Already set to phi_old.values[i]
+                        let mut handled = false;
+                        if let Some(_) = face.boundary_type {
+                            if let Some(map) = ghost_map {
+                                if map.contains_key(&face_idx) {
+                                    // Parallel Interface
+                                    // Retrieve ghost value
+                                    let mut phi_ghost = 0.0;
+                                    let mut has_ghost = false;
+                                    if let Some(&ghost_idx) = map.get(&face_idx) {
+                                        if let Some(ghosts) = ghost_values {
+                                            let local_ghost_idx = ghost_idx - mesh.cells.len();
+                                            if local_ghost_idx < ghosts.len() {
+                                                phi_ghost = ghosts[local_ghost_idx];
+                                                has_ghost = true;
+                                            }
+                                        }
+                                    }
+
+                                    if has_ghost {
+                                        // Use Central Differencing for consistency across partition boundary
+                                        // phi_ho = 0.5 * (phi_P + phi_ghost)
+                                        phi_ho = 0.5 * (phi_old.values[i] + phi_ghost);
+                                        handled = true;
+                                    }
+                                }
+                            }
                         }
-                        // Inflow: phi_ho = phi_upwind (BC value)
+
+                        if !handled {
+                            if flux > 0.0 {
+                                // Outflow: Use Upwind (Zero Gradient) to prevent reflections.
+                                // Extrapolating with gradients at the outlet can be unstable and cause
+                                // unphysical reflections if the gradient is not well-behaved.
+                                // phi_ho = phi_upwind; // Already set to phi_old.values[i]
+                            }
+                            // Inflow: phi_ho = phi_upwind (BC value)
+                        }
                     }
                     
                     // Correction term: flux * (phi_ho - phi_upwind)

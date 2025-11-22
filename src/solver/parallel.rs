@@ -284,6 +284,7 @@ impl ParallelPisoSolver {
                             solver.dt = part.dt;
                             solver.density = part.density;
                             solver.viscosity = part.viscosity;
+                            solver.scheme = part.scheme;
                             if solver.u.values.len() == part.u.values.len() {
                                 solver.u = part.u.clone();
                                 solver.p = part.p.clone();

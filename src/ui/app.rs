@@ -111,20 +111,23 @@ impl CFDApp {
             self.solver = None;
             // Initialize solver params for all sub-solvers
             if let Some(ps) = &mut self.parallel_solver {
-                for solver in &mut ps.solvers {
+                for solver in &mut ps.partitions {
+                    let mut solver = solver.write().unwrap();
                     solver.dt = self.timestep;
                     solver.density = self.current_fluid.density;
                     solver.viscosity = self.current_fluid.viscosity;
                     solver.scheme = self.selected_scheme;
                     // BCs
-                    for (i, cell) in solver.mesh.cells.iter().enumerate() {
+                    let n_cells = solver.mesh.cells.len();
+                    for i in 0..n_cells {
+                        let center = solver.mesh.cells[i].center;
                         // Check if cell is in inlet region (global check needed or local?)
                         // Since we partitioned by X, inlet is likely in rank 0.
                         // But we should check coordinates.
-                        if cell.center.x < self.max_cell_size {
+                        if center.x < self.max_cell_size {
                              match self.selected_geometry {
                                 GeometryType::BackwardsStep => {
-                                    if cell.center.y > 0.5 {
+                                    if center.y > 0.5 {
                                         solver.u.values[i] = Vector2::new(1.0, 0.0);
                                     }
                                 },
@@ -274,8 +277,8 @@ impl eframe::App for CFDApp {
                 }
             } else if let Some(ps) = &self.parallel_solver {
                 // Show residuals from rank 0
-                if !ps.solvers.is_empty() {
-                    let solver = &ps.solvers[0];
+                if !ps.partitions.is_empty() {
+                    let solver = ps.partitions[0].read().unwrap();
                     ui.label(format!("Time: {:.3}", solver.time));
                     ui.label("Residuals (Rank 0):");
                     for (name, val) in &solver.residuals {
@@ -312,7 +315,8 @@ impl eframe::App for CFDApp {
             let mut min_val = f64::MAX;
             let mut max_val = f64::MIN;
             
-            for solver in &ps.solvers {
+            for solver in &ps.partitions {
+                let solver = solver.read().unwrap();
                 for i in 0..solver.mesh.cells.len() {
                     let val = match self.plot_field {
                         PlotField::Pressure => solver.p.values[i],
@@ -340,10 +344,10 @@ impl eframe::App for CFDApp {
                 ui.separator();
             } else if let Some(ps) = &self.parallel_solver {
                 ui.heading("Mesh Stats");
-                let total_cells: usize = ps.solvers.iter().map(|s| s.mesh.cells.len()).sum();
+                let total_cells: usize = ps.partitions.iter().map(|s| s.read().unwrap().mesh.cells.len()).sum();
                 ui.label(format!("Total Cells: {}", total_cells));
-                let max_skew = ps.solvers.iter()
-                    .map(|s| s.mesh.calculate_max_skewness())
+                let max_skew = ps.partitions.iter()
+                    .map(|s| s.read().unwrap().mesh.calculate_max_skewness())
                     .fold(0.0, f64::max);
                 ui.label(format!("Max Skewness: {:.4}", max_skew));
                 ui.separator();
@@ -446,7 +450,8 @@ impl eframe::App for CFDApp {
                 Plot::new("cfd_plot")
                     .data_aspect(1.0)
                     .show(ui, |plot_ui| {
-                        for solver in &ps.solvers {
+                        for solver in &ps.partitions {
+                            let solver = solver.read().unwrap();
                             for (i, cell) in solver.mesh.cells.iter().enumerate() {
                                 let val = match self.plot_field {
                                     PlotField::Pressure => solver.p.values[i],
@@ -478,7 +483,8 @@ impl eframe::App for CFDApp {
                         
                         if let Some(pointer) = plot_ui.pointer_coordinate() {
                             let p = Point2::new(pointer.x, pointer.y);
-                            for (s_idx, solver) in ps.solvers.iter().enumerate() {
+                            for (s_idx, solver) in ps.partitions.iter().enumerate() {
+                                let solver = solver.read().unwrap();
                                 if let Some(idx) = solver.mesh.get_cell_at_pos(p) {
                                     let skew = solver.mesh.calculate_cell_skewness(idx);
                                     let val = match self.plot_field {

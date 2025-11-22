@@ -3,6 +3,7 @@ use crate::solver::fvm::{Fvm, ScalarField, VectorField, Scheme};
 use crate::solver::linear_solver::{solve_bicgstab, SparseMatrix, SerialOps};
 use nalgebra::Vector2;
 use std::collections::HashMap;
+use wide::{f64x4, CmpGt};
 
 pub struct PisoSolver {
     pub mesh: Mesh,
@@ -116,10 +117,42 @@ impl PisoSolver {
             Some(&u_y_ghosts)
         );
 
-        for i in 0..self.mesh.cells.len() {
+        let mut i = 0;
+        let n_cells = self.mesh.cells.len();
+        let v_density = f64x4::splat(self.density);
+        while i + 4 <= n_cells {
+            let v_vol = f64x4::from([
+                self.mesh.cells[i].volume,
+                self.mesh.cells[i+1].volume,
+                self.mesh.cells[i+2].volume,
+                self.mesh.cells[i+3].volume,
+            ]);
+            
+            let v_grad_px = f64x4::from([grad_p[i].x, grad_p[i+1].x, grad_p[i+2].x, grad_p[i+3].x]);
+            let v_grad_py = f64x4::from([grad_p[i].y, grad_p[i+1].y, grad_p[i+2].y, grad_p[i+3].y]);
+            
+            let v_rhs_ux = f64x4::from(&rhs_ux[i..i+4]);
+            let v_rhs_uy = f64x4::from(&rhs_uy[i..i+4]);
+            
+            let term_x = (v_grad_px / v_density) * v_vol;
+            let term_y = (v_grad_py / v_density) * v_vol;
+            
+            let new_rhs_ux = v_rhs_ux - term_x;
+            let new_rhs_uy = v_rhs_uy - term_y;
+            
+            let arr_ux: [f64; 4] = new_rhs_ux.into();
+            let arr_uy: [f64; 4] = new_rhs_uy.into();
+            
+            rhs_ux[i..i+4].copy_from_slice(&arr_ux);
+            rhs_uy[i..i+4].copy_from_slice(&arr_uy);
+            
+            i += 4;
+        }
+        while i < n_cells {
             let vol = self.mesh.cells[i].volume;
             rhs_ux[i] -= (grad_p[i].x / self.density) * vol;
             rhs_uy[i] -= (grad_p[i].y / self.density) * vol;
+            i += 1;
         }
         
                 // Solve Ux
@@ -154,10 +187,47 @@ impl PisoSolver {
 
         // Compute d_p = Vol / (Ap * rho)
         let mut d_p = vec![0.0; self.mesh.cells.len()];
-        for i in 0..self.mesh.cells.len() {
+        
+        let n_cells = self.mesh.cells.len();
+        let mut i = 0;
+        let v_density = f64x4::splat(self.density);
+        let v_epsilon = f64x4::splat(1e-20);
+        let v_one = f64x4::splat(1.0);
+
+        while i + 4 <= n_cells {
+            let v_ap = f64x4::from(&a_p[i..i+4]);
+            let v_vol = f64x4::from([
+                self.mesh.cells[i].volume,
+                self.mesh.cells[i+1].volume,
+                self.mesh.cells[i+2].volume,
+                self.mesh.cells[i+3].volume,
+            ]);
+            
+            let mask = v_ap.abs().simd_gt(v_epsilon);
+            
+            // Convert mask to 0.0/1.0
+            let mask_01 = mask & v_one;
+            
+            // Avoid division by zero by adding epsilon. 
+            // If ap is large, epsilon is negligible.
+            // If ap is small, we will zero out the result anyway.
+            let v_ap_safe = v_ap + v_epsilon;
+            
+            let res = v_vol / (v_ap_safe * v_density);
+            
+            let final_res = res * mask_01;
+            
+            let res_arr: [f64; 4] = final_res.into();
+            d_p[i..i+4].copy_from_slice(&res_arr);
+            
+            i += 4;
+        }
+
+        while i < n_cells {
             if a_p[i].abs() > 1e-20 {
                 d_p[i] = self.mesh.cells[i].volume / (a_p[i] * self.density);
             }
+            i += 1;
         }
         
         // Exchange d_p ghosts

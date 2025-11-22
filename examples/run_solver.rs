@@ -11,15 +11,18 @@ fn main() {
         step_x: 0.5,
     };
     let mesh = generate_cut_cell_mesh(&geo, 0.05, 0.1, domain_size);
-    println!("Mesh generated with {} cells and {} faces", mesh.cells.len(), mesh.faces.len());
+    println!("Mesh generated with {} cells and {} faces", mesh.num_cells(), mesh.num_faces());
 
     let mut solver = PisoSolver::new(mesh);
     solver.dt = 0.001;
 
     // Initialize field
-    for (i, cell) in solver.mesh.cells.iter().enumerate() {
-        if cell.center.x < 0.1 && cell.center.y > 0.5 {
-             solver.u.values[i] = Vector2::new(1.0, 0.0);
+    for i in 0..solver.mesh.num_cells() {
+        let cx = solver.mesh.cell_cx[i];
+        let cy = solver.mesh.cell_cy[i];
+        if cx < 0.1 && cy > 0.5 {
+             solver.u.vx[i] = 1.0;
+             solver.u.vy[i] = 0.0;
         }
     }
 

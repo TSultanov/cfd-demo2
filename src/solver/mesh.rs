@@ -3,12 +3,6 @@ use std::collections::HashMap;
 use rayon::prelude::*;
 use wide::{f64x4, CmpGe, CmpGt, CmpLt};
 
-#[derive(Clone, Debug)]
-pub struct Vertex {
-    pub pos: Point2<f64>,
-    pub is_fixed: bool,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BoundaryType {
     Inlet,
@@ -17,35 +11,53 @@ pub enum BoundaryType {
     ParallelInterface(usize, usize), // Rank of the neighbor, Remote Cell Index
 }
 
-#[derive(Clone, Debug)]
-pub struct Face {
-    pub vertex_indices: [usize; 2],
-    pub owner: usize,
-    pub neighbor: Option<usize>, // None for boundary
-    pub boundary_type: Option<BoundaryType>,
-    pub normal: Vector2<f64>,    // Pointing from owner to neighbor
-    pub area: f64,               // Length in 2D
-    pub center: Point2<f64>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Cell {
-    pub face_indices: Vec<usize>,
-    pub vertex_indices: Vec<usize>,
-    pub center: Point2<f64>,
-    pub volume: f64, // Area in 2D
-}
-
 #[derive(Default, Clone)]
 pub struct Mesh {
-    pub vertices: Vec<Vertex>,
-    pub faces: Vec<Face>,
-    pub cells: Vec<Cell>,
+    // Vertices
+    pub vx: Vec<f64>,
+    pub vy: Vec<f64>,
+    pub v_fixed: Vec<bool>,
+
+    // Faces
+    pub face_v1: Vec<usize>,
+    pub face_v2: Vec<usize>,
+    pub face_owner: Vec<usize>,
+    pub face_neighbor: Vec<Option<usize>>,
+    pub face_boundary: Vec<Option<BoundaryType>>,
+    pub face_nx: Vec<f64>,
+    pub face_ny: Vec<f64>,
+    pub face_area: Vec<f64>,
+    pub face_cx: Vec<f64>,
+    pub face_cy: Vec<f64>,
+
+    // Cells
+    pub cell_cx: Vec<f64>,
+    pub cell_cy: Vec<f64>,
+    pub cell_vol: Vec<f64>,
+    
+    // Connectivity
+    pub cell_faces: Vec<usize>,
+    pub cell_face_offsets: Vec<usize>, // cell_face_offsets[i] .. cell_face_offsets[i+1]
+    
+    pub cell_vertices: Vec<usize>,
+    pub cell_vertex_offsets: Vec<usize>,
 }
 
 impl Mesh {
     pub fn new() -> Self {
         Self::default()
+    }
+    
+    pub fn num_cells(&self) -> usize {
+        self.cell_cx.len()
+    }
+    
+    pub fn num_faces(&self) -> usize {
+        self.face_cx.len()
+    }
+    
+    pub fn num_vertices(&self) -> usize {
+        self.vx.len()
     }
 }
 
@@ -462,9 +474,16 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
         *poly = new_poly;
     });
     // 3. Create Mesh from Polygons
-    mesh.cells.reserve(all_polys.len());
-    mesh.vertices.reserve(all_polys.len() * 2);
-    mesh.faces.reserve(all_polys.len() * 4);
+    let n_polys = all_polys.len();
+    mesh.vx.reserve(n_polys * 2);
+    mesh.vy.reserve(n_polys * 2);
+    mesh.v_fixed.reserve(n_polys * 2);
+    
+    mesh.cell_cx.reserve(n_polys);
+    mesh.cell_cy.reserve(n_polys);
+    mesh.cell_vol.reserve(n_polys);
+    mesh.cell_face_offsets.push(0);
+    mesh.cell_vertex_offsets.push(0);
 
     for poly_verts in all_polys {
         // Create Cell
@@ -479,9 +498,11 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
             let idx = if let Some(&idx) = vertex_map.get(&key) {
                 idx
             } else {
-                let idx = mesh.vertices.len();
+                let idx = mesh.vx.len();
                 let is_fixed = unique_verts_map.get(&key).map(|(_, f)| *f).unwrap_or(false);
-                mesh.vertices.push(Vertex { pos: *p, is_fixed });
+                mesh.vx.push(p.x);
+                mesh.vy.push(p.y);
+                mesh.v_fixed.push(is_fixed);
                 vertex_map.insert(key, idx);
                 idx
             };
@@ -504,8 +525,7 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
 
         center /= 6.0 * area;
         
-        let cell_idx = mesh.cells.len();
-        let mut cell_face_indices = Vec::new();
+        let cell_idx = mesh.cell_cx.len();
         
         // Create Faces
         for k in 0..n {
@@ -516,8 +536,8 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
                 continue;
             }
 
-            let p1 = mesh.vertices[v1].pos;
-            let p2 = mesh.vertices[v2].pos;
+            let p1 = Point2::new(mesh.vx[v1], mesh.vy[v1]);
+            let p2 = Point2::new(mesh.vx[v2], mesh.vy[v2]);
             let edge_vec = p2 - p1;
             let edge_len = edge_vec.norm();
             
@@ -525,61 +545,65 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
                 continue;
             }
 
-                    let (min_v, max_v) = if v1 < v2 { (v1, v2) } else { (v2, v1) };
-                    let key = (min_v, max_v);
-                    
-                    if let Some(&face_idx) = face_map.get(&key) {
-                        // Face exists, update neighbor
-                        mesh.faces[face_idx].neighbor = Some(cell_idx);
-                        cell_face_indices.push(face_idx);
-                    } else {
-                        // New face
-                        let p1 = mesh.vertices[v1].pos;
-                        let p2 = mesh.vertices[v2].pos;
-                        let face_center = Point2::from((p1.coords + p2.coords) * 0.5);
-                        let edge_vec = p2 - p1;
-                        let normal = Vector2::new(edge_vec.y, -edge_vec.x).normalize(); 
-                        
-                        // Determine boundary type if boundary
-                        let boundary_type = if face_center.x < 1e-6 {
-                            Some(BoundaryType::Inlet)
-                        } else if (face_center.x - domain_size.x).abs() < 1e-6 {
-                            Some(BoundaryType::Outlet)
-                        } else {
-                            Some(BoundaryType::Wall)
-                        };
-
-                        let face_idx = mesh.faces.len();
-                        mesh.faces.push(Face {
-                            vertex_indices: [v1, v2],
-                            owner: cell_idx,
-                            neighbor: None,
-                            boundary_type,
-                            normal,
-                            area: edge_vec.norm(),
-                            center: face_center,
-                        });
-                        face_map.insert(key, face_idx);
-                        cell_face_indices.push(face_idx);
-                    }
-                }
+            let (min_v, max_v) = if v1 < v2 { (v1, v2) } else { (v2, v1) };
+            let key = (min_v, max_v);
+            
+            if let Some(&face_idx) = face_map.get(&key) {
+                // Face exists, update neighbor
+                mesh.face_neighbor[face_idx] = Some(cell_idx);
+                // Internal face has no boundary type
+                mesh.face_boundary[face_idx] = None;
+                mesh.cell_faces.push(face_idx);
+            } else {
+                // New face
+                let face_center = Point2::from((p1.coords + p2.coords) * 0.5);
+                let normal = Vector2::new(edge_vec.y, -edge_vec.x).normalize(); 
                 
-                mesh.cells.push(Cell {
-                    face_indices: cell_face_indices,
-                    vertex_indices: cell_v_indices,
-                    center: Point2::from(center),
-                    volume: area.abs(),
-                });
+                // Determine boundary type if boundary
+                let boundary_type = if face_center.x < 1e-6 {
+                    Some(BoundaryType::Inlet)
+                } else if (face_center.x - domain_size.x).abs() < 1e-6 {
+                    Some(BoundaryType::Outlet)
+                } else {
+                    Some(BoundaryType::Wall)
+                };
+
+                let face_idx = mesh.face_cx.len();
+                
+                mesh.face_v1.push(v1);
+                mesh.face_v2.push(v2);
+                mesh.face_owner.push(cell_idx);
+                mesh.face_neighbor.push(None);
+                mesh.face_boundary.push(boundary_type);
+                mesh.face_nx.push(normal.x);
+                mesh.face_ny.push(normal.y);
+                mesh.face_area.push(edge_len);
+                mesh.face_cx.push(face_center.x);
+                mesh.face_cy.push(face_center.y);
+                
+                face_map.insert(key, face_idx);
+                mesh.cell_faces.push(face_idx);
             }
+        }
+        
+        mesh.cell_cx.push(center.x);
+        mesh.cell_cy.push(center.y);
+        mesh.cell_vol.push(area.abs());
+        
+        mesh.cell_face_offsets.push(mesh.cell_faces.len());
+        
+        mesh.cell_vertices.extend_from_slice(&cell_v_indices);
+        mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
+    }
     
     let mut min_vol = f64::MAX;
     let mut max_vol = f64::MIN;
-    for cell in &mesh.cells {
-        if cell.volume < min_vol { min_vol = cell.volume; }
-        if cell.volume > max_vol { max_vol = cell.volume; }
+    for &vol in &mesh.cell_vol {
+        if vol < min_vol { min_vol = vol; }
+        if vol > max_vol { max_vol = vol; }
     }
     println!("Mesh generated. Cells: {}, Faces: {}. Min Vol: {:.6e}, Max Vol: {:.6e}", 
-        mesh.cells.len(), mesh.faces.len(), min_vol, max_vol);
+        mesh.num_cells(), mesh.num_faces(), min_vol, max_vol);
 
     mesh
 }
@@ -636,43 +660,57 @@ fn collect_leaves<'a>(node: &'a QuadNode, leaves: &mut Vec<&'a QuadNode>) {
 impl Mesh {
     pub fn recalculate_geometry(&mut self) {
         // 1. Recalculate Faces
-        for face in &mut self.faces {
-            let v0 = self.vertices[face.vertex_indices[0]].pos;
-            let v1 = self.vertices[face.vertex_indices[1]].pos;
+        for i in 0..self.face_cx.len() {
+            let v0_idx = self.face_v1[i];
+            let v1_idx = self.face_v2[i];
             
-            face.center = Point2::from((v0.coords + v1.coords) * 0.5);
+            let v0 = Point2::new(self.vx[v0_idx], self.vy[v0_idx]);
+            let v1 = Point2::new(self.vx[v1_idx], self.vy[v1_idx]);
+            
+            let center = Point2::from((v0.coords + v1.coords) * 0.5);
+            self.face_cx[i] = center.x;
+            self.face_cy[i] = center.y;
+            
             let edge_vec = v1 - v0;
-            face.area = edge_vec.norm();
+            self.face_area[i] = edge_vec.norm();
             
             // Preserve normal orientation
             let tangent = edge_vec.normalize();
             let mut normal = Vector2::new(tangent.y, -tangent.x);
             
-            if normal.dot(&face.normal) < 0.0 {
+            let current_normal = Vector2::new(self.face_nx[i], self.face_ny[i]);
+            if normal.dot(&current_normal) < 0.0 {
                 normal = -normal;
             }
-            face.normal = normal;
+            self.face_nx[i] = normal.x;
+            self.face_ny[i] = normal.y;
         }
         
         // 2. Recalculate Cells
-        for cell in &mut self.cells {
+        for i in 0..self.cell_cx.len() {
             let mut center = Vector2::zeros();
-            let n = cell.vertex_indices.len();
+            let start = self.cell_vertex_offsets[i];
+            let end = self.cell_vertex_offsets[i+1];
+            let n = end - start;
             
             // Polygon Area and Centroid
-            // Shoelace formula for area, centroid formula
             let mut signed_area = 0.0;
             let mut c_x = 0.0;
             let mut c_y = 0.0;
             
-            for i in 0..n {
-                let p0 = self.vertices[cell.vertex_indices[i]].pos;
-                let p1 = self.vertices[cell.vertex_indices[(i + 1) % n]].pos;
+            for k in 0..n {
+                let idx0 = self.cell_vertices[start + k];
+                let idx1 = self.cell_vertices[start + (k + 1) % n];
                 
-                let cross = p0.x * p1.y - p1.x * p0.y;
+                let p0_x = self.vx[idx0];
+                let p0_y = self.vy[idx0];
+                let p1_x = self.vx[idx1];
+                let p1_y = self.vy[idx1];
+                
+                let cross = p0_x * p1_y - p1_x * p0_y;
                 signed_area += cross;
-                c_x += (p0.x + p1.x) * cross;
-                c_y += (p0.y + p1.y) * cross;
+                c_x += (p0_x + p1_x) * cross;
+                c_y += (p0_y + p1_y) * cross;
             }
             
             signed_area *= 0.5;
@@ -684,45 +722,47 @@ impl Mesh {
                 center = Vector2::new(c_x, c_y);
             } else {
                 // Fallback to average
-                for i in 0..n {
-                    center += self.vertices[cell.vertex_indices[i]].pos.coords;
+                for k in 0..n {
+                    let idx = self.cell_vertices[start + k];
+                    center.x += self.vx[idx];
+                    center.y += self.vy[idx];
                 }
                 center /= n as f64;
             }
             
-            cell.center = Point2::from(center);
-            cell.volume = area;
+            self.cell_cx[i] = center.x;
+            self.cell_cy[i] = center.y;
+            self.cell_vol[i] = area;
         }
     }
 
     pub fn smooth(&mut self, target_skew: f64, max_iterations: usize) {
-        let n_verts = self.vertices.len();
+        let n_verts = self.vx.len();
         let mut adj = vec![Vec::new(); n_verts];
         
         // Build adjacency
-        for face in &self.faces {
-            let v0 = face.vertex_indices[0];
-            let v1 = face.vertex_indices[1];
+        for i in 0..self.face_cx.len() {
+            let v0 = self.face_v1[i];
+            let v1 = self.face_v2[i];
             adj[v0].push(v1);
             adj[v1].push(v0);
         }
         
         // Identify domain boundaries (Box)
-        // We assume the domain is the bounding box of the mesh
         let mut min_bound = Point2::new(f64::MAX, f64::MAX);
         let mut max_bound = Point2::new(f64::MIN, f64::MIN);
         
-        for v in &self.vertices {
-            if v.pos.x < min_bound.x { min_bound.x = v.pos.x; }
-            if v.pos.y < min_bound.y { min_bound.y = v.pos.y; }
-            if v.pos.x > max_bound.x { max_bound.x = v.pos.x; }
-            if v.pos.y > max_bound.y { max_bound.y = v.pos.y; }
+        for i in 0..n_verts {
+            if self.vx[i] < min_bound.x { min_bound.x = self.vx[i]; }
+            if self.vy[i] < min_bound.y { min_bound.y = self.vy[i]; }
+            if self.vx[i] > max_bound.x { max_bound.x = self.vx[i]; }
+            if self.vy[i] > max_bound.y { max_bound.y = self.vy[i]; }
         }
         
-        let is_on_box = |p: &Point2<f64>| -> bool {
+        let is_on_box = |x: f64, y: f64| -> bool {
             let eps = 1e-6;
-            (p.x - min_bound.x).abs() < eps || (p.x - max_bound.x).abs() < eps ||
-            (p.y - min_bound.y).abs() < eps || (p.y - max_bound.y).abs() < eps
+            (x - min_bound.x).abs() < eps || (x - max_bound.x).abs() < eps ||
+            (y - min_bound.y).abs() < eps || (y - max_bound.y).abs() < eps
         };
 
         for iter in 0..max_iterations {
@@ -737,43 +777,51 @@ impl Mesh {
                  println!("Smoothing iter {}: max skew = {:.6}", iter, current_skew);
             }
 
-            let mut new_pos = vec![Point2::origin(); n_verts];
+            let mut new_vx = vec![0.0; n_verts];
+            let mut new_vy = vec![0.0; n_verts];
             
             for i in 0..n_verts {
-                let p_old = self.vertices[i].pos;
+                let x_old = self.vx[i];
+                let y_old = self.vy[i];
                 
                 // If on domain box or obstacle boundary, fix it
-                if is_on_box(&p_old) || self.vertices[i].is_fixed {
-                    new_pos[i] = p_old;
+                if is_on_box(x_old, y_old) || self.v_fixed[i] {
+                    new_vx[i] = x_old;
+                    new_vy[i] = y_old;
                     continue;
                 }
                 
                 if adj[i].is_empty() {
-                    new_pos[i] = p_old;
+                    new_vx[i] = x_old;
+                    new_vy[i] = y_old;
                     continue;
                 }
                 
-                let mut sum = Vector2::zeros();
+                let mut sum_x = 0.0;
+                let mut sum_y = 0.0;
                 let mut count = 0;
 
                 // Internal smoothing: consider all neighbors
                 for &neigh in &adj[i] {
-                    sum += self.vertices[neigh].pos.coords;
+                    sum_x += self.vx[neigh];
+                    sum_y += self.vy[neigh];
                     count += 1;
                 }
 
-                let avg = Point2::from(sum / count as f64);
+                let avg_x = sum_x / count as f64;
+                let avg_y = sum_y / count as f64;
                 
                 // Relaxation factor
                 let alpha = 0.5;
-                let p_new = p_old + (avg - p_old) * alpha;
+                let x_new = x_old + (avg_x - x_old) * alpha;
+                let y_new = y_old + (avg_y - y_old) * alpha;
                 
-                new_pos[i] = p_new;
+                new_vx[i] = x_new;
+                new_vy[i] = y_new;
             }
             
-            for i in 0..n_verts {
-                self.vertices[i].pos = new_pos[i];
-            }
+            self.vx = new_vx;
+            self.vy = new_vy;
         }
         
         self.recalculate_geometry();
@@ -782,12 +830,17 @@ impl Mesh {
 
     pub fn calculate_max_skewness(&self) -> f64 {
         let mut max_skew = 0.0;
-        for face in &self.faces {
-            let d = if let Some(neigh) = face.neighbor {
-                self.cells[neigh].center - self.cells[face.owner].center
+        for i in 0..self.face_cx.len() {
+            let owner = self.face_owner[i];
+            let d = if let Some(neigh) = self.face_neighbor[i] {
+                let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
+                let c2 = Vector2::new(self.cell_cx[neigh], self.cell_cy[neigh]);
+                c2 - c1
             } else {
-                // Boundary face: vector from cell center to face center
-                face.center - self.cells[face.owner].center
+                // Boundary face
+                let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
+                let f_c = Vector2::new(self.face_cx[i], self.face_cy[i]);
+                f_c - c1
             };
             
             let d_norm = if d.norm_squared() > 1e-12 {
@@ -796,7 +849,8 @@ impl Mesh {
                 Vector2::zeros()
             };
             
-            let skew = 1.0 - d_norm.dot(&face.normal).abs();
+            let normal = Vector2::new(self.face_nx[i], self.face_ny[i]);
+            let skew = 1.0 - d_norm.dot(&normal).abs();
             if skew > max_skew {
                 max_skew = skew;
             }
@@ -805,18 +859,23 @@ impl Mesh {
     }
 
     pub fn calculate_cell_skewness(&self, cell_idx: usize) -> f64 {
-        let cell = &self.cells[cell_idx];
         let mut max_skew = 0.0;
-        for &face_idx in &cell.face_indices {
-            let face = &self.faces[face_idx];
+        let start = self.cell_face_offsets[cell_idx];
+        let end = self.cell_face_offsets[cell_idx+1];
+        
+        for k in start..end {
+            let face_idx = self.cell_faces[k];
+            let owner = self.face_owner[face_idx];
             
-            let d = if let Some(neigh) = face.neighbor {
-                let c1 = self.cells[face.owner].center;
-                let c2 = self.cells[neigh].center;
+            let d = if let Some(neigh) = self.face_neighbor[face_idx] {
+                let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
+                let c2 = Vector2::new(self.cell_cx[neigh], self.cell_cy[neigh]);
                 c2 - c1
             } else {
                 // Boundary face
-                face.center - self.cells[cell_idx].center
+                let c1 = Vector2::new(self.cell_cx[cell_idx], self.cell_cy[cell_idx]);
+                let f_c = Vector2::new(self.face_cx[face_idx], self.face_cy[face_idx]);
+                f_c - c1
             };
 
             let d_norm = if d.norm_squared() > 1e-12 {
@@ -825,7 +884,8 @@ impl Mesh {
                 Vector2::zeros()
             };
 
-            let skew = 1.0 - d_norm.dot(&face.normal).abs();
+            let normal = Vector2::new(self.face_nx[face_idx], self.face_ny[face_idx]);
+            let skew = 1.0 - d_norm.dot(&normal).abs();
             if skew > max_skew {
                 max_skew = skew;
             }
@@ -834,19 +894,23 @@ impl Mesh {
     }
 
     pub fn get_cell_at_pos(&self, p: Point2<f64>) -> Option<usize> {
-        for (i, cell) in self.cells.iter().enumerate() {
+        for i in 0..self.cell_cx.len() {
             // Point in polygon test (Ray casting)
             let mut inside = false;
-            let n = cell.vertex_indices.len();
+            let start = self.cell_vertex_offsets[i];
+            let end = self.cell_vertex_offsets[i+1];
+            let n = end - start;
             let mut j = n - 1;
             for k in 0..n {
-                let vi = cell.vertex_indices[k];
-                let vj = cell.vertex_indices[j];
-                let pi = self.vertices[vi].pos;
-                let pj = self.vertices[vj].pos;
+                let vi = self.cell_vertices[start + k];
+                let vj = self.cell_vertices[start + j];
+                let pi_x = self.vx[vi];
+                let pi_y = self.vy[vi];
+                let pj_x = self.vx[vj];
+                let pj_y = self.vy[vj];
                 
-                if ((pi.y > p.y) != (pj.y > p.y)) &&
-                   (p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x) {
+                if ((pi_y > p.y) != (pj_y > p.y)) &&
+                   (p.x < (pj_x - pi_x) * (p.y - pi_y) / (pj_y - pi_y) + pi_x) {
                     inside = !inside;
                 }
                 j = k;
@@ -863,7 +927,6 @@ impl Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nalgebra::{Point2, Vector2};
 
     struct CircleObstacle {
         center: Point2<f64>,
@@ -878,25 +941,18 @@ mod tests {
         }
 
         fn sdf(&self, p: &Point2<f64>) -> f64 {
-            // Box SDF (negative inside)
-            let center = (self.domain_min + self.domain_max.coords) * 0.5;
-            let size = (self.domain_max - self.domain_min) * 0.5;
-            let p_rel = p - center;
-            let d = p_rel.abs() - size;
-            let box_dist = d.x.max(d.y).min(0.0) + Vector2::new(d.x.max(0.0), d.y.max(0.0)).norm();
+            let dx = (p.x - (self.domain_min.x + self.domain_max.x) / 2.0).abs() - (self.domain_max.x - self.domain_min.x) / 2.0;
+            let dy = (p.y - (self.domain_min.y + self.domain_max.y) / 2.0).abs() - (self.domain_max.y - self.domain_min.y) / 2.0;
+            let box_dist = dx.max(dy).min(0.0) + Vector2::new(dx.max(0.0), dy.max(0.0)).norm();
 
-            // Circle SDF (negative inside)
             let circle_dist = (p - self.center).norm() - self.radius;
-
-            // Fluid is inside box AND outside circle
+            
             box_dist.max(-circle_dist)
         }
     }
 
     #[test]
     fn test_mesh_generation_circle_obstacle() {
-        // Use off-center coordinates to generate sliver cells/bad skewness
-        // Coarse mesh relative to curvature might cause issues
         let geo = CircleObstacle {
             center: Point2::new(0.5001, 0.5001),
             radius: 0.2,
@@ -909,16 +965,16 @@ mod tests {
         // Coarser mesh: 0.1 cell size. Radius is 0.2.
         let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, domain_size);
         
-        println!("Generated mesh with {} cells", mesh.cells.len());
-        assert!(mesh.cells.len() > 0);
+        println!("Generated mesh with {} cells", mesh.num_cells());
+        assert!(mesh.num_cells() > 0);
         
         let initial_skew = mesh.calculate_max_skewness();
         println!("Initial max skewness: {}", initial_skew);
         
         // Identify boundary vertices before smoothing
         let mut boundary_indices = Vec::new();
-        for (i, v) in mesh.vertices.iter().enumerate() {
-            if v.is_fixed {
+        for i in 0..mesh.num_vertices() {
+            if mesh.v_fixed[i] {
                 boundary_indices.push(i);
             }
         }
@@ -928,7 +984,7 @@ mod tests {
         
         // Store initial positions
         let initial_positions: Vec<Point2<f64>> = boundary_indices.iter()
-            .map(|&i| mesh.vertices[i].pos)
+            .map(|&i| Point2::new(mesh.vx[i], mesh.vy[i]))
             .collect();
 
         // Smooth
@@ -936,7 +992,7 @@ mod tests {
         
         // Verify positions haven't changed
         for (k, &idx) in boundary_indices.iter().enumerate() {
-            let p_new = mesh.vertices[idx].pos;
+            let p_new = Point2::new(mesh.vx[idx], mesh.vy[idx]);
             let p_old = initial_positions[k];
             let dist = (p_new - p_old).norm();
             if dist > 1e-9 {
@@ -967,8 +1023,8 @@ mod tests {
         let domain_size = Vector2::new(2.0, 1.0);
         let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, domain_size);
         
-        println!("Generated mesh with {} cells", mesh.cells.len());
-        assert!(mesh.cells.len() > 0);
+        println!("Generated mesh with {} cells", mesh.num_cells());
+        assert!(mesh.num_cells() > 0);
         
         let initial_skew = mesh.calculate_max_skewness();
         println!("Initial max skewness: {}", initial_skew);
@@ -984,3 +1040,4 @@ mod tests {
         assert!(final_skew < 0.4); 
     }
 }
+

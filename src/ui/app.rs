@@ -118,21 +118,24 @@ impl CFDApp {
                     solver.viscosity = self.current_fluid.viscosity;
                     solver.scheme = self.selected_scheme;
                     // BCs
-                    let n_cells = solver.mesh.cells.len();
+                    let n_cells = solver.mesh.num_cells();
                     for i in 0..n_cells {
-                        let center = solver.mesh.cells[i].center;
+                        let cx = solver.mesh.cell_cx[i];
+                        let cy = solver.mesh.cell_cy[i];
                         // Check if cell is in inlet region (global check needed or local?)
                         // Since we partitioned by X, inlet is likely in rank 0.
                         // But we should check coordinates.
-                        if center.x < self.max_cell_size {
+                        if cx < self.max_cell_size {
                              match self.selected_geometry {
                                 GeometryType::BackwardsStep => {
-                                    if center.y > 0.5 {
-                                        solver.u.values[i] = Vector2::new(1.0, 0.0);
+                                    if cy > 0.5 {
+                                        solver.u.vx[i] = 1.0;
+                                        solver.u.vy[i] = 0.0;
                                     }
                                 },
                                 GeometryType::ChannelObstacle => {
-                                    solver.u.values[i] = Vector2::new(1.0, 0.0);
+                                    solver.u.vx[i] = 1.0;
+                                    solver.u.vy[i] = 0.0;
                                 }
                             }
                         }
@@ -151,17 +154,21 @@ impl CFDApp {
             };
             
             // Set initial BCs (Inlet velocity)
-            for (i, cell) in solver.mesh.cells.iter().enumerate() {
-                if cell.center.x < self.max_cell_size {
+            for i in 0..solver.mesh.num_cells() {
+                let cx = solver.mesh.cell_cx[i];
+                let cy = solver.mesh.cell_cy[i];
+                if cx < self.max_cell_size {
                     // Inlet region
                     match self.selected_geometry {
                         GeometryType::BackwardsStep => {
-                            if cell.center.y > 0.5 {
-                                solver.u.values[i] = Vector2::new(1.0, 0.0);
+                            if cy > 0.5 {
+                                solver.u.vx[i] = 1.0;
+                                solver.u.vy[i] = 0.0;
                             }
                         },
                         GeometryType::ChannelObstacle => {
-                            solver.u.values[i] = Vector2::new(1.0, 0.0);
+                            solver.u.vx[i] = 1.0;
+                            solver.u.vy[i] = 0.0;
                         }
                     }
                 }
@@ -292,14 +299,14 @@ impl eframe::App for CFDApp {
         let (min_val, max_val, values) = if let Some(solver) = &self.solver {
             let mut min_val = f64::MAX;
             let mut max_val = f64::MIN;
-            let mut values = Vec::with_capacity(solver.mesh.cells.len());
+            let mut values = Vec::with_capacity(solver.mesh.num_cells());
             
-            for i in 0..solver.mesh.cells.len() {
+            for i in 0..solver.mesh.num_cells() {
                     let val = match self.plot_field {
                     PlotField::Pressure => solver.p.values[i],
-                    PlotField::VelocityX => solver.u.values[i].x,
-                    PlotField::VelocityY => solver.u.values[i].y,
-                    PlotField::VelocityMag => solver.u.values[i].norm(),
+                    PlotField::VelocityX => solver.u.vx[i],
+                    PlotField::VelocityY => solver.u.vy[i],
+                    PlotField::VelocityMag => (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt(),
                 };
                 if val < min_val { min_val = val; }
                 if val > max_val { max_val = val; }
@@ -317,12 +324,12 @@ impl eframe::App for CFDApp {
             
             for solver in &ps.partitions {
                 let solver = solver.read().unwrap();
-                for i in 0..solver.mesh.cells.len() {
+                for i in 0..solver.mesh.num_cells() {
                     let val = match self.plot_field {
                         PlotField::Pressure => solver.p.values[i],
-                        PlotField::VelocityX => solver.u.values[i].x,
-                        PlotField::VelocityY => solver.u.values[i].y,
-                        PlotField::VelocityMag => solver.u.values[i].norm(),
+                        PlotField::VelocityX => solver.u.vx[i],
+                        PlotField::VelocityY => solver.u.vy[i],
+                        PlotField::VelocityMag => (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt(),
                     };
                     if val < min_val { min_val = val; }
                     if val > max_val { max_val = val; }
@@ -339,12 +346,12 @@ impl eframe::App for CFDApp {
         egui::SidePanel::right("legend").show(ctx, |ui| {
             if let Some(solver) = &self.solver {
                 ui.heading("Mesh Stats");
-                ui.label(format!("Cells: {}", solver.mesh.cells.len()));
+                ui.label(format!("Cells: {}", solver.mesh.num_cells()));
                 ui.label(format!("Max Skewness: {:.4}", solver.mesh.calculate_max_skewness()));
                 ui.separator();
             } else if let Some(ps) = &self.parallel_solver {
                 ui.heading("Mesh Stats");
-                let total_cells: usize = ps.partitions.iter().map(|s| s.read().unwrap().mesh.cells.len()).sum();
+                let total_cells: usize = ps.partitions.iter().map(|s| s.read().unwrap().mesh.num_cells()).sum();
                 ui.label(format!("Total Cells: {}", total_cells));
                 let max_skew = ps.partitions.iter()
                     .map(|s| s.read().unwrap().mesh.calculate_max_skewness())
@@ -404,16 +411,18 @@ impl eframe::App for CFDApp {
                     Plot::new("cfd_plot")
                         .data_aspect(1.0)
                         .show(ui, |plot_ui| {
-                            for (i, cell) in solver.mesh.cells.iter().enumerate() {
+                            for i in 0..solver.mesh.num_cells() {
                                 let val = vals[i];
                                 let t = (val - min_val) / (max_val - min_val);
                                 
                                 let color = get_color(t);
                                 
-                                let polygon_points: Vec<[f64; 2]> = cell.vertex_indices.iter()
-                                    .map(|&v_idx| {
-                                        let p = solver.mesh.vertices[v_idx].pos;
-                                        [p.x, p.y]
+                                let start = solver.mesh.cell_vertex_offsets[i];
+                                let end = solver.mesh.cell_vertex_offsets[i+1];
+                                let polygon_points: Vec<[f64; 2]> = (start..end)
+                                    .map(|k| {
+                                        let v_idx = solver.mesh.cell_vertices[k];
+                                        [solver.mesh.vx[v_idx], solver.mesh.vy[v_idx]]
                                     })
                                     .collect();
 
@@ -433,7 +442,7 @@ impl eframe::App for CFDApp {
                                 if let Some(idx) = solver.mesh.get_cell_at_pos(p) {
                                     let skew = solver.mesh.calculate_cell_skewness(idx);
                                     let val = vals[idx];
-                                    let vol = solver.mesh.cells[idx].volume;
+                                    let vol = solver.mesh.cell_vol[idx];
                                     plot_ui.text(
                                         egui_plot::Text::new(
                                             pointer, 
@@ -452,20 +461,22 @@ impl eframe::App for CFDApp {
                     .show(ui, |plot_ui| {
                         for solver in &ps.partitions {
                             let solver = solver.read().unwrap();
-                            for (i, cell) in solver.mesh.cells.iter().enumerate() {
+                            for i in 0..solver.mesh.num_cells() {
                                 let val = match self.plot_field {
                                     PlotField::Pressure => solver.p.values[i],
-                                    PlotField::VelocityX => solver.u.values[i].x,
-                                    PlotField::VelocityY => solver.u.values[i].y,
-                                    PlotField::VelocityMag => solver.u.values[i].norm(),
+                                    PlotField::VelocityX => solver.u.vx[i],
+                                    PlotField::VelocityY => solver.u.vy[i],
+                                    PlotField::VelocityMag => (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt(),
                                 };
                                 let t = (val - min_val) / (max_val - min_val);
                                 let color = get_color(t);
                                 
-                                let polygon_points: Vec<[f64; 2]> = cell.vertex_indices.iter()
-                                    .map(|&v_idx| {
-                                        let p = solver.mesh.vertices[v_idx].pos;
-                                        [p.x, p.y]
+                                let start = solver.mesh.cell_vertex_offsets[i];
+                                let end = solver.mesh.cell_vertex_offsets[i+1];
+                                let polygon_points: Vec<[f64; 2]> = (start..end)
+                                    .map(|k| {
+                                        let v_idx = solver.mesh.cell_vertices[k];
+                                        [solver.mesh.vx[v_idx], solver.mesh.vy[v_idx]]
                                     })
                                     .collect();
 
@@ -489,11 +500,11 @@ impl eframe::App for CFDApp {
                                     let skew = solver.mesh.calculate_cell_skewness(idx);
                                     let val = match self.plot_field {
                                         PlotField::Pressure => solver.p.values[idx],
-                                        PlotField::VelocityX => solver.u.values[idx].x,
-                                        PlotField::VelocityY => solver.u.values[idx].y,
-                                        PlotField::VelocityMag => solver.u.values[idx].norm(),
+                                        PlotField::VelocityX => solver.u.vx[idx],
+                                        PlotField::VelocityY => solver.u.vy[idx],
+                                        PlotField::VelocityMag => (solver.u.vx[idx].powi(2) + solver.u.vy[idx].powi(2)).sqrt(),
                                     };
-                                    let vol = solver.mesh.cells[idx].volume;
+                                    let vol = solver.mesh.cell_vol[idx];
                                     plot_ui.text(
                                         egui_plot::Text::new(
                                             pointer, 

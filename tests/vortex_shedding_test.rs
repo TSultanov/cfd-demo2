@@ -22,7 +22,7 @@ fn test_vortex_shedding_discrepancy() {
     println!("Generating mesh...");
     let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, domain_size);
     mesh.smooth(0.3, 50);
-    println!("Mesh generated: {} cells", mesh.cells.len());
+    println!("Mesh generated: {} cells", mesh.num_cells());
     
     let density = 1000.0;
     let viscosity = 0.001;
@@ -38,9 +38,11 @@ fn test_vortex_shedding_discrepancy() {
     serial_solver.scheme = scheme;
     
     // Init BC
-    for (i, cell) in serial_solver.mesh.cells.iter().enumerate() {
-        if cell.center.x < max_cell_size {
-            serial_solver.u.values[i] = Vector2::new(1.0, 0.0);
+    for i in 0..serial_solver.mesh.num_cells() {
+        let cx = serial_solver.mesh.cell_cx[i];
+        if cx < max_cell_size {
+            serial_solver.u.vx[i] = 1.0;
+            serial_solver.u.vy[i] = 0.0;
         }
     }
     
@@ -54,7 +56,9 @@ fn test_vortex_shedding_discrepancy() {
         }
     }
     
-    let serial_u_mag: Vec<f64> = serial_solver.u.values.iter().map(|v| v.norm()).collect();
+    let serial_u_mag: Vec<f64> = (0..serial_solver.u.vx.len())
+        .map(|i| (serial_solver.u.vx[i].powi(2) + serial_solver.u.vy[i].powi(2)).sqrt())
+        .collect();
     
     // Run Parallel
     println!("Running Parallel Solver...");
@@ -68,10 +72,11 @@ fn test_vortex_shedding_discrepancy() {
         solver.viscosity = viscosity;
         solver.scheme = scheme;
         
-        for i in 0..solver.mesh.cells.len() {
-            let cell = &solver.mesh.cells[i];
-            if cell.center.x < max_cell_size {
-                solver.u.values[i] = Vector2::new(1.0, 0.0);
+        for i in 0..solver.mesh.num_cells() {
+            let cx = solver.mesh.cell_cx[i];
+            if cx < max_cell_size {
+                solver.u.vx[i] = 1.0;
+                solver.u.vy[i] = 0.0;
             }
         }
     }
@@ -88,7 +93,9 @@ fn test_vortex_shedding_discrepancy() {
 
     for partition in &parallel_solver.partitions {
         let solver = partition.read().unwrap();
-        let u_mag: Vec<f64> = solver.u.values.iter().map(|v| v.norm()).collect();
+        let u_mag: Vec<f64> = (0..solver.u.vx.len())
+            .map(|i| (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt())
+            .collect();
         
         total_parallel += u_mag.iter().sum::<f64>();
         count_parallel += u_mag.len();
@@ -98,6 +105,4 @@ fn test_vortex_shedding_discrepancy() {
     let avg_parallel = total_parallel / count_parallel as f64;
     
     println!("Average Velocity: Serial = {}, Parallel = {}", avg_serial, avg_parallel);
-    
-    // assert!((avg_serial - avg_parallel).abs() < 0.1, "Average velocities differ significantly!");
 }

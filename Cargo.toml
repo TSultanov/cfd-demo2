@@ -3,6 +3,9 @@ name = "cfd2"
 version = "0.1.0"
 edition = "2021"
 
+[profile.test]
+inherits = "release"
+
 [dependencies]
 egui = "0.24"
 eframe = "0.24"

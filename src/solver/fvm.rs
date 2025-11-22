@@ -16,12 +16,16 @@ impl ScalarField {
 
 #[derive(Clone)]
 pub struct VectorField {
-    pub values: Vec<Vector2<f64>>,
+    pub vx: Vec<f64>,
+    pub vy: Vec<f64>,
 }
 
 impl VectorField {
     pub fn new(n: usize, val: Vector2<f64>) -> Self {
-        Self { values: vec![val; n] }
+        Self { 
+            vx: vec![val.x; n],
+            vy: vec![val.y; n],
+        }
     }
 }
 
@@ -42,28 +46,33 @@ impl Fvm {
         field: &ScalarField, 
         boundary_value: F,
         ghost_values: Option<&[f64]>,
-        ghost_map: Option<&HashMap<usize, usize>>
-    ) -> Vec<Vector2<f64>> 
+        ghost_map: Option<&HashMap<usize, usize>>,
+        ghost_centers: Option<&Vec<Vector2<f64>>>
+    ) -> VectorField 
     where F: Fn(BoundaryType) -> Option<f64>
     {
         // Green-Gauss Gradient
-        let mut grads = vec![Vector2::zeros(); mesh.cells.len()];
+        let n_cells = mesh.num_cells();
+        let mut grad_x = vec![0.0; n_cells];
+        let mut grad_y = vec![0.0; n_cells];
         
-        for (face_idx, face) in mesh.faces.iter().enumerate() {
-            let owner = face.owner;
-            let neighbor = face.neighbor;
+        for face_idx in 0..mesh.num_faces() {
+            let owner = mesh.face_owner[face_idx];
+            let neighbor = mesh.face_neighbor[face_idx];
             
             let val_owner = field.values[owner];
             
             let val_face = if let Some(neigh) = neighbor {
                 // Linear interpolation for face value
                 let val_neigh = field.values[neigh];
-                // Simple average or distance weighted?
-                // Distance weighted
-                let d_own = (face.center - mesh.cells[owner].center).norm();
-                let d_neigh = (face.center - mesh.cells[neigh].center).norm();
-                // phi_f = phi_P + f * (phi_N - phi_P)
-                // f = d_own / (d_own + d_neigh)
+                
+                let c_owner = Vector2::new(mesh.cell_cx[owner], mesh.cell_cy[owner]);
+                let c_neigh = Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh]);
+                let f_center = Vector2::new(mesh.face_cx[face_idx], mesh.face_cy[face_idx]);
+                
+                let d_own = (f_center - c_owner).norm();
+                let d_neigh = (f_center - c_neigh).norm();
+                
                 let f = d_own / (d_own + d_neigh);
                 
                 val_owner + f * (val_neigh - val_owner)
@@ -72,16 +81,28 @@ impl Fvm {
                 let mut val = val_owner;
                 let mut handled = false;
 
-                if let Some(bt) = face.boundary_type {
+                if let Some(bt) = mesh.face_boundary[face_idx] {
                     // Check Parallel Interface
                     if let Some(map) = ghost_map {
                         if let Some(&ghost_idx) = map.get(&face_idx) {
                             if let Some(ghosts) = ghost_values {
-                                let local_ghost_idx = ghost_idx - mesh.cells.len();
+                                let local_ghost_idx = ghost_idx - n_cells;
                                 if local_ghost_idx < ghosts.len() {
                                     let val_neigh = ghosts[local_ghost_idx];
-                                    // Interpolate
-                                    val = 0.5 * (val_owner + val_neigh);
+                                    
+                                    let f = if let Some(centers) = ghost_centers {
+                                        if let Some(gc) = centers.get(local_ghost_idx) {
+                                            let c_owner = Vector2::new(mesh.cell_cx[owner], mesh.cell_cy[owner]);
+                                            let f_center = Vector2::new(mesh.face_cx[face_idx], mesh.face_cy[face_idx]);
+                                            let d_own = (f_center - c_owner).norm();
+                                            let dx = gc.x - f_center.x;
+                                            let dy = gc.y - f_center.y;
+                                            let d_neigh = (dx*dx + dy*dy).sqrt();
+                                            d_own / (d_own + d_neigh)
+                                        } else { 0.5 }
+                                    } else { 0.5 };
+                                    
+                                    val = val_owner + f * (val_neigh - val_owner);
                                     handled = true;
                                 }
                             }
@@ -99,25 +120,31 @@ impl Fvm {
                 val
             };
             
-            let area_vec = face.normal * face.area;
+            let nx = mesh.face_nx[face_idx];
+            let ny = mesh.face_ny[face_idx];
+            let area = mesh.face_area[face_idx];
             
             // Contribution to owner
-            grads[owner] += val_face * area_vec;
+            grad_x[owner] += val_face * nx * area;
+            grad_y[owner] += val_face * ny * area;
             
             // Contribution to neighbor
             if let Some(neigh) = neighbor {
-                grads[neigh] -= val_face * area_vec;
+                grad_x[neigh] -= val_face * nx * area;
+                grad_y[neigh] -= val_face * ny * area;
             }
         }
         
-        for (i, cell) in mesh.cells.iter().enumerate() {
-            if cell.volume < 1e-12 {
-                println!("Warning: Small cell volume for cell {}: {}", i, cell.volume);
+        for i in 0..n_cells {
+            let vol = mesh.cell_vol[i];
+            if vol < 1e-12 {
+                println!("Warning: Small cell volume for cell {}: {}", i, vol);
             }
-            grads[i] /= cell.volume;
+            grad_x[i] /= vol;
+            grad_y[i] /= vol;
         }
         
-        grads
+        VectorField { vx: grad_x, vy: grad_y }
     }
     
     // Assemble matrix for scalar transport:
@@ -132,34 +159,46 @@ impl Fvm {
         boundary_value: F,
         ghost_map: Option<&HashMap<usize, usize>>,
         ghost_values: Option<&[f64]>,
+        ghost_centers: Option<&Vec<Vector2<f64>>>,
     ) -> (SparseMatrix, Vec<f64>) 
     where F: Fn(BoundaryType) -> Option<f64>
     {
-        let n_cells = mesh.cells.len();
+        let n_cells = mesh.num_cells();
         let mut triplets = Vec::new();
         let mut rhs = vec![0.0; n_cells];
         
         // Compute gradients for higher order schemes
-        let grads = if matches!(scheme, Scheme::Central | Scheme::QUICK) {
-             Some(Self::compute_gradients(mesh, phi_old, &boundary_value, ghost_values, ghost_map))
+        let grads = if *scheme != Scheme::Upwind {
+            Some(Self::compute_gradients(mesh, phi_old, &boundary_value, ghost_values, ghost_map, ghost_centers))
         } else {
-             None
+            None
         };
         
-        for (i, cell) in mesh.cells.iter().enumerate() {
+        for i in 0..n_cells {
             // Unsteady term: (phi - phi_old)/dt * V
-            let coeff_unsteady = cell.volume / dt;
+            let vol = mesh.cell_vol[i];
+            let coeff_unsteady = vol / dt;
             if coeff_unsteady.is_nan() {
-                println!("coeff_unsteady is NaN for cell {}. vol={}, dt={}", i, cell.volume, dt);
+                println!("coeff_unsteady is NaN for cell {}. vol={}, dt={}", i, vol, dt);
             }
             triplets.push((i, i, coeff_unsteady));
             rhs[i] += coeff_unsteady * phi_old.values[i];
             
             // Loop over faces
-            for &face_idx in &cell.face_indices {
-                let face = &mesh.faces[face_idx];
-                let is_owner = face.owner == i;
-                let neighbor_idx = if is_owner { face.neighbor } else { Some(face.owner) };
+            let start = mesh.cell_face_offsets[i];
+            let end = mesh.cell_face_offsets[i+1];
+            
+            for k in start..end {
+                let face_idx = mesh.cell_faces[k];
+                let owner = mesh.face_owner[face_idx];
+                let neighbor = mesh.face_neighbor[face_idx];
+                let is_owner = owner == i;
+                let neighbor_idx = if is_owner { neighbor } else { Some(owner) };
+                
+                let f_c = Vector2::new(mesh.face_cx[face_idx], mesh.face_cy[face_idx]);
+                let f_area = mesh.face_area[face_idx];
+                let f_normal = Vector2::new(mesh.face_nx[face_idx], mesh.face_ny[face_idx]);
+                let c_i = Vector2::new(mesh.cell_cx[i], mesh.cell_cy[i]);
                 
                 // Flux OUT of cell i
                 let flux = if is_owner { fluxes[face_idx] } else { -fluxes[face_idx] };
@@ -186,7 +225,7 @@ impl Fvm {
                         let mut val = 0.0;
                         let mut handled = false;
 
-                        if let Some(bt) = face.boundary_type {
+                        if let Some(bt) = mesh.face_boundary[face_idx] {
                             // Check for Parallel Interface
                             if let Some(map) = ghost_map {
                                 if let Some(&ghost_idx) = map.get(&face_idx) {
@@ -194,7 +233,7 @@ impl Fvm {
                                     triplets.push((i, ghost_idx, flux));
                                     
                                     if let Some(ghosts) = ghost_values {
-                                        let local_ghost_idx = ghost_idx - mesh.cells.len();
+                                        let local_ghost_idx = ghost_idx - mesh.num_cells();
                                         if local_ghost_idx < ghosts.len() {
                                             val = ghosts[local_ghost_idx];
                                             // Debug print
@@ -238,8 +277,8 @@ impl Fvm {
                     
                     if let Some(neigh) = neighbor_idx {
                         // Internal Face
-                        let d_own = (face.center - mesh.cells[i].center).norm();
-                        let d_neigh = (face.center - mesh.cells[neigh].center).norm();
+                        let d_own = (f_c - c_i).norm();
+                        let d_neigh = (f_c - Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh])).norm();
                         
                         match scheme {
                             Scheme::Central => {
@@ -253,13 +292,13 @@ impl Fvm {
                                 // Linear Upwind (Second Order Upwind)
                                 if flux > 0.0 {
                                     // From Owner
-                                    let grad = gradients[i];
-                                    let r = face.center - mesh.cells[i].center;
+                                    let grad = Vector2::new(gradients.vx[i], gradients.vy[i]);
+                                    let r = f_c - c_i;
                                     phi_ho = phi_old.values[i] + grad.dot(&r);
                                 } else {
                                     // From Neighbor
-                                    let grad = gradients[neigh];
-                                    let r = face.center - mesh.cells[neigh].center;
+                                    let grad = Vector2::new(gradients.vx[neigh], gradients.vy[neigh]);
+                                    let r = f_c - Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh]);
                                     phi_ho = phi_old.values[neigh] + grad.dot(&r);
                                 }
                             },
@@ -268,7 +307,7 @@ impl Fvm {
                     } else {
                         // Boundary Face
                         let mut handled = false;
-                        if let Some(_) = face.boundary_type {
+                        if let Some(_) = mesh.face_boundary[face_idx] {
                             if let Some(map) = ghost_map {
                                 if map.contains_key(&face_idx) {
                                     // Parallel Interface
@@ -277,7 +316,7 @@ impl Fvm {
                                     let mut has_ghost = false;
                                     if let Some(&ghost_idx) = map.get(&face_idx) {
                                         if let Some(ghosts) = ghost_values {
-                                            let local_ghost_idx = ghost_idx - mesh.cells.len();
+                                            let local_ghost_idx = ghost_idx - mesh.num_cells();
                                             if local_ghost_idx < ghosts.len() {
                                                 phi_ghost = ghosts[local_ghost_idx];
                                                 has_ghost = true;
@@ -317,12 +356,12 @@ impl Fvm {
                 // d = distance between centers
                 
                 if let Some(neigh) = neighbor_idx {
-                    let d_vec = mesh.cells[neigh].center - cell.center;
+                    let d_vec = Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh]) - c_i;
                     let d = d_vec.norm();
                     if d < 1e-9 {
                         println!("Warning: Small distance between cells {} and {}: {}", i, neigh, d);
                     }
-                    let diff_coeff = gamma * face.area / d;
+                    let diff_coeff = gamma * f_area / d;
                     
                     // - (diff_coeff * (phi_N - phi_P))
                     // = - diff_coeff * phi_N + diff_coeff * phi_P
@@ -336,7 +375,7 @@ impl Fvm {
                         // S = n * A
                         // If is_owner, normal points i -> neigh. S is out of i.
                         // If !is_owner, normal points neigh -> i. S is out of i (so -normal).
-                        let s_vec = if is_owner { face.normal } else { -face.normal } * face.area;
+                        let s_vec = if is_owner { f_normal } else { -f_normal } * f_area;
                         
                         // Over-relaxed correction vector k
                         // k = S - (S . d / |d|^2) * d  <-- Minimum correction
@@ -344,14 +383,14 @@ impl Fvm {
                         // We use Over-relaxed to match the implicit coefficient (gamma * A / d)
                         // A = |S|. So implicit term is gamma * |S|/|d|.
                         
-                        let k_vec = s_vec - d_vec * (face.area / d);
+                        let k_vec = s_vec - d_vec * (f_area / d);
                         
                         // Interpolate gradient to face
-                        let grad_own = gradients[i];
-                        let grad_neigh = gradients[neigh];
+                        let grad_own = Vector2::new(gradients.vx[i], gradients.vy[i]);
+                        let grad_neigh = Vector2::new(gradients.vx[neigh], gradients.vy[neigh]);
                         // Linear interpolation based on distance
-                        let d_own = (face.center - mesh.cells[i].center).norm();
-                        let d_neigh = (face.center - mesh.cells[neigh].center).norm();
+                        let d_own = (f_c - c_i).norm();
+                        let d_neigh = (f_c - Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh])).norm();
                         let f = d_own / (d_own + d_neigh);
                         let grad_f = grad_own + (grad_neigh - grad_own) * f;
                         
@@ -363,8 +402,8 @@ impl Fvm {
                     }
                 } else {
                     // Boundary diffusion
-                    if let Some(bt) = face.boundary_type {
-                        let d = (face.center - cell.center).norm(); // Distance to face center
+                    if let Some(bt) = mesh.face_boundary[face_idx] {
+                        let d = (f_c - c_i).norm(); // Distance to face center
                         if d < 1e-9 {
                             println!("Warning: Small distance to boundary face {} for cell {}: {}", face_idx, i, d);
                         }
@@ -373,9 +412,19 @@ impl Fvm {
                         let is_parallel = if let Some(map) = ghost_map {
                             if let Some(&ghost_idx) = map.get(&face_idx) {
                                 // Treat as internal face
-                                // Approx distance: 2 * d (assuming uniform mesh across boundary)
-                                let dist = 2.0 * d;
-                                let diff_coeff = gamma * face.area / dist;
+                                let dist = if let Some(centers) = ghost_centers {
+                                    let local_ghost_idx = ghost_idx - mesh.num_cells();
+                                    if let Some(gc) = centers.get(local_ghost_idx) {
+                                        let dx = gc.x - mesh.cell_cx[i];
+                                        let dy = gc.y - mesh.cell_cy[i];
+                                        (dx * dx + dy * dy).sqrt()
+                                    } else {
+                                        2.0 * d
+                                    }
+                                } else {
+                                    2.0 * d
+                                };
+                                let diff_coeff = gamma * f_area / dist;
                                 
                                 triplets.push((i, i, diff_coeff));
                                 triplets.push((i, ghost_idx, -diff_coeff));
@@ -384,10 +433,10 @@ impl Fvm {
                         } else { false };
 
                         if !is_parallel {
-                            let diff_coeff = gamma * face.area / d;
+                            let diff_coeff = gamma * f_area / d;
                             
                             if diff_coeff.is_nan() {
-                                println!("diff_coeff is NaN for face {}. gamma={}, area={}, d={}", face_idx, gamma, face.area, d);
+                                println!("diff_coeff is NaN for face {}. gamma={}, area={}, d={}", face_idx, gamma, f_area, d);
                             }
 
                             if let Some(bv) = boundary_value(bt) {
@@ -415,40 +464,111 @@ impl Fvm {
         (SparseMatrix::from_triplets(n_cells, n_cols, &triplets), rhs)
     }
     
-    pub fn smooth_gradients(mesh: &Mesh, grads: &[Vector2<f64>]) -> Vec<Vector2<f64>> {
-        let mut smoothed = grads.to_vec();
+    pub fn smooth_gradients(mesh: &Mesh, grads: &VectorField) -> VectorField {
+        let mut smoothed_vx = grads.vx.clone();
+        let mut smoothed_vy = grads.vy.clone();
         
         // Simple volume-weighted smoothing
-        for i in 0..mesh.cells.len() {
-            let cell = &mesh.cells[i];
-            let mut sum_g = grads[i] * cell.volume;
-            let mut sum_vol = cell.volume;
+        for i in 0..mesh.num_cells() {
+            let mut sum_gx = grads.vx[i] * mesh.cell_vol[i];
+            let mut sum_gy = grads.vy[i] * mesh.cell_vol[i];
+            let mut sum_vol = mesh.cell_vol[i];
             
-            for &face_idx in &cell.face_indices {
-                let face = &mesh.faces[face_idx];
-                let neighbor = if face.owner == i { face.neighbor } else { Some(face.owner) };
+            let start = mesh.cell_face_offsets[i];
+            let end = mesh.cell_face_offsets[i+1];
+            for k in start..end {
+                let face_idx = mesh.cell_faces[k];
+                let owner = mesh.face_owner[face_idx];
+                let neighbor = mesh.face_neighbor[face_idx];
+                let n_idx = if owner == i { neighbor } else { Some(owner) };
                 
-                if let Some(n) = neighbor {
-                    let n_vol = mesh.cells[n].volume;
-                    sum_g += grads[n] * n_vol;
+                if let Some(n) = n_idx {
+                    let n_vol = mesh.cell_vol[n];
+                    sum_gx += grads.vx[n] * n_vol;
+                    sum_gy += grads.vy[n] * n_vol;
                     sum_vol += n_vol;
                 }
             }
             
-            smoothed[i] = sum_g / sum_vol;
+            smoothed_vx[i] = sum_gx / sum_vol;
+            smoothed_vy[i] = sum_gy / sum_vol;
         }
         
-        smoothed
+        VectorField { vx: smoothed_vx, vy: smoothed_vy }
     }
     
-    pub fn limit_gradients(grads: &[Vector2<f64>], max_mag: f64) -> Vec<Vector2<f64>> {
-        grads.iter().map(|g| {
-            let mag = g.norm();
+    pub fn limit_gradients(grads: &VectorField, max_mag: f64) -> VectorField {
+        let mut limited_vx = grads.vx.clone();
+        let mut limited_vy = grads.vy.clone();
+
+        for i in 0..grads.vx.len() {
+            let mag = (grads.vx[i].powi(2) + grads.vy[i].powi(2)).sqrt();
             if mag > max_mag {
-                g * (max_mag / mag)
-            } else {
-                *g
+                let scale = max_mag / mag;
+                limited_vx[i] *= scale;
+                limited_vy[i] *= scale;
             }
-        }).collect()
+        }
+        VectorField { vx: limited_vx, vy: limited_vy }
+    }
+    
+    pub fn limit_gradients_bj(mesh: &Mesh, field: &ScalarField, grads: &mut VectorField) {
+        for i in 0..mesh.num_cells() {
+            let val_p = field.values[i];
+            let mut phi_max = val_p;
+            let mut phi_min = val_p;
+            
+            let start = mesh.cell_face_offsets[i];
+            let end = mesh.cell_face_offsets[i+1];
+            
+            // Find min/max of neighbors
+            for k in start..end {
+                let face_idx = mesh.cell_faces[k];
+                let owner = mesh.face_owner[face_idx];
+                let neighbor = mesh.face_neighbor[face_idx];
+                let n_idx = if owner == i { neighbor } else { Some(owner) };
+                
+                if let Some(n) = n_idx {
+                    let val_n = field.values[n];
+                    if val_n > phi_max { phi_max = val_n; }
+                    if val_n < phi_min { phi_min = val_n; }
+                }
+            }
+            
+            // Barth-Jespersen Limiter
+            let mut alpha = 1.0f64;
+            let grad_x = grads.vx[i];
+            let grad_y = grads.vy[i];
+            
+            for k in start..end {
+                let face_idx = mesh.cell_faces[k];
+                let f_cx = mesh.face_cx[face_idx];
+                let f_cy = mesh.face_cy[face_idx];
+                let c_cx = mesh.cell_cx[i];
+                let c_cy = mesh.cell_cy[i];
+                
+                let rx = f_cx - c_cx;
+                let ry = f_cy - c_cy;
+                
+                let phi_face = val_p + grad_x * rx + grad_y * ry;
+                
+                if phi_face > phi_max {
+                    let diff = phi_max - val_p;
+                    let grad_diff = phi_face - val_p;
+                    if grad_diff.abs() > 1e-12 {
+                        alpha = alpha.min(diff / grad_diff);
+                    }
+                } else if phi_face < phi_min {
+                    let diff = phi_min - val_p;
+                    let grad_diff = phi_face - val_p;
+                    if grad_diff.abs() > 1e-12 {
+                        alpha = alpha.min(diff / grad_diff);
+                    }
+                }
+            }
+            
+            grads.vx[i] *= alpha;
+            grads.vy[i] *= alpha;
+        }
     }
 }

@@ -281,13 +281,25 @@ impl PisoSolver {
                     let u_own = Vector2::new(self.u.vx[i], self.u.vy[i]);
                     let (u_face_dot_n, d_face) = if let Some(n) = n_idx {
                         let u_neigh = Vector2::new(self.u.vx[n], self.u.vy[n]);
-                        let u_avg = (u_own + u_neigh) * 0.5;
-                        let d_face = (d_p[i] + d_p[n]) * 0.5;
+                        
+                        // Distance weighted interpolation
+                        let d_own = (f_c - c_i).norm();
+                        let c_neigh = Vector2::new(self.mesh.cell_cx[n], self.mesh.cell_cy[n]);
+                        let d_neigh = (f_c - c_neigh).norm();
+                        let total_dist = d_own + d_neigh;
+                        
+                        let lambda = if total_dist > 1e-12 { d_neigh / total_dist } else { 0.5 };
+                        
+                        let u_avg = u_own * lambda + u_neigh * (1.0 - lambda);
+                        let d_face = d_p[i] * lambda + d_p[n] * (1.0 - lambda);
                         
                         // Rhie-Chow Correction
-                        let d_vec = Vector2::new(self.mesh.cell_cx[n], self.mesh.cell_cy[n]) - c_i;
+                        let d_vec = c_neigh - c_i;
                         let dist = d_vec.norm();
-                        let grad_p_avg = (Vector2::new(grad_p.vx[i], grad_p.vy[i]) + Vector2::new(grad_p.vx[n], grad_p.vy[n])) * 0.5;
+                        
+                        let grad_p_own = Vector2::new(grad_p.vx[i], grad_p.vy[i]);
+                        let grad_p_neigh = Vector2::new(grad_p.vx[n], grad_p.vy[n]);
+                        let grad_p_avg = grad_p_own * lambda + grad_p_neigh * (1.0 - lambda);
                         
                         let p_down = self.p.values[n];
                         let p_up = self.p.values[i];
@@ -398,9 +410,9 @@ impl PisoSolver {
             let n_cols = self.mesh.num_cells() + self.ghost_map.len();
             let mat_p = SparseMatrix::from_triplets(self.mesh.num_cells(), n_cols, &p_triplets);
             let mut p_prime = vec![0.0; self.mesh.num_cells()];
-            // Use BiCGStab for pressure as well, just in case
-            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(&mat_p, &p_rhs, &mut p_prime, 1000, 1e-10, ops);
+            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(&mat_p, &p_rhs, &mut p_prime, 1000, 1e-6, ops);
             
+            // Update P
             // Exchange p_prime ghosts
             let p_prime_ghosts = ops.exchange_halo(&p_prime);
 

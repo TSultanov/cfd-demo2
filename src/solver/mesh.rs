@@ -736,7 +736,7 @@ impl Mesh {
         }
     }
 
-    pub fn smooth(&mut self, target_skew: f64, max_iterations: usize) {
+    pub fn smooth<G: Geometry>(&mut self, geo: &G, target_skew: f64, max_iterations: usize) {
         let n_verts = self.vx.len();
         let mut adj = vec![Vec::new(); n_verts];
         
@@ -784,8 +784,8 @@ impl Mesh {
                 let x_old = self.vx[i];
                 let y_old = self.vy[i];
                 
-                // If on domain box or obstacle boundary, fix it
-                if is_on_box(x_old, y_old) || self.v_fixed[i] {
+                // If on domain box, fix it
+                if is_on_box(x_old, y_old) {
                     new_vx[i] = x_old;
                     new_vy[i] = y_old;
                     continue;
@@ -813,11 +813,44 @@ impl Mesh {
                 
                 // Relaxation factor
                 let alpha = 0.5;
-                let x_new = x_old + (avg_x - x_old) * alpha;
-                let y_new = y_old + (avg_y - y_old) * alpha;
+                let mut x_new = x_old + (avg_x - x_old) * alpha;
+                let mut y_new = y_old + (avg_y - y_old) * alpha;
                 
-                new_vx[i] = x_new;
-                new_vy[i] = y_new;
+                if self.v_fixed[i] {
+                    // Project back to surface
+                    let p_curr = Point2::new(x_new, y_new);
+                    let d = geo.sdf(&p_curr);
+                    
+                    // Numerical Gradient
+                    let eps = 1e-6;
+                    let d_x = geo.sdf(&Point2::new(x_new + eps, y_new)) - geo.sdf(&Point2::new(x_new - eps, y_new));
+                    let d_y = geo.sdf(&Point2::new(x_new, y_new + eps)) - geo.sdf(&Point2::new(x_new, y_new - eps));
+                    let grad = Vector2::new(d_x, d_y).normalize();
+                    
+                    let p_proj = p_curr - grad * d;
+                    x_new = p_proj.x;
+                    y_new = p_proj.y;
+                }
+
+                // Check for bad cells (edge collapse)
+                let mut bad_move = false;
+                for &neigh in &adj[i] {
+                    let nx = self.vx[neigh];
+                    let ny = self.vy[neigh];
+                    let dist_sq = (x_new - nx).powi(2) + (y_new - ny).powi(2);
+                    if dist_sq < 1e-8 { // 1e-4 squared
+                        bad_move = true;
+                        break;
+                    }
+                }
+
+                if bad_move {
+                    new_vx[i] = x_old;
+                    new_vy[i] = y_old;
+                } else {
+                    new_vx[i] = x_new;
+                    new_vy[i] = y_new;
+                }
             }
             
             self.vx = new_vx;
@@ -982,23 +1015,14 @@ mod tests {
         println!("Found {} fixed boundary vertices", boundary_indices.len());
         assert!(boundary_indices.len() > 0);
         
-        // Store initial positions
-        let initial_positions: Vec<Point2<f64>> = boundary_indices.iter()
-            .map(|&i| Point2::new(mesh.vx[i], mesh.vy[i]))
-            .collect();
-
         // Smooth
-        mesh.smooth(0.05, 50);
+        mesh.smooth(&geo, 0.05, 50);
         
-        // Verify positions haven't changed
-        for (k, &idx) in boundary_indices.iter().enumerate() {
+        // Verify positions are still on boundary
+        for &idx in &boundary_indices {
             let p_new = Point2::new(mesh.vx[idx], mesh.vy[idx]);
-            let p_old = initial_positions[k];
-            let dist = (p_new - p_old).norm();
-            if dist > 1e-9 {
-                println!("Boundary vertex {} moved by {:.6e}. Old: {:?}, New: {:?}", idx, dist, p_old, p_new);
-            }
-            assert!(dist < 1e-9, "Boundary vertex moved during smoothing!");
+            let dist = geo.sdf(&p_new).abs();
+            assert!(dist < 1e-4, "Boundary vertex moved off boundary! dist={}", dist);
         }
 
         let final_skew = mesh.calculate_max_skewness();
@@ -1030,7 +1054,7 @@ mod tests {
         println!("Initial max skewness: {}", initial_skew);
         
         // Target low skewness
-        mesh.smooth(0.1, 50);
+        mesh.smooth(&geo, 0.1, 50);
         
         let final_skew = mesh.calculate_max_skewness();
         println!("Final max skewness: {}", final_skew);

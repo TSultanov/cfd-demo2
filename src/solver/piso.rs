@@ -888,7 +888,7 @@ mod tests {
         let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, domain_size);
         
         // Smooth the mesh to reduce skewness near the cylinder
-        mesh.smooth(0.3, 20);
+        mesh.smooth(&geo, 0.3, 20);
         
         println!("Mesh generated. Cells: {}, Faces: {}", mesh.num_cells(), mesh.num_faces());
         

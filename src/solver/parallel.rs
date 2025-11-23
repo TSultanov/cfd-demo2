@@ -767,7 +767,7 @@ mod tests {
         let min_cell_size = 0.025;
         let max_cell_size = 0.025;
         let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, domain_size);
-        mesh.smooth(0.3, 50);
+        mesh.smooth(&geo, 0.3, 50);
         
         let dt = 0.01;
         let density = 1000.0;

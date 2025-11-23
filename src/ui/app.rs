@@ -93,7 +93,7 @@ impl CFDApp {
                     step_x: 0.5,
                 };
                 let mut mesh = generate_cut_cell_mesh(&geo, self.min_cell_size, self.max_cell_size, domain_size);
-                mesh.smooth(0.3, 50);
+                mesh.smooth(&geo, 0.3, 50);
                 mesh
             },
             GeometryType::ChannelObstacle => {
@@ -106,7 +106,7 @@ impl CFDApp {
                     obstacle_radius: 0.2,
                 };
                 let mut mesh = generate_cut_cell_mesh(&geo, self.min_cell_size, self.max_cell_size, domain_size);
-                mesh.smooth(0.3, 50);
+                mesh.smooth(&geo, 0.3, 50);
                 mesh
             },
         };

@@ -64,7 +64,6 @@ impl GpuSolver {
             if _iter % 50 == 0 {
                 // Submit pending commands before reading back
                 if pending_commands {
-                    // println!("Submitting batch at iter {}", _iter);
                     let start = if self.profiling_enabled.load(Ordering::Relaxed) {
                         Some(std::time::Instant::now())
                     } else {

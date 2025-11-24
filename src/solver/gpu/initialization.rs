@@ -1,6 +1,6 @@
 use crate::solver::mesh::{BoundaryType, Mesh};
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use wgpu::util::DeviceExt;
 
@@ -363,12 +363,13 @@ impl GpuSolver {
         // Dot Product & Params
         let workgroup_size = 64;
         let num_groups = (num_cells + workgroup_size - 1) / workgroup_size;
+
         let b_dot_result = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dot Result Buffer"),
             size: (num_groups as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -376,8 +377,8 @@ impl GpuSolver {
             label: Some("Dot Result Buffer 2"),
             size: (num_groups as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 

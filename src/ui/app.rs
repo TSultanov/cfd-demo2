@@ -136,6 +136,7 @@ impl CFDApp {
             let mut gpu_solver = pollster::block_on(GpuSolver::new(&solver.mesh));
             gpu_solver.set_dt(self.timestep as f32);
             gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
+            gpu_solver.set_density(self.current_fluid.density as f32);
             
             // CPU Init Logic (copied from below)
             let n_cells = solver.mesh.num_cells();

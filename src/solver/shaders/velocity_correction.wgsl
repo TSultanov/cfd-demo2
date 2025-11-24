@@ -104,9 +104,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             if (neigh_idx != -1) {
                 let neigh = u32(neigh_idx);
-                d_p_face = 0.5 * (d_p_face + d_p[neigh]);
-
+                
+                // Distance weighted interpolation for d_p_face to match pressure assembly
                 let c_neigh = cell_centers[neigh];
+                let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(face_center.x, face_center.y));
+                let d_n = distance(vec2<f32>(c_neigh.x, c_neigh.y), vec2<f32>(face_center.x, face_center.y));
+                let total_dist = d_c + d_n;
+                
+                var lambda = 0.5;
+                if (total_dist > 1e-6) {
+                    lambda = d_n / total_dist;
+                }
+                d_p_face = lambda * d_p[idx] + (1.0 - lambda) * d_p[neigh];
+
                 let dx = c_neigh.x - center.x;
                 let dy = c_neigh.y - center.y;
                 let dist = sqrt(dx * dx + dy * dy);

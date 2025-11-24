@@ -13,9 +13,11 @@ impl GpuSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
-    pub async fn solve(&self) {
+    pub async fn solve(&self) -> super::structs::LinearSolverStats {
+        let start_time = std::time::Instant::now();
         let max_iter = 1000;
-        let tol = 1e-6;
+        let abs_tol = 1e-5;
+        let rel_tol = 1e-2;
         let n = self.num_cells;
         let workgroup_size = 64;
         let num_groups = (n + workgroup_size - 1) / workgroup_size;
@@ -45,6 +47,11 @@ impl GpuSolver {
                     label: Some("Solver Loop Encoder"),
                 });
         let mut pending_commands = false;
+        let mut init_resid = 0.0;
+        let mut final_resid = 0.0;
+        let mut converged = false;
+        let mut final_iter = max_iter;
+        let mut prev_res = f32::MAX;
 
         for _iter in 0..max_iter {
             // 1. rho_new = (r0, r) -> b_dot_result
@@ -79,13 +86,24 @@ impl GpuSolver {
 
                 let r_r = self.read_scalar_r_r().await;
                 let res = r_r.sqrt();
-                if res < tol {
-                    // println!("Converged at iter {} with residual {:e}", _iter, res);
+                final_resid = res;
+                
+                if _iter == 0 {
+                    init_resid = res;
+                }
+
+                if res < abs_tol || (_iter > 0 && res < rel_tol * init_resid) {
+                    converged = true;
+                    final_iter = _iter + 1;
                     break;
                 }
-                if _iter == max_iter - 1 {
-                    // println!("Solver failed to converge! Final residual: {:e}", res);
+
+                // Stagnation check
+                if _iter > 0 && res >= 0.99 * prev_res {
+                    final_iter = _iter + 1;
+                    break;
                 }
+                prev_res = res;
             }
 
             // p = r + beta * (p - omega * v)
@@ -133,6 +151,13 @@ impl GpuSolver {
 
         if pending_commands {
             self.context.queue.submit(Some(encoder.finish()));
+        }
+
+        super::structs::LinearSolverStats {
+            iterations: final_iter,
+            residual: final_resid,
+            converged,
+            time: start_time.elapsed(),
         }
     }
 

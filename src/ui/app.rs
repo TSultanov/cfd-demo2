@@ -391,6 +391,24 @@ impl eframe::App for CFDApp {
                         ui.label(format!("{}: {:.6}", name, val));
                     }
                 }
+            } else if let Some(gpu_solver) = &self.gpu_solver {
+                // Try to lock, if fails (busy), just skip or show last known?
+                // Since we don't have last known here easily without caching, let's try lock.
+                // If it blocks, UI lags.
+                if let Ok(solver) = gpu_solver.try_lock() {
+                     ui.label(format!("Time: {:.3}", solver.constants.time));
+                     ui.label("GPU Solver Stats:");
+                     
+                     let stats_ux = *solver.stats_ux.lock().unwrap();
+                     let stats_uy = *solver.stats_uy.lock().unwrap();
+                     let stats_p = *solver.stats_p.lock().unwrap();
+                     
+                     ui.label(format!("Ux: {} iters, res {:.2e}, {:.2?}", stats_ux.iterations, stats_ux.residual, stats_ux.time));
+                     ui.label(format!("Uy: {} iters, res {:.2e}, {:.2?}", stats_uy.iterations, stats_uy.residual, stats_uy.time));
+                     ui.label(format!("P:  {} iters, res {:.2e}, {:.2?}", stats_p.iterations, stats_p.residual, stats_p.time));
+                } else {
+                    ui.label("GPU Solver Running...");
+                }
             }
         });
 

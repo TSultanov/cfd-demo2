@@ -1776,6 +1776,9 @@ impl GpuSolver {
             time_compute: Mutex::new(std::time::Duration::new(0, 0)),
             time_spmv: Mutex::new(std::time::Duration::new(0, 0)),
             time_dot: Mutex::new(std::time::Duration::new(0, 0)),
+            stats_ux: Mutex::new(Default::default()),
+            stats_uy: Mutex::new(Default::default()),
+            stats_p: Mutex::new(Default::default()),
         }
     }
 }

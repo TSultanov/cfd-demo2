@@ -3,6 +3,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use super::context::GpuContext;
 
+#[derive(Default, Clone, Copy, Debug)]
+pub struct LinearSolverStats {
+    pub iterations: u32,
+    pub residual: f32,
+    pub converged: bool,
+    pub time: std::time::Duration,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct GpuConstants {
@@ -123,4 +131,9 @@ pub struct GpuSolver {
     pub time_compute: Mutex<std::time::Duration>,
     pub time_spmv: Mutex<std::time::Duration>,
     pub time_dot: Mutex<std::time::Duration>,
+
+    // Solver Stats
+    pub stats_ux: Mutex<LinearSolverStats>,
+    pub stats_uy: Mutex<LinearSolverStats>,
+    pub stats_p: Mutex<LinearSolverStats>,
 }

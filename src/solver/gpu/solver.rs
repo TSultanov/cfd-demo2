@@ -240,7 +240,8 @@ impl GpuSolver {
 
             // Solve Pressure (p_prime)
             self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-            pollster::block_on(self.solve());
+            let stats = pollster::block_on(self.solve());
+            *self.stats_p.lock().unwrap() = stats;
 
             // Velocity Correction
             {
@@ -294,7 +295,12 @@ impl GpuSolver {
         }
 
         self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-        pollster::block_on(self.solve());
+        let stats = pollster::block_on(self.solve());
+        if component == 0 {
+            *self.stats_ux.lock().unwrap() = stats;
+        } else {
+            *self.stats_uy.lock().unwrap() = stats;
+        }
 
         {
             let mut encoder =

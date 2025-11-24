@@ -117,7 +117,6 @@ pub struct GpuSolver {
     pub pipeline_velocity_correction: wgpu::ComputePipeline,
     pub pipeline_flux_correction: wgpu::ComputePipeline,
     pub pipeline_update_p_field: wgpu::ComputePipeline,
-    pub pipeline_compute_d_p: wgpu::ComputePipeline,
     pub pipeline_update_u_component: wgpu::ComputePipeline,
 
     pub bg_fields_prime: wgpu::BindGroup,

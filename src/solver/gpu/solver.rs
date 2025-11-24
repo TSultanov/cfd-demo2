@@ -239,28 +239,6 @@ impl GpuSolver {
 
         // 2. Pressure Corrector
 
-        // Compute d_p
-        {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Compute D_P Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Compute D_P Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_compute_d_p);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.set_bind_group(2, &self.bg_solver, &[]);
-                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-        }
-
         // PISO Loop
         for _ in 0..2 {
             // Compute Gradient P

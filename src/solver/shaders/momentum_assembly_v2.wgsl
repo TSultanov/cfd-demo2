@@ -34,6 +34,7 @@ struct Constants {
 @group(1) @binding(2) var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(3) var<uniform> constants: Constants;
 @group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
+@group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -169,6 +170,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let diag_idx = diagonal_indices[idx];
     matrix_values[diag_idx] = diag_coeff;
+
+    if (constants.component == 0u) {
+        if (abs(diag_coeff) > 1e-20) {
+            d_p[idx] = vol / (diag_coeff * constants.density);
+        } else {
+            d_p[idx] = 0.0;
+        }
+    }
     
     rhs[idx] = rhs_val;
 }

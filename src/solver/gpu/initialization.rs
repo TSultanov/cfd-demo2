@@ -1493,27 +1493,6 @@ impl GpuSolver {
                 entry_point: "main",
             });
 
-        let shader_compute_d_p = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Compute D_P Shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../shaders/compute_d_p.wgsl"
-            ))),
-        });
-
-        let pl_compute_d_p = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Compute D_P Pipeline Layout"),
-            bind_group_layouts: &[&bgl_mesh, &bgl_fields, &bgl_solver], // Group 0, 1, 2 (matrix)
-            push_constant_ranges: &[],
-        });
-
-        let pipeline_compute_d_p =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute D_P Pipeline"),
-                layout: Some(&pl_compute_d_p),
-                module: &shader_compute_d_p,
-                entry_point: "main",
-            });
-
         let shader_update_u = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Update U Component Shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
@@ -1780,7 +1759,6 @@ impl GpuSolver {
             pipeline_velocity_correction,
             pipeline_flux_correction,
             pipeline_update_p_field,
-            pipeline_compute_d_p,
             pipeline_update_u_component,
             bg_fields_prime,
             num_cells,

@@ -100,10 +100,7 @@ impl GpuSolver {
 
     pub async fn get_row_offsets(&self) -> Vec<u32> {
         let data = self
-            .read_buffer(
-                &self.b_row_offsets,
-                ((self.num_cells as u64) + 1) * 4,
-            )
+            .read_buffer(&self.b_row_offsets, ((self.num_cells as u64) + 1) * 4)
             .await;
         let vals_u32: &[u32] = bytemuck::cast_slice(&data);
         vals_u32.to_vec()
@@ -183,26 +180,11 @@ impl GpuSolver {
 
         // 1. Momentum Predictor
 
-        // Compute Gradient P
-        {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Gradient Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Gradient Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_gradient);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-        }
+        // 1. Momentum Predictor
+
+        // Gradient P is now computed inside momentum_assembly (component 0)
+
+        // Solve Ux (Component 0)
 
         // Solve Ux (Component 0)
         self.solve_momentum(0, num_groups_cells);
@@ -216,12 +198,12 @@ impl GpuSolver {
         for _ in 0..2 {
             // Gradient, flux interpolation, and pressure assembly
             {
-                let mut encoder = self
-                    .context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("PISO Pre-Solve Encoder"),
-                    });
+                let mut encoder =
+                    self.context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("PISO Pre-Solve Encoder"),
+                        });
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Gradient Pass"),
@@ -281,7 +263,6 @@ impl GpuSolver {
                 }
                 self.context.queue.submit(Some(encoder.finish()));
             }
-
         }
 
         self.context.device.poll(wgpu::Maintain::Wait);
@@ -337,7 +318,6 @@ impl GpuSolver {
         }
     }
 
-
     pub fn enable_profiling(&self, enable: bool) {
         self.profiling_enabled.store(enable, Ordering::Relaxed);
     }
@@ -354,5 +334,29 @@ impl GpuSolver {
         let spmv = *self.time_spmv.lock().unwrap();
         let dot = *self.time_dot.lock().unwrap();
         (dot, compute, spmv, std::time::Duration::new(0, 0))
+    }
+
+    pub fn compute_gradient(&self) {
+        let workgroup_size = 64;
+        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
+
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Gradient Encoder"),
+                });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Gradient Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_gradient);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+        self.context.device.poll(wgpu::Maintain::Wait);
     }
 }

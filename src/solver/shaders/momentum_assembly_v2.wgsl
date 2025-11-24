@@ -61,13 +61,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let u_old = u[idx];
     let val_old = select(u_old.x, u_old.y, constants.component == 1u);
     
+    // Variables for gradient calculation (only used if component == 0)
+    let val_c_p = p[idx];
+    var grad_p_accum = Vector2(0.0, 0.0);
 
-    
-    // Pressure Gradient Source: -grad(p) * V / rho
-    let gp = grad_p[idx];
-    let gp_comp = select(gp.x, gp.y, constants.component == 1u);
-    rhs_val -= (gp_comp / constants.density) * vol;
-    
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -90,9 +87,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         var other_center: Vector2;
         var is_boundary = false;
+        var other_idx = 0u;
         
         if (neigh_idx != -1) {
-            var other_idx = u32(neigh_idx);
+            other_idx = u32(neigh_idx);
             if (owner != idx) {
                 other_idx = owner;
             }
@@ -161,8 +159,49 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
+
+        // Gradient P calculation (fused)
+        if (constants.component == 0u) {
+             var val_f_p = 0.0;
+             if (!is_boundary) {
+                 // Internal Face
+                 let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+                 let d_o = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+                 let total_dist_p = d_c + d_o;
+                 
+                 var lambda_p = 0.5;
+                 if (total_dist_p > 1e-6) {
+                     lambda_p = d_o / total_dist_p;
+                 }
+                 
+                 let val_other_p = p[other_idx];
+                 val_f_p = lambda_p * val_c_p + (1.0 - lambda_p) * val_other_p;
+             } else {
+                 // Boundary
+                 if (boundary_type == 2u) { // Outlet
+                     val_f_p = 0.0;
+                 } else {
+                     val_f_p = val_c_p;
+                 }
+             }
+             
+             grad_p_accum.x += val_f_p * normal.x * area;
+             grad_p_accum.y += val_f_p * normal.y * area;
+        }
     }
     
+    // Pressure Gradient Source: -grad(p) * V / rho
+    if (constants.component == 0u) {
+        grad_p_accum.x /= vol;
+        grad_p_accum.y /= vol;
+        grad_p[idx] = grad_p_accum;
+        
+        rhs_val -= (grad_p_accum.x / constants.density) * vol;
+    } else {
+        let gp = grad_p[idx];
+        rhs_val -= (gp.y / constants.density) * vol;
+    }
+
     // Time term
     let time_coeff = vol / constants.dt;
     diag_coeff += time_coeff;

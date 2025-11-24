@@ -1,10 +1,7 @@
 struct SolverParams {
-    alpha: f32,
-    beta: f32,
-    omega: f32,
     n: u32,
 }
-@group(2) @binding(3) var<uniform> params: SolverParams;
+@group(2) @binding(4) var<uniform> params: SolverParams;
 
 @group(3) @binding(0) var<storage, read_write> dot_result: array<f32>;
 @group(3) @binding(1) var<storage, read> dot_a: array<f32>;

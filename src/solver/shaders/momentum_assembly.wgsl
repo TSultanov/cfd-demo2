@@ -164,9 +164,5 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let diag_idx = diagonal_indices[idx];
     matrix_values[diag_idx] = diag_coeff;
     
-    // DEBUG: Write dt to rhs to check if it is correct
-    rhs[idx] = constants.dt;
-    // rhs[idx] = vol;
-    // rhs[idx] = time_coeff;
-    // rhs[idx] = rhs_val;
+    rhs[idx] = rhs_val;
 }

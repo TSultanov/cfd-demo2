@@ -2,6 +2,8 @@ use wgpu::util::DeviceExt;
 use crate::solver::mesh::{Mesh, BoundaryType};
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -18,10 +20,9 @@ struct GpuConstants {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct SolverParams {
-    alpha: f32,
-    beta: f32,
-    omega: f32,
     n: u32,
+    num_groups: u32,
+    padding: [u32; 2],
 }
 
 pub struct GpuSolver {
@@ -69,6 +70,9 @@ pub struct GpuSolver {
     
     // Dot Product & Params
     b_dot_result: wgpu::Buffer,
+    b_dot_result_2: wgpu::Buffer,
+    b_scalars: wgpu::Buffer,
+    b_staging_scalar: wgpu::Buffer, // Added
     b_solver_params: wgpu::Buffer,
     
     // Constants
@@ -88,6 +92,7 @@ pub struct GpuSolver {
     bg_dot_t_s: wgpu::BindGroup,
     bg_dot_t_t: wgpu::BindGroup,
     bg_dot_r_r: wgpu::BindGroup,
+    bg_scalars: wgpu::BindGroup,
     bg_empty: wgpu::BindGroup,
     
     pipeline_gradient: wgpu::ComputePipeline,
@@ -98,6 +103,17 @@ pub struct GpuSolver {
     pipeline_bicgstab_update_x_r: wgpu::ComputePipeline,
     pipeline_bicgstab_update_p: wgpu::ComputePipeline,
     pipeline_bicgstab_update_s: wgpu::ComputePipeline,
+
+    // Scalar Pipelines
+    pipeline_init_scalars: wgpu::ComputePipeline,
+    pipeline_reduce_rho_new_r_r: wgpu::ComputePipeline,
+    pipeline_update_beta: wgpu::ComputePipeline,
+    pipeline_update_alpha: wgpu::ComputePipeline,
+    pipeline_reduce_r0_v: wgpu::ComputePipeline,
+    pipeline_reduce_t_s_t_t: wgpu::ComputePipeline,
+    pipeline_update_omega: wgpu::ComputePipeline,
+    pipeline_update_rho_old: wgpu::ComputePipeline,
+
     pipeline_flux: wgpu::ComputePipeline, // Added
     pipeline_momentum_assembly: wgpu::ComputePipeline,
     pipeline_pressure_assembly: wgpu::ComputePipeline,
@@ -114,6 +130,12 @@ pub struct GpuSolver {
     num_faces: u32,
     
     constants: GpuConstants,
+    
+    // Profiling
+    profiling_enabled: AtomicBool,
+    time_compute: Mutex<std::time::Duration>,
+    time_spmv: Mutex<std::time::Duration>,
+    time_dot: Mutex<std::time::Duration>,
 }
 
 impl GpuSolver {
@@ -455,7 +477,28 @@ impl GpuSolver {
             mapped_at_creation: false,
         });
 
-        let solver_params = SolverParams { alpha: 1.0, beta: 0.0, omega: 0.0, n: num_cells };
+        let b_dot_result_2 = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Dot Result Buffer 2"),
+            size: (num_groups as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_scalars = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Scalars Buffer"),
+            size: 64, 
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_staging_scalar = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer Scalar"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let solver_params = SolverParams { n: num_cells, num_groups, padding: [0; 2] };
         let b_solver_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Solver Params Buffer"),
             contents: bytemuck::bytes_of(&solver_params),
@@ -534,7 +577,8 @@ impl GpuSolver {
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
 
@@ -627,7 +671,8 @@ impl GpuSolver {
                 wgpu::BindGroupEntry { binding: 0, resource: b_row_offsets.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: b_col_indices.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: b_matrix_values.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: b_solver_params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: b_scalars.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: b_solver_params.as_entire_binding() },
             ],
         });
 
@@ -691,7 +736,7 @@ impl GpuSolver {
             label: Some("Dot Product T T Bind Group"),
             layout: &bgl_dot_inputs,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: b_dot_result.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: b_dot_result_2.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: b_t.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: b_t.as_entire_binding() },
             ],
@@ -701,7 +746,7 @@ impl GpuSolver {
             label: Some("Dot Product R R Bind Group"),
             layout: &bgl_dot_inputs,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: b_dot_result.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: b_dot_result_2.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: b_r.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: b_r.as_entire_binding() },
             ],
@@ -940,6 +985,95 @@ impl GpuSolver {
             ],
         });
 
+        // Scalar Pipelines
+        let shader_scalars = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Scalars Shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/scalars.wgsl"))),
+        });
+
+        let bgl_scalars = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Scalars Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
+        });
+
+        let bg_scalars = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Scalars Bind Group"),
+            layout: &bgl_scalars,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: b_scalars.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: b_dot_result.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: b_dot_result_2.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: b_solver_params.as_entire_binding() },
+            ],
+        });
+
+        let pl_scalars = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Scalars Pipeline Layout"),
+            bind_group_layouts: &[&bgl_scalars],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline_init_scalars = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Init Scalars Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "init_scalars",
+        });
+
+        let pipeline_reduce_rho_new_r_r = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Reduce Rho New R R Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "reduce_rho_new_r_r",
+        });
+
+        let pipeline_update_beta = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Update Beta Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "update_beta",
+        });
+
+        let pipeline_update_alpha = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Update Alpha Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "update_alpha",
+        });
+
+        let pipeline_reduce_r0_v = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Reduce R0 V Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "reduce_r0_v",
+        });
+
+        let pipeline_reduce_t_s_t_t = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Reduce T S T T Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "reduce_t_s_t_t",
+        });
+
+        let pipeline_update_omega = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Update Omega Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "update_omega",
+        });
+
+        let pipeline_update_rho_old = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Update Rho Old Pipeline"),
+            layout: Some(&pl_scalars),
+            module: &shader_scalars,
+            entry_point: "update_rho_old",
+        });
+
         Self {
             device,
             queue,
@@ -968,7 +1102,11 @@ impl GpuSolver {
             b_s,
             b_t,
             b_dot_result,
+            b_dot_result_2,
+            b_scalars,
+            b_staging_scalar,
             b_solver_params,
+            
             b_constants,
             b_u,
             b_p,
@@ -986,6 +1124,7 @@ impl GpuSolver {
             bg_dot_t_s,
             bg_dot_t_t,
             bg_dot_r_r,
+            bg_scalars,
             bg_empty,
             pipeline_gradient,
             pipeline_spmv_p_v,
@@ -994,6 +1133,14 @@ impl GpuSolver {
             pipeline_bicgstab_update_x_r,
             pipeline_bicgstab_update_p,
             pipeline_bicgstab_update_s,
+            pipeline_init_scalars,
+            pipeline_reduce_rho_new_r_r,
+            pipeline_update_beta,
+            pipeline_update_alpha,
+            pipeline_reduce_r0_v,
+            pipeline_reduce_t_s_t_t,
+            pipeline_update_omega,
+            pipeline_update_rho_old,
             pipeline_flux,
             pipeline_momentum_assembly,
             pipeline_pressure_assembly,
@@ -1007,9 +1154,12 @@ impl GpuSolver {
             num_cells,
             num_faces,
             constants,
+            profiling_enabled: AtomicBool::new(false),
+            time_compute: Mutex::new(std::time::Duration::new(0, 0)),
+            time_spmv: Mutex::new(std::time::Duration::new(0, 0)),
+            time_dot: Mutex::new(std::time::Duration::new(0, 0)),
         }
     }
-
     pub fn set_u(&self, u: &[(f64, f64)]) {
         let u_f32: Vec<[f32; 2]> = u.iter().map(|&(x, y)| [x as f32, y as f32]).collect();
         self.queue.write_buffer(&self.b_u, 0, bytemuck::cast_slice(&u_f32));
@@ -1027,6 +1177,16 @@ impl GpuSolver {
 
     pub fn set_viscosity(&mut self, nu: f32) {
         self.constants.viscosity = nu;
+        self.update_constants();
+    }
+
+    pub fn set_alpha_p(&mut self, alpha_p: f32) {
+        self.constants.alpha_p = alpha_p;
+        self.update_constants();
+    }
+
+    pub fn set_density(&mut self, rho: f32) {
+        self.constants.density = rho;
         self.update_constants();
     }
 
@@ -1321,173 +1481,188 @@ impl GpuSolver {
         let num_groups = (n + workgroup_size - 1) / workgroup_size;
 
         // Initialize r = b - Ax. Since x=0, r = b.
-       
-        // Also r0 = r.
         let size = (n as u64) * 4;
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Init Solver Encoder") });
         encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r, 0, size);
         encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r0, 0, size);
-        // Also initialize p = r? No, p is updated in loop.
-        // Actually BiCGStab starts with p = r?
-        // Standard BiCGStab:
-        // r0 = b - Ax
-        // r_hat = r0
-        // rho0 = alpha = omega = 1
-        // v0 = p0 = 0
-        // Loop:
-        // rho_i = (r_hat, r_{i-1})
-        // beta = (rho_i / rho_{i-1}) * (alpha / omega)
-        // p_i = r_{i-1} + beta * (p_{i-1} - omega * v_{i-1})
-        // ...
-        
-        // My implementation:
-        // rho_new = (r0, r)
-        // ...
-        // p = r + beta * (p - omega * v)
-        
-
-        
-        // If p and v are 0 initially, and beta is computed, then p becomes r.
-        // So I need to zero p and v buffers too.
         encoder.clear_buffer(&self.b_p_solver, 0, None);
         encoder.clear_buffer(&self.b_v, 0, None);
+        
+        // Init scalars
+        self.encode_scalar_compute(&mut encoder, &self.pipeline_init_scalars);
+        
         self.queue.submit(Some(encoder.finish()));
 
-        let mut rho_old = 1.0f32;
-        let mut alpha = 1.0f32;
-        let mut omega = 1.0f32;
-        
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Solver Loop Encoder") });
+        let mut pending_commands = false;
+
         for _iter in 0..max_iter {
-            // rho_new = (r0, r)
-            let rho_new = self.compute_dot(&self.bg_dot_r0_r, num_groups).await;
+            // 1. rho_new = (r0, r) -> b_dot_result
+            // 2. r_r = (r, r) -> b_dot_result_2
+            self.encode_dot_paired(&mut encoder, &self.bg_dot_r0_r, &self.bg_dot_r_r, num_groups);
             
-            if rho_new.abs() < 1e-20 { break; }
+            // Reduce rho_new and r_r
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_rho_new_r_r, num_groups);
             
-            let beta = (rho_new / rho_old) * (alpha / omega);
+            pending_commands = true;
+
+            // Check convergence every 50 iterations
+            if _iter % 50 == 0 {
+                // Submit pending commands before reading back
+                if pending_commands {
+                    // println!("Submitting batch at iter {}", _iter);
+                    let start = if self.profiling_enabled.load(Ordering::Relaxed) { Some(std::time::Instant::now()) } else { None };
+                    self.queue.submit(Some(encoder.finish()));
+                    if let Some(start) = start {
+                        *self.time_compute.lock().unwrap() += start.elapsed();
+                    }
+                    encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Solver Loop Encoder") });
+                    pending_commands = false;
+                }
+
+                let r_r = self.read_scalar_r_r().await;
+                if r_r.sqrt() < tol {
+                    // println!("Converged at iter {} with residual {:e}", _iter, r_r.sqrt());
+                    break;
+                }
+            }
             
-            // Update Params
-            let params = SolverParams { alpha, beta, omega, n };
-            self.queue.write_buffer(&self.b_solver_params, 0, bytemuck::bytes_of(&params));
+            // Update beta
+            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_beta);
             
             // p = r + beta * (p - omega * v)
-
-            self.run_compute(&self.pipeline_bicgstab_update_p, &self.bg_linear_state, num_groups);
+            self.encode_compute(&mut encoder, &self.pipeline_bicgstab_update_p, &self.bg_linear_state, num_groups);
             
             // v = A * p
-            self.run_spmv(&self.pipeline_spmv_p_v, num_groups);
+            self.encode_spmv(&mut encoder, &self.pipeline_spmv_p_v, num_groups);
             
-            // alpha = rho_new / (r0, v)
-            let r0_v = self.compute_dot(&self.bg_dot_r0_v, num_groups).await;
-            if r0_v.abs() < 1e-20 { break; }
-            alpha = rho_new / r0_v;
+            // r0_v = (r0, v)
+            self.encode_dot(&mut encoder, &self.bg_dot_r0_v, num_groups);
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_r0_v, num_groups);
             
-            // Update Params (alpha changed)
-            let params = SolverParams { alpha, beta, omega, n };
-            self.queue.write_buffer(&self.b_solver_params, 0, bytemuck::bytes_of(&params));
+            // Update alpha
+            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_alpha);
             
             // s = r - alpha * v
-            self.run_compute(&self.pipeline_bicgstab_update_s, &self.bg_linear_state, num_groups);
+            self.encode_compute(&mut encoder, &self.pipeline_bicgstab_update_s, &self.bg_linear_state, num_groups);
             
             // t = A * s
-            self.run_spmv(&self.pipeline_spmv_s_t, num_groups);
+            self.encode_spmv(&mut encoder, &self.pipeline_spmv_s_t, num_groups);
             
-            // omega = (t, s) / (t, t)
-            let t_s = self.compute_dot(&self.bg_dot_t_s, num_groups).await;
-            let t_t = self.compute_dot(&self.bg_dot_t_t, num_groups).await;
+            // t_s = (t, s) -> b_dot_result
+            // t_t = (t, t) -> b_dot_result_2
+            self.encode_dot_paired(&mut encoder, &self.bg_dot_t_s, &self.bg_dot_t_t, num_groups);
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_t_s_t_t, num_groups);
             
-            if t_t.abs() < 1e-20 { omega = 0.0; } else { omega = t_s / t_t; }
-            
-            // Update Params (omega changed)
-            let params = SolverParams { alpha, beta, omega, n };
-            self.queue.write_buffer(&self.b_solver_params, 0, bytemuck::bytes_of(&params));
+            // Update omega
+            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_omega);
             
             // x = x + alpha * p + omega * s
             // r = s - omega * t
-            self.run_compute(&self.pipeline_bicgstab_update_x_r, &self.bg_linear_state, num_groups);
+            self.encode_compute(&mut encoder, &self.pipeline_bicgstab_update_x_r, &self.bg_linear_state, num_groups);
             
-            // Check convergence
-            // We can check norm of r or s.
-            // r is updated.
-            let r_r = self.compute_dot(&self.bg_dot_r_r, num_groups).await;
-            if r_r.sqrt() < tol { break; }
+            // Update rho_old
+            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_rho_old);
             
-            rho_old = rho_new;
+            pending_commands = true;
+        }
+        
+        if pending_commands {
+             self.queue.submit(Some(encoder.finish()));
         }
     }
 
-    fn run_compute(&self, pipeline: &wgpu::ComputePipeline, bind_group: &wgpu::BindGroup, num_groups: u32) {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
-            cpass.set_pipeline(pipeline);
-            // Most linear solver kernels use:
-            // Group 0: Mesh (Not used but bound in layout? No, layout for linear solver is different)
-            // Wait, pl_linear layout: [linear_matrix, linear_state, dot_inputs] (Wait, I changed it)
-            // Let's check pl_linear layout in new()
-            // It is: [mesh, linear_state, linear_matrix]
-            cpass.set_bind_group(0, &self.bg_mesh, &[]);
-            cpass.set_bind_group(1, bind_group, &[]); // linear_state
-            cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
-            cpass.dispatch_workgroups(num_groups, 1, 1);
-        }
-        self.queue.submit(Some(encoder.finish()));
+    fn encode_compute(&self, encoder: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline, bind_group: &wgpu::BindGroup, num_groups: u32) {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
+        cpass.set_pipeline(pipeline);
+        cpass.set_bind_group(0, &self.bg_mesh, &[]);
+        cpass.set_bind_group(1, bind_group, &[]); // linear_state
+        cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
+        cpass.dispatch_workgroups(num_groups, 1, 1);
     }
 
-    fn run_spmv(&self, pipeline: &wgpu::ComputePipeline, num_groups: u32) {
-        // SpMV uses same layout as other linear solver kernels
-        self.run_compute(pipeline, &self.bg_linear_state, num_groups);
+    fn encode_spmv(&self, encoder: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline, num_groups: u32) {
+        self.encode_compute(encoder, pipeline, &self.bg_linear_state, num_groups);
     }
 
-    async fn compute_dot(&self, bg_dot_inputs: &wgpu::BindGroup, num_groups: u32) -> f32 {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Dot Encoder") });
+    fn encode_dot(&self, encoder: &mut wgpu::CommandEncoder, bg_dot_inputs: &wgpu::BindGroup, num_groups: u32) {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Dot Pass"), timestamp_writes: None });
+        cpass.set_pipeline(&self.pipeline_dot);
+        cpass.set_bind_group(0, &self.bg_mesh, &[]);
+        cpass.set_bind_group(1, &self.bg_linear_state_ro, &[]);
+        cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
+        cpass.set_bind_group(3, bg_dot_inputs, &[]);
+        cpass.dispatch_workgroups(num_groups, 1, 1);
+    }
+
+    fn encode_dot_paired(&self, encoder: &mut wgpu::CommandEncoder, bg1: &wgpu::BindGroup, bg2: &wgpu::BindGroup, num_groups: u32) {
         {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Dot Pass"), timestamp_writes: None });
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Dot Pass 1"), timestamp_writes: None });
             cpass.set_pipeline(&self.pipeline_dot);
-            // Layout: [mesh, linear_state_ro, linear_matrix, dot_inputs]
             cpass.set_bind_group(0, &self.bg_mesh, &[]);
             cpass.set_bind_group(1, &self.bg_linear_state_ro, &[]);
             cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
-            cpass.set_bind_group(3, bg_dot_inputs, &[]);
+            cpass.set_bind_group(3, bg1, &[]);
             cpass.dispatch_workgroups(num_groups, 1, 1);
         }
         
-        // Reduction is done in shader for workgroup.
-        // Now we need to sum up the partial results from b_dot_result.
-        // For simplicity, let's read back the partial results and sum on CPU.
-        // Or if num_groups is small (e.g. < 1024), we can just read them.
-        // But b_dot_result size is 4 bytes? No, I set it to 4 bytes in new().
-        // And here I need to read it.
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Dot Pass 2"), timestamp_writes: None });
+            cpass.set_pipeline(&self.pipeline_dot);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_linear_state_ro, &[]);
+            cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
+            cpass.set_bind_group(3, bg2, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
+        }
+    }
+
+    fn encode_scalar_compute(&self, encoder: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline) {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Scalar Compute Pass"), timestamp_writes: None });
+        cpass.set_pipeline(pipeline);
+        cpass.set_bind_group(0, &self.bg_scalars, &[]);
+        cpass.dispatch_workgroups(1, 1, 1);
+    }
+
+    fn encode_scalar_reduce(&self, encoder: &mut wgpu::CommandEncoder, pipeline: &wgpu::ComputePipeline, _num_groups: u32) {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Scalar Reduce Pass"), timestamp_writes: None });
+        cpass.set_pipeline(pipeline);
+        cpass.set_bind_group(0, &self.bg_scalars, &[]);
+        cpass.dispatch_workgroups(1, 1, 1);
+    }
+
+    async fn read_scalar_r_r(&self) -> f32 {
+        // Read r_r from b_scalars.
+        // Offset of r_r is 8 * 4 = 32 bytes.
+        let offset = 32;
+        let size = 4;
         
-        // I need to resize b_dot_result in new() to be num_groups * 4.
-        // And here I read it.
-        
-        // For now, let's assume I fix b_dot_result size.
-        // And here I read it.
-        
-        // Copy to staging buffer
-        let size = (num_groups as u64) * 4;
-        let b_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Staging Buffer"),
-            size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        
-        encoder.copy_buffer_to_buffer(&self.b_dot_result, 0, &b_staging, 0, size);
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Read Scalar Encoder") });
+        encoder.copy_buffer_to_buffer(&self.b_scalars, offset, &self.b_staging_scalar, 0, size);
         self.queue.submit(Some(encoder.finish()));
         
-        let slice = b_staging.slice(..);
+        let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
         self.device.poll(wgpu::Maintain::Wait);
         rx.recv().unwrap().unwrap();
         
         let data = slice.get_mapped_range();
-        let result: &[f32] = bytemuck::cast_slice(&data);
-        let sum: f32 = result.iter().sum();
+        let val = f32::from_ne_bytes(data[0..4].try_into().unwrap());
         drop(data);
-        b_staging.unmap();
+        self.b_staging_scalar.unmap();
         
-        sum
+        val
+    }
+
+    pub fn enable_profiling(&self, enable: bool) {
+        self.profiling_enabled.store(enable, Ordering::Relaxed);
+    }
+
+    pub fn get_profiling_data(&self) -> (std::time::Duration, std::time::Duration, std::time::Duration, std::time::Duration) {
+        let compute = *self.time_compute.lock().unwrap();
+        let spmv = *self.time_spmv.lock().unwrap();
+        let dot = *self.time_dot.lock().unwrap();
+        (dot, compute, spmv, std::time::Duration::new(0, 0))
     }
 }

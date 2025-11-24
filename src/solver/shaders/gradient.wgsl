@@ -12,6 +12,7 @@ struct Vector2 {
 @group(0) @binding(5) var<storage, read> cell_vols: array<f32>;
 @group(0) @binding(6) var<storage, read> cell_face_offsets: array<u32>;
 @group(0) @binding(7) var<storage, read> cell_faces: array<u32>;
+@group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 
 // Group 1: Fields
@@ -83,12 +84,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         } else {
             // Boundary
-            // Assume Zero Gradient for now (val_f = val_c)
-            // Or if we had boundary values, we would use them.
-            // For pressure, usually Neumann (grad p . n = 0) -> val_f = val_c is consistent?
-            // Actually, if grad p . n = 0, then p_f != p_c necessarily, but p_f - p_c ~ 0 along normal.
-            // Let's stick with val_f = val_c for Neumann.
-            val_f = val_c;
+            let boundary_type = face_boundary[face_idx];
+            if (boundary_type == 2u) { // Outlet (Dirichlet p=0)
+                val_f = 0.0;
+            } else {
+                // Inlet/Wall (Neumann dp/dn=0)
+                val_f = val_c;
+            }
         }
         
         grad.x += val_f * normal.x * area;

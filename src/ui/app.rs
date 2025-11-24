@@ -5,6 +5,9 @@ use crate::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObst
 use crate::solver::fvm::Scheme;
 use nalgebra::{Vector2, Point2};
 use crate::solver::gpu::GpuSolver;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 #[derive(PartialEq)]
 enum GeometryType {
@@ -45,7 +48,11 @@ use crate::solver::parallel::ParallelPisoSolver;
 pub struct CFDApp {
     solver: Option<PisoSolver>,
     parallel_solver: Option<ParallelPisoSolver>,
-    gpu_solver: Option<GpuSolver>,
+    gpu_solver: Option<Arc<Mutex<GpuSolver>>>,
+    gpu_solver_running: Arc<AtomicBool>,
+    shared_results: Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>,
+    cached_u: Vec<(f64, f64)>,
+    cached_p: Vec<f64>,
     use_parallel: bool,
     use_gpu: bool,
     n_threads: usize,
@@ -66,6 +73,10 @@ impl CFDApp {
             solver: None,
             parallel_solver: None,
             gpu_solver: None,
+            gpu_solver_running: Arc::new(AtomicBool::new(false)),
+            shared_results: Arc::new(Mutex::new(None)),
+            cached_u: Vec::new(),
+            cached_p: Vec::new(),
             use_parallel: false,
             use_gpu: false,
             n_threads: 4,
@@ -82,6 +93,9 @@ impl CFDApp {
     }
 
     fn init_solver(&mut self) {
+        self.is_running = false;
+        self.gpu_solver_running.store(false, Ordering::Relaxed);
+
         let mesh = match self.selected_geometry {
             GeometryType::BackwardsStep => {
                 let length = 3.5;
@@ -149,8 +163,13 @@ impl CFDApp {
                 .map(|(&x, &y)| (x, y)).collect();
             gpu_solver.set_u(&u_init);
             
+            // Initialize cached values
+            self.cached_u = u_init;
+            self.cached_p = vec![0.0; n_cells];
+
             self.solver = Some(solver);
-            self.gpu_solver = Some(gpu_solver);
+            self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
+            self.shared_results = Arc::new(Mutex::new(None));
             self.parallel_solver = None;
             
         } else if self.use_parallel {
@@ -311,6 +330,34 @@ impl eframe::App for CFDApp {
             if self.solver.is_some() || self.parallel_solver.is_some() {
                 if ui.button(if self.is_running { "Pause" } else { "Run" }).clicked() {
                     self.is_running = !self.is_running;
+                    
+                    if let Some(gpu_solver) = &self.gpu_solver {
+                        if self.is_running {
+                            self.gpu_solver_running.store(true, Ordering::Relaxed);
+                            let solver_arc = gpu_solver.clone();
+                            let running_flag = self.gpu_solver_running.clone();
+                            let shared_results = self.shared_results.clone();
+                            let ctx_clone = ctx.clone();
+                            thread::spawn(move || {
+                                while running_flag.load(Ordering::Relaxed) {
+                                    if let Ok(mut solver) = solver_arc.lock() {
+                                        solver.step();
+                                        // Fetch results while holding the lock
+                                        let u = pollster::block_on(solver.get_u());
+                                        let p = pollster::block_on(solver.get_p());
+                                        
+                                        if let Ok(mut results) = shared_results.lock() {
+                                            *results = Some((u, p));
+                                        }
+                                    }
+                                    ctx_clone.request_repaint();
+                                    thread::sleep(std::time::Duration::from_millis(1));
+                                }
+                            });
+                        } else {
+                            self.gpu_solver_running.store(false, Ordering::Relaxed);
+                        }
+                    }
                 }
             }
             
@@ -348,32 +395,42 @@ impl eframe::App for CFDApp {
 
         // Calculate stats for plot and legend
         let (min_val, max_val, values) = if let Some(solver) = &self.solver {
-            if let Some(gpu_solver) = &self.gpu_solver {
-                // Fetch from GPU
-                let (u, p) = pollster::block_on(async {
-                     (gpu_solver.get_u().await, gpu_solver.get_p().await)
-                });
-                
-                let mut min_val = f64::MAX;
-                let mut max_val = f64::MIN;
-                let mut values = Vec::with_capacity(solver.mesh.num_cells());
-                
-                for i in 0..solver.mesh.num_cells() {
-                    let val = match self.plot_field {
-                        PlotField::Pressure => p[i],
-                        PlotField::VelocityX => u[i].0,
-                        PlotField::VelocityY => u[i].1,
-                        PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
-                    };
-                    if val < min_val { min_val = val; }
-                    if val > max_val { max_val = val; }
-                    values.push(val);
+            if let Some(_gpu_solver) = &self.gpu_solver {
+                // Fetch from shared results
+                if let Ok(mut results) = self.shared_results.lock() {
+                    if let Some((u, p)) = results.take() {
+                        self.cached_u = u;
+                        self.cached_p = p;
+                    }
                 }
                 
-                if (max_val - min_val).abs() < 1e-6 {
-                    max_val = min_val + 1.0;
+                let u = &self.cached_u;
+                let p = &self.cached_p;
+                
+                if u.len() == solver.mesh.num_cells() {
+                    let mut min_val = f64::MAX;
+                    let mut max_val = f64::MIN;
+                    let mut values = Vec::with_capacity(solver.mesh.num_cells());
+                    
+                    for i in 0..solver.mesh.num_cells() {
+                        let val = match self.plot_field {
+                            PlotField::Pressure => p[i],
+                            PlotField::VelocityX => u[i].0,
+                            PlotField::VelocityY => u[i].1,
+                            PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
+                        };
+                        if val < min_val { min_val = val; }
+                        if val > max_val { max_val = val; }
+                        values.push(val);
+                    }
+                    
+                    if (max_val - min_val).abs() < 1e-6 {
+                        max_val = min_val + 1.0;
+                    }
+                    (min_val, max_val, Some(values))
+                } else {
+                    (0.0, 1.0, None)
                 }
-                (min_val, max_val, Some(values))
             } else {
                 let mut min_val = f64::MAX;
                 let mut max_val = f64::MIN;
@@ -476,9 +533,8 @@ impl eframe::App for CFDApp {
         
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.is_running {
-                if let Some(gpu_solver) = &mut self.gpu_solver {
-                    pollster::block_on(async { gpu_solver.step() });
-                    ctx.request_repaint();
+                if self.gpu_solver.is_some() {
+                    // GPU solver runs in background thread
                 } else if let Some(solver) = &mut self.solver {
                     solver.step();
                     ctx.request_repaint();

@@ -1,11 +1,7 @@
 // Force recompile 2
-use crate::solver::mesh::{BoundaryType, Mesh};
-use std::borrow::Cow;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use wgpu::util::DeviceExt;
+use std::sync::atomic::Ordering;
 
-use super::structs::{GpuConstants, SolverParams, GpuSolver};
+use super::structs::GpuSolver;
 
 impl GpuSolver {
     pub fn set_u(&self, u: &[(f64, f64)]) {
@@ -180,29 +176,6 @@ impl GpuSolver {
         result
     }
 
-    pub fn compute_gradient(&mut self) {
-        let workgroup_size = 64;
-        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
-
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Gradient Encoder"),
-                });
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Gradient Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&self.pipeline_gradient);
-            cpass.set_bind_group(0, &self.bg_mesh, &[]);
-            cpass.set_bind_group(1, &self.bg_fields, &[]);
-            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-        }
-        self.context.queue.submit(Some(encoder.finish()));
-    }
-
     pub fn step(&mut self) {
         let workgroup_size = 64;
         let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
@@ -241,14 +214,14 @@ impl GpuSolver {
 
         // PISO Loop
         for _ in 0..2 {
-            // Compute Gradient P
+            // Gradient, flux interpolation, and pressure assembly
             {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Gradient Encoder"),
-                        });
+                let mut encoder = self
+                    .context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("PISO Pre-Solve Encoder"),
+                    });
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Gradient Pass"),
@@ -259,17 +232,6 @@ impl GpuSolver {
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
-
-            // Flux Rhie-Chow
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Flux RC Encoder"),
-                        });
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Flux RC Pass"),
@@ -280,17 +242,6 @@ impl GpuSolver {
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
                     cpass.dispatch_workgroups(num_groups_faces, 1, 1);
                 }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
-
-            // Assemble Pressure Matrix
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Pressure Assembly Encoder"),
-                        });
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Pressure Assembly Pass"),
@@ -309,49 +260,6 @@ impl GpuSolver {
             self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
             pollster::block_on(self.solve());
 
-            // Update P
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Update P Encoder"),
-                        });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Update P Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_update_p_field);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
-
-            // Compute Grad P Prime
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Grad P Prime Encoder"),
-                        });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Grad P Prime Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_gradient);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields_prime, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
-
             // Velocity Correction
             {
                 let mut encoder =
@@ -368,32 +276,12 @@ impl GpuSolver {
                     cpass.set_pipeline(&self.pipeline_velocity_correction);
                     cpass.set_bind_group(0, &self.bg_mesh, &[]);
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
+                    cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
                 self.context.queue.submit(Some(encoder.finish()));
             }
 
-            // Flux Correction
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Flux Correction Encoder"),
-                        });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Flux Correction Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_flux_correction);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-                    cpass.dispatch_workgroups(num_groups_faces, 1, 1);
-                }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
         }
 
         self.context.device.poll(wgpu::Maintain::Wait);

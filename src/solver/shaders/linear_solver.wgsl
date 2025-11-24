@@ -26,7 +26,7 @@ struct GpuScalars {
     t_t: f32,
     r_r: f32,
 }
-@group(2) @binding(3) var<storage, read> scalars: GpuScalars;
+@group(2) @binding(3) var<storage, read_write> scalars: GpuScalars;
 
 struct SolverParams {
     n: u32,
@@ -92,32 +92,64 @@ fn spmv_s_t(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn bicgstab_update_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
+
+    var beta = 0.0;
+    if (abs(scalars.omega) >= 1e-20) {
+        beta = (scalars.rho_new / scalars.rho_old) * (scalars.alpha / scalars.omega);
+    }
+
+    if (global_id.x == 0u) {
+        scalars.beta = beta;
+    }
+
     if (idx >= params.n) {
         return;
     }
-    
-    p[idx] = r[idx] + scalars.beta * (p[idx] - scalars.omega * v[idx]);
+
+    p[idx] = r[idx] + beta * (p[idx] - scalars.omega * v[idx]);
 }
 
 // BiCGStab Update S: s = r - alpha * v
 @compute @workgroup_size(64)
 fn bicgstab_update_s(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
+
+    var alpha = 0.0;
+    if (abs(scalars.r0_v) >= 1e-20) {
+        alpha = scalars.rho_new / scalars.r0_v;
+    }
+
+    if (global_id.x == 0u) {
+        scalars.alpha = alpha;
+    }
+
     if (idx >= params.n) {
         return;
     }
-    
-    s[idx] = r[idx] - scalars.alpha * v[idx];
+
+    s[idx] = r[idx] - alpha * v[idx];
 }
 
 // BiCGStab Update X and R: x = x + alpha * p + omega * s, r = s - omega * t
 @compute @workgroup_size(64)
 fn bicgstab_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
+
+    var omega = 0.0;
+    if (abs(scalars.t_t) >= 1e-20) {
+        omega = scalars.t_s / scalars.t_t;
+    }
+
+    if (global_id.x == 0u) {
+        scalars.omega = omega;
+        scalars.rho_old = scalars.rho_new;
+    }
+
     if (idx >= params.n) {
         return;
     }
-    
-    x[idx] += scalars.alpha * p[idx] + scalars.omega * s[idx];
-    r[idx] = s[idx] - scalars.omega * t[idx];
+
+    let alpha = scalars.alpha;
+    x[idx] += alpha * p[idx] + omega * s[idx];
+    r[idx] = s[idx] - omega * t[idx];
 }

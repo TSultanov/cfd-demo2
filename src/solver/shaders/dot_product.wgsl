@@ -1,11 +1,11 @@
 struct SolverParams {
     n: u32,
 }
-@group(2) @binding(4) var<uniform> params: SolverParams;
+@group(0) @binding(0) var<uniform> params: SolverParams;
 
-@group(3) @binding(0) var<storage, read_write> dot_result: array<f32>;
-@group(3) @binding(1) var<storage, read> dot_a: array<f32>;
-@group(3) @binding(2) var<storage, read> dot_b: array<f32>;
+@group(1) @binding(0) var<storage, read_write> dot_result: array<f32>;
+@group(1) @binding(1) var<storage, read> dot_a: array<f32>;
+@group(1) @binding(2) var<storage, read> dot_b: array<f32>;
 
 var<workgroup> scratch: array<f32, 64>;
 

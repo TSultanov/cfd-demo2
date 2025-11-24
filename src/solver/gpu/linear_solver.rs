@@ -49,10 +49,9 @@ impl GpuSolver {
         for _iter in 0..max_iter {
             // 1. rho_new = (r0, r) -> b_dot_result
             // 2. r_r = (r, r) -> b_dot_result_2
-            self.encode_dot_paired(
+            self.encode_dot_pair(
                 &mut encoder,
-                &self.bg_dot_r0_r,
-                &self.bg_dot_r_r,
+                &self.bg_dot_pair_r0r_rr,
                 num_groups,
             );
 
@@ -94,9 +93,6 @@ impl GpuSolver {
                 }
             }
 
-            // Update beta
-            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_beta);
-
             // p = r + beta * (p - omega * v)
             self.encode_compute(
                 &mut encoder,
@@ -112,9 +108,6 @@ impl GpuSolver {
             self.encode_dot(&mut encoder, &self.bg_dot_r0_v, num_groups);
             self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_r0_v, num_groups);
 
-            // Update alpha
-            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_alpha);
-
             // s = r - alpha * v
             self.encode_compute(
                 &mut encoder,
@@ -128,11 +121,8 @@ impl GpuSolver {
 
             // t_s = (t, s) -> b_dot_result
             // t_t = (t, t) -> b_dot_result_2
-            self.encode_dot_paired(&mut encoder, &self.bg_dot_t_s, &self.bg_dot_t_t, num_groups);
+            self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_tstt, num_groups);
             self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_t_s_t_t, num_groups);
-
-            // Update omega
-            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_omega);
 
             // x = x + alpha * p + omega * s
             // r = s - omega * t
@@ -142,9 +132,6 @@ impl GpuSolver {
                 &self.bg_linear_state,
                 num_groups,
             );
-
-            // Update rho_old
-            self.encode_scalar_compute(&mut encoder, &self.pipeline_update_rho_old);
 
             pending_commands = true;
         }
@@ -192,45 +179,25 @@ impl GpuSolver {
             timestamp_writes: None,
         });
         cpass.set_pipeline(&self.pipeline_dot);
-        cpass.set_bind_group(0, &self.bg_mesh, &[]);
-        cpass.set_bind_group(1, &self.bg_linear_state_ro, &[]);
-        cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
-        cpass.set_bind_group(3, bg_dot_inputs, &[]);
+        cpass.set_bind_group(0, &self.bg_dot_params, &[]);
+        cpass.set_bind_group(1, bg_dot_inputs, &[]);
         cpass.dispatch_workgroups(num_groups, 1, 1);
     }
 
-    fn encode_dot_paired(
+    fn encode_dot_pair(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        bg1: &wgpu::BindGroup,
-        bg2: &wgpu::BindGroup,
+        bind_group: &wgpu::BindGroup,
         num_groups: u32,
     ) {
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Dot Pass 1"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&self.pipeline_dot);
-            cpass.set_bind_group(0, &self.bg_mesh, &[]);
-            cpass.set_bind_group(1, &self.bg_linear_state_ro, &[]);
-            cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
-            cpass.set_bind_group(3, bg1, &[]);
-            cpass.dispatch_workgroups(num_groups, 1, 1);
-        }
-
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Dot Pass 2"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&self.pipeline_dot);
-            cpass.set_bind_group(0, &self.bg_mesh, &[]);
-            cpass.set_bind_group(1, &self.bg_linear_state_ro, &[]);
-            cpass.set_bind_group(2, &self.bg_linear_matrix, &[]);
-            cpass.set_bind_group(3, bg2, &[]);
-            cpass.dispatch_workgroups(num_groups, 1, 1);
-        }
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Dot Pair Pass"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&self.pipeline_dot_pair);
+        cpass.set_bind_group(0, &self.bg_dot_params, &[]);
+        cpass.set_bind_group(1, bind_group, &[]);
+        cpass.dispatch_workgroups(num_groups, 1, 1);
     }
 
     fn encode_scalar_compute(

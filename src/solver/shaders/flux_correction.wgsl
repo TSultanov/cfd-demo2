@@ -37,18 +37,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let neigh_idx = u32(neighbor);
         let c_neigh = cell_centers[neigh_idx];
         let f_center = face_centers[idx];
-        
-        let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
-        let d_neigh = distance(vec2<f32>(c_neigh.x, c_neigh.y), vec2<f32>(f_center.x, f_center.y));
-        
-        let total_dist = d_own + d_neigh;
-        var lambda = 0.5;
-        if (total_dist > 1e-6) {
-            lambda = d_neigh / total_dist;
-        }
-        
-        d_p_face = lambda * d_p_face + (1.0 - lambda) * d_p[neigh_idx];
-        
+
+        // CPU reference uses simple averaging for d_p on flux correction
+        d_p_face = 0.5 * (d_p_face + d_p[neigh_idx]);
+
         let p_prime_neigh = x[neigh_idx];
         
         let dx = c_neigh.x - center.x;
@@ -59,15 +51,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         fluxes[idx] -= d_p_face * area * grad_p_f;
     } else {
-        let boundary_type = face_boundary[idx];
-        if (boundary_type == 2u) { // Outlet
-             let f_center = face_centers[idx];
-             let dx = f_center.x - center.x;
-             let dy = f_center.y - center.y;
-             let dist = sqrt(dx*dx + dy*dy);
+           let boundary_type = face_boundary[idx];
+           if (boundary_type == 2u) { // Outlet
+               let f_center = face_centers[idx];
+               let dx = f_center.x - center.x;
+               let dy = f_center.y - center.y;
+               let dist = sqrt(dx*dx + dy*dy);
              
-             let grad_p_f = (0.0 - p_prime_own) / dist;
-             fluxes[idx] -= d_p_face * area * grad_p_f;
-        }
+               let grad_p_f = (0.0 - p_prime_own) / dist;
+               fluxes[idx] -= d_p_face * area * grad_p_f;
+           }
     }
 }

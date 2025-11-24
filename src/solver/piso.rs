@@ -18,6 +18,9 @@ pub struct PisoSolver {
     pub scheme: Scheme,
     pub ghost_map: HashMap<usize, usize>, // face_idx -> ghost_col_idx
     pub ghost_centers: Vec<Vector2<f64>>,
+    pub save_debug_data: bool,
+    pub last_pressure_matrix: Option<SparseMatrix>,
+    pub last_pressure_rhs: Option<Vec<f64>>,
 }
 
 impl PisoSolver {
@@ -37,6 +40,9 @@ impl PisoSolver {
             scheme: Scheme::Upwind,
             ghost_map: HashMap::new(),
             ghost_centers: Vec::new(),
+            save_debug_data: false,
+            last_pressure_matrix: None,
+            last_pressure_rhs: None,
         };
         solver.check_connectivity();
         solver
@@ -409,6 +415,10 @@ impl PisoSolver {
             
             let n_cols = self.mesh.num_cells() + self.ghost_map.len();
             let mat_p = SparseMatrix::from_triplets(self.mesh.num_cells(), n_cols, &p_triplets);
+            if self.save_debug_data {
+                self.last_pressure_matrix = Some(mat_p.clone());
+                self.last_pressure_rhs = Some(p_rhs.clone());
+            }
             let mut p_prime = vec![0.0; self.mesh.num_cells()];
             let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(&mat_p, &p_rhs, &mut p_prime, 1000, 1e-6, ops);
             

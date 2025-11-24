@@ -102,6 +102,25 @@ impl GpuSolver {
         vals_f32.iter().map(|&x| x as f64).collect()
     }
 
+    pub async fn get_row_offsets(&self) -> Vec<u32> {
+        let data = self
+            .read_buffer(
+                &self.b_row_offsets,
+                ((self.num_cells as u64) + 1) * 4,
+            )
+            .await;
+        let vals_u32: &[u32] = bytemuck::cast_slice(&data);
+        vals_u32.to_vec()
+    }
+
+    pub async fn get_col_indices(&self) -> Vec<u32> {
+        let data = self
+            .read_buffer(&self.b_col_indices, (self.num_nonzeros as u64) * 4)
+            .await;
+        let vals_u32: &[u32] = bytemuck::cast_slice(&data);
+        vals_u32.to_vec()
+    }
+
     pub async fn get_cell_vols(&self) -> Vec<f32> {
         let data = self
             .read_buffer(&self.b_cell_vols, (self.num_cells as u64) * 4)

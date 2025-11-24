@@ -35,3 +35,11 @@ harness = false
 [[bench]]
 name = "gpu_solver_benchmark"
 harness = false
+
+[[bench]]
+name = "cpu_solver_benchmark"
+harness = false
+
+[[bench]]
+name = "solver_comparison_benchmark"
+harness = false

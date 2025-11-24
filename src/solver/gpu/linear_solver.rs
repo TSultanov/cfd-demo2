@@ -49,11 +49,7 @@ impl GpuSolver {
         for _iter in 0..max_iter {
             // 1. rho_new = (r0, r) -> b_dot_result
             // 2. r_r = (r, r) -> b_dot_result_2
-            self.encode_dot_pair(
-                &mut encoder,
-                &self.bg_dot_pair_r0r_rr,
-                num_groups,
-            );
+            self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_r0r_rr, num_groups);
 
             // Reduce rho_new and r_r
             self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_rho_new_r_r, num_groups);
@@ -84,11 +80,11 @@ impl GpuSolver {
                 let r_r = self.read_scalar_r_r().await;
                 let res = r_r.sqrt();
                 if res < tol {
-                    println!("Converged at iter {} with residual {:e}", _iter, res);
+                    // println!("Converged at iter {} with residual {:e}", _iter, res);
                     break;
                 }
                 if _iter == max_iter - 1 {
-                    println!("Solver failed to converge! Final residual: {:e}", res);
+                    // println!("Solver failed to converge! Final residual: {:e}", res);
                 }
             }
 

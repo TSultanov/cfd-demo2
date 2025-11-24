@@ -31,3 +31,7 @@ harness = false
 [[bench]]
 name = "large_mesh_benchmark"
 harness = false
+
+[[bench]]
+name = "gpu_solver_benchmark"
+harness = false

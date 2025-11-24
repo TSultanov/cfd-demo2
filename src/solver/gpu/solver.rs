@@ -18,6 +18,13 @@ impl GpuSolver {
             .write_buffer(&self.b_p, 0, bytemuck::cast_slice(&p_f32));
     }
 
+    pub fn set_fluxes(&self, fluxes: &[f64]) {
+        let fluxes_f32: Vec<f32> = fluxes.iter().map(|&x| x as f32).collect();
+        self.context
+            .queue
+            .write_buffer(&self.b_fluxes, 0, bytemuck::cast_slice(&fluxes_f32));
+    }
+
     pub fn set_dt(&mut self, dt: f32) {
         self.constants.dt = dt;
         self.update_constants();
@@ -334,7 +341,7 @@ impl GpuSolver {
 
         // Compute gradients if scheme is not Upwind
         if self.constants.scheme != 0 {
-             let mut encoder =
+            let mut encoder =
                 self.context
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -393,6 +400,61 @@ impl GpuSolver {
             cpass.set_pipeline(&self.pipeline_gradient);
             cpass.set_bind_group(0, &self.bg_mesh, &[]);
             cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+        self.context.device.poll(wgpu::Maintain::Wait);
+    }
+
+    pub fn compute_velocity_gradient(&mut self, component: u32) {
+        self.constants.component = component;
+        self.update_constants();
+
+        let workgroup_size = 64;
+        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
+
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Velocity Gradient Encoder"),
+                });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Velocity Gradient Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_gradient);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+        self.context.device.poll(wgpu::Maintain::Wait);
+    }
+
+    pub fn assemble_momentum(&mut self, component: u32) {
+        self.constants.component = component;
+        self.update_constants();
+
+        let workgroup_size = 64;
+        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
+
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Momentum Assembly Encoder"),
+                });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Momentum Assembly Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_momentum_assembly);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.set_bind_group(2, &self.bg_solver, &[]);
             cpass.dispatch_workgroups(num_groups_cells, 1, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));

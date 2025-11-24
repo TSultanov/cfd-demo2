@@ -5,6 +5,8 @@ struct Constants {
     density: f32,
     component: u32,
     alpha_p: f32,
+    padding1: u32,
+    padding2: u32,
 }
 
 @group(1) @binding(1) var<storage, read_write> p: array<f32>;

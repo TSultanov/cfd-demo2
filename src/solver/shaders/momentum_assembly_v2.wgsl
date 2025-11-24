@@ -10,6 +10,8 @@ struct Constants {
     density: f32,
     component: u32,
     alpha_p: f32,
+    padding1: u32,
+    padding2: u32,
 }
 
 // Group 0: Mesh
@@ -46,10 +48,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[idx + 1];
     let center = cell_centers[idx];
     let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[idx + 1];
     
     var diag_coeff: f32 = 0.0;
     var rhs_val: f32 = 0.0;
@@ -58,9 +60,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let u_old = u[idx];
     let val_old = select(u_old.x, u_old.y, constants.component == 1u);
     
-    let time_coeff = vol / constants.dt;
-    diag_coeff += time_coeff;
-    rhs_val += time_coeff * val_old;
+
     
     // Pressure Gradient Source: -grad(p) * V / rho
     let gp = grad_p[idx];
@@ -161,6 +161,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
+    // Time term
+    let time_coeff = vol / constants.dt;
+    diag_coeff += time_coeff;
+    rhs_val += time_coeff * val_old;
+
     let diag_idx = diagonal_indices[idx];
     matrix_values[diag_idx] = diag_coeff;
     

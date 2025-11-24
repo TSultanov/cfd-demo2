@@ -8,8 +8,10 @@ struct Constants {
     time: f32,
     viscosity: f32,
     density: f32,
-    component: u32, // Added to match layout, though unused here? No, pressure assembly doesn't use component.
+    component: u32,
     alpha_p: f32,
+    padding1: u32,
+    padding2: u32,
 }
 
 // Group 0: Mesh
@@ -63,6 +65,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let area = face_areas[face_idx];
         let f_center = face_centers[face_idx];
         
+        // Ensure normal points out of owner
+        let c_owner = cell_centers[owner];
+        let dx_vec = f_center.x - c_owner.x;
+        let dy_vec = f_center.y - c_owner.y;
+        if (dx_vec * normal.x + dy_vec * normal.y < 0.0) {
+            normal.x = -normal.x;
+            normal.y = -normal.y;
+        }
+
         var normal_sign: f32 = 1.0;
         if (owner != idx) {
             normal.x = -normal.x;

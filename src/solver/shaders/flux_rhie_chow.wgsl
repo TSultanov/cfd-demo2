@@ -10,6 +10,8 @@ struct Constants {
     density: f32,
     component: u32,
     alpha_p: f32,
+    padding1: u32,
+    padding2: u32,
 }
 
 // Group 0: Mesh
@@ -39,11 +41,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     let owner = face_owner[idx];
     let neighbor = face_neighbor[idx];
-    let normal = face_normals[idx];
     let area = face_areas[idx];
     let boundary_type = face_boundary[idx];
     let face_center = face_centers[idx];
     
+    // Ensure normal points out of owner
+    var normal = face_normals[idx];
+    let c_own = cell_centers[owner];
+    let dx_vec = face_center.x - c_own.x;
+    let dy_vec = face_center.y - c_own.y;
+    if (dx_vec * normal.x + dy_vec * normal.y < 0.0) {
+        normal.x = -normal.x;
+        normal.y = -normal.y;
+    }
+
     var u_face = u[owner];
     var d_p_face = d_p[owner];
     var grad_p_avg = grad_p[owner];

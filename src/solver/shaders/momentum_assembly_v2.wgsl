@@ -155,7 +155,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (flux > 0.0) {
                     diag_coeff += flux;
                 } else {
-                    diag_coeff += flux; 
+                    // Backflow: Treat explicitly to maintain diagonal dominance
+                    rhs_val -= flux * val_old;
                 }
             }
         }

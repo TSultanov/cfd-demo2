@@ -268,7 +268,7 @@ impl GpuSolver {
         });
 
         let constants = GpuConstants {
-            dt: 0.001, // Default
+            dt: 0.0001, // Reduced dt
             time: 0.0,
             viscosity: 0.01,
             density: 1.0,

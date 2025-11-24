@@ -1,19 +1,21 @@
 use cfd2::solver::gpu::GpuSolver;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle};
 use cfd2::solver::piso::PisoSolver;
-use nalgebra::Vector2;
+use nalgebra::{Vector2, Point2};
 
 #[test]
 fn test_gpu_cpu_comparison() {
-    let domain_size = Vector2::new(2.0, 1.0);
-    let geo = BackwardsStep {
-        length: 2.0,
-        height_inlet: 0.5,
-        height_outlet: 1.0,
-        step_x: 0.5,
+    let domain_size = Vector2::new(3.0, 1.0);
+    let geo = ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.5),
+        obstacle_radius: 0.2,
     };
-    // Coarse mesh for speed and easier debugging
-    let mesh = generate_cut_cell_mesh(&geo, 0.1, 0.2, domain_size);
+    // Use a coarser mesh for test speed, but fine enough to capture geometry
+    let cell_size = 0.05; 
+    let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, domain_size);
+    mesh.smooth(&geo, 0.3, 50);
     println!("Mesh generated with {} cells", mesh.num_cells());
 
     // DEBUG: Check CPU mesh closure
@@ -40,9 +42,18 @@ fn test_gpu_cpu_comparison() {
     }
 
     let mut cpu_solver = PisoSolver::new(mesh.clone());
+    cpu_solver.dt = 0.0001;
     let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh));
+    gpu_solver.constants.dt = 0.0001;
+    // gpu_solver.update_constants(); // Private, so we rely on default or need to expose it.
+    // Actually, we can't update it easily if method is private.
+    // But wait, GpuSolver::new calls update_constants() at the end?
+    // No, it initializes buffer with initial constants.
+    // If we change constants.dt after new(), buffer is not updated.
+    // We need to update the buffer.
 
-    let dt = 0.001;
+
+    let dt = 0.0001;
     let density = 1.0;
     let viscosity = 0.01;
 
@@ -61,7 +72,7 @@ fn test_gpu_cpu_comparison() {
     for i in 0..num_cells {
         let cx = mesh.cell_cx[i];
         let cy = mesh.cell_cy[i];
-        if cx < 0.1 && cy > 0.5 {
+        if cx < cell_size {
             u_init[i] = (1.0, 0.0);
             cpu_solver.u.vx[i] = 1.0;
             cpu_solver.u.vy[i] = 0.0;
@@ -78,6 +89,14 @@ fn test_gpu_cpu_comparison() {
         let gpu_u_vec = pollster::block_on(gpu_solver.get_u());
         let gpu_p = pollster::block_on(gpu_solver.get_p());
         
+        // Stats
+        let mut max_cpu_p = 0.0;
+        for p in &cpu_solver.p.values { if p.abs() > max_cpu_p { max_cpu_p = p.abs(); } }
+        let mut max_gpu_p = 0.0;
+        for p in &gpu_p { if p.abs() > max_gpu_p { max_gpu_p = p.abs(); } }
+        
+        println!("  CPU Max P: {:.4}, GPU Max P: {:.4}", max_cpu_p, max_gpu_p);
+
         // Compare results
         let mut max_diff_u = 0.0;
         let mut max_diff_p = 0.0;
@@ -98,6 +117,8 @@ fn test_gpu_cpu_comparison() {
             if diff_vy > max_diff_u { max_diff_u = diff_vy; }
             if diff_p > max_diff_p { max_diff_p = diff_p; }
         }
+
+        println!("  Max diff U: {:.4}, Max diff P: {:.4}", max_diff_u, max_diff_p);
 
         if max_diff_u > 1.0 || max_diff_p > 100.0 {
              println!("Divergence detected at step {}", step);

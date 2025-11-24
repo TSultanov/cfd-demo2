@@ -108,8 +108,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let dy = center.y - other_center.y;
             let dist = sqrt(dx*dx + dy*dy);
             
+            // Calculate lambda for interpolation (match flux_rhie_chow)
+            let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+            let d_neigh = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+            let total_dist = d_own + d_neigh;
+            var lambda = 0.5;
+            if (total_dist > 1e-6) {
+                lambda = d_neigh / total_dist;
+            }
+
             let d_p_own = d_p[idx];
-            let d_p_face = 0.5 * (d_p_own + d_p_neigh);
+            let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             
             let coeff = d_p_face * area / dist;
             

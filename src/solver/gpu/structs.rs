@@ -20,7 +20,8 @@ pub struct GpuConstants {
     pub density: f32,
     pub component: u32, // 0: x, 1: y
     pub alpha_p: f32,   // Pressure relaxation
-    pub padding: [u32; 2],
+    pub scheme: u32,    // 0: Upwind, 1: Central, 2: QUICK
+    pub padding: u32,
 }
 
 #[repr(C)]
@@ -56,6 +57,7 @@ pub struct GpuSolver {
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_p: wgpu::Buffer,
+    pub b_grad_component: wgpu::Buffer,
 
     // Matrix Structure (CSR)
     pub b_row_offsets: wgpu::Buffer,

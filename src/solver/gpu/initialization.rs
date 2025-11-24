@@ -98,7 +98,6 @@ impl GpuSolver {
         });
 
         let cell_vols: Vec<f32> = mesh.cell_vol.iter().map(|&x| x as f32).collect();
-        println!("GpuSolver::new - cell_vols[0]: {}", cell_vols[0]);
         let b_cell_vols = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell Volumes Buffer"),
             contents: bytemuck::cast_slice(&cell_vols),
@@ -267,6 +266,12 @@ impl GpuSolver {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let b_grad_component = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grad Component Buffer"),
+            contents: bytemuck::cast_slice(&zero_vecs),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+
         let constants = GpuConstants {
             dt: 0.0001, // Reduced dt
             time: 0.0,
@@ -274,7 +279,8 @@ impl GpuSolver {
             density: 1.0,
             component: 0,
             alpha_p: 1.0, // Default pressure relaxation
-            padding: [0; 2],
+            scheme: 0,    // Upwind
+            padding: 0,
         };
         let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Constants Buffer"),
@@ -622,6 +628,17 @@ impl GpuSolver {
                 // 5: D_P
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 6: Grad Component
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -1139,6 +1156,10 @@ impl GpuSolver {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: b_d_p.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: b_grad_component.as_entire_binding(),
                 },
             ],
         });
@@ -1739,6 +1760,7 @@ impl GpuSolver {
             b_d_p,
             b_fluxes,
             b_grad_p,
+            b_grad_component,
             bg_mesh,
             bg_fields,
             bg_solver,

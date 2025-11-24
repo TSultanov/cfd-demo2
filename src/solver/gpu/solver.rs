@@ -38,6 +38,11 @@ impl GpuSolver {
         self.update_constants();
     }
 
+    pub fn set_scheme(&mut self, scheme: u32) {
+        self.constants.scheme = scheme;
+        self.update_constants();
+    }
+
     fn update_constants(&self) {
         self.context
             .queue
@@ -196,6 +201,10 @@ impl GpuSolver {
 
         // PISO Loop
         for _ in 0..2 {
+            // Set component to 2 for Pressure Gradient calculation
+            self.constants.component = 2;
+            self.update_constants();
+
             // Gradient, flux interpolation, and pressure assembly
             {
                 let mut encoder =
@@ -322,6 +331,27 @@ impl GpuSolver {
             }
             self.context.queue.submit(Some(encoder.finish()));
         }
+
+        // Compute gradients if scheme is not Upwind
+        if self.constants.scheme != 0 {
+             let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Gradient U Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Gradient U Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_gradient);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
     }
 
     pub fn enable_profiling(&self, enable: bool) {
@@ -342,7 +372,10 @@ impl GpuSolver {
         (dot, compute, spmv, std::time::Duration::new(0, 0))
     }
 
-    pub fn compute_gradient(&self) {
+    pub fn compute_gradient(&mut self) {
+        self.constants.component = 2;
+        self.update_constants();
+
         let workgroup_size = 64;
         let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
 

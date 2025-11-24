@@ -15,10 +15,23 @@ struct Vector2 {
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 
+struct Constants {
+    dt: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32, // 0: x, 1: y, 2: p
+    alpha_p: f32,
+    scheme: u32,
+    padding: u32,
+}
+
 // Group 1: Fields
 @group(1) @binding(0) var<storage, read_write> u: array<Vector2>;
 @group(1) @binding(1) var<storage, read_write> p: array<f32>;
+@group(1) @binding(3) var<uniform> constants: Constants;
 @group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
+@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -34,7 +47,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let end = cell_face_offsets[idx + 1];
     let vol = cell_vols[idx];
     let center = cell_centers[idx];
-    let val_c = p[idx];
+    
+    var val_c = 0.0;
+    if (constants.component == 2u) {
+        val_c = p[idx];
+    } else {
+        let u_val = u[idx];
+        val_c = select(u_val.x, u_val.y, constants.component == 1u);
+    }
     
     var grad = Vector2(0.0, 0.0);
     
@@ -62,7 +82,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 other_idx = owner;
             }
             
-            let val_other = p[other_idx];
+            var val_other = 0.0;
+            if (constants.component == 2u) {
+                val_other = p[other_idx];
+            } else {
+                let u_other = u[other_idx];
+                val_other = select(u_other.x, u_other.y, constants.component == 1u);
+            }
+            
             let center_other = cell_centers[other_idx];
             
             let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(face_center.x, face_center.y));
@@ -85,11 +112,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             // Boundary
             let boundary_type = face_boundary[face_idx];
-            if (boundary_type == 2u) { // Outlet (Dirichlet p=0)
-                val_f = 0.0;
+            if (constants.component == 2u) {
+                if (boundary_type == 2u) { // Outlet (Dirichlet p=0)
+                    val_f = 0.0;
+                } else {
+                    // Inlet/Wall (Neumann dp/dn=0)
+                    val_f = val_c;
+                }
             } else {
-                // Inlet/Wall (Neumann dp/dn=0)
-                val_f = val_c;
+                // Velocity Boundary
+                if (boundary_type == 1u) { // Inlet
+                    let u_bc_x = 1.0;
+                    let u_bc_y = 0.0;
+                    val_f = select(u_bc_x, u_bc_y, constants.component == 1u);
+                } else if (boundary_type == 3u) { // Wall
+                    val_f = 0.0;
+                } else { // Outlet
+                    val_f = val_c; // Zero Gradient
+                }
             }
         }
         
@@ -100,5 +140,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     grad.x /= vol;
     grad.y /= vol;
     
-    grad_p[idx] = grad;
+    if (constants.component == 2u) {
+        grad_p[idx] = grad;
+    } else {
+        grad_component[idx] = grad;
+    }
 }

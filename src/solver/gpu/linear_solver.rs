@@ -16,8 +16,8 @@ impl GpuSolver {
     pub async fn solve(&self) -> super::structs::LinearSolverStats {
         let start_time = std::time::Instant::now();
         let max_iter = 1000;
-        let abs_tol = 1e-5;
-        let rel_tol = 1e-2;
+        let abs_tol = 1e-6;
+        let rel_tol = 1e-4;
         let n = self.num_cells;
         let workgroup_size = 64;
         let num_groups = (n + workgroup_size - 1) / workgroup_size;

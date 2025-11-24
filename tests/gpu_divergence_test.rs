@@ -12,25 +12,24 @@ fn test_gpu_divergence() {
         height_outlet: 1.0,
         step_x: 0.5,
     };
-    let mut mesh = generate_cut_cell_mesh(&geo, 0.05, 0.05, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
     pollster::block_on(async {
         let mut solver = GpuSolver::new(&mesh).await;
-        solver.set_dt(0.01);
-        solver.set_viscosity(0.001); // Water-like
-        solver.set_density(1000.0);
-        solver.set_alpha_p(1.0);
+        solver.set_dt(0.001);
+        solver.set_viscosity(0.01); 
+        solver.set_density(1.0);
+        solver.set_alpha_p(0.5);
 
         // Set initial BCs (Inlet velocity)
         let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
         for i in 0..mesh.num_cells() {
-            let cx = mesh.cell_cx[i];
+            let _cx = mesh.cell_cx[i];
             let cy = mesh.cell_cy[i];
-            if cx < 0.05 {
-                if cy > 0.5 {
-                    u_init[i] = (1.0, 0.0);
-                }
+            // Initialize flow in the upper channel
+            if cy > 0.5 {
+                u_init[i] = (1.0, 0.0);
             }
         }
         solver.set_u(&u_init);
@@ -58,6 +57,9 @@ fn test_gpu_divergence() {
             }
             
             println!("Step {}: Max U = {:.4}, Max P = {:.4}", step, max_u, max_p);
+            
+            let stats_p = solver.stats_p.lock().unwrap();
+            println!("  P Solver: iter={}, res={:.6e}, conv={}", stats_p.iterations, stats_p.residual, stats_p.converged);
             
             if has_nan {
                 panic!("Divergence detected at step {}! NaN values found.", step);

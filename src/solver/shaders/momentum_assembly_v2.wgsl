@@ -10,8 +10,8 @@ struct Constants {
     density: f32,
     component: u32,
     alpha_p: f32,
-    padding1: u32,
-    padding2: u32,
+    scheme: u32,
+    padding: u32,
 }
 
 // Group 0: Mesh
@@ -35,6 +35,7 @@ struct Constants {
 @group(1) @binding(3) var<uniform> constants: Constants;
 @group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
 @group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
+@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -187,6 +188,48 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
              
              grad_p_accum.x += val_f_p * normal.x * area;
              grad_p_accum.y += val_f_p * normal.y * area;
+        }
+        
+        // Deferred Correction for Higher Order Schemes
+        if (constants.scheme != 0u && !is_boundary) {
+            let u_other = u[other_idx];
+            let val_other = select(u_other.x, u_other.y, constants.component == 1u);
+            
+            var phi_upwind = val_old;
+            if (flux < 0.0) {
+                phi_upwind = val_other;
+            }
+            
+            var phi_ho = phi_upwind;
+            
+            let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+            let d_o = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+            
+            if (constants.scheme == 1u) { // Central
+                let total_dist = d_c + d_o;
+                var lambda = 0.5;
+                if (total_dist > 1e-6) {
+                    lambda = d_o / total_dist;
+                }
+                phi_ho = lambda * val_old + (1.0 - lambda) * val_other;
+            } else if (constants.scheme == 2u) { // QUICK (Linear Upwind)
+                if (flux > 0.0) {
+                    // From Owner
+                    let grad = grad_component[idx];
+                    let r_x = f_center.x - center.x;
+                    let r_y = f_center.y - center.y;
+                    phi_ho = val_old + (grad.x * r_x + grad.y * r_y);
+                } else {
+                    // From Neighbor
+                    let grad = grad_component[other_idx];
+                    let r_x = f_center.x - other_center.x;
+                    let r_y = f_center.y - other_center.y;
+                    phi_ho = val_other + (grad.x * r_x + grad.y * r_y);
+                }
+            }
+            
+            let correction = flux * (phi_ho - phi_upwind);
+            rhs_val -= correction;
         }
     }
     

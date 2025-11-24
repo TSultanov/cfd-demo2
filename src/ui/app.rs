@@ -138,6 +138,13 @@ impl CFDApp {
             gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
             gpu_solver.set_density(self.current_fluid.density as f32);
             
+            let scheme_idx = match self.selected_scheme {
+                Scheme::Upwind => 0,
+                Scheme::Central => 1,
+                Scheme::QUICK => 2,
+            };
+            gpu_solver.set_scheme(scheme_idx);
+            
             // CPU Init Logic (copied from below)
             let n_cells = solver.mesh.num_cells();
             for i in 0..n_cells {
@@ -315,12 +322,27 @@ impl eframe::App for CFDApp {
                 
                 if ui.radio(matches!(self.selected_scheme, Scheme::Upwind), "Upwind").clicked() {
                     self.selected_scheme = Scheme::Upwind;
+                    if let Some(solver) = &self.gpu_solver {
+                        if let Ok(mut s) = solver.lock() {
+                            s.set_scheme(0);
+                        }
+                    }
                 }
                 if ui.radio(matches!(self.selected_scheme, Scheme::Central), "Central (2nd Order)").clicked() {
                     self.selected_scheme = Scheme::Central;
+                    if let Some(solver) = &self.gpu_solver {
+                        if let Ok(mut s) = solver.lock() {
+                            s.set_scheme(1);
+                        }
+                    }
                 }
                 if ui.radio(matches!(self.selected_scheme, Scheme::QUICK), "QUICK").clicked() {
                     self.selected_scheme = Scheme::QUICK;
+                    if let Some(solver) = &self.gpu_solver {
+                        if let Ok(mut s) = solver.lock() {
+                            s.set_scheme(2);
+                        }
+                    }
                 }
             });
             

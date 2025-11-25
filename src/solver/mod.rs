@@ -4,3 +4,4 @@ pub mod piso;
 pub mod linear_solver;
 pub mod parallel;
 pub mod gpu;
+pub mod float;

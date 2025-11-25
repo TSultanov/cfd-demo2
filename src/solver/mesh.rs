@@ -605,10 +605,6 @@ pub fn generate_cut_cell_mesh(geo: &(impl Geometry + Sync), min_cell_size: f64, 
     println!("Mesh generated. Cells: {}, Faces: {}. Min Vol: {:.6e}, Max Vol: {:.6e}", 
         mesh.num_cells(), mesh.num_faces(), min_vol, max_vol);
 
-    // Enforce smoothing to ensure mesh quality
-    println!("Smoothing mesh...");
-    mesh.smooth(geo, 0.3, 20);
-
     mesh
 }
 

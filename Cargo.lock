@@ -621,6 +621,7 @@ dependencies = [
  "geo",
  "log",
  "nalgebra",
+ "num-traits",
  "pollster",
  "rand",
  "rayon",

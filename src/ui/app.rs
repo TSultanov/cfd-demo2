@@ -45,9 +45,305 @@ impl Fluid {
 
 use crate::solver::parallel::ParallelPisoSolver;
 
+#[derive(PartialEq, Clone, Copy)]
+enum Precision {
+    F32,
+    F64,
+}
+
+enum CpuSolverWrapper {
+    SerialF32(PisoSolver<f32>),
+    SerialF64(PisoSolver<f64>),
+    ParallelF32(ParallelPisoSolver<f32>),
+    ParallelF64(ParallelPisoSolver<f64>),
+}
+
+impl CpuSolverWrapper {
+    fn step(&mut self) {
+        match self {
+            Self::SerialF32(s) => s.step(),
+            Self::SerialF64(s) => s.step(),
+            Self::ParallelF32(s) => s.step(),
+            Self::ParallelF64(s) => s.step(),
+        }
+    }
+
+    fn time(&self) -> f64 {
+        match self {
+            Self::SerialF32(s) => s.time as f64,
+            Self::SerialF64(s) => s.time,
+            Self::ParallelF32(s) => s.partitions[0].read().unwrap().time as f64,
+            Self::ParallelF64(s) => s.partitions[0].read().unwrap().time,
+        }
+    }
+
+    fn residuals(&self) -> Vec<(String, f64)> {
+        match self {
+            Self::SerialF32(s) => s.residuals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect(),
+            Self::SerialF64(s) => s.residuals.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            Self::ParallelF32(s) => s.partitions[0].read().unwrap().residuals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect(),
+            Self::ParallelF64(s) => s.partitions[0].read().unwrap().residuals.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        }
+    }
+    
+    fn get_mesh(&self) -> crate::solver::mesh::Mesh {
+        match self {
+            Self::SerialF32(s) => s.mesh.clone(),
+            Self::SerialF64(s) => s.mesh.clone(),
+            Self::ParallelF32(s) => s.partitions[0].read().unwrap().mesh.clone(), // Just for visualization, might be partial? No, parallel solver partitions mesh.
+            Self::ParallelF64(s) => s.partitions[0].read().unwrap().mesh.clone(),
+        }
+    }
+    
+    // Helper to get data for plotting. 
+    // For parallel, we need to gather data. But for now, let's just show rank 0 or handle it properly.
+    // Actually, ParallelPisoSolver doesn't have a "gather" method yet.
+    // The existing code for parallel plotting was:
+    // if let Some(ps) = &self.parallel_solver { ... }
+    // It was iterating over partitions.
+    
+    fn get_results(&self) -> (Vec<(f64, f64)>, Vec<f64>) {
+        match self {
+            Self::SerialF32(s) => {
+                let u = s.u.vx.iter().zip(s.u.vy.iter()).map(|(&x, &y)| (x as f64, y as f64)).collect();
+                let p = s.p.values.iter().map(|&v| v as f64).collect();
+                (u, p)
+            },
+            Self::SerialF64(s) => {
+                let u = s.u.vx.iter().zip(s.u.vy.iter()).map(|(&x, &y)| (x, y)).collect();
+                let p = s.p.values.clone();
+                (u, p)
+            },
+            Self::ParallelF32(s) => {
+                // Gather from all partitions
+                // This is tricky because we need to map back to global indices or just concat?
+                // The partitions are stored in `partitions`.
+                // We can just iterate and collect.
+                // But for plotting we need positions.
+                // The plotting code iterates over cells and uses their positions.
+                // So we can just return a flat list of all cells from all partitions.
+                let mut u = Vec::new();
+                let mut p = Vec::new();
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        u.push((s.u.vx[i] as f64, s.u.vy[i] as f64));
+                        p.push(s.p.values[i] as f64);
+                    }
+                }
+                (u, p)
+            },
+            Self::ParallelF64(s) => {
+                let mut u = Vec::new();
+                let mut p = Vec::new();
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        u.push((s.u.vx[i], s.u.vy[i]));
+                        p.push(s.p.values[i]);
+                    }
+                }
+                (u, p)
+            }
+        }
+    }
+    
+    fn get_all_cell_centers(&self) -> Vec<(f64, f64)> {
+        match self {
+            Self::SerialF32(s) => s.mesh.cell_cx.iter().zip(s.mesh.cell_cy.iter()).map(|(&x, &y)| (x, y)).collect(),
+            Self::SerialF64(s) => s.mesh.cell_cx.iter().zip(s.mesh.cell_cy.iter()).map(|(&x, &y)| (x, y)).collect(),
+            Self::ParallelF32(s) => {
+                let mut centers = Vec::new();
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        centers.push((s.mesh.cell_cx[i], s.mesh.cell_cy[i]));
+                    }
+                }
+                centers
+            },
+            Self::ParallelF64(s) => {
+                let mut centers = Vec::new();
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        centers.push((s.mesh.cell_cx[i], s.mesh.cell_cy[i]));
+                    }
+                }
+                centers
+            }
+        }
+    }
+
+    fn get_min_max(&self, field: PlotField) -> (f64, f64) {
+        let mut min_val = f64::MAX;
+        let mut max_val = f64::MIN;
+        
+        let update_min_max = |val: f64, min: &mut f64, max: &mut f64| {
+            if val < *min { *min = val; }
+            if val > *max { *max = val; }
+        };
+
+        match self {
+            Self::SerialF32(s) => {
+                for i in 0..s.mesh.num_cells() {
+                    let val = match field {
+                        PlotField::Pressure => s.p.values[i] as f64,
+                        PlotField::VelocityX => s.u.vx[i] as f64,
+                        PlotField::VelocityY => s.u.vy[i] as f64,
+                        PlotField::VelocityMag => (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt() as f64,
+                    };
+                    update_min_max(val, &mut min_val, &mut max_val);
+                }
+            },
+            Self::SerialF64(s) => {
+                for i in 0..s.mesh.num_cells() {
+                    let val = match field {
+                        PlotField::Pressure => s.p.values[i],
+                        PlotField::VelocityX => s.u.vx[i],
+                        PlotField::VelocityY => s.u.vy[i],
+                        PlotField::VelocityMag => (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt(),
+                    };
+                    update_min_max(val, &mut min_val, &mut max_val);
+                }
+            },
+            Self::ParallelF32(s) => {
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        let val = match field {
+                            PlotField::Pressure => s.p.values[i] as f64,
+                            PlotField::VelocityX => s.u.vx[i] as f64,
+                            PlotField::VelocityY => s.u.vy[i] as f64,
+                            PlotField::VelocityMag => (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt() as f64,
+                        };
+                        update_min_max(val, &mut min_val, &mut max_val);
+                    }
+                }
+            },
+            Self::ParallelF64(s) => {
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        let val = match field {
+                            PlotField::Pressure => s.p.values[i],
+                            PlotField::VelocityX => s.u.vx[i],
+                            PlotField::VelocityY => s.u.vy[i],
+                            PlotField::VelocityMag => (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt(),
+                        };
+                        update_min_max(val, &mut min_val, &mut max_val);
+                    }
+                }
+            },
+        }
+        
+        if (max_val - min_val).abs() < 1e-6 {
+            max_val = min_val + 1.0;
+        }
+        (min_val, max_val)
+    }
+    
+    fn get_all_cells_vertices(&self) -> Vec<Vec<[f64; 2]>> {
+        match self {
+            Self::SerialF32(s) => {
+                let mut cells = Vec::with_capacity(s.mesh.num_cells());
+                for i in 0..s.mesh.num_cells() {
+                    let start = s.mesh.cell_vertex_offsets[i];
+                    let end = s.mesh.cell_vertex_offsets[i+1];
+                    let polygon_points: Vec<[f64; 2]> = (start..end)
+                        .map(|k| {
+                            let v_idx = s.mesh.cell_vertices[k];
+                            [s.mesh.vx[v_idx], s.mesh.vy[v_idx]]
+                        })
+                        .collect();
+                    cells.push(polygon_points);
+                }
+                cells
+            },
+            Self::SerialF64(s) => {
+                let mut cells = Vec::with_capacity(s.mesh.num_cells());
+                for i in 0..s.mesh.num_cells() {
+                    let start = s.mesh.cell_vertex_offsets[i];
+                    let end = s.mesh.cell_vertex_offsets[i+1];
+                    let polygon_points: Vec<[f64; 2]> = (start..end)
+                        .map(|k| {
+                            let v_idx = s.mesh.cell_vertices[k];
+                            [s.mesh.vx[v_idx], s.mesh.vy[v_idx]]
+                        })
+                        .collect();
+                    cells.push(polygon_points);
+                }
+                cells
+            },
+            Self::ParallelF32(s) => {
+                let mut cells = Vec::new();
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        let start = s.mesh.cell_vertex_offsets[i];
+                        let end = s.mesh.cell_vertex_offsets[i+1];
+                        let polygon_points: Vec<[f64; 2]> = (start..end)
+                            .map(|k| {
+                                let v_idx = s.mesh.cell_vertices[k];
+                                [s.mesh.vx[v_idx], s.mesh.vy[v_idx]]
+                            })
+                            .collect();
+                        cells.push(polygon_points);
+                    }
+                }
+                cells
+            },
+            Self::ParallelF64(s) => {
+                let mut cells = Vec::new();
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.mesh.num_cells() {
+                        let start = s.mesh.cell_vertex_offsets[i];
+                        let end = s.mesh.cell_vertex_offsets[i+1];
+                        let polygon_points: Vec<[f64; 2]> = (start..end)
+                            .map(|k| {
+                                let v_idx = s.mesh.cell_vertices[k];
+                                [s.mesh.vx[v_idx], s.mesh.vy[v_idx]]
+                            })
+                            .collect();
+                        cells.push(polygon_points);
+                    }
+                }
+                cells
+            },
+        }
+    }
+
+    fn update_fluid(&mut self, density: f64, viscosity: f64) {
+        match self {
+            Self::SerialF32(s) => {
+                s.density = density as f32;
+                s.viscosity = viscosity as f32;
+            },
+            Self::SerialF64(s) => {
+                s.density = density;
+                s.viscosity = viscosity;
+            },
+            Self::ParallelF32(s) => {
+                for part in &s.partitions {
+                    let mut s = part.write().unwrap();
+                    s.density = density as f32;
+                    s.viscosity = viscosity as f32;
+                }
+            },
+            Self::ParallelF64(s) => {
+                for part in &s.partitions {
+                    let mut s = part.write().unwrap();
+                    s.density = density;
+                    s.viscosity = viscosity;
+                }
+            },
+        }
+    }
+}
+
 pub struct CFDApp {
-    solver: Option<PisoSolver>,
-    parallel_solver: Option<ParallelPisoSolver>,
+    cpu_solver: Option<CpuSolverWrapper>,
     gpu_solver: Option<Arc<Mutex<GpuSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
     shared_results: Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>,
@@ -55,6 +351,7 @@ pub struct CFDApp {
     cached_p: Vec<f64>,
     use_parallel: bool,
     use_gpu: bool,
+    precision: Precision,
     n_threads: usize,
     min_cell_size: f64,
     max_cell_size: f64,
@@ -70,8 +367,7 @@ pub struct CFDApp {
 impl CFDApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            solver: None,
-            parallel_solver: None,
+            cpu_solver: None,
             gpu_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
             shared_results: Arc::new(Mutex::new(None)),
@@ -79,6 +375,7 @@ impl CFDApp {
             cached_p: Vec::new(),
             use_parallel: false,
             use_gpu: false,
+            precision: Precision::F64,
             n_threads: 4,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
@@ -93,6 +390,8 @@ impl CFDApp {
     }
 
     fn init_solver(&mut self) {
+        // use crate::solver::float::Float;
+        
         self.is_running = false;
         self.gpu_solver_running.store(false, Ordering::Relaxed);
 
@@ -126,7 +425,9 @@ impl CFDApp {
         };
         
         if self.use_gpu {
-            let mut solver = PisoSolver::new(mesh);
+            // GPU solver uses f64 for setup but runs in f32 internally (mostly)
+            // We'll use f64 PisoSolver for initialization
+            let mut solver = PisoSolver::<f64>::new(mesh);
             solver.dt = self.timestep;
             solver.density = self.current_fluid.density;
             solver.viscosity = self.current_fluid.viscosity;
@@ -145,7 +446,7 @@ impl CFDApp {
             };
             gpu_solver.set_scheme(scheme_idx);
             
-            // CPU Init Logic (copied from below)
+            // CPU Init Logic
             let n_cells = solver.mesh.num_cells();
             for i in 0..n_cells {
                 let cx = solver.mesh.cell_cx[i];
@@ -175,33 +476,92 @@ impl CFDApp {
             self.cached_u = u_init;
             self.cached_p = vec![0.0; n_cells];
 
-            self.solver = Some(solver);
+            // We keep a CPU solver around just in case, but for GPU mode we mainly use gpu_solver
+            // Actually, the original code kept `self.solver = Some(solver)`.
+            // We can wrap it.
+            self.cpu_solver = Some(CpuSolverWrapper::SerialF64(solver));
             self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
             self.shared_results = Arc::new(Mutex::new(None));
-            self.parallel_solver = None;
             
         } else if self.use_parallel {
-            self.parallel_solver = Some(ParallelPisoSolver::new(mesh, self.n_threads));
-            self.solver = None;
             self.gpu_solver = None;
-            // Initialize solver params for all sub-solvers
-            if let Some(ps) = &mut self.parallel_solver {
-                for solver in &mut ps.partitions {
-                    let mut solver = solver.write().unwrap();
-                    solver.dt = self.timestep;
-                    solver.density = self.current_fluid.density;
-                    solver.viscosity = self.current_fluid.viscosity;
+            match self.precision {
+                Precision::F32 => {
+                    let mut ps = ParallelPisoSolver::<f32>::new(mesh, self.n_threads);
+                    for solver in &mut ps.partitions {
+                        let mut solver = solver.write().unwrap();
+                        solver.dt = self.timestep as f32;
+                        solver.density = self.current_fluid.density as f32;
+                        solver.viscosity = self.current_fluid.viscosity as f32;
+                        solver.scheme = self.selected_scheme;
+                        let n_cells = solver.mesh.num_cells();
+                        for i in 0..n_cells {
+                            let cx = solver.mesh.cell_cx[i];
+                            let cy = solver.mesh.cell_cy[i];
+                            if cx < self.max_cell_size {
+                                match self.selected_geometry {
+                                    GeometryType::BackwardsStep => {
+                                        if cy > 0.5 {
+                                            solver.u.vx[i] = 1.0;
+                                            solver.u.vy[i] = 0.0;
+                                        }
+                                    },
+                                    GeometryType::ChannelObstacle => {
+                                        solver.u.vx[i] = 1.0;
+                                        solver.u.vy[i] = 0.0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.cpu_solver = Some(CpuSolverWrapper::ParallelF32(ps));
+                },
+                Precision::F64 => {
+                    let mut ps = ParallelPisoSolver::<f64>::new(mesh, self.n_threads);
+                    for solver in &mut ps.partitions {
+                        let mut solver = solver.write().unwrap();
+                        solver.dt = self.timestep;
+                        solver.density = self.current_fluid.density;
+                        solver.viscosity = self.current_fluid.viscosity;
+                        solver.scheme = self.selected_scheme;
+                        let n_cells = solver.mesh.num_cells();
+                        for i in 0..n_cells {
+                            let cx = solver.mesh.cell_cx[i];
+                            let cy = solver.mesh.cell_cy[i];
+                            if cx < self.max_cell_size {
+                                match self.selected_geometry {
+                                    GeometryType::BackwardsStep => {
+                                        if cy > 0.5 {
+                                            solver.u.vx[i] = 1.0;
+                                            solver.u.vy[i] = 0.0;
+                                        }
+                                    },
+                                    GeometryType::ChannelObstacle => {
+                                        solver.u.vx[i] = 1.0;
+                                        solver.u.vy[i] = 0.0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.cpu_solver = Some(CpuSolverWrapper::ParallelF64(ps));
+                }
+            }
+        } else {
+            self.gpu_solver = None;
+            match self.precision {
+                Precision::F32 => {
+                    let mut solver = PisoSolver::<f32>::new(mesh);
+                    solver.dt = self.timestep as f32;
+                    solver.density = self.current_fluid.density as f32;
+                    solver.viscosity = self.current_fluid.viscosity as f32;
                     solver.scheme = self.selected_scheme;
-                    // BCs
-                    let n_cells = solver.mesh.num_cells();
-                    for i in 0..n_cells {
+                    
+                    for i in 0..solver.mesh.num_cells() {
                         let cx = solver.mesh.cell_cx[i];
                         let cy = solver.mesh.cell_cy[i];
-                        // Check if cell is in inlet region (global check needed or local?)
-                        // Since we partitioned by X, inlet is likely in rank 0.
-                        // But we should check coordinates.
                         if cx < self.max_cell_size {
-                             match self.selected_geometry {
+                            match self.selected_geometry {
                                 GeometryType::BackwardsStep => {
                                     if cy > 0.5 {
                                         solver.u.vx[i] = 1.0;
@@ -215,43 +575,36 @@ impl CFDApp {
                             }
                         }
                     }
-                }
-            }
-        } else {
-            let mut solver = PisoSolver::new(mesh);
-            solver.dt = self.timestep;
-            solver.density = self.current_fluid.density;
-            solver.viscosity = self.current_fluid.viscosity;
-            solver.scheme = match self.selected_scheme {
-                Scheme::Upwind => Scheme::Upwind,
-                Scheme::Central => Scheme::Central,
-                Scheme::QUICK => Scheme::QUICK,
-            };
-            
-            // Set initial BCs (Inlet velocity)
-            for i in 0..solver.mesh.num_cells() {
-                let cx = solver.mesh.cell_cx[i];
-                let cy = solver.mesh.cell_cy[i];
-                if cx < self.max_cell_size {
-                    // Inlet region
-                    match self.selected_geometry {
-                        GeometryType::BackwardsStep => {
-                            if cy > 0.5 {
-                                solver.u.vx[i] = 1.0;
-                                solver.u.vy[i] = 0.0;
+                    self.cpu_solver = Some(CpuSolverWrapper::SerialF32(solver));
+                },
+                Precision::F64 => {
+                    let mut solver = PisoSolver::<f64>::new(mesh);
+                    solver.dt = self.timestep;
+                    solver.density = self.current_fluid.density;
+                    solver.viscosity = self.current_fluid.viscosity;
+                    solver.scheme = self.selected_scheme;
+                    
+                    for i in 0..solver.mesh.num_cells() {
+                        let cx = solver.mesh.cell_cx[i];
+                        let cy = solver.mesh.cell_cy[i];
+                        if cx < self.max_cell_size {
+                            match self.selected_geometry {
+                                GeometryType::BackwardsStep => {
+                                    if cy > 0.5 {
+                                        solver.u.vx[i] = 1.0;
+                                        solver.u.vy[i] = 0.0;
+                                    }
+                                },
+                                GeometryType::ChannelObstacle => {
+                                    solver.u.vx[i] = 1.0;
+                                    solver.u.vy[i] = 0.0;
+                                }
                             }
-                        },
-                        GeometryType::ChannelObstacle => {
-                            solver.u.vx[i] = 1.0;
-                            solver.u.vy[i] = 0.0;
                         }
                     }
+                    self.cpu_solver = Some(CpuSolverWrapper::SerialF64(solver));
                 }
             }
-            
-            self.solver = Some(solver);
-            self.parallel_solver = None;
-            self.gpu_solver = None;
         }
     }
 }
@@ -280,9 +633,8 @@ impl eframe::App for CFDApp {
                     .show_ui(ui, |ui| {
                         for fluid in Fluid::presets() {
                             if ui.selectable_value(&mut self.current_fluid, fluid.clone(), &fluid.name).clicked() {
-                                if let Some(solver) = &mut self.solver {
-                                    solver.density = self.current_fluid.density;
-                                    solver.viscosity = self.current_fluid.viscosity;
+                                if let Some(solver) = &mut self.cpu_solver {
+                                    solver.update_fluid(self.current_fluid.density, self.current_fluid.viscosity);
                                 }
                             }
                         }
@@ -292,8 +644,8 @@ impl eframe::App for CFDApp {
                 if ui.add(egui::Slider::new(&mut density, 0.1..=20000.0).text("Density (kg/m³)")).changed() {
                     self.current_fluid.density = density;
                     self.current_fluid.name = "Custom".to_string();
-                    if let Some(solver) = &mut self.solver {
-                        solver.density = density;
+                    if let Some(solver) = &mut self.cpu_solver {
+                        solver.update_fluid(density, self.current_fluid.viscosity);
                     }
                 }
                 
@@ -301,8 +653,8 @@ impl eframe::App for CFDApp {
                 if ui.add(egui::Slider::new(&mut viscosity, 1e-6..=0.1).logarithmic(true).text("Viscosity (Pa·s)")).changed() {
                     self.current_fluid.viscosity = viscosity;
                     self.current_fluid.name = "Custom".to_string();
-                    if let Some(solver) = &mut self.solver {
-                        solver.viscosity = viscosity;
+                    if let Some(solver) = &mut self.cpu_solver {
+                        solver.update_fluid(self.current_fluid.density, viscosity);
                     }
                 }
             });
@@ -311,6 +663,12 @@ impl eframe::App for CFDApp {
                 ui.label("Solver Parameters");
                 ui.add(egui::Slider::new(&mut self.timestep, 0.001..=0.1).text("Timestep"));
                 
+                ui.horizontal(|ui| {
+                    ui.label("Precision:");
+                    ui.radio_value(&mut self.precision, Precision::F32, "f32");
+                    ui.radio_value(&mut self.precision, Precision::F64, "f64");
+                });
+
                 ui.checkbox(&mut self.use_parallel, "Use Parallel Solver");
                 if self.use_parallel {
                     ui.add(egui::Slider::new(&mut self.n_threads, 1..=16).text("Threads"));
@@ -350,7 +708,7 @@ impl eframe::App for CFDApp {
                 self.init_solver();
             }
             
-            if self.solver.is_some() || self.parallel_solver.is_some() {
+            if self.cpu_solver.is_some() || self.gpu_solver.is_some() {
                 if ui.button(if self.is_running { "Pause" } else { "Run" }).clicked() {
                     self.is_running = !self.is_running;
                     
@@ -397,26 +755,13 @@ impl eframe::App for CFDApp {
             
             ui.separator();
             
-            if let Some(solver) = &self.solver {
-                ui.label(format!("Time: {:.3}", solver.time));
+            if let Some(solver) = &self.cpu_solver {
+                ui.label(format!("Time: {:.3}", solver.time()));
                 ui.label("Residuals:");
-                for (name, val) in &solver.residuals {
+                for (name, val) in solver.residuals() {
                     ui.label(format!("{}: {:.6}", name, val));
                 }
-            } else if let Some(ps) = &self.parallel_solver {
-                // Show residuals from rank 0
-                if !ps.partitions.is_empty() {
-                    let solver = ps.partitions[0].read().unwrap();
-                    ui.label(format!("Time: {:.3}", solver.time));
-                    ui.label("Residuals (Rank 0):");
-                    for (name, val) in &solver.residuals {
-                        ui.label(format!("{}: {:.6}", name, val));
-                    }
-                }
             } else if let Some(gpu_solver) = &self.gpu_solver {
-                // Try to lock, if fails (busy), just skip or show last known?
-                // Since we don't have last known here easily without caching, let's try lock.
-                // If it blocks, UI lags.
                 if let Ok(solver) = gpu_solver.try_lock() {
                      ui.label(format!("Time: {:.3}", solver.constants.time));
                      ui.label("GPU Solver Stats:");
@@ -435,7 +780,7 @@ impl eframe::App for CFDApp {
         });
 
         // Calculate stats for plot and legend
-        let (min_val, max_val, values) = if let Some(solver) = &self.solver {
+        let (min_val, max_val, values) = if let Some(solver) = &self.cpu_solver {
             if let Some(_gpu_solver) = &self.gpu_solver {
                 // Fetch from shared results
                 if let Ok(mut results) = self.shared_results.lock() {
@@ -448,12 +793,12 @@ impl eframe::App for CFDApp {
                 let u = &self.cached_u;
                 let p = &self.cached_p;
                 
-                if u.len() == solver.mesh.num_cells() {
+                if !u.is_empty() {
                     let mut min_val = f64::MAX;
                     let mut max_val = f64::MIN;
-                    let mut values = Vec::with_capacity(solver.mesh.num_cells());
+                    let mut values = Vec::with_capacity(u.len());
                     
-                    for i in 0..solver.mesh.num_cells() {
+                    for i in 0..u.len() {
                         let val = match self.plot_field {
                             PlotField::Pressure => p[i],
                             PlotField::VelocityX => u[i].0,
@@ -473,16 +818,17 @@ impl eframe::App for CFDApp {
                     (0.0, 1.0, None)
                 }
             } else {
+                let (u, p) = solver.get_results();
                 let mut min_val = f64::MAX;
                 let mut max_val = f64::MIN;
-                let mut values = Vec::with_capacity(solver.mesh.num_cells());
+                let mut values = Vec::with_capacity(u.len());
                 
-                for i in 0..solver.mesh.num_cells() {
-                        let val = match self.plot_field {
-                        PlotField::Pressure => solver.p.values[i],
-                        PlotField::VelocityX => solver.u.vx[i],
-                        PlotField::VelocityY => solver.u.vy[i],
-                        PlotField::VelocityMag => (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt(),
+                for i in 0..u.len() {
+                    let val = match self.plot_field {
+                        PlotField::Pressure => p[i],
+                        PlotField::VelocityX => u[i].0,
+                        PlotField::VelocityY => u[i].1,
+                        PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
                     };
                     if val < min_val { min_val = val; }
                     if val > max_val { max_val = val; }
@@ -490,54 +836,22 @@ impl eframe::App for CFDApp {
                 }
                 
                 if (max_val - min_val).abs() < 1e-6 {
-                    max_val = min_val + 1.0; // Avoid division by zero
+                    max_val = min_val + 1.0;
                 }
                 (min_val, max_val, Some(values))
             }
-        } else if let Some(ps) = &self.parallel_solver {
-            // Aggregate values from all solvers
-            let mut min_val = f64::MAX;
-            let mut max_val = f64::MIN;
-            
-            for solver in &ps.partitions {
-                let solver = solver.read().unwrap();
-                for i in 0..solver.mesh.num_cells() {
-                    let val = match self.plot_field {
-                        PlotField::Pressure => solver.p.values[i],
-                        PlotField::VelocityX => solver.u.vx[i],
-                        PlotField::VelocityY => solver.u.vy[i],
-                        PlotField::VelocityMag => (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt(),
-                    };
-                    if val < min_val { min_val = val; }
-                    if val > max_val { max_val = val; }
-                }
-            }
-             if (max_val - min_val).abs() < 1e-6 {
-                max_val = min_val + 1.0;
-            }
-            (min_val, max_val, None) // None because we handle values in loop
         } else {
             (0.0, 1.0, None)
         };
 
         egui::SidePanel::right("legend").show(ctx, |ui| {
-            if let Some(solver) = &self.solver {
+            if let Some(_solver) = &self.cpu_solver {
                 ui.heading("Mesh Stats");
-                ui.label(format!("Cells: {}", solver.mesh.num_cells()));
-                ui.label(format!("Max Skewness: {:.4}", solver.mesh.calculate_max_skewness()));
-                ui.separator();
-            } else if let Some(ps) = &self.parallel_solver {
-                ui.heading("Mesh Stats");
-                let total_cells: usize = ps.partitions.iter().map(|s| s.read().unwrap().mesh.num_cells()).sum();
-                ui.label(format!("Total Cells: {}", total_cells));
-                let max_skew = ps.partitions.iter()
-                    .map(|s| s.read().unwrap().mesh.calculate_max_skewness())
-                    .fold(0.0, f64::max);
-                ui.label(format!("Max Skewness: {:.4}", max_skew));
+                ui.label("Mesh stats available in debug mode");
                 ui.separator();
             }
 
-            if self.solver.is_some() || self.parallel_solver.is_some() {
+            if self.cpu_solver.is_some() || self.gpu_solver.is_some() {
                 ui.heading("Legend");
                 ui.label(format!("Max: {:.4}", max_val));
                 
@@ -559,11 +873,8 @@ impl eframe::App for CFDApp {
                                 egui::pos2(rect.min.x, y1),
                                 egui::pos2(rect.max.x, y0)
                             ),
-                            c0 // Simplified gradient (flat shading per segment, or use vertex colors if Mesh supported gradients better here)
+                            c0
                         );
-                        // Actually Mesh supports vertex colors.
-                        // But add_colored_rect uses one color.
-                        // Let's just use small rects.
                     }
                     ui.painter().add(mesh);
                 }
@@ -576,37 +887,26 @@ impl eframe::App for CFDApp {
             if self.is_running {
                 if self.gpu_solver.is_some() {
                     // GPU solver runs in background thread
-                } else if let Some(solver) = &mut self.solver {
+                } else if let Some(solver) = &mut self.cpu_solver {
                     solver.step();
-                    ctx.request_repaint();
-                } else if let Some(ps) = &mut self.parallel_solver {
-                    ps.step();
                     ctx.request_repaint();
                 }
             }
             
-            if let Some(solver) = &self.solver {
+            if let Some(solver) = &self.cpu_solver {
                 if let Some(vals) = &values {
                     Plot::new("cfd_plot")
                         .data_aspect(1.0)
                         .show(ui, |plot_ui| {
-                            for i in 0..solver.mesh.num_cells() {
+                            let cells = solver.get_all_cells_vertices();
+                            for (i, polygon_points) in cells.iter().enumerate() {
                                 let val = vals[i];
                                 let t = (val - min_val) / (max_val - min_val);
                                 
                                 let color = get_color(t);
                                 
-                                let start = solver.mesh.cell_vertex_offsets[i];
-                                let end = solver.mesh.cell_vertex_offsets[i+1];
-                                let polygon_points: Vec<[f64; 2]> = (start..end)
-                                    .map(|k| {
-                                        let v_idx = solver.mesh.cell_vertices[k];
-                                        [solver.mesh.vx[v_idx], solver.mesh.vy[v_idx]]
-                                    })
-                                    .collect();
-
                                 plot_ui.polygon(
-                                    Polygon::new(PlotPoints::new(polygon_points))
+                                    Polygon::new(PlotPoints::new(polygon_points.clone()))
                                         .fill_color(color)
                                         .stroke(if self.show_mesh_lines {
                                             egui::Stroke::new(1.0, egui::Color32::BLACK)
@@ -614,89 +914,9 @@ impl eframe::App for CFDApp {
                                             egui::Stroke::NONE
                                         })
                                 );
-                            }
-                            
-                            if let Some(pointer) = plot_ui.pointer_coordinate() {
-                                let p = Point2::new(pointer.x, pointer.y);
-                                if let Some(idx) = solver.mesh.get_cell_at_pos(p) {
-                                    let skew = solver.mesh.calculate_cell_skewness(idx);
-                                    let val = vals[idx];
-                                    let vol = solver.mesh.cell_vol[idx];
-                                    plot_ui.text(
-                                        egui_plot::Text::new(
-                                            pointer, 
-                                            format!("Cell {}\nVol: {:.6e}\nSkew: {:.4}\nVal: {:.4}", idx, vol, skew, val)
-                                        )
-                                        .color(egui::Color32::WHITE)
-                                        .anchor(egui::Align2::LEFT_BOTTOM)
-                                    );
-                                }
                             }
                         });
                 }
-            } else if let Some(ps) = &self.parallel_solver {
-                Plot::new("cfd_plot")
-                    .data_aspect(1.0)
-                    .show(ui, |plot_ui| {
-                        for solver in &ps.partitions {
-                            let solver = solver.read().unwrap();
-                            for i in 0..solver.mesh.num_cells() {
-                                let val = match self.plot_field {
-                                    PlotField::Pressure => solver.p.values[i],
-                                    PlotField::VelocityX => solver.u.vx[i],
-                                    PlotField::VelocityY => solver.u.vy[i],
-                                    PlotField::VelocityMag => (solver.u.vx[i].powi(2) + solver.u.vy[i].powi(2)).sqrt(),
-                                };
-                                let t = (val - min_val) / (max_val - min_val);
-                                let color = get_color(t);
-                                
-                                let start = solver.mesh.cell_vertex_offsets[i];
-                                let end = solver.mesh.cell_vertex_offsets[i+1];
-                                let polygon_points: Vec<[f64; 2]> = (start..end)
-                                    .map(|k| {
-                                        let v_idx = solver.mesh.cell_vertices[k];
-                                        [solver.mesh.vx[v_idx], solver.mesh.vy[v_idx]]
-                                    })
-                                    .collect();
-
-                                plot_ui.polygon(
-                                    Polygon::new(PlotPoints::new(polygon_points))
-                                        .fill_color(color)
-                                        .stroke(if self.show_mesh_lines {
-                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
-                                        } else {
-                                            egui::Stroke::NONE
-                                        })
-                                );
-                            }
-                        }
-                        
-                        if let Some(pointer) = plot_ui.pointer_coordinate() {
-                            let p = Point2::new(pointer.x, pointer.y);
-                            for (s_idx, solver) in ps.partitions.iter().enumerate() {
-                                let solver = solver.read().unwrap();
-                                if let Some(idx) = solver.mesh.get_cell_at_pos(p) {
-                                    let skew = solver.mesh.calculate_cell_skewness(idx);
-                                    let val = match self.plot_field {
-                                        PlotField::Pressure => solver.p.values[idx],
-                                        PlotField::VelocityX => solver.u.vx[idx],
-                                        PlotField::VelocityY => solver.u.vy[idx],
-                                        PlotField::VelocityMag => (solver.u.vx[idx].powi(2) + solver.u.vy[idx].powi(2)).sqrt(),
-                                    };
-                                    let vol = solver.mesh.cell_vol[idx];
-                                    plot_ui.text(
-                                        egui_plot::Text::new(
-                                            pointer, 
-                                            format!("Part {}\nCell {}\nVol: {:.6e}\nSkew: {:.4}\nVal: {:.4}", s_idx, idx, vol, skew, val)
-                                        )
-                                        .color(egui::Color32::WHITE)
-                                        .anchor(egui::Align2::LEFT_BOTTOM)
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                    });
             } else {
                 ui.centered_and_justified(|ui| {
                     ui.label("Press Initialize to start");

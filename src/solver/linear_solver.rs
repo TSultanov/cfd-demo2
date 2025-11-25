@@ -1,36 +1,36 @@
-use wide::f64x4;
+use crate::solver::float::{Float, Simd};
 
-pub trait SolverOps {
-    fn dot(&self, a: &[f64], b: &[f64]) -> f64;
-    fn mat_vec_mul(&self, matrix: &SparseMatrix, x: &[f64], y: &mut [f64]);
-    fn norm(&self, a: &[f64]) -> f64 {
+pub trait SolverOps<T: Float> {
+    fn dot(&self, a: &[T], b: &[T]) -> T;
+    fn mat_vec_mul(&self, matrix: &SparseMatrix<T>, x: &[T], y: &mut [T]);
+    fn norm(&self, a: &[T]) -> T {
         self.dot(a, a).sqrt()
     }
-    fn exchange_halo(&self, _data: &[f64]) -> Vec<f64> {
+    fn exchange_halo(&self, _data: &[T]) -> Vec<T> {
         Vec::new()
     }
 }
 
 pub struct SerialOps;
-impl SolverOps for SerialOps {
-    fn dot(&self, a: &[f64], b: &[f64]) -> f64 {
+impl<T: Float> SolverOps<T> for SerialOps {
+    fn dot(&self, a: &[T], b: &[T]) -> T {
         dot(a, b)
     }
-    fn mat_vec_mul(&self, matrix: &SparseMatrix, x: &[f64], y: &mut [f64]) {
+    fn mat_vec_mul(&self, matrix: &SparseMatrix<T>, x: &[T], y: &mut [T]) {
         matrix.mat_vec_mul(x, y);
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct SparseMatrix {
-    pub values: Vec<f64>,
+pub struct SparseMatrix<T: Float> {
+    pub values: Vec<T>,
     pub col_indices: Vec<usize>,
     pub row_offsets: Vec<usize>,
     pub n_rows: usize,
     pub n_cols: usize,
 }
 
-impl SparseMatrix {
+impl<T: Float> SparseMatrix<T> {
     pub fn new(n_rows: usize, n_cols: usize) -> Self {
         Self {
             values: Vec::new(),
@@ -41,7 +41,7 @@ impl SparseMatrix {
         }
     }
 
-    pub fn from_triplets(n_rows: usize, n_cols: usize, triplets: &[(usize, usize, f64)]) -> Self {
+    pub fn from_triplets(n_rows: usize, n_cols: usize, triplets: &[(usize, usize, T)]) -> Self {
         let mut row_counts = vec![0; n_rows];
         for &(r, _, _) in triplets {
             row_counts[r] += 1;
@@ -54,7 +54,7 @@ impl SparseMatrix {
         
         let mut mat = Self::new(n_rows, n_cols);
         mat.row_offsets = row_offsets.clone();
-        mat.values = vec![0.0; triplets.len()];
+        mat.values = vec![T::zero(); triplets.len()];
         mat.col_indices = vec![0; triplets.len()];
         
         let mut current_row_indices = row_offsets.clone();
@@ -69,41 +69,41 @@ impl SparseMatrix {
         mat
     }
 
-    pub fn mat_vec_mul(&self, x: &[f64], y: &mut [f64]) {
+    pub fn mat_vec_mul(&self, x: &[T], y: &mut [T]) {
         assert_eq!(x.len(), self.n_cols);
         assert_eq!(y.len(), self.n_rows);
         
         for i in 0..self.n_rows {
-            let mut sum = 0.0;
+            let mut sum = T::zero();
             for j in self.row_offsets[i]..self.row_offsets[i+1] {
-                sum += self.values[j] * x[self.col_indices[j]];
+                sum = sum + self.values[j] * x[self.col_indices[j]];
             }
             y[i] = sum;
         }
     }
 }
 
-pub fn solve_bicgstab<O: SolverOps>(
-    a: &SparseMatrix,
-    b: &[f64],
-    x: &mut [f64],
+pub fn solve_bicgstab<T: Float, O: SolverOps<T>>(
+    a: &SparseMatrix<T>,
+    b: &[T],
+    x: &mut [T],
     max_iter: usize,
-    tol: f64,
+    tol: T,
     ops: &O,
-) -> (usize, f64, f64) {
+) -> (usize, T, T) {
     let n = b.len();
-    let mut r = vec![0.0; n];
+    let mut r = vec![T::zero(); n];
     ops.mat_vec_mul(a, x, &mut r);
     
     // r = b - Ax
     let mut i = 0;
-    while i + 4 <= n {
-        let vb = f64x4::from(&b[i..i+4]);
-        let _vr = f64x4::from(&r[i..i+4]);
+    let lanes = T::Simd::LANES;
+    while i + lanes <= n {
+        let vb = T::Simd::from_slice(&b[i..i+lanes]);
+        let _vr = T::Simd::from_slice(&r[i..i+lanes]);
         let res = vb - _vr;
-        let res_arr: [f64; 4] = res.into();
-        r[i..i+4].copy_from_slice(&res_arr);
-        i += 4;
+        res.write_to_slice(&mut r[i..i+lanes]);
+        i += lanes;
     }
     while i < n {
         r[i] = b[i] - r[i];
@@ -116,44 +116,53 @@ pub fn solve_bicgstab<O: SolverOps>(
     }
 
     let r0 = r.clone();
-    let mut rho_old = 1.0;
-    let mut alpha = 1.0;
-    let mut omega = 1.0;
-    let mut v = vec![0.0; n];
-    let mut p = vec![0.0; n];
+    let mut rho_old = T::one();
+    let mut alpha = T::one();
+    let mut omega = T::one();
+    let mut v = vec![T::zero(); n];
+    let mut p = vec![T::zero(); n];
     
     let mut rho_new;
-    let mut s = vec![0.0; n];
-    let mut t = vec![0.0; n];
+    let mut s = vec![T::zero(); n];
+    let mut t = vec![T::zero(); n];
     
     for iter in 0..max_iter {
         rho_new = ops.dot(&r0, &r);
         
         if rho_new.is_nan() {
             println!("BiCGStab: rho_new is NaN at iter {}", iter);
-            return (iter, f64::NAN, init_resid);
+            return (iter, T::nan(), init_resid);
         }
         
-        if rho_new.abs() < 1e-20 {
+        if rho_new.abs() < T::val_from_f64(1e-20) {
             break;
         }
         
         if iter == 0 {
-            p.copy_from_slice(&r);
+            // p = r
+            let mut i = 0;
+            while i + lanes <= n {
+                let vr = T::Simd::from_slice(&r[i..i+lanes]);
+                vr.write_to_slice(&mut p[i..i+lanes]);
+                i += lanes;
+            }
+            while i < n {
+                p[i] = r[i];
+                i += 1;
+            }
         } else {
             let beta = (rho_new / rho_old) * (alpha / omega);
-            let v_beta = f64x4::splat(beta);
-            let v_omega = f64x4::splat(omega);
+            let v_beta = T::Simd::splat(beta);
+            let v_omega = T::Simd::splat(omega);
             
             let mut i = 0;
-            while i + 4 <= n {
-                let vr = f64x4::from(&r[i..i+4]);
-                let vp = f64x4::from(&p[i..i+4]);
-                let vv = f64x4::from(&v[i..i+4]);
+            while i + lanes <= n {
+                let vr = T::Simd::from_slice(&r[i..i+lanes]);
+                let vp = T::Simd::from_slice(&p[i..i+lanes]);
+                let vv = T::Simd::from_slice(&v[i..i+lanes]);
                 let res = vr + v_beta * (vp - v_omega * vv);
-                let res_arr: [f64; 4] = res.into();
-                p[i..i+4].copy_from_slice(&res_arr);
-                i += 4;
+                res.write_to_slice(&mut p[i..i+lanes]);
+                i += lanes;
             }
             while i < n {
                 p[i] = r[i] + beta * (p[i] - omega * v[i]);
@@ -163,21 +172,20 @@ pub fn solve_bicgstab<O: SolverOps>(
 
         ops.mat_vec_mul(a, &p, &mut v);
         let r0_v = ops.dot(&r0, &v);
-        if r0_v.abs() < 1e-20 {
+        if r0_v.abs() < T::val_from_f64(1e-20) {
             break;
         }
         alpha = rho_new / r0_v;
         
         // s = r - alpha * v
-        let v_alpha = f64x4::splat(alpha);
+        let v_alpha = T::Simd::splat(alpha);
         let mut i = 0;
-        while i + 4 <= n {
-            let vr = f64x4::from(&r[i..i+4]);
-            let vv = f64x4::from(&v[i..i+4]);
+        while i + lanes <= n {
+            let vr = T::Simd::from_slice(&r[i..i+lanes]);
+            let vv = T::Simd::from_slice(&v[i..i+lanes]);
             let res = vr - v_alpha * vv;
-            let res_arr: [f64; 4] = res.into();
-            s[i..i+4].copy_from_slice(&res_arr);
-            i += 4;
+            res.write_to_slice(&mut s[i..i+lanes]);
+            i += lanes;
         }
         while i < n {
             s[i] = r[i] - alpha * v[i];
@@ -186,7 +194,19 @@ pub fn solve_bicgstab<O: SolverOps>(
         
         let norm_s = ops.norm(&s);
         if norm_s < tol {
-            x.iter_mut().zip(p.iter()).for_each(|(x_val, p_val)| *x_val += alpha * p_val);
+            // x = x + alpha * p
+            let mut i = 0;
+            while i + lanes <= n {
+                let vx = T::Simd::from_slice(&x[i..i+lanes]);
+                let vp = T::Simd::from_slice(&p[i..i+lanes]);
+                let res = vx + v_alpha * vp;
+                res.write_to_slice(&mut x[i..i+lanes]);
+                i += lanes;
+            }
+            while i < n {
+                x[i] = x[i] + alpha * p[i];
+                i += 1;
+            }
             return (iter + 1, norm_s, init_resid);
         }
         
@@ -194,35 +214,32 @@ pub fn solve_bicgstab<O: SolverOps>(
         let t_s = ops.dot(&t, &s);
         let t_t = ops.dot(&t, &t);
         
-        if t_t.abs() < 1e-20 {
-             omega = 0.0;
+        if t_t.abs() < T::val_from_f64(1e-20) {
+             omega = T::zero();
         } else {
              omega = t_s / t_t;
         }
         
         // x = x + alpha * p + omega * s
         // r = s - omega * t
-        let v_omega = f64x4::splat(omega);
+        let v_omega = T::Simd::splat(omega);
         let mut i = 0;
-        while i + 4 <= n {
-            let vx = f64x4::from(&x[i..i+4]);
-            let vp = f64x4::from(&p[i..i+4]);
-            let vs = f64x4::from(&s[i..i+4]);
-            let _vr = f64x4::from(&r[i..i+4]); // r becomes new r
-            let vt = f64x4::from(&t[i..i+4]);
+        while i + lanes <= n {
+            let vx = T::Simd::from_slice(&x[i..i+lanes]);
+            let vp = T::Simd::from_slice(&p[i..i+lanes]);
+            let vs = T::Simd::from_slice(&s[i..i+lanes]);
+            let _vr = T::Simd::from_slice(&r[i..i+lanes]); // r becomes new r
+            let vt = T::Simd::from_slice(&t[i..i+lanes]);
             
             let res_x = vx + v_alpha * vp + v_omega * vs;
             let res_r = vs - v_omega * vt; // r = s - omega * t
             
-            let res_x_arr: [f64; 4] = res_x.into();
-            let res_r_arr: [f64; 4] = res_r.into();
-            
-            x[i..i+4].copy_from_slice(&res_x_arr);
-            r[i..i+4].copy_from_slice(&res_r_arr);
-            i += 4;
+            res_x.write_to_slice(&mut x[i..i+lanes]);
+            res_r.write_to_slice(&mut r[i..i+lanes]);
+            i += lanes;
         }
         while i < n {
-            x[i] += alpha * p[i] + omega * s[i];
+            x[i] = x[i] + alpha * p[i] + omega * s[i];
             r[i] = s[i] - omega * t[i];
             i += 1;
         }
@@ -232,7 +249,7 @@ pub fn solve_bicgstab<O: SolverOps>(
             return (iter + 1, resid, init_resid);
         }
         
-        if omega.abs() < 1e-20 {
+        if omega.abs() < T::val_from_f64(1e-20) {
             break;
         }
         
@@ -242,27 +259,27 @@ pub fn solve_bicgstab<O: SolverOps>(
     (max_iter, ops.norm(&r), init_resid)
 }
 
-pub fn solve_cg<O: SolverOps>(
-    a: &SparseMatrix,
-    b: &[f64],
-    x: &mut [f64],
+pub fn solve_cg<T: Float, O: SolverOps<T>>(
+    a: &SparseMatrix<T>,
+    b: &[T],
+    x: &mut [T],
     max_iter: usize,
-    tol: f64,
+    tol: T,
     ops: &O,
-) -> (usize, f64, f64) {
+) -> (usize, T, T) {
     let n = b.len();
-    let mut r = vec![0.0; n];
+    let mut r = vec![T::zero(); n];
     ops.mat_vec_mul(a, x, &mut r);
     
     // r = b - Ax
     let mut i = 0;
-    while i + 4 <= n {
-        let vb = f64x4::from(&b[i..i+4]);
-        let _vr = f64x4::from(&r[i..i+4]);
+    let lanes = T::Simd::LANES;
+    while i + lanes <= n {
+        let vb = T::Simd::from_slice(&b[i..i+lanes]);
+        let _vr = T::Simd::from_slice(&r[i..i+lanes]);
         let res = vb - _vr;
-        let res_arr: [f64; 4] = res.into();
-        r[i..i+4].copy_from_slice(&res_arr);
-        i += 4;
+        res.write_to_slice(&mut r[i..i+lanes]);
+        i += lanes;
     }
     while i < n {
         r[i] = b[i] - r[i];
@@ -273,7 +290,7 @@ pub fn solve_cg<O: SolverOps>(
     
     let mut p = r.clone();
     let mut rsold = ops.dot(&r, &r);
-    let mut q = vec![0.0; n];
+    let mut q = vec![T::zero(); n];
     
     for iter in 0..max_iter {
         if rsold.sqrt() < tol {
@@ -282,32 +299,29 @@ pub fn solve_cg<O: SolverOps>(
         
         ops.mat_vec_mul(a, &p, &mut q);
         let p_q = ops.dot(&p, &q);
-        if p_q.abs() < 1e-20 {
+        if p_q.abs() < T::val_from_f64(1e-20) {
             break;
         }
         let alpha = rsold / p_q;
         
-        let v_alpha = f64x4::splat(alpha);
+        let v_alpha = T::Simd::splat(alpha);
         let mut i = 0;
-        while i + 4 <= n {
-            let vx = f64x4::from(&x[i..i+4]);
-            let vp = f64x4::from(&p[i..i+4]);
-            let vr = f64x4::from(&r[i..i+4]);
-            let vq = f64x4::from(&q[i..i+4]);
+        while i + lanes <= n {
+            let vx = T::Simd::from_slice(&x[i..i+lanes]);
+            let vp = T::Simd::from_slice(&p[i..i+lanes]);
+            let vr = T::Simd::from_slice(&r[i..i+lanes]);
+            let vq = T::Simd::from_slice(&q[i..i+lanes]);
             
             let res_x = vx + v_alpha * vp;
             let res_r = vr - v_alpha * vq;
             
-            let res_x_arr: [f64; 4] = res_x.into();
-            let res_r_arr: [f64; 4] = res_r.into();
-            
-            x[i..i+4].copy_from_slice(&res_x_arr);
-            r[i..i+4].copy_from_slice(&res_r_arr);
-            i += 4;
+            res_x.write_to_slice(&mut x[i..i+lanes]);
+            res_r.write_to_slice(&mut r[i..i+lanes]);
+            i += lanes;
         }
         while i < n {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * q[i];
+            x[i] = x[i] + alpha * p[i];
+            r[i] = r[i] - alpha * q[i];
             i += 1;
         }
         
@@ -317,15 +331,14 @@ pub fn solve_cg<O: SolverOps>(
         }
         
         let p_val = rsnew / rsold;
-        let v_pval = f64x4::splat(p_val);
+        let v_pval = T::Simd::splat(p_val);
         let mut i = 0;
-        while i + 4 <= n {
-            let vr = f64x4::from(&r[i..i+4]);
-            let vp = f64x4::from(&p[i..i+4]);
+        while i + lanes <= n {
+            let vr = T::Simd::from_slice(&r[i..i+lanes]);
+            let vp = T::Simd::from_slice(&p[i..i+lanes]);
             let res = vr + v_pval * vp;
-            let res_arr: [f64; 4] = res.into();
-            p[i..i+4].copy_from_slice(&res_arr);
-            i += 4;
+            res.write_to_slice(&mut p[i..i+lanes]);
+            i += lanes;
         }
         while i < n {
             p[i] = r[i] + p_val * p[i];
@@ -337,25 +350,31 @@ pub fn solve_cg<O: SolverOps>(
     (max_iter, rsold.sqrt(), init_resid)
 }
 
-pub fn dot(a: &[f64], b: &[f64]) -> f64 {
-    let mut sum = f64x4::splat(0.0);
+pub fn dot<T: Float>(a: &[T], b: &[T]) -> T {
+    let mut sum = T::Simd::splat(T::zero());
     let mut i = 0;
     let n = a.len();
-    while i + 4 <= n {
-        let va = f64x4::from(&a[i..i+4]);
-        let vb = f64x4::from(&b[i..i+4]);
-        sum += va * vb;
-        i += 4;
+    let lanes = T::Simd::LANES;
+    while i + lanes <= n {
+        let va = T::Simd::from_slice(&a[i..i+lanes]);
+        let vb = T::Simd::from_slice(&b[i..i+lanes]);
+        sum = sum + va * vb;
+        i += lanes;
     }
-    let mut s = sum.reduce_add();
+    
+    // Reduce sum
+    let mut arr = vec![T::zero(); lanes];
+    sum.write_to_slice(&mut arr);
+    let mut s = arr.iter().cloned().sum();
+    
     while i < n {
-        s += a[i] * b[i];
+        s = s + a[i] * b[i];
         i += 1;
     }
     s
 }
 
 #[allow(dead_code)]
-fn norm(a: &[f64]) -> f64 {
+fn norm<T: Float>(a: &[T]) -> T {
     dot(a, a).sqrt()
 }

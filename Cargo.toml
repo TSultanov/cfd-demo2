@@ -20,6 +20,7 @@ rayon = "1.8"
 wgpu = "0.19"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
+num-traits = "0.2.19"
 
 [dev-dependencies]
 criterion = "0.5"

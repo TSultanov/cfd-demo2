@@ -41,7 +41,7 @@ fn test_gpu_cpu_comparison() {
         }
     }
 
-    let mut cpu_solver = PisoSolver::new(mesh.clone());
+    let mut cpu_solver = PisoSolver::<f64>::new(mesh.clone());
     cpu_solver.save_debug_data = true;
     cpu_solver.dt = 0.0001;
     let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh));

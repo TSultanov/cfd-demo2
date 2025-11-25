@@ -1,28 +1,28 @@
 use crate::solver::mesh::{Mesh, BoundaryType};
 use crate::solver::linear_solver::SparseMatrix;
+use crate::solver::float::{Float, Simd};
 use nalgebra::Vector2;
 use std::collections::HashMap;
-use wide::f64x4;
 
 #[derive(Clone)]
-pub struct ScalarField {
-    pub values: Vec<f64>,
+pub struct ScalarField<T: Float> {
+    pub values: Vec<T>,
 }
 
-impl ScalarField {
-    pub fn new(n: usize, val: f64) -> Self {
+impl<T: Float> ScalarField<T> {
+    pub fn new(n: usize, val: T) -> Self {
         Self { values: vec![val; n] }
     }
 }
 
 #[derive(Clone)]
-pub struct VectorField {
-    pub vx: Vec<f64>,
-    pub vy: Vec<f64>,
+pub struct VectorField<T: Float> {
+    pub vx: Vec<T>,
+    pub vy: Vec<T>,
 }
 
-impl VectorField {
-    pub fn new(n: usize, val: Vector2<f64>) -> Self {
+impl<T: Float> VectorField<T> {
+    pub fn new(n: usize, val: Vector2<T>) -> Self {
         Self { 
             vx: vec![val.x; n],
             vy: vec![val.y; n],
@@ -37,25 +37,23 @@ pub enum Scheme {
     QUICK,
 }
 
-pub struct Fvm {
-    // Helper for FVM operations
-}
+pub struct Fvm;
 
 impl Fvm {
-    pub fn compute_gradients<F>(
+    pub fn compute_gradients<T: Float, F>(
         mesh: &Mesh, 
-        field: &ScalarField, 
+        field: &ScalarField<T>, 
         boundary_value: F,
-        ghost_values: Option<&[f64]>,
+        ghost_values: Option<&[T]>,
         ghost_map: Option<&HashMap<usize, usize>>,
         ghost_centers: Option<&Vec<Vector2<f64>>>
-    ) -> VectorField 
-    where F: Fn(BoundaryType) -> Option<f64>
+    ) -> VectorField<T> 
+    where F: Fn(BoundaryType) -> Option<T>
     {
         // Green-Gauss Gradient
         let n_cells = mesh.num_cells();
-        let mut grad_x = vec![0.0; n_cells];
-        let mut grad_y = vec![0.0; n_cells];
+        let mut grad_x = vec![T::zero(); n_cells];
+        let mut grad_y = vec![T::zero(); n_cells];
         
         for face_idx in 0..mesh.num_faces() {
             let owner = mesh.face_owner[face_idx];
@@ -74,7 +72,7 @@ impl Fvm {
                 let d_own = (f_center - c_owner).norm();
                 let d_neigh = (f_center - c_neigh).norm();
                 
-                let f = d_own / (d_own + d_neigh);
+                let f = T::val_from_f64(d_own / (d_own + d_neigh));
                 
                 val_owner + f * (val_neigh - val_owner)
             } else {
@@ -99,9 +97,9 @@ impl Fvm {
                                             let dx = gc.x - f_center.x;
                                             let dy = gc.y - f_center.y;
                                             let d_neigh = (dx*dx + dy*dy).sqrt();
-                                            d_own / (d_own + d_neigh)
-                                        } else { 0.5 }
-                                    } else { 0.5 };
+                                            T::val_from_f64(d_own / (d_own + d_neigh))
+                                        } else { T::val_from_f64(0.5) }
+                                    } else { T::val_from_f64(0.5) };
                                     
                                     val = val_owner + f * (val_neigh - val_owner);
                                     handled = true;
@@ -121,46 +119,30 @@ impl Fvm {
                 val
             };
             
-            let nx = mesh.face_nx[face_idx];
-            let ny = mesh.face_ny[face_idx];
-            let area = mesh.face_area[face_idx];
+            let nx = T::val_from_f64(mesh.face_nx[face_idx]);
+            let ny = T::val_from_f64(mesh.face_ny[face_idx]);
+            let area = T::val_from_f64(mesh.face_area[face_idx]);
             
             // Contribution to owner
-            grad_x[owner] += val_face * nx * area;
-            grad_y[owner] += val_face * ny * area;
+            grad_x[owner] = grad_x[owner] + val_face * nx * area;
+            grad_y[owner] = grad_y[owner] + val_face * ny * area;
             
             // Contribution to neighbor
             if let Some(neigh) = neighbor {
-                grad_x[neigh] -= val_face * nx * area;
-                grad_y[neigh] -= val_face * ny * area;
+                grad_x[neigh] = grad_x[neigh] - val_face * nx * area;
+                grad_y[neigh] = grad_y[neigh] - val_face * ny * area;
             }
         }
         
         let mut i = 0;
-        while i + 4 <= n_cells {
-            let v_vol = f64x4::from(&mesh.cell_vol[i..i+4]);
-            let v_grad_x = f64x4::from(&grad_x[i..i+4]);
-            let v_grad_y = f64x4::from(&grad_y[i..i+4]);
-            
-            let res_x = v_grad_x / v_vol;
-            let res_y = v_grad_y / v_vol;
-            
-            let arr_x: [f64; 4] = res_x.into();
-            let arr_y: [f64; 4] = res_y.into();
-            
-            grad_x[i..i+4].copy_from_slice(&arr_x);
-            grad_y[i..i+4].copy_from_slice(&arr_y);
-            
-            i += 4;
-        }
-
         while i < n_cells {
             let vol = mesh.cell_vol[i];
             if vol < 1e-12 {
                 println!("Warning: Small cell volume for cell {}: {}", i, vol);
             }
-            grad_x[i] /= vol;
-            grad_y[i] /= vol;
+            let vol_t = T::val_from_f64(vol);
+            grad_x[i] = grad_x[i] / vol_t;
+            grad_y[i] = grad_y[i] / vol_t;
             i += 1;
         }
         
@@ -169,23 +151,23 @@ impl Fvm {
     
     // Assemble matrix for scalar transport:
     // d(phi)/dt + div(u phi) - div(gamma grad phi) = source
-    pub fn assemble_scalar_transport<F>(
+    pub fn assemble_scalar_transport<T: Float, F>(
         mesh: &Mesh,
-        phi_old: &ScalarField,
-        fluxes: &Vec<f64>,
-        gamma: f64,
-        dt: f64,
+        phi_old: &ScalarField<T>,
+        fluxes: &[T],
+        gamma: T,
+        dt: T,
         scheme: &Scheme,
         boundary_value: F,
         ghost_map: Option<&HashMap<usize, usize>>,
-        ghost_values: Option<&[f64]>,
+        ghost_values: Option<&[T]>,
         ghost_centers: Option<&Vec<Vector2<f64>>>,
-    ) -> (SparseMatrix, Vec<f64>) 
-    where F: Fn(BoundaryType) -> Option<f64>
+    ) -> (SparseMatrix<T>, Vec<T>) 
+    where F: Fn(BoundaryType) -> Option<T>
     {
         let n_cells = mesh.num_cells();
         let mut triplets = Vec::with_capacity(n_cells + 2 * mesh.num_faces());
-        let mut rhs = vec![0.0; n_cells];
+        let mut rhs = vec![T::zero(); n_cells];
         
         // Compute gradients for higher order schemes
         let grads = if *scheme != Scheme::Upwind {
@@ -196,19 +178,8 @@ impl Fvm {
 
         // Vectorized Unsteady Term for RHS
         let mut i = 0;
-        let v_dt = f64x4::splat(dt);
-        while i + 4 <= n_cells {
-             let v_vol = f64x4::from(&mesh.cell_vol[i..i+4]);
-             let v_phi_old = f64x4::from(&phi_old.values[i..i+4]);
-             let v_coeff = v_vol / v_dt;
-             // rhs is zero initially
-             let res = v_coeff * v_phi_old;
-             let res_arr: [f64; 4] = res.into();
-             rhs[i..i+4].copy_from_slice(&res_arr);
-             i += 4;
-        }
         while i < n_cells {
-             let vol = mesh.cell_vol[i];
+             let vol = T::val_from_f64(mesh.cell_vol[i]);
              let coeff = vol / dt;
              rhs[i] = coeff * phi_old.values[i];
              i += 1;
@@ -216,10 +187,10 @@ impl Fvm {
         
         for i in 0..n_cells {
             // Unsteady term: (phi - phi_old)/dt * V
-            let vol = mesh.cell_vol[i];
+            let vol = T::val_from_f64(mesh.cell_vol[i]);
             let coeff_unsteady = vol / dt;
             if coeff_unsteady.is_nan() {
-                println!("coeff_unsteady is NaN for cell {}. vol={}, dt={}", i, vol, dt);
+                println!("coeff_unsteady is NaN for cell {}. vol={:?}, dt={:?}", i, vol, dt);
             }
             triplets.push((i, i, coeff_unsteady));
             // rhs[i] += coeff_unsteady * phi_old.values[i]; // Handled above
@@ -236,12 +207,13 @@ impl Fvm {
                 let neighbor_idx = if is_owner { neighbor } else { Some(owner) };
                 
                 let f_c = Vector2::new(mesh.face_cx[face_idx], mesh.face_cy[face_idx]);
-                let f_area = mesh.face_area[face_idx];
-                let f_normal = Vector2::new(mesh.face_nx[face_idx], mesh.face_ny[face_idx]);
+                let f_area = T::val_from_f64(mesh.face_area[face_idx]);
+                let f_normal = Vector2::new(T::val_from_f64(mesh.face_nx[face_idx]), T::val_from_f64(mesh.face_ny[face_idx]));
                 let c_i = Vector2::new(mesh.cell_cx[i], mesh.cell_cy[i]);
                 
                 // Flux OUT of cell i
-                let flux = if is_owner { fluxes[face_idx] } else { -fluxes[face_idx] };
+                let flux_val = fluxes[face_idx];
+                let flux = if is_owner { flux_val } else { -flux_val };
                 
                 if flux.is_nan() {
                     println!("flux is NaN for face {}", face_idx);
@@ -250,7 +222,7 @@ impl Fvm {
                 // Convection: div(u phi) -> sum(flux * phi_f)
                 // Implicit Part: Upwind scheme (Diagonally Dominant)
                 
-                let phi_upwind = if flux > 0.0 {
+                let phi_upwind = if flux > T::zero() {
                     // Outflow: phi_f = phi_P
                     triplets.push((i, i, flux));
                     phi_old.values[i]
@@ -262,7 +234,7 @@ impl Fvm {
                         phi_old.values[neigh]
                     } else {
                         // Boundary inflow
-                        let mut val = 0.0;
+                        let mut val = T::zero();
                         let mut handled = false;
 
                         if let Some(bt) = mesh.face_boundary[face_idx] {
@@ -276,8 +248,6 @@ impl Fvm {
                                         let local_ghost_idx = ghost_idx - mesh.num_cells();
                                         if local_ghost_idx < ghosts.len() {
                                             val = ghosts[local_ghost_idx];
-                                            // Debug print
-                                            // if i == 0 { println!("Ghost val: {}", val); }
                                         }
                                     }
                                     handled = true;
@@ -287,15 +257,15 @@ impl Fvm {
                             if !handled {
                                 if let Some(bv) = boundary_value(bt) {
                                     // Dirichlet: flux * val_b. Move to RHS.
-                                    rhs[i] -= flux * bv;
+                                    rhs[i] = rhs[i] - flux * bv;
                                     val = bv;
                                 } else {
                                     // Neumann (Zero Gradient): phi_b = phi_P
-                                    if flux < 0.0 {
+                                    if flux < T::zero() {
                                         // Inflow with Neumann is unstable and can make diagonal negative.
                                         // Treat as Dirichlet with value from previous step (Explicit)
                                         // phi_b = phi_old[i]
-                                        rhs[i] -= flux * phi_old.values[i];
+                                        rhs[i] = rhs[i] - flux * phi_old.values[i];
                                         val = phi_old.values[i];
                                     } else {
                                         triplets.push((i, i, flux));
@@ -323,22 +293,22 @@ impl Fvm {
                         match scheme {
                             Scheme::Central => {
                                 // Linear Interpolation (Central Differencing)
-                                let f = d_own / (d_own + d_neigh);
+                                let f = T::val_from_f64(d_own / (d_own + d_neigh));
                                 let val_own = phi_old.values[i];
                                 let val_neigh = phi_old.values[neigh];
                                 phi_ho = val_own + f * (val_neigh - val_own);
                             },
                             Scheme::QUICK => {
                                 // Linear Upwind (Second Order Upwind)
-                                if flux > 0.0 {
+                                if flux > T::zero() {
                                     // From Owner
                                     let grad = Vector2::new(gradients.vx[i], gradients.vy[i]);
-                                    let r = f_c - c_i;
+                                    let r = Vector2::new(T::val_from_f64(f_c.x - c_i.x), T::val_from_f64(f_c.y - c_i.y));
                                     phi_ho = phi_old.values[i] + grad.dot(&r);
                                 } else {
                                     // From Neighbor
                                     let grad = Vector2::new(gradients.vx[neigh], gradients.vy[neigh]);
-                                    let r = f_c - Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh]);
+                                    let r = Vector2::new(T::val_from_f64(f_c.x - mesh.cell_cx[neigh]), T::val_from_f64(f_c.y - mesh.cell_cy[neigh]));
                                     phi_ho = phi_old.values[neigh] + grad.dot(&r);
                                 }
                             },
@@ -352,7 +322,7 @@ impl Fvm {
                                 if map.contains_key(&face_idx) {
                                     // Parallel Interface
                                     // Retrieve ghost value
-                                    let mut phi_ghost = 0.0;
+                                    let mut phi_ghost = T::zero();
                                     let mut has_ghost = false;
                                     if let Some(&ghost_idx) = map.get(&face_idx) {
                                         if let Some(ghosts) = ghost_values {
@@ -367,7 +337,7 @@ impl Fvm {
                                     if has_ghost {
                                         // Use Central Differencing for consistency across partition boundary
                                         // phi_ho = 0.5 * (phi_P + phi_ghost)
-                                        phi_ho = 0.5 * (phi_old.values[i] + phi_ghost);
+                                        phi_ho = T::val_from_f64(0.5) * (phi_old.values[i] + phi_ghost);
                                         handled = true;
                                     }
                                 }
@@ -375,11 +345,8 @@ impl Fvm {
                         }
 
                         if !handled {
-                            if flux > 0.0 {
+                            if flux > T::zero() {
                                 // Outflow: Use Upwind (Zero Gradient) to prevent reflections.
-                                // Extrapolating with gradients at the outlet can be unstable and cause
-                                // unphysical reflections if the gradient is not well-behaved.
-                                // phi_ho = phi_upwind; // Already set to phi_old.values[i]
                             }
                             // Inflow: phi_ho = phi_upwind (BC value)
                         }
@@ -388,12 +355,10 @@ impl Fvm {
                     // Correction term: flux * (phi_ho - phi_upwind)
                     // Move to RHS: ... = ... - correction
                     let correction = flux * (phi_ho - phi_upwind);
-                    rhs[i] -= correction;
+                    rhs[i] = rhs[i] - correction;
                 }
                 
                 // Diffusion: -div(gamma grad phi) -> -sum(gamma * grad_phi * S)
-                // grad_phi * S ~ (phi_N - phi_P) / d * Area
-                // d = distance between centers
                 
                 if let Some(neigh) = neighbor_idx {
                     let d_vec = Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh]) - c_i;
@@ -401,7 +366,7 @@ impl Fvm {
                     if d < 1e-9 {
                         println!("Warning: Small distance between cells {} and {}: {}", i, neigh, d);
                     }
-                    let diff_coeff = gamma * f_area / d;
+                    let diff_coeff = gamma * f_area / T::val_from_f64(d);
                     
                     // - (diff_coeff * (phi_N - phi_P))
                     // = - diff_coeff * phi_N + diff_coeff * phi_P
@@ -413,17 +378,12 @@ impl Fvm {
                     // Non-orthogonal correction
                     if let Some(gradients) = &grads {
                         // S = n * A
-                        // If is_owner, normal points i -> neigh. S is out of i.
-                        // If !is_owner, normal points neigh -> i. S is out of i (so -normal).
                         let s_vec = if is_owner { f_normal } else { -f_normal } * f_area;
                         
-                        // Over-relaxed correction vector k
-                        // k = S - (S . d / |d|^2) * d  <-- Minimum correction
-                        // k = S - (|S|/|d|) * d        <-- Over-relaxed correction
-                        // We use Over-relaxed to match the implicit coefficient (gamma * A / d)
-                        // A = |S|. So implicit term is gamma * |S|/|d|.
+                        let d_vec_t = Vector2::new(T::val_from_f64(d_vec.x), T::val_from_f64(d_vec.y));
+                        let d_t = T::val_from_f64(d);
                         
-                        let k_vec = s_vec - d_vec * (f_area / d);
+                        let k_vec = s_vec - d_vec_t * (f_area / d_t);
                         
                         // Interpolate gradient to face
                         let grad_own = Vector2::new(gradients.vx[i], gradients.vy[i]);
@@ -431,14 +391,14 @@ impl Fvm {
                         // Linear interpolation based on distance
                         let d_own = (f_c - c_i).norm();
                         let d_neigh = (f_c - Vector2::new(mesh.cell_cx[neigh], mesh.cell_cy[neigh])).norm();
-                        let f = d_own / (d_own + d_neigh);
+                        let f = T::val_from_f64(d_own / (d_own + d_neigh));
                         let grad_f = grad_own + (grad_neigh - grad_own) * f;
                         
                         let correction_flux = gamma * grad_f.dot(&k_vec);
                         
                         // Subtract from RHS (since it's -div(flux))
                         // flux is out of i.
-                        rhs[i] -= correction_flux;
+                        rhs[i] = rhs[i] - correction_flux;
                     }
                 } else {
                     // Boundary diffusion
@@ -464,7 +424,7 @@ impl Fvm {
                                 } else {
                                     2.0 * d
                                 };
-                                let diff_coeff = gamma * f_area / dist;
+                                let diff_coeff = gamma * f_area / T::val_from_f64(dist);
                                 
                                 triplets.push((i, i, diff_coeff));
                                 triplets.push((i, ghost_idx, -diff_coeff));
@@ -473,10 +433,10 @@ impl Fvm {
                         } else { false };
 
                         if !is_parallel {
-                            let diff_coeff = gamma * f_area / d;
+                            let diff_coeff = gamma * f_area / T::val_from_f64(d);
                             
                             if diff_coeff.is_nan() {
-                                println!("diff_coeff is NaN for face {}. gamma={}, area={}, d={}", face_idx, gamma, f_area, d);
+                                println!("diff_coeff is NaN for face {}. gamma={:?}, area={:?}, d={}", face_idx, gamma, f_area, d);
                             }
 
                             if let Some(bv) = boundary_value(bt) {
@@ -485,7 +445,7 @@ impl Fvm {
                                 // LHS: + diff_coeff * phi_P
                                 // RHS: + diff_coeff * phi_b
                                 triplets.push((i, i, diff_coeff));
-                                rhs[i] += diff_coeff * bv;
+                                rhs[i] = rhs[i] + diff_coeff * bv;
                             } else {
                                 // Neumann (Zero Gradient): grad_phi = 0 -> flux = 0
                                 // No contribution
@@ -504,15 +464,16 @@ impl Fvm {
         (SparseMatrix::from_triplets(n_cells, n_cols, &triplets), rhs)
     }
     
-    pub fn smooth_gradients(mesh: &Mesh, grads: &VectorField) -> VectorField {
+    pub fn smooth_gradients<T: Float>(mesh: &Mesh, grads: &VectorField<T>) -> VectorField<T> {
         let mut smoothed_vx = grads.vx.clone();
         let mut smoothed_vy = grads.vy.clone();
         
         // Simple volume-weighted smoothing
         for i in 0..mesh.num_cells() {
-            let mut sum_gx = grads.vx[i] * mesh.cell_vol[i];
-            let mut sum_gy = grads.vy[i] * mesh.cell_vol[i];
-            let mut sum_vol = mesh.cell_vol[i];
+            let vol = T::val_from_f64(mesh.cell_vol[i]);
+            let mut sum_gx = grads.vx[i] * vol;
+            let mut sum_gy = grads.vy[i] * vol;
+            let mut sum_vol = vol;
             
             let start = mesh.cell_face_offsets[i];
             let end = mesh.cell_face_offsets[i+1];
@@ -523,10 +484,10 @@ impl Fvm {
                 let n_idx = if owner == i { neighbor } else { Some(owner) };
                 
                 if let Some(n) = n_idx {
-                    let n_vol = mesh.cell_vol[n];
-                    sum_gx += grads.vx[n] * n_vol;
-                    sum_gy += grads.vy[n] * n_vol;
-                    sum_vol += n_vol;
+                    let n_vol = T::val_from_f64(mesh.cell_vol[n]);
+                    sum_gx = sum_gx + grads.vx[n] * n_vol;
+                    sum_gy = sum_gy + grads.vy[n] * n_vol;
+                    sum_vol = sum_vol + n_vol;
                 }
             }
             
@@ -537,7 +498,7 @@ impl Fvm {
         VectorField { vx: smoothed_vx, vy: smoothed_vy }
     }
     
-    pub fn limit_gradients(grads: &VectorField, max_mag: f64) -> VectorField {
+    pub fn limit_gradients<T: Float>(grads: &VectorField<T>, max_mag: T) -> VectorField<T> {
         let mut limited_vx = grads.vx.clone();
         let mut limited_vy = grads.vy.clone();
 
@@ -545,14 +506,14 @@ impl Fvm {
             let mag = (grads.vx[i].powi(2) + grads.vy[i].powi(2)).sqrt();
             if mag > max_mag {
                 let scale = max_mag / mag;
-                limited_vx[i] *= scale;
-                limited_vy[i] *= scale;
+                limited_vx[i] = limited_vx[i] * scale;
+                limited_vy[i] = limited_vy[i] * scale;
             }
         }
         VectorField { vx: limited_vx, vy: limited_vy }
     }
     
-    pub fn limit_gradients_bj(mesh: &Mesh, field: &ScalarField, grads: &mut VectorField) {
+    pub fn limit_gradients_bj<T: Float>(mesh: &Mesh, field: &ScalarField<T>, grads: &mut VectorField<T>) {
         for i in 0..mesh.num_cells() {
             let val_p = field.values[i];
             let mut phi_max = val_p;
@@ -576,16 +537,16 @@ impl Fvm {
             }
             
             // Barth-Jespersen Limiter
-            let mut alpha = 1.0f64;
+            let mut alpha = T::one();
             let grad_x = grads.vx[i];
             let grad_y = grads.vy[i];
             
             for k in start..end {
                 let face_idx = mesh.cell_faces[k];
-                let f_cx = mesh.face_cx[face_idx];
-                let f_cy = mesh.face_cy[face_idx];
-                let c_cx = mesh.cell_cx[i];
-                let c_cy = mesh.cell_cy[i];
+                let f_cx = T::val_from_f64(mesh.face_cx[face_idx]);
+                let f_cy = T::val_from_f64(mesh.face_cy[face_idx]);
+                let c_cx = T::val_from_f64(mesh.cell_cx[i]);
+                let c_cy = T::val_from_f64(mesh.cell_cy[i]);
                 
                 let rx = f_cx - c_cx;
                 let ry = f_cy - c_cy;
@@ -595,20 +556,20 @@ impl Fvm {
                 if phi_face > phi_max {
                     let diff = phi_max - val_p;
                     let grad_diff = phi_face - val_p;
-                    if grad_diff.abs() > 1e-12 {
+                    if grad_diff.abs() > T::val_from_f64(1e-12) {
                         alpha = alpha.min(diff / grad_diff);
                     }
                 } else if phi_face < phi_min {
                     let diff = phi_min - val_p;
                     let grad_diff = phi_face - val_p;
-                    if grad_diff.abs() > 1e-12 {
+                    if grad_diff.abs() > T::val_from_f64(1e-12) {
                         alpha = alpha.min(diff / grad_diff);
                     }
                 }
             }
             
-            grads.vx[i] *= alpha;
-            grads.vy[i] *= alpha;
+            grads.vx[i] = grads.vx[i] * alpha;
+            grads.vy[i] = grads.vy[i] * alpha;
         }
     }
 }

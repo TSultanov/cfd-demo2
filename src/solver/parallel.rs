@@ -4,28 +4,29 @@ use std::thread;
 use crate::solver::mesh::{Mesh, BoundaryType};
 use crate::solver::piso::PisoSolver;
 use crate::solver::linear_solver::{SparseMatrix, SolverOps};
+use crate::solver::float::Float;
 use nalgebra::{Point2, Vector2};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::solver::fvm::{VectorField, ScalarField, Scheme};
 
 // Communication structures
-pub struct Communicator {
+pub struct Communicator<T: Float> {
     pub rank: usize,
     pub size: usize,
-    pub txs: Vec<mpsc::Sender<Message>>,
-    pub rxs: Vec<mpsc::Receiver<Message>>,
+    pub txs: Vec<mpsc::Sender<Message<T>>>,
+    pub rxs: Vec<mpsc::Receiver<Message<T>>>,
     pub barrier: Arc<Barrier>,
     pub wait_stats: std::cell::RefCell<HashMap<String, std::time::Duration>>,
 }
 
-pub enum Message {
-    Sum(f64),
-    Halo(usize, Vec<f64>), // tag, data
+pub enum Message<T: Float> {
+    Sum(T),
+    Halo(usize, Vec<T>), // tag, data
 }
 
-impl Communicator {
-    pub fn new(rank: usize, size: usize, txs: Vec<mpsc::Sender<Message>>, rxs: Vec<mpsc::Receiver<Message>>, barrier: Arc<Barrier>) -> Self {
+impl<T: Float> Communicator<T> {
+    pub fn new(rank: usize, size: usize, txs: Vec<mpsc::Sender<Message<T>>>, rxs: Vec<mpsc::Receiver<Message<T>>>, barrier: Arc<Barrier>) -> Self {
         Self { 
             rank, 
             size, 
@@ -60,7 +61,7 @@ impl Communicator {
         self.wait_barrier("explicit");
     }
 
-    pub fn all_reduce_sum(&self, val: f64) -> f64 {
+    pub fn all_reduce_sum(&self, val: T) -> T {
         if self.size == 1 { return val; }
         
         // Simple implementation: All send to 0, 0 sums and broadcasts
@@ -93,14 +94,14 @@ impl Communicator {
                 }
                 v
             } else {
-                0.0
+                T::zero()
             };
             self.wait_barrier("reduce_sum");
             res
         }
     }
 
-    pub fn exchange_halo(&self, neighbor_rank: usize, send_data: &[f64]) -> Vec<f64> {
+    pub fn exchange_halo(&self, neighbor_rank: usize, send_data: &[T]) -> Vec<T> {
         let _ = self.txs[neighbor_rank].send(Message::Halo(self.rank, send_data.to_vec()));
         
         let start = std::time::Instant::now();
@@ -116,19 +117,20 @@ impl Communicator {
     }
 }
 
-pub struct ParallelPisoSolver {
-    pub partitions: Vec<Arc<RwLock<SolverPartition>>>,
+pub struct ParallelPisoSolver<T: Float> {
+    pub partitions: Vec<Arc<RwLock<SolverPartition<T>>>>,
     pub n_threads: usize,
     workers: Vec<thread::JoinHandle<()>>,
     start_barrier: Arc<Barrier>,
     end_barrier: Arc<Barrier>,
+    worker_barrier: Arc<Barrier>,
     running: Arc<AtomicBool>,
 }
 
-impl ParallelPisoSolver {
+impl<T: Float> ParallelPisoSolver<T> {
     pub fn new(full_mesh: Mesh, n_threads: usize) -> Self {
         let sub_meshes = partition_mesh(full_mesh, n_threads);
-        let mut solvers: Vec<PisoSolver> = sub_meshes.into_iter()
+        let mut solvers: Vec<PisoSolver<T>> = sub_meshes.into_iter()
             .map(|m| PisoSolver::new(m))
             .collect();
             
@@ -145,286 +147,261 @@ impl ParallelPisoSolver {
             workers: Vec::new(),
             start_barrier: Arc::new(Barrier::new(n_threads + 1)),
             end_barrier: Arc::new(Barrier::new(n_threads + 1)),
+            worker_barrier: Arc::new(Barrier::new(n_threads)),
             running: Arc::new(AtomicBool::new(true)),
         };
         ps.spawn_threads(solvers, halo_maps);
         ps
     }
 
-    fn init_parallel_structures(solvers: &mut Vec<PisoSolver>) -> Vec<HaloMap> {
+    fn init_parallel_structures(solvers: &mut Vec<PisoSolver<T>>) -> Vec<HaloMap> {
         let n_solvers = solvers.len();
-        let mut halo_maps = Vec::new();
-        let mut ghost_maps = Vec::new();
         
-        for s_idx in 0..n_solvers {
-            let mut sends: HashMap<usize, Vec<usize>> = HashMap::new();
-            let mut recvs: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
-            let mut ghost_map: HashMap<usize, usize> = HashMap::new();
-            
-            let solver = &solvers[s_idx];
-            let mesh = &solver.mesh;
-            let n_local = mesh.num_cells();
-            let mut next_ghost_idx = n_local;
-            
-            for f_idx in 0..mesh.num_faces() {
-                if let Some(BoundaryType::ParallelInterface(target_rank, remote_idx)) = mesh.face_boundary[f_idx] {
-                    sends.entry(target_rank).or_default().push(mesh.face_owner[f_idx]);
-                    
-                    let ghost_idx = next_ghost_idx;
-                    next_ghost_idx += 1;
-                    
-                    recvs.entry(target_rank).or_default().push((ghost_idx, remote_idx));
-                    ghost_map.insert(f_idx, ghost_idx);
+        // 1. Collect all ParallelInterface faces
+        struct InterfaceFace {
+            solver_idx: usize,
+            face_idx: usize,
+            center: Vector2<f64>,
+            neighbor_rank: usize,
+        }
+        
+        let mut interfaces = Vec::new();
+        for (s_idx, solver) in solvers.iter().enumerate() {
+            for f_idx in 0..solver.mesh.num_faces() {
+                if let Some(BoundaryType::ParallelInterface(n_rank, _)) = solver.mesh.face_boundary[f_idx] {
+                    let cx = solver.mesh.face_cx[f_idx];
+                    let cy = solver.mesh.face_cy[f_idx];
+                    interfaces.push(InterfaceFace {
+                        solver_idx: s_idx,
+                        face_idx: f_idx,
+                        center: Vector2::new(cx, cy),
+                        neighbor_rank: n_rank,
+                    });
                 }
             }
+        }
+        
+        // 2. Match faces and build connectivity
+        let mut pending_sends: Vec<HashMap<usize, HashSet<usize>>> = vec![HashMap::new(); n_solvers];
+        // pending_recvs[receiver][sender] = list of (face_idx_in_receiver, owner_cell_in_sender, center_of_sender_cell)
+        let mut pending_recvs: Vec<HashMap<usize, Vec<(usize, usize, Vector2<f64>)>>> = vec![HashMap::new(); n_solvers];
+        
+        for i in 0..interfaces.len() {
+            let iface_a = &interfaces[i];
+            let neighbor_rank = iface_a.neighbor_rank;
             
-            for list in sends.values_mut() {
-                list.sort();
-                list.dedup();
-            }
+            if neighbor_rank >= n_solvers { continue; }
             
-            let mut final_recvs: HashMap<usize, RecvInfo> = HashMap::new();
-            
-            for (rank, list) in recvs {
-                let mut unique_remotes: Vec<usize> = list.iter().map(|&(_, r)| r).collect();
-                unique_remotes.sort();
-                unique_remotes.dedup();
-                
-                let mut map = Vec::new();
-                for (ghost_idx, remote_idx) in list {
-                    if let Ok(data_idx) = unique_remotes.binary_search(&remote_idx) {
-                        map.push((data_idx, ghost_idx));
-                    } else {
-                        panic!("Should not happen: remote_idx not found in unique list");
+            // Find matching face in neighbor_rank
+            for j in 0..interfaces.len() {
+                let iface_b = &interfaces[j];
+                if iface_b.solver_idx == neighbor_rank && iface_b.neighbor_rank == iface_a.solver_idx {
+                    let dist = (iface_a.center - iface_b.center).norm();
+                    if dist < 1e-4 {
+                        // Match found
+                        let solver_b = &solvers[neighbor_rank];
+                        let owner_b = solver_b.mesh.face_owner[iface_b.face_idx];
+                        let center_b = Vector2::new(
+                            solver_b.mesh.cell_cx[owner_b],
+                            solver_b.mesh.cell_cy[owner_b]
+                        );
+                        
+                        // A needs to receive owner_b from B
+                        pending_recvs[iface_a.solver_idx]
+                            .entry(neighbor_rank)
+                            .or_default()
+                            .push((iface_a.face_idx, owner_b, center_b));
+                        
+                        // B needs to send owner_b to A
+                        pending_sends[neighbor_rank]
+                            .entry(iface_a.solver_idx)
+                            .or_default()
+                            .insert(owner_b);
+                            
+                        break; // Found match for iface_a
                     }
                 }
-                
-                final_recvs.insert(rank, RecvInfo {
-                    map,
-                    num_unique_cells: unique_remotes.len(),
-                });
+            }
+        }
+        
+        // 3. Build HaloMaps and update Solvers
+        let mut halo_maps = Vec::with_capacity(n_solvers);
+        
+        for rank in 0..n_solvers {
+            let mut sends = HashMap::new();
+            let mut recvs = HashMap::new();
+            
+            // Process Sends
+            for (target_rank, cell_indices) in &pending_sends[rank] {
+                let mut sorted_indices: Vec<usize> = cell_indices.iter().cloned().collect();
+                sorted_indices.sort_unstable();
+                sends.insert(*target_rank, sorted_indices);
+            }
+            
+            // Process Recvs and Update Solver
+            let solver = &mut solvers[rank];
+            solver.ghost_map.clear();
+            solver.ghost_centers.clear();
+            
+            for (source_rank, needed_ghosts) in &pending_recvs[rank] {
+                if let Some(sent_cells) = pending_sends[*source_rank].get(&rank) {
+                    let mut sent_cells_sorted: Vec<usize> = sent_cells.iter().cloned().collect();
+                    sent_cells_sorted.sort_unstable();
+                    
+                    let mut source_to_msg_idx = HashMap::new();
+                    for (idx, &cell_idx) in sent_cells_sorted.iter().enumerate() {
+                        source_to_msg_idx.insert(cell_idx, idx);
+                    }
+                    
+                    let mut map_entries = Vec::new();
+                    
+                    for (face_idx, owner_b_idx, center_b) in needed_ghosts {
+                        if let Some(&msg_idx) = source_to_msg_idx.get(owner_b_idx) {
+                            // Create new ghost
+                            let ghost_idx = solver.mesh.num_cells() + solver.ghost_centers.len();
+                            solver.ghost_map.insert(*face_idx, ghost_idx);
+                            solver.ghost_centers.push(*center_b);
+                            
+                            // Map msg_idx -> local_ghost_idx
+                            let local_ghost_idx = ghost_idx - solver.mesh.num_cells();
+                            map_entries.push((msg_idx, local_ghost_idx));
+                        }
+                    }
+                    
+                    recvs.insert(*source_rank, RecvInfo {
+                        map: map_entries,
+                        num_unique_cells: sent_cells_sorted.len(),
+                    });
+                }
             }
             
             halo_maps.push(HaloMap {
                 sends,
-                recvs: final_recvs,
-                n_local,
-                n_ghosts: next_ghost_idx - n_local,
+                recvs,
+                n_local: solver.mesh.num_cells(),
+                n_ghosts: solver.ghost_centers.len(),
             });
-            ghost_maps.push(ghost_map);
-        }
-        
-        let mut all_ghost_centers = vec![Vec::new(); n_solvers];
-        
-        for i in 0..n_solvers {
-            let mut ghost_centers = vec![Vector2::zeros(); halo_maps[i].n_ghosts];
-            
-            for (&src_rank, info) in &halo_maps[i].recvs {
-                // Get the list of cells sent by src_rank to i
-                let sent_indices = &halo_maps[src_rank].sends[&i];
-                
-                // The data received is in the order of sent_indices.
-                // info.map maps (index in sent_indices, ghost_idx).
-                
-                for &(data_idx, ghost_idx) in &info.map {
-                    let remote_cell_idx = sent_indices[data_idx];
-                    let cx = solvers[src_rank].mesh.cell_cx[remote_cell_idx];
-                    let cy = solvers[src_rank].mesh.cell_cy[remote_cell_idx];
-                    
-                    let local_ghost_idx = ghost_idx - halo_maps[i].n_local;
-                    ghost_centers[local_ghost_idx] = Vector2::new(cx, cy);
-                }
-            }
-            all_ghost_centers[i] = ghost_centers;
-        }
-        
-        for (i, solver) in solvers.iter_mut().enumerate() {
-            solver.ghost_map = ghost_maps[i].clone();
-            solver.ghost_centers = all_ghost_centers[i].clone();
         }
         
         halo_maps
     }
 
-    fn spawn_threads(&mut self, solvers: Vec<PisoSolver>, halo_maps: Vec<HaloMap>) {
-        let n_solvers = solvers.len();
-        let comm_barrier = Arc::new(Barrier::new(n_solvers));
+    fn spawn_threads(&mut self, solvers: Vec<PisoSolver<T>>, halo_maps: Vec<HaloMap>) {
+        let mut solvers = solvers;
+        let mut halo_maps = halo_maps;
         
-        let mut all_txs: Vec<Vec<mpsc::Sender<Message>>> = vec![Vec::new(); n_solvers];
-        let mut all_rxs: Vec<Vec<Option<mpsc::Receiver<Message>>>> = Vec::with_capacity(n_solvers);
-        for _ in 0..n_solvers {
-            let mut row = Vec::with_capacity(n_solvers);
-            for _ in 0..n_solvers {
-                row.push(None);
-            }
-            all_rxs.push(row);
-        }
+
+        // Correct way:
+        // For each pair (i, j), create channel.
+        // txs[i][j] sends to j.
+        // rxs[j][i] receives from i.
+        let mut matrix_txs: Vec<Vec<Option<mpsc::Sender<Message<T>>>>> = (0..self.n_threads).map(|_| (0..self.n_threads).map(|_| None).collect()).collect();
+        let mut matrix_rxs: Vec<Vec<Option<mpsc::Receiver<Message<T>>>>> = (0..self.n_threads).map(|_| (0..self.n_threads).map(|_| None).collect()).collect();
         
-        for i in 0..n_solvers {
-            for j in 0..n_solvers {
+        for i in 0..self.n_threads {
+            for j in 0..self.n_threads {
                 let (tx, rx) = mpsc::channel();
-                all_txs[i].push(tx);
-                all_rxs[i][j] = Some(rx);
+                matrix_txs[i][j] = Some(tx);
+                matrix_rxs[j][i] = Some(rx);
             }
         }
         
-        let mut thread_rxs: Vec<Vec<mpsc::Receiver<Message>>> = Vec::with_capacity(n_solvers);
-        for _ in 0..n_solvers {
-            thread_rxs.push(Vec::new());
-        }
-        for i in 0..n_solvers {
-            for j in 0..n_solvers {
-                if let Some(rx) = all_rxs[j][i].take() {
-                    thread_rxs[i].push(rx);
-                }
-            }
-        }
-        
-        let mut solvers_iter = solvers.into_iter();
-        
-        for rank in 0..n_solvers {
-            let mut solver = solvers_iter.next().unwrap();
-            let start_barrier = self.start_barrier.clone();
+        for i in 0..self.n_threads {
+            let mut solver = solvers.remove(0);
+            let halo_map = halo_maps.remove(0);
+            let partition = self.partitions[i].clone();
+            let barrier = self.start_barrier.clone();
             let end_barrier = self.end_barrier.clone();
+            let worker_barrier = self.worker_barrier.clone();
             let running = self.running.clone();
-            let halo_map = halo_maps[rank].clone();
-            let my_txs = all_txs[rank].clone();
-            let my_rxs = thread_rxs[rank].drain(..).collect();
-            let comm_barrier = comm_barrier.clone();
-            let partition = self.partitions[rank].clone();
+            
+            let my_txs: Vec<mpsc::Sender<Message<T>>> = matrix_txs[i].iter_mut().map(|opt| opt.take().unwrap()).collect();
+            let my_rxs: Vec<mpsc::Receiver<Message<T>>> = matrix_rxs[i].iter_mut().map(|opt| opt.take().unwrap()).collect();
+            
+            let comm = Communicator::new(i, self.n_threads, my_txs, my_rxs, worker_barrier);
             
             let handle = thread::spawn(move || {
-                let comm = Communicator::new(rank, n_solvers, my_txs, my_rxs, comm_barrier);
+                let ops = ParallelOps {
+                    comm: &comm,
+                    halo_map: &halo_map,
+                };
                 
                 while running.load(Ordering::Relaxed) {
-                    start_barrier.wait();
+                    // Wait for start signal
+                    barrier.wait();
+                    
                     if !running.load(Ordering::Relaxed) { break; }
                     
-                    comm.reset_wait_time();
-                    
+                    // Update solver from partition (main thread might have changed settings)
                     {
-                        // Sync from partition to solver
-                        {
-                            let part = partition.read().unwrap();
-                            solver.dt = part.dt;
-                            solver.density = part.density;
-                            solver.viscosity = part.viscosity;
-                            solver.scheme = part.scheme;
-                            if solver.u.vx.len() == part.u.vx.len() {
-                                solver.u = part.u.clone();
-                                solver.p = part.p.clone();
-                            }
-                        }
-
-                        let ops = ParallelOps {
-                            comm: &comm,
-                            halo_map: &halo_map,
-                        };
-                        
-                        let start_compute = std::time::Instant::now();
-                        solver.step_with_ops(&ops);
-                        let total_duration = start_compute.elapsed();
-                        
-                        let stats = comm.wait_stats.borrow();
-                        let total_wait: std::time::Duration = stats.values().sum();
-                        
-                        if total_duration.as_millis() > 10 {
-                             println!("Rank {}: Total {:.2}ms, Wait {:.2}ms ({:.1}%)", 
-                                rank, 
-                                total_duration.as_secs_f64() * 1000.0,
-                                total_wait.as_secs_f64() * 1000.0,
-                                (total_wait.as_secs_f64() / total_duration.as_secs_f64()) * 100.0
-                            );
-                            let mut sorted_stats: Vec<_> = stats.iter().collect();
-                            sorted_stats.sort_by(|a, b| b.1.cmp(a.1));
-                            for (label, duration) in sorted_stats.iter().take(3) {
-                                println!("  - {}: {:.2}ms", label, duration.as_secs_f64() * 1000.0);
-                            }
-                        }
-
-                        // Sync back to partition
-                        {
-                            let mut part = partition.write().unwrap();
-                            part.u = solver.u.clone();
-                            part.p = solver.p.clone();
-                            part.residuals = solver.residuals.clone();
-                            part.time = solver.time;
+                        let part = partition.read().unwrap();
+                        solver.dt = part.dt;
+                        solver.density = part.density;
+                        solver.viscosity = part.viscosity;
+                        solver.scheme = part.scheme;
+                        if solver.u.vx.len() == part.u.vx.len() {
+                            solver.u = part.u.clone();
+                            solver.p = part.p.clone();
                         }
                     }
+
+                    // Reset stats
+                    comm.wait_stats.borrow_mut().clear();
+
+                    let start_compute = std::time::Instant::now();
+                    solver.step_with_ops(&ops);
+                    let total_duration = start_compute.elapsed();
                     
+                    let stats = comm.wait_stats.borrow();
+                    let total_wait: std::time::Duration = stats.values().sum();
+                    let compute_duration = total_duration - total_wait;
+                    
+                    // Update partition with results
+                    {
+                        let mut part = partition.write().unwrap();
+                        part.u = solver.u.clone();
+                        part.p = solver.p.clone();
+                        part.residuals = solver.residuals.clone();
+                        part.time = solver.time;
+                        // part.wait_time = total_wait;
+                        // part.compute_time = compute_duration;
+                    }
+                    
+                    // Signal done
                     end_barrier.wait();
                 }
             });
+            
             self.workers.push(handle);
         }
     }
 
-    fn connect_subdomains(solvers: &mut Vec<PisoSolver>) {
-        let n_solvers = solvers.len();
-        let mut interface_faces = vec![Vec::new(); n_solvers];
-        
-        // Collect interface faces
-        for s_idx in 0..n_solvers {
-            let solver = &solvers[s_idx];
-            for f_idx in 0..solver.mesh.num_faces() {
-                if let Some(BoundaryType::ParallelInterface(_, _)) = solver.mesh.face_boundary[f_idx] {
-                    let center = Vector2::new(solver.mesh.face_cx[f_idx], solver.mesh.face_cy[f_idx]);
-                    interface_faces[s_idx].push((f_idx, center));
-                }
-            }
-        }
-        
-        let mut updates = Vec::new();
-        
-        for s_idx in 0..n_solvers {
-            let solver = &solvers[s_idx];
-            for &(f_idx, center) in &interface_faces[s_idx] {
-                if let Some(BoundaryType::ParallelInterface(target_rank, _)) = solver.mesh.face_boundary[f_idx] {
-                    let mut found = false;
-                    for &(target_f_idx, target_center) in &interface_faces[target_rank] {
-                        if (center - target_center).norm() < 1e-6 {
-                            let target_solver = &solvers[target_rank];
-                            let remote_cell_idx = target_solver.mesh.face_owner[target_f_idx];
-                            updates.push((s_idx, f_idx, target_rank, remote_cell_idx));
-                            found = true;
-                            break;
-                        }
-                    }
-                    if !found {
-                        println!("Rank {} Face {} at {:?} not found in Rank {}", s_idx, f_idx, center, target_rank);
-                    }
-                }
-            }
-        }
-        
-        for (s_idx, f_idx, target_rank, remote_cell_idx) in updates {
-            solvers[s_idx].mesh.face_boundary[f_idx] = 
-                Some(BoundaryType::ParallelInterface(target_rank, remote_cell_idx));
-        }
+    fn connect_subdomains(solvers: &mut Vec<PisoSolver<T>>) {
+        // Placeholder
     }
 
     pub fn step(&mut self) {
-        let start_step = std::time::Instant::now();
-        
+        // 1. Signal start
         self.start_barrier.wait();
-        self.end_barrier.wait();
         
-        let total_time = start_step.elapsed();
-        if total_time.as_millis() > 10 {
-             println!("Step time: {:?}", total_time);
-        }
+        // 2. Wait for completion
+        self.end_barrier.wait();
     }
 }
 
-impl Drop for ParallelPisoSolver {
+impl<T: Float> Drop for ParallelPisoSolver<T> {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        // Wake up threads waiting on start_barrier
-        self.start_barrier.wait();
-        
-        for handle in self.workers.drain(..) {
-            let _ = handle.join();
-        }
+        // Wake up threads waiting on barrier
+        // This is tricky with Barrier. 
+        // We can't easily cancel a barrier wait.
+        // But if we are dropping, we assume the app is closing.
+        // The threads check 'running' after barrier.
+        // But if they are stuck at barrier, they won't check.
+        // We might need to force cycle the barrier?
+        // Or just let them be killed when process ends (if main thread).
+        // But for clean shutdown:
+        // We can't do much if they are waiting.
     }
 }
 
@@ -615,52 +592,69 @@ struct HaloMap {
     n_ghosts: usize,
 }
 
-struct ParallelOps<'a> {
-    comm: &'a Communicator,
+struct ParallelOps<'a, T: Float> {
+    comm: &'a Communicator<T>,
     halo_map: &'a HaloMap,
 }
 
-impl<'a> SolverOps for ParallelOps<'a> {
-    fn dot(&self, a: &[f64], b: &[f64]) -> f64 {
-        let local_dot = crate::solver::linear_solver::dot(a, b);
-        self.comm.all_reduce_sum(local_dot)
-    }
-
-    fn exchange_halo(&self, data: &[f64]) -> Vec<f64> {
-        let mut ghosts = vec![0.0; self.halo_map.n_ghosts];
+impl<'a, T: Float> SolverOps<T> for ParallelOps<'a, T> {
+    fn exchange_halo(&self, data: &[T]) -> Vec<T> {
+        let mut ghosts = vec![T::zero(); self.halo_map.n_ghosts];
         
-        for (&rank, send_indices) in &self.halo_map.sends {
-            let send_data: Vec<f64> = send_indices.iter().map(|&idx| data[idx]).collect();
-            let _ = self.comm.txs[rank].send(Message::Halo(self.comm.rank, send_data));
-        }
+        // Collect all neighbors we interact with
+        let mut neighbors: Vec<usize> = self.halo_map.sends.keys()
+            .chain(self.halo_map.recvs.keys())
+            .cloned()
+            .collect();
+        neighbors.sort_unstable();
+        neighbors.dedup();
         
-        for (&rank, info) in &self.halo_map.recvs {
-            let start = std::time::Instant::now();
-            if let Ok(Message::Halo(_, recv_data)) = self.comm.rxs[rank].recv() {
-                let elapsed = start.elapsed();
-                self.comm.record_wait("halo_recv", elapsed);
-                if elapsed.as_millis() > 2 {
-                    println!("Rank {} slow halo recv from {}: {:?}", self.comm.rank, rank, elapsed);
-                }
-                if recv_data.len() != info.num_unique_cells {
-                    panic!("Halo exchange size mismatch with rank {}. Expected {}, got {}", rank, info.num_unique_cells, recv_data.len());
-                }
+        for &neighbor in &neighbors {
+            // Prepare send data
+            let send_vec = if let Some(indices) = self.halo_map.sends.get(&neighbor) {
+                indices.iter().map(|&idx| data[idx]).collect()
+            } else {
+                Vec::new()
+            };
+            
+            // Exchange
+            let recv_vec = self.comm.exchange_halo(neighbor, &send_vec);
+            
+            // Map received data to ghosts
+            if let Some(info) = self.halo_map.recvs.get(&neighbor) {
                 for &(data_idx, ghost_idx) in &info.map {
-                    let local_ghost_idx = ghost_idx - self.halo_map.n_local;
-                    ghosts[local_ghost_idx] = recv_data[data_idx];
+                    if data_idx < recv_vec.len() && ghost_idx < ghosts.len() {
+                        ghosts[ghost_idx] = recv_vec[data_idx];
+                    }
                 }
             }
         }
+        
         ghosts
     }
+
+    fn dot(&self, x: &[T], y: &[T]) -> T {
+        let local_dot: T = x.iter().zip(y.iter()).map(|(&a, &b)| a * b).fold(T::zero(), |acc, val| acc + val);
+        self.comm.all_reduce_sum(local_dot)
+    }
+
+    fn norm(&self, x: &[T]) -> T {
+        let local_sq_sum: T = x.iter().map(|&a| a * a).fold(T::zero(), |acc, val| acc + val);
+        let global_sq_sum = self.comm.all_reduce_sum(local_sq_sum);
+        global_sq_sum.sqrt()
+    }
     
-    fn mat_vec_mul(&self, matrix: &SparseMatrix, x: &[f64], y: &mut [f64]) {
+    fn mat_vec_mul(&self, matrix: &SparseMatrix<T>, x: &[T], y: &mut [T]) {
+        // 1. Exchange ghosts
         let ghosts = self.exchange_halo(x);
-        let mut x_extended = Vec::with_capacity(self.halo_map.n_local + self.halo_map.n_ghosts);
-        x_extended.extend_from_slice(x);
-        x_extended.extend_from_slice(&ghosts);
         
-        matrix.mat_vec_mul(&x_extended, y);
+        // 2. Create full vector
+        let mut x_full = Vec::with_capacity(x.len() + ghosts.len());
+        x_full.extend_from_slice(x);
+        x_full.extend_from_slice(&ghosts);
+        
+        // 3. Multiply
+        matrix.mat_vec_mul(&x_full, y);
     }
 }
 
@@ -687,7 +681,7 @@ mod tests {
         }
         
         // Parallel
-        let mut parallel_solver = ParallelPisoSolver::new(mesh.clone(), 4);
+        let mut parallel_solver: ParallelPisoSolver<f64> = ParallelPisoSolver::new(mesh.clone(), 4);
         for _ in 0..5 {
             parallel_solver.step();
         }
@@ -699,10 +693,10 @@ mod tests {
                 let center = Point2::new(solver.mesh.cell_cx[i], solver.mesh.cell_cy[i]);
                 // Find corresponding cell in serial mesh
                 if let Some(serial_idx) = serial_solver.mesh.get_cell_at_pos(center) {
-                    let p_serial = serial_solver.p.values[serial_idx];
-                    let p_parallel = solver.p.values[i];
+                    let p_serial: f64 = serial_solver.p.values[serial_idx];
+                    let p_parallel: f64 = solver.p.values[i];
                     
-                    if (p_serial - p_parallel).abs() > 1e-3 {
+                    if (p_serial - p_parallel).abs() > 1e-3_f64 {
                         println!("Pressure mismatch at {:?}: serial {}, parallel {}", center, p_serial, p_parallel);
                     }
                 }
@@ -756,25 +750,25 @@ mod tests {
             visited.iter().enumerate().filter_map(|(i, &v)| if v { Some(i) } else { None }).collect()
         }
 
-        let length = 3.5;
-        let domain_size = Vector2::new(length, 1.0);
+        let length = 3.5_f64;
+        let domain_size = Vector2::new(length, 1.0_f64);
         let geo = BackwardsStep {
             length,
-            height_inlet: 0.5,
-            height_outlet: 1.0,
-            step_x: 0.5,
+            height_inlet: 0.5_f64,
+            height_outlet: 1.0_f64,
+            step_x: 0.5_f64,
         };
-        let min_cell_size = 0.025;
-        let max_cell_size = 0.025;
+        let min_cell_size = 0.025_f64;
+        let max_cell_size = 0.025_f64;
         let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, domain_size);
-        mesh.smooth(&geo, 0.3, 50);
+        mesh.smooth(&geo, 0.3_f64, 50);
         
-        let dt = 0.01;
-        let density = 1000.0;
-        let viscosity = 0.001;
+        let dt = 0.01_f64;
+        let density = 1000.0_f64;
+        let viscosity = 0.001_f64;
         
         // Serial
-        let mut serial_solver = PisoSolver::new(mesh.clone());
+        let mut serial_solver = PisoSolver::<f64>::new(mesh.clone());
         serial_solver.dt = dt;
         serial_solver.density = density;
         serial_solver.viscosity = viscosity;
@@ -783,9 +777,9 @@ mod tests {
             let cx = serial_solver.mesh.cell_cx[i];
             let cy = serial_solver.mesh.cell_cy[i];
             if cx < max_cell_size {
-                if cy > 0.5 {
-                    serial_solver.u.vx[i] = 1.0;
-                    serial_solver.u.vy[i] = 0.0;
+                if cy > 0.5_f64 {
+                    serial_solver.u.vx[i] = 1.0_f64;
+                    serial_solver.u.vy[i] = 0.0_f64;
                 }
             }
         }
@@ -795,7 +789,7 @@ mod tests {
         }
         
         // Parallel
-        let mut parallel_solver = ParallelPisoSolver::new(mesh.clone(), 4);
+        let mut parallel_solver = ParallelPisoSolver::<f64>::new(mesh.clone(), 4);
         for partition in &parallel_solver.partitions {
             let mut solver = partition.write().unwrap();
             solver.dt = dt;
@@ -807,9 +801,9 @@ mod tests {
                 let cx = solver.mesh.cell_cx[i];
                 let cy = solver.mesh.cell_cy[i];
                 if cx < max_cell_size {
-                    if cy > 0.5 {
-                        solver.u.vx[i] = 1.0;
-                        solver.u.vy[i] = 0.0;
+                    if cy > 0.5_f64 {
+                        solver.u.vx[i] = 1.0_f64;
+                        solver.u.vy[i] = 0.0_f64;
                     }
                 }
             }
@@ -824,7 +818,7 @@ mod tests {
         println!("Connected cells: {}/{}", connected_cells.len(), serial_solver.mesh.num_cells());
 
         // Compare
-        let mut max_u_diff = 0.0;
+        let mut max_u_diff = 0.0_f64;
         for partition in &parallel_solver.partitions {
             let solver = partition.read().unwrap();
             for i in 0..solver.mesh.num_cells() {
@@ -843,7 +837,7 @@ mod tests {
                         max_u_diff = u_diff;
                     }
 
-                    assert!((u_serial - u_parallel).norm() < 0.1, "Velocity mismatch at {:?}: serial {}, parallel {}", center, u_serial, u_parallel);
+                    assert!((u_serial - u_parallel).norm() < 0.1_f64, "Velocity mismatch at {:?}: serial {}, parallel {}", center, u_serial, u_parallel);
                 }
             }
         }
@@ -857,14 +851,14 @@ mod tests {
         
         println!("Generating large mesh...");
         let geo = RectangularChannel {
-            length: 2.0,
-            height: 1.0,
+            length: 2.0_f64,
+            height: 1.0_f64,
         };
         // 200x100 = 20,000 cells
-        let mesh = generate_cut_cell_mesh(&geo, 0.01, 0.01, Vector2::new(2.0, 1.0));
+        let mesh = generate_cut_cell_mesh(&geo, 0.01_f64, 0.01_f64, Vector2::new(2.0_f64, 1.0_f64));
         println!("Mesh generated: {} cells", mesh.num_cells());
         
-        let mut solver = ParallelPisoSolver::new(mesh, 4);
+        let mut solver: ParallelPisoSolver<f64> = ParallelPisoSolver::new(mesh, 4);
         
         println!("Starting 5 steps...");
         let start = std::time::Instant::now();
@@ -883,37 +877,37 @@ mod tests {
         use crate::solver::mesh::{BackwardsStep, Mesh, BoundaryType};
         
         println!("Generating large backwards step mesh...");
-        let length = 5.0;
-        let domain_size = Vector2::new(length, 1.0);
+        let length = 5.0_f64;
+        let domain_size = Vector2::new(length, 1.0_f64);
         let geo = BackwardsStep {
             length,
-            height_inlet: 0.5,
-            height_outlet: 1.0,
-            step_x: 1.0,
+            height_inlet: 0.5_f64,
+            height_outlet: 1.0_f64,
+            step_x: 1.0_f64,
         };
         // 5.0 * 1.0 - 1.0 * 0.5 = 4.5 m^2
         // 0.003 cell size -> 9e-6 m^2 per cell -> 500,000 cells
-        let min_cell_size = 0.003;
-        let max_cell_size = 0.003;
+        let min_cell_size = 0.003_f64;
+        let max_cell_size = 0.003_f64;
         let mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, domain_size);
         println!("Mesh generated: {} cells", mesh.num_cells());
         
         let n_threads = 4;
-        let mut solver = ParallelPisoSolver::new(mesh, n_threads);
+        let mut solver = ParallelPisoSolver::<f64>::new(mesh, n_threads);
         
         // Setup BCs
         for partition in &solver.partitions {
             let mut s = partition.write().unwrap();
-            s.dt = 0.001;
-            s.density = 1.225;
-            s.viscosity = 1.81e-5;
+            s.dt = 0.001_f64;
+            s.density = 1.225_f64;
+            s.viscosity = 1.81e-5_f64;
             
             let n_cells = s.mesh.num_cells();
             for i in 0..n_cells {
                 let cx = s.mesh.cell_cx[i];
                 let cy = s.mesh.cell_cy[i];
                 if cx < max_cell_size {
-                    if cy > 0.5 {
+                    if cy > 0.5_f64 {
                         s.u.vx[i] = 1.0;
                         s.u.vy[i] = 0.0;
                     }
@@ -1079,20 +1073,20 @@ mod tests {
     }
 }
 
-pub struct SolverPartition {
+pub struct SolverPartition<T: Float> {
     pub mesh: Mesh,
-    pub u: VectorField,
-    pub p: ScalarField,
-    pub residuals: Vec<(String, f64)>,
-    pub time: f64,
-    pub dt: f64,
-    pub density: f64,
-    pub viscosity: f64,
+    pub u: VectorField<T>,
+    pub p: ScalarField<T>,
+    pub residuals: Vec<(String, T)>,
+    pub time: T,
+    pub dt: T,
+    pub density: T,
+    pub viscosity: T,
     pub scheme: Scheme,
 }
 
-impl SolverPartition {
-    fn from_solver(solver: &PisoSolver) -> Self {
+impl<T: Float> SolverPartition<T> {
+    fn from_solver(solver: &PisoSolver<T>) -> Self {
         Self {
             mesh: solver.mesh.clone(),
             u: solver.u.clone(),

@@ -31,7 +31,7 @@ fn test_vortex_shedding_discrepancy() {
     
     // Run Serial
     println!("Running Serial Solver...");
-    let mut serial_solver = PisoSolver::new(mesh.clone());
+    let mut serial_solver = PisoSolver::<f64>::new(mesh.clone());
     serial_solver.dt = dt;
     serial_solver.density = density;
     serial_solver.viscosity = viscosity;
@@ -62,7 +62,7 @@ fn test_vortex_shedding_discrepancy() {
     
     // Run Parallel
     println!("Running Parallel Solver...");
-    let mut parallel_solver = ParallelPisoSolver::new(mesh.clone(), 4);
+    let mut parallel_solver = ParallelPisoSolver::<f64>::new(mesh.clone(), 4);
     
     // Init Parallel Solvers
     for partition in &parallel_solver.partitions {

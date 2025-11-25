@@ -57,6 +57,9 @@ impl<T: Float> PisoSolver<T> {
     }
 
     pub fn step_with_ops<O: SolverOps<T>>(&mut self, ops: &O) {
+        // Clear residuals from previous step
+        self.residuals.clear();
+        
         // println!("Starting step at time {:.4}", self.time);
         if self.fluxes.iter().any(|f| f.is_nan()) {
             println!("Fluxes contain NaN at start of step!");

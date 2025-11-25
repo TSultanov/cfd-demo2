@@ -661,7 +661,20 @@ impl eframe::App for CFDApp {
 
             ui.group(|ui| {
                 ui.label("Solver Parameters");
-                ui.add(egui::Slider::new(&mut self.timestep, 0.001..=0.1).text("Timestep"));
+                
+                // Calculate recommended timestep for stability (CFL < 0.5)
+                let recommended_dt = 0.5 * self.min_cell_size; // CFL = u*dt/dx < 0.5 => dt < 0.5*dx (assuming u=1)
+                let cfl = self.timestep / self.min_cell_size; // Approximate CFL
+                
+                ui.add(egui::Slider::new(&mut self.timestep, 0.0001..=0.1).text("Timestep"));
+                
+                // Show CFL warning
+                if cfl > 1.0 {
+                    ui.colored_label(egui::Color32::RED, format!("⚠ CFL≈{:.1} (>1, may be unstable!)", cfl));
+                    ui.colored_label(egui::Color32::YELLOW, format!("Recommended dt ≤ {:.4}", recommended_dt));
+                } else if cfl > 0.5 {
+                    ui.colored_label(egui::Color32::YELLOW, format!("CFL≈{:.2} (moderate)", cfl));
+                }
                 
                 ui.horizontal(|ui| {
                     ui.label("Precision:");
@@ -845,9 +858,17 @@ impl eframe::App for CFDApp {
         };
 
         egui::SidePanel::right("legend").show(ctx, |ui| {
-            if let Some(_solver) = &self.cpu_solver {
+            if let Some(solver) = &self.cpu_solver {
                 ui.heading("Mesh Stats");
-                ui.label("Mesh stats available in debug mode");
+                let mesh = solver.get_mesh();
+                ui.label(format!("Cells: {}", mesh.num_cells()));
+                ui.label(format!("Faces: {}", mesh.num_faces()));
+                ui.label(format!("Vertices: {}", mesh.num_vertices()));
+                if !mesh.cell_vol.is_empty() {
+                    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let max_vol = mesh.cell_vol.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    ui.label(format!("Cell vol: {:.2e} - {:.2e}", min_vol, max_vol));
+                }
                 ui.separator();
             }
 

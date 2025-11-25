@@ -101,9 +101,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             other_center = f_center;
         }
         
-        let dx = center.x - other_center.x;
-        let dy = center.y - other_center.y;
-        let dist = sqrt(dx*dx + dy*dy);
+        // Vector from this cell to other cell (d_vec)
+        let d_vec_x = other_center.x - center.x;
+        let d_vec_y = other_center.y - center.y;
+        let dist = sqrt(d_vec_x*d_vec_x + d_vec_y*d_vec_y);
         
         // Diffusion: nu * A / dist
         let diff_coeff = constants.viscosity * area / dist;
@@ -127,6 +128,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             
             diag_coeff += diff_coeff + conv_coeff_diag;
+            
+            // Non-orthogonal diffusion correction
+            // S = normal * area (face area vector pointing outward from this cell)
+            let s_x = normal.x * area;
+            let s_y = normal.y * area;
+            
+            // k_vec = S - d_vec * (area / dist)
+            // This is the component of S perpendicular to d_vec
+            let k_x = s_x - d_vec_x * (area / dist);
+            let k_y = s_y - d_vec_y * (area / dist);
+            
+            // Interpolate gradient to face
+            let grad_own = grad_component[idx];
+            let grad_neigh = grad_component[other_idx];
+            
+            // Distance-weighted interpolation
+            let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+            let d_neigh = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+            let total_d = d_own + d_neigh;
+            var interp_f = 0.5;
+            if (total_d > 1e-6) {
+                interp_f = d_own / total_d;  // Weight for neighbor
+            }
+            
+            let grad_f_x = grad_own.x + interp_f * (grad_neigh.x - grad_own.x);
+            let grad_f_y = grad_own.y + interp_f * (grad_neigh.y - grad_own.y);
+            
+            // Correction flux = gamma * dot(grad_f, k_vec)
+            let correction_flux = constants.viscosity * (grad_f_x * k_x + grad_f_y * k_y);
+            
+            // Subtract from RHS (since diffusion is -div(nu * grad(phi)))
+            rhs_val -= correction_flux;
         } else {
             // Boundary Conditions
             if (boundary_type == 1u) { // Inlet

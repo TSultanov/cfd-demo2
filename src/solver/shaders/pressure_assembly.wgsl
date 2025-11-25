@@ -104,9 +104,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         
         if (!is_boundary) {
-            let dx = center.x - other_center.x;
-            let dy = center.y - other_center.y;
-            let dist = sqrt(dx*dx + dy*dy);
+            // Vector from this cell to other cell
+            let d_vec_x = other_center.x - center.x;
+            let d_vec_y = other_center.y - center.y;
+            let dist = sqrt(d_vec_x*d_vec_x + d_vec_y*d_vec_y);
             
             // Calculate lambda for interpolation (match flux_rhie_chow)
             let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
@@ -128,6 +129,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             
             diag_coeff += coeff;
+            
+            // Non-orthogonal correction for pressure Laplacian
+            // S = normal * area (face area vector pointing outward from this cell)
+            let s_x = normal.x * area;
+            let s_y = normal.y * area;
+            
+            // k_vec = S - d_vec * (area / dist)
+            let k_x = s_x - d_vec_x * (area / dist);
+            let k_y = s_y - d_vec_y * (area / dist);
+            
+            // Interpolate pressure gradient to face
+            var other_idx_p = u32(neigh_idx);
+            if (owner != idx) {
+                other_idx_p = owner;
+            }
+            let grad_p_own = grad_p[idx];
+            let grad_p_neigh = grad_p[other_idx_p];
+            
+            // Distance-weighted interpolation
+            var interp_f = 0.5;
+            if (total_dist > 1e-6) {
+                interp_f = d_own / total_dist;  // Weight for neighbor
+            }
+            
+            let grad_p_f_x = grad_p_own.x + interp_f * (grad_p_neigh.x - grad_p_own.x);
+            let grad_p_f_y = grad_p_own.y + interp_f * (grad_p_neigh.y - grad_p_own.y);
+            
+            // Correction flux = d_p_face * dot(grad_p_f, k_vec)
+            let correction_flux = d_p_face * (grad_p_f_x * k_x + grad_p_f_y * k_y);
+            
+            // Subtract from RHS (pressure equation is Laplacian)
+            rhs_val -= correction_flux;
         } else {
             // Boundary Conditions
             if (boundary_type == 2u) { // Outlet (Dirichlet p=0)

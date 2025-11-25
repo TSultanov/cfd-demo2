@@ -289,6 +289,28 @@ impl GpuSolver {
         self.constants.component = component;
         self.update_constants();
 
+        // Compute gradients BEFORE assembly for higher order schemes
+        // The gradient of the OLD field is needed for deferred correction
+        if self.constants.scheme != 0 {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Gradient U Encoder (pre-assembly)"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Gradient U Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_gradient);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
         {
             let mut encoder =
                 self.context
@@ -334,27 +356,6 @@ impl GpuSolver {
                 cpass.set_bind_group(0, &self.bg_mesh, &[]);
                 cpass.set_bind_group(1, &self.bg_fields, &[]);
                 cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-                cpass.dispatch_workgroups(num_groups, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-        }
-
-        // Compute gradients if scheme is not Upwind
-        if self.constants.scheme != 0 {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Gradient U Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Gradient U Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_gradient);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
             self.context.queue.submit(Some(encoder.finish()));

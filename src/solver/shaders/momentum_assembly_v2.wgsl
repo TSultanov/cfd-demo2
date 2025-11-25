@@ -106,8 +106,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d_vec_y = other_center.y - center.y;
         let dist = sqrt(d_vec_x*d_vec_x + d_vec_y*d_vec_y);
         
-        // Diffusion: nu * A / dist
-        let diff_coeff = constants.viscosity * area / dist;
+        // Diffusion: nu * A / dist (nu = viscosity / density = kinematic viscosity)
+        let nu = constants.viscosity / constants.density;
+        let diff_coeff = nu * area / dist;
         
         // Convection: Upwind
         var conv_coeff_diag: f32 = 0.0;
@@ -155,8 +156,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let grad_f_x = grad_own.x + interp_f * (grad_neigh.x - grad_own.x);
             let grad_f_y = grad_own.y + interp_f * (grad_neigh.y - grad_own.y);
             
-            // Correction flux = gamma * dot(grad_f, k_vec)
-            let correction_flux = constants.viscosity * (grad_f_x * k_x + grad_f_y * k_y);
+            // Correction flux = nu * dot(grad_f, k_vec) (nu = kinematic viscosity)
+            let correction_flux = nu * (grad_f_x * k_x + grad_f_y * k_y);
             
             // Subtract from RHS (since diffusion is -div(nu * grad(phi)))
             rhs_val -= correction_flux;

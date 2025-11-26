@@ -242,7 +242,7 @@ impl GpuSolver {
                 self.constants.component = 2;
                 self.update_constants();
 
-                // Gradient, flux interpolation, and pressure assembly
+                // Flux interpolation with Rhie-Chow, then combined gradient + pressure assembly
                 {
                     let mut encoder =
                         self.context
@@ -250,16 +250,6 @@ impl GpuSolver {
                             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                                 label: Some("PISO Pre-Solve Encoder"),
                             });
-                    {
-                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Gradient Pass"),
-                            timestamp_writes: None,
-                        });
-                        cpass.set_pipeline(&self.pipeline_gradient);
-                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                        cpass.set_bind_group(1, &self.bg_fields, &[]);
-                        cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                    }
                     {
                         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some("Flux RC Pass"),
@@ -271,11 +261,12 @@ impl GpuSolver {
                         cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
                     }
                     {
+                        // Combined gradient + pressure assembly (merged kernel)
                         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Pressure Assembly Pass"),
+                            label: Some("Pressure Assembly With Grad Pass"),
                             timestamp_writes: None,
                         });
-                        cpass.set_pipeline(&self.pipeline_pressure_assembly);
+                        cpass.set_pipeline(&self.pipeline_pressure_assembly_with_grad);
                         cpass.set_bind_group(0, &self.bg_mesh, &[]);
                         cpass.set_bind_group(1, &self.bg_fields, &[]);
                         cpass.set_bind_group(2, &self.bg_solver, &[]);
@@ -423,16 +414,19 @@ impl GpuSolver {
         self.constants.component = component;
         self.update_constants();
 
-        // Compute gradients BEFORE assembly for higher order schemes
-        // The gradient of the OLD field is needed for deferred correction
-        if self.constants.scheme != 0 {
+        // Pre-assembly: gradient (for higher order schemes) + momentum assembly
+        // Combined into single encoder submission for efficiency
+        {
             let mut encoder =
                 self.context
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Gradient U Encoder (pre-assembly)"),
+                        label: Some("Momentum Pre-Solve Encoder"),
                     });
-            {
+            
+            // Compute gradients BEFORE assembly for higher order schemes
+            // The gradient of the OLD field is needed for deferred correction
+            if self.constants.scheme != 0 {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Gradient U Pass"),
                     timestamp_writes: None,
@@ -442,16 +436,7 @@ impl GpuSolver {
                 cpass.set_bind_group(1, &self.bg_fields, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
-            self.context.queue.submit(Some(encoder.finish()));
-        }
-
-        {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Momentum Assembly Encoder"),
-                    });
+            
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Momentum Assembly Pass"),
@@ -463,36 +448,18 @@ impl GpuSolver {
                 cpass.set_bind_group(2, &self.bg_solver, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
+            
             self.context.queue.submit(Some(encoder.finish()));
         }
 
         self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-        let stats = pollster::block_on(self.solve());
+        
+        // Use combined solve + update_u to avoid separate kernel dispatch
+        let stats = pollster::block_on(self.solve_and_update_u());
         if component == 0 {
             *self.stats_ux.lock().unwrap() = stats;
         } else {
             *self.stats_uy.lock().unwrap() = stats;
-        }
-
-        {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Update U Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Update U Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_update_u_component);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-                cpass.dispatch_workgroups(num_groups, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
         }
     }
 

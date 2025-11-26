@@ -122,6 +122,7 @@ pub struct GpuSolver {
     pub pipeline_flux: wgpu::ComputePipeline,
     pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
+    pub pipeline_pressure_assembly_with_grad: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_velocity_correction: wgpu::ComputePipeline,
     pub pipeline_update_u_component: wgpu::ComputePipeline,

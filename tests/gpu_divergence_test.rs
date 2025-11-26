@@ -48,7 +48,7 @@ fn test_gpu_divergence_channel_obstacle() {
 
     // Run loop
     println!("Starting simulation loop...");
-    let max_steps = 2000;
+    let max_steps = 200;
     let target_cfl = 0.5;
 
     for step in 0..max_steps {

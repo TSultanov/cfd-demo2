@@ -1569,6 +1569,22 @@ impl GpuSolver {
                 entry_point: "main",
             });
 
+        // Combined pressure assembly + gradient shader (optimization)
+        let shader_pressure_with_grad = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Pressure Assembly With Grad Shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "../shaders/pressure_assembly_with_grad.wgsl"
+            ))),
+        });
+
+        let pipeline_pressure_assembly_with_grad =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Pressure Assembly With Grad Pipeline"),
+                layout: Some(&pl_matrix),
+                module: &shader_pressure_with_grad,
+                entry_point: "main",
+            });
+
         let shader_flux_rhie_chow = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flux Rhie-Chow Shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
@@ -1797,6 +1813,7 @@ impl GpuSolver {
             pipeline_flux,
             pipeline_momentum_assembly,
             pipeline_pressure_assembly,
+            pipeline_pressure_assembly_with_grad,
             pipeline_flux_rhie_chow,
             pipeline_velocity_correction,
             pipeline_update_u_component,

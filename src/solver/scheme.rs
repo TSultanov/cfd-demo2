@@ -1,5 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Scheme {
+    #[default]
     Upwind,
     Central,
     QUICK,
@@ -15,8 +17,3 @@ impl Scheme {
     }
 }
 
-impl Default for Scheme {
-    fn default() -> Self {
-        Scheme::Upwind
-    }
-}

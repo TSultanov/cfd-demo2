@@ -458,11 +458,11 @@ pub fn generate_cut_cell_mesh(
                         if final_mask.any() {
                             let t_arr = t.to_array();
                             let mask_int = final_mask.to_bitmask();
-                            for lane in 0..4 {
+                            for (lane, &t_val) in t_arr.iter().enumerate() {
                                 if (mask_int & (1 << lane)) != 0 {
                                     let idx = i + lane;
                                     on_segment.push((
-                                        t_arr[lane],
+                                        t_val,
                                         Point2::new(xs[idx], ys[idx]),
                                         fixeds[idx],
                                     ));

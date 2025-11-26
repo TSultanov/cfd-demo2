@@ -39,6 +39,8 @@ struct Fluid {
     viscosity: f64,
 }
 
+type SharedResults = Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>;
+
 impl Fluid {
     fn presets() -> Vec<Fluid> {
         vec![
@@ -89,7 +91,7 @@ struct CachedGpuStats {
 pub struct CFDApp {
     gpu_solver: Option<Arc<Mutex<GpuSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
-    shared_results: Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>,
+    shared_results: SharedResults,
     shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
@@ -235,18 +237,18 @@ impl CFDApp {
 
     fn build_initial_velocity(&self, mesh: &Mesh) -> Vec<(f64, f64)> {
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
-        for i in 0..mesh.num_cells() {
+        for (i, vel) in u.iter_mut().enumerate() {
             let cx = mesh.cell_cx[i];
             let cy = mesh.cell_cy[i];
             if cx < self.max_cell_size {
                 match self.selected_geometry {
                     GeometryType::BackwardsStep => {
                         if cy > 0.5 {
-                            u[i] = (1.0, 0.0);
+                            *vel = (1.0, 0.0);
                         }
                     }
                     GeometryType::ChannelObstacle => {
-                        u[i] = (1.0, 0.0);
+                        *vel = (1.0, 0.0);
                     }
                 }
             }

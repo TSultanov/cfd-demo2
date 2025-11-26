@@ -1,5 +1,5 @@
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use nalgebra::Vector2;
 use std::time::Instant;
 
@@ -33,13 +33,13 @@ fn test_gpu_profile() {
             }
         }
         solver.set_u(&u_init);
-        
+
         solver.enable_profiling(true);
 
         println!("Starting profiling...");
         let start_total = Instant::now();
         let steps = 50;
-        
+
         for step in 0..steps {
             let start_step = Instant::now();
             solver.step();
@@ -48,18 +48,18 @@ fn test_gpu_profile() {
                 println!("Step {}: {:?}", step, duration);
             }
         }
-        
+
         let total_duration = start_total.elapsed();
         println!("Total time for {} steps: {:?}", steps, total_duration);
         println!("Average time per step: {:?}", total_duration / steps);
-        
+
         let (time_dot, time_compute, time_spmv, time_transfer) = solver.get_profiling_data();
         println!("Profiling Data:");
         println!("  Dot Product (CPU Wait): {:?}", time_dot);
         println!("  Compute Kernels (Submit): {:?}", time_compute);
         println!("  SpMV Kernels (Submit): {:?}", time_spmv);
         println!("  Transfer (Submit): {:?}", time_transfer);
-        
+
         let total_profiled = time_dot + time_compute + time_spmv + time_transfer;
         println!("  Total Profiled: {:?}", total_profiled);
         // Note: total_duration includes initial setup time if not careful, but here we measure loop only?
@@ -67,9 +67,12 @@ fn test_gpu_profile() {
         // But profiling data is accumulated over the loop.
         // So it should be comparable.
         if total_duration > total_profiled {
-             println!("  Unaccounted (CPU Overhead): {:?}", total_duration - total_profiled);
+            println!(
+                "  Unaccounted (CPU Overhead): {:?}",
+                total_duration - total_profiled
+            );
         } else {
-             println!("  Unaccounted (CPU Overhead): 0 (Profiled > Total?)");
+            println!("  Unaccounted (CPU Overhead): 0 (Profiled > Total?)");
         }
     });
 }

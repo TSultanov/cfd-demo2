@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use nalgebra::{Point2, Vector2};
 
 fn mesh_generation_benchmark(c: &mut Criterion) {
@@ -14,14 +14,16 @@ fn mesh_generation_benchmark(c: &mut Criterion) {
     let min_cell_size = 0.02;
     let max_cell_size = 0.05;
 
-    c.bench_function("generate_cut_cell_mesh", |b| b.iter(|| {
-        generate_cut_cell_mesh(
-            black_box(&geo),
-            black_box(min_cell_size),
-            black_box(max_cell_size),
-            black_box(domain_size),
-        )
-    }));
+    c.bench_function("generate_cut_cell_mesh", |b| {
+        b.iter(|| {
+            generate_cut_cell_mesh(
+                black_box(&geo),
+                black_box(min_cell_size),
+                black_box(max_cell_size),
+                black_box(domain_size),
+            )
+        })
+    });
 }
 
 criterion_group!(benches, mesh_generation_benchmark);

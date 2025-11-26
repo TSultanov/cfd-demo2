@@ -1,7 +1,7 @@
 use num_traits::{FromPrimitive, ToPrimitive};
 use std::fmt::{Debug, Display};
 use std::iter::Sum;
-use std::ops::{Add, Div, Mul, Sub, AddAssign, SubAssign, MulAssign, DivAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 use wide::{f32x8, f64x4};
 
 pub trait Float:
@@ -26,11 +26,7 @@ pub trait Float:
 }
 
 pub trait Simd:
-    Copy
-    + Add<Output = Self>
-    + Sub<Output = Self>
-    + Mul<Output = Self>
-    + Div<Output = Self>
+    Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self>
 {
     type Element;
     const LANES: usize;

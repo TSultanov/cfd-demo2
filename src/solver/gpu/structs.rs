@@ -1,7 +1,7 @@
+use super::context::GpuContext;
 use bytemuck::{Pod, Zeroable};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
-use super::context::GpuContext;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {

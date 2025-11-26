@@ -11,7 +11,11 @@ fn main() {
         step_x: 0.5,
     };
     let mesh = generate_cut_cell_mesh(&geo, 0.05, 0.1, domain_size);
-    println!("Mesh generated with {} cells and {} faces", mesh.num_cells(), mesh.num_faces());
+    println!(
+        "Mesh generated with {} cells and {} faces",
+        mesh.num_cells(),
+        mesh.num_faces()
+    );
 
     let mut solver = PisoSolver::new(mesh);
     solver.dt = 0.001;
@@ -21,8 +25,8 @@ fn main() {
         let cx = solver.mesh.cell_cx[i];
         let cy = solver.mesh.cell_cy[i];
         if cx < 0.1 && cy > 0.5 {
-             solver.u.vx[i] = 1.0;
-             solver.u.vy[i] = 0.0;
+            solver.u.vx[i] = 1.0;
+            solver.u.vy[i] = 0.0;
         }
     }
 

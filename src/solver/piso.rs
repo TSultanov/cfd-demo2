@@ -1,7 +1,7 @@
-use crate::solver::fvm::{Fvm, ScalarField, Scheme, VectorField};
-use crate::solver::linear_solver::{solve_bicgstab, SerialOps, SparseMatrix, SolverOps};
-use crate::solver::mesh::{BoundaryType, Mesh};
 use crate::solver::float::{Float, Simd};
+use crate::solver::fvm::{Fvm, ScalarField, Scheme, VectorField};
+use crate::solver::linear_solver::{solve_bicgstab, SerialOps, SolverOps, SparseMatrix};
+use crate::solver::mesh::{BoundaryType, Mesh};
 use nalgebra::Vector2;
 use std::collections::HashMap;
 
@@ -29,7 +29,7 @@ impl<T: Float> PisoSolver<T> {
         let n_cells = mesh.num_cells();
         let n_faces = mesh.num_faces();
         let cell_vol: Vec<T> = mesh.cell_vol.iter().map(|&v| T::val_from_f64(v)).collect();
-        
+
         let solver = Self {
             mesh,
             u: VectorField::new(n_cells, Vector2::new(T::zero(), T::zero())),
@@ -59,7 +59,7 @@ impl<T: Float> PisoSolver<T> {
     pub fn step_with_ops<O: SolverOps<T>>(&mut self, ops: &O) {
         // Clear residuals from previous step
         self.residuals.clear();
-        
+
         // println!("Starting step at time {:.4}", self.time);
         if self.fluxes.iter().any(|f| f.is_nan()) {
             println!("Fluxes contain NaN at start of step!");
@@ -145,20 +145,20 @@ impl<T: Float> PisoSolver<T> {
         let v_inv_rho = T::Simd::splat(inv_density);
 
         while i + lanes <= n_cells {
-            let v_vol = T::Simd::from_slice(&self.cell_vol[i..i+lanes]);
-            let v_gp_x = T::Simd::from_slice(&grad_p.vx[i..i+lanes]);
-            let v_gp_y = T::Simd::from_slice(&grad_p.vy[i..i+lanes]);
-            let v_rhs_x = T::Simd::from_slice(&rhs_ux[i..i+lanes]);
-            let v_rhs_y = T::Simd::from_slice(&rhs_uy[i..i+lanes]);
+            let v_vol = T::Simd::from_slice(&self.cell_vol[i..i + lanes]);
+            let v_gp_x = T::Simd::from_slice(&grad_p.vx[i..i + lanes]);
+            let v_gp_y = T::Simd::from_slice(&grad_p.vy[i..i + lanes]);
+            let v_rhs_x = T::Simd::from_slice(&rhs_ux[i..i + lanes]);
+            let v_rhs_y = T::Simd::from_slice(&rhs_uy[i..i + lanes]);
 
             let res_x = v_rhs_x - (v_gp_x * v_inv_rho) * v_vol;
             let res_y = v_rhs_y - (v_gp_y * v_inv_rho) * v_vol;
 
-            res_x.write_to_slice(&mut rhs_ux[i..i+lanes]);
-            res_y.write_to_slice(&mut rhs_uy[i..i+lanes]);
+            res_x.write_to_slice(&mut rhs_ux[i..i + lanes]);
+            res_y.write_to_slice(&mut rhs_uy[i..i + lanes]);
             i += lanes;
         }
-        
+
         while i < n_cells {
             let vol = self.cell_vol[i];
             rhs_ux[i] -= (grad_p.vx[i] * inv_density) * vol;
@@ -168,14 +168,26 @@ impl<T: Float> PisoSolver<T> {
 
         // Solve Ux
         let mut x_sol = u_x.values.clone();
-        let (_iter_ux, _res_ux, init_res_ux) =
-            solve_bicgstab(&mat_u, &rhs_ux, &mut x_sol, 1000, T::val_from_f64(1e-6), ops);
+        let (_iter_ux, _res_ux, init_res_ux) = solve_bicgstab(
+            &mat_u,
+            &rhs_ux,
+            &mut x_sol,
+            1000,
+            T::val_from_f64(1e-6),
+            ops,
+        );
         self.u.vx.copy_from_slice(&x_sol);
 
         // Solve Uy
         let mut y_sol = u_y.values.clone();
-        let (_iter_uy, _res_uy, init_res_uy) =
-            solve_bicgstab(&mat_v, &rhs_uy, &mut y_sol, 1000, T::val_from_f64(1e-6), ops);
+        let (_iter_uy, _res_uy, init_res_uy) = solve_bicgstab(
+            &mat_v,
+            &rhs_uy,
+            &mut y_sol,
+            1000,
+            T::val_from_f64(1e-6),
+            ops,
+        );
         self.u.vy.copy_from_slice(&y_sol);
 
         // Exchange U ghosts (updated after predictor)
@@ -245,48 +257,58 @@ impl<T: Float> PisoSolver<T> {
             for i in 0..self.mesh.num_cells() {
                 let mut div_u_star = T::zero();
                 let c_i = Vector2::new(self.mesh.cell_cx[i], self.mesh.cell_cy[i]);
-                
+
                 let start = self.mesh.cell_face_offsets[i];
-                let end = self.mesh.cell_face_offsets[i+1];
-                
+                let end = self.mesh.cell_face_offsets[i + 1];
+
                 for k in start..end {
                     let face_idx = self.mesh.cell_faces[k];
                     let owner = self.mesh.face_owner[face_idx];
                     let neighbor = self.mesh.face_neighbor[face_idx];
                     let is_owner = owner == i;
                     let neighbor_idx = if is_owner { neighbor } else { Some(owner) };
-                    
-                    let f_c = Vector2::new(self.mesh.face_cx[face_idx], self.mesh.face_cy[face_idx]);
+
+                    let f_c =
+                        Vector2::new(self.mesh.face_cx[face_idx], self.mesh.face_cy[face_idx]);
                     let f_area = T::val_from_f64(self.mesh.face_area[face_idx]);
-                    let f_normal = Vector2::new(T::val_from_f64(self.mesh.face_nx[face_idx]), T::val_from_f64(self.mesh.face_ny[face_idx]));
+                    let f_normal = Vector2::new(
+                        T::val_from_f64(self.mesh.face_nx[face_idx]),
+                        T::val_from_f64(self.mesh.face_ny[face_idx]),
+                    );
                     let normal = if is_owner { f_normal } else { -f_normal };
-                    
+
                     // Interpolate U to face
                     let u_own = Vector2::new(self.u.vx[i], self.u.vy[i]);
-                    let mut u_face = u_own; // Default
-                    let mut d_p_face = d_p[i];
-                    
+                    let u_face;
+                    let d_p_face;
+
                     let (u_face_dot_n, d_face_val) = if let Some(neigh) = neighbor_idx {
                         let u_neigh = Vector2::new(self.u.vx[neigh], self.u.vy[neigh]);
                         let d_own = (f_c - c_i).norm();
-                        let d_neigh = (f_c - Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh])).norm();
+                        let d_neigh = (f_c
+                            - Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh]))
+                        .norm();
                         let f = T::val_from_f64(d_own / (d_own + d_neigh));
-                        
+
                         u_face = u_own + (u_neigh - u_own) * f;
                         d_p_face = d_p[i] + f * (d_p[neigh] - d_p[i]);
-                        
+
                         // Rhie-Chow Correction
                         let grad_p_own = Vector2::new(grad_p.vx[i], grad_p.vy[i]);
                         let grad_p_neigh = Vector2::new(grad_p.vx[neigh], grad_p.vy[neigh]);
                         let grad_p_avg = grad_p_own + (grad_p_neigh - grad_p_own) * f;
-                        
+
                         let grad_p_n = grad_p_avg.dot(&normal);
-                        
-                        let dist = (Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh]) - c_i).norm();
-                        let p_grad_face = (self.p.values[neigh] - self.p.values[i]) / T::val_from_f64(dist);
-                        
+
+                        let dist =
+                            (Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh])
+                                - c_i)
+                                .norm();
+                        let p_grad_face =
+                            (self.p.values[neigh] - self.p.values[i]) / T::val_from_f64(dist);
+
                         let rc_term = d_p_face * f_area * (grad_p_n - p_grad_face);
-                        
+
                         (u_face.dot(&normal) * f_area + rc_term, d_p_face)
                     } else {
                         // Boundary
@@ -295,63 +317,77 @@ impl<T: Float> PisoSolver<T> {
                             if let (Some(ub), Some(vb)) = (u_bc(bt), v_bc(bt)) {
                                 u_b = Vector2::new(ub, vb);
                             }
-                            
+
                             let mut flux = u_b.dot(&normal) * f_area;
                             let mut d_face = d_p[i];
 
                             // Check Parallel Interface
-                            let mut handled = false;
                             let map = &self.ghost_map;
                             if let Some(&ghost_idx) = map.get(&face_idx) {
                                 // Ghost cell
                                 let local_ghost_idx = ghost_idx - self.mesh.num_cells();
                                 if local_ghost_idx < u_x_ghosts_pred.len() {
-                                        let u_g = Vector2::new(u_x_ghosts_pred[local_ghost_idx], u_y_ghosts_pred[local_ghost_idx]);
-                                        let d_p_g = d_p_ghosts[local_ghost_idx];
-                                        
-                                        // Interpolate
-                                        u_b = (u_own + u_g) * T::val_from_f64(0.5);
-                                        flux = u_b.dot(&normal) * f_area;
-                                        d_face = (d_p[i] + d_p_g) * T::val_from_f64(0.5);
-                                        
-                                        // Rhie-Chow
-                                        if local_ghost_idx < gp_x_ghosts.len() {
-                                            let gp_g = Vector2::new(gp_x_ghosts[local_ghost_idx], gp_y_ghosts[local_ghost_idx]);
-                                            let grad_p_avg = (Vector2::new(grad_p.vx[i], grad_p.vy[i]) + gp_g) * T::val_from_f64(0.5);
-                                            let grad_p_n = grad_p_avg.dot(&normal);
-                                            
-                                            let p_ghost = p_ghosts_loop[local_ghost_idx];
-                                            let dist = if let Some(gc) = self.ghost_centers.get(local_ghost_idx) {
-                                                let dx = gc.x - self.mesh.cell_cx[i];
-                                                let dy = gc.y - self.mesh.cell_cy[i];
-                                                (dx * dx + dy * dy).sqrt()
-                                            } else { (f_c - c_i).norm() * 2.0 };
-                                            
-                                            let p_grad_face = (p_ghost - self.p.values[i]) / T::val_from_f64(dist);
-                                            let rc_term = d_face * f_area * (grad_p_n - p_grad_face);
-                                            flux += rc_term;
-                                        }
-                                        handled = true;
+                                    let u_g = Vector2::new(
+                                        u_x_ghosts_pred[local_ghost_idx],
+                                        u_y_ghosts_pred[local_ghost_idx],
+                                    );
+                                    let d_p_g = d_p_ghosts[local_ghost_idx];
+
+                                    // Interpolate
+                                    u_b = (u_own + u_g) * T::val_from_f64(0.5);
+                                    flux = u_b.dot(&normal) * f_area;
+                                    d_face = (d_p[i] + d_p_g) * T::val_from_f64(0.5);
+
+                                    // Rhie-Chow
+                                    if local_ghost_idx < gp_x_ghosts.len() {
+                                        let gp_g = Vector2::new(
+                                            gp_x_ghosts[local_ghost_idx],
+                                            gp_y_ghosts[local_ghost_idx],
+                                        );
+                                        let grad_p_avg = (Vector2::new(grad_p.vx[i], grad_p.vy[i])
+                                            + gp_g)
+                                            * T::val_from_f64(0.5);
+                                        let grad_p_n = grad_p_avg.dot(&normal);
+
+                                        let p_ghost = p_ghosts_loop[local_ghost_idx];
+                                        let dist = if let Some(gc) =
+                                            self.ghost_centers.get(local_ghost_idx)
+                                        {
+                                            let dx = gc.x - self.mesh.cell_cx[i];
+                                            let dy = gc.y - self.mesh.cell_cy[i];
+                                            (dx * dx + dy * dy).sqrt()
+                                        } else {
+                                            (f_c - c_i).norm() * 2.0
+                                        };
+
+                                        let p_grad_face =
+                                            (p_ghost - self.p.values[i]) / T::val_from_f64(dist);
+                                        let rc_term = d_face * f_area * (grad_p_n - p_grad_face);
+                                        flux += rc_term;
                                     }
                                 }
-                            
+                            }
+
                             (flux, d_face)
                         } else {
                             (u_own.dot(&normal) * f_area, d_p[i])
                         }
                     };
-                    
+
                     if is_owner {
                         flux_star[face_idx] = u_face_dot_n;
                     }
-                    
+
                     div_u_star += u_face_dot_n;
-                    
+
                     // Diffusion coeff for pressure: d_face * Area / dist
                     if let Some(neigh) = neighbor_idx {
-                        let dist = (Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh]) - c_i).norm();
+                        let dist =
+                            (Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh])
+                                - c_i)
+                                .norm();
                         let d_coeff = d_face_val * f_area / T::val_from_f64(dist);
-                        
+
                         p_triplets.push((i, i, d_coeff));
                         p_triplets.push((i, neigh, -d_coeff));
                     } else {
@@ -362,8 +398,10 @@ impl<T: Float> PisoSolver<T> {
                                 let dx = gc.x - self.mesh.cell_cx[i];
                                 let dy = gc.y - self.mesh.cell_cy[i];
                                 (dx * dx + dy * dy).sqrt()
-                            } else { (f_c - c_i).norm() * 2.0 };
-                            
+                            } else {
+                                (f_c - c_i).norm() * 2.0
+                            };
+
                             let d_coeff = d_face_val * f_area / T::val_from_f64(dist);
                             p_triplets.push((i, i, d_coeff));
                             p_triplets.push((i, *ghost_idx, -d_coeff));
@@ -377,24 +415,37 @@ impl<T: Float> PisoSolver<T> {
                         }
                     }
                 }
-                
+
                 p_rhs[i] -= div_u_star;
             }
-            
+
             // Solve Pressure
-            let n_cols = if self.ghost_map.is_empty() { self.mesh.num_cells() } else { self.mesh.num_cells() + self.ghost_map.len() };
+            let n_cols = if self.ghost_map.is_empty() {
+                self.mesh.num_cells()
+            } else {
+                self.mesh.num_cells() + self.ghost_map.len()
+            };
             let mat_p = SparseMatrix::from_triplets(self.mesh.num_cells(), n_cols, &p_triplets);
-            
+
             if self.save_debug_data {
                 self.last_pressure_matrix = Some(mat_p.clone());
                 self.last_pressure_rhs = Some(p_rhs.clone());
             }
-            
+
             let mut p_prime = vec![T::zero(); self.mesh.num_cells()];
-            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(&mat_p, &p_rhs, &mut p_prime, 1000, T::val_from_f64(1e-6), ops);
-            
-            if corrector_step == 0 { init_res_p = init_res_p_step; }
-            
+            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(
+                &mat_p,
+                &p_rhs,
+                &mut p_prime,
+                1000,
+                T::val_from_f64(1e-6),
+                ops,
+            );
+
+            if corrector_step == 0 {
+                init_res_p = init_res_p_step;
+            }
+
             // Correct Pressure: p = p + p_prime
             // Exchange p_prime ghosts
             let p_prime_ghosts = ops.exchange_halo(&p_prime);
@@ -404,41 +455,49 @@ impl<T: Float> PisoSolver<T> {
             let mut i = 0;
             let lanes = T::Simd::LANES;
             while i + lanes <= self.mesh.num_cells() {
-                let v_p = T::Simd::from_slice(&self.p.values[i..i+lanes]);
-                let v_pp = T::Simd::from_slice(&p_prime[i..i+lanes]);
+                let v_p = T::Simd::from_slice(&self.p.values[i..i + lanes]);
+                let v_pp = T::Simd::from_slice(&p_prime[i..i + lanes]);
                 let res = v_p + v_alpha_p * v_pp;
-                res.write_to_slice(&mut self.p.values[i..i+lanes]);
+                res.write_to_slice(&mut self.p.values[i..i + lanes]);
                 i += lanes;
             }
             while i < self.mesh.num_cells() {
                 self.p.values[i] += alpha_p * p_prime[i];
                 i += 1;
             }
-            
+
             // Correct Velocity: u = u - d_p * grad(p_prime)
-            let p_prime_field = ScalarField { values: p_prime.clone() };
+            let p_prime_field = ScalarField {
+                values: p_prime.clone(),
+            };
             let grad_p_prime = Fvm::compute_gradients(
                 &self.mesh,
                 &p_prime_field,
-                |bt| if matches!(bt, BoundaryType::Outlet) { Some(T::zero()) } else { None },
+                |bt| {
+                    if matches!(bt, BoundaryType::Outlet) {
+                        Some(T::zero())
+                    } else {
+                        None
+                    }
+                },
                 Some(&p_prime_ghosts),
                 Some(&self.ghost_map),
                 Some(&self.ghost_centers),
             );
-            
+
             let mut i = 0;
             while i + lanes <= self.mesh.num_cells() {
-                let v_dp = T::Simd::from_slice(&d_p[i..i+lanes]);
-                let v_gpx = T::Simd::from_slice(&grad_p_prime.vx[i..i+lanes]);
-                let v_gpy = T::Simd::from_slice(&grad_p_prime.vy[i..i+lanes]);
-                let v_ux = T::Simd::from_slice(&self.u.vx[i..i+lanes]);
-                let v_uy = T::Simd::from_slice(&self.u.vy[i..i+lanes]);
-                
+                let v_dp = T::Simd::from_slice(&d_p[i..i + lanes]);
+                let v_gpx = T::Simd::from_slice(&grad_p_prime.vx[i..i + lanes]);
+                let v_gpy = T::Simd::from_slice(&grad_p_prime.vy[i..i + lanes]);
+                let v_ux = T::Simd::from_slice(&self.u.vx[i..i + lanes]);
+                let v_uy = T::Simd::from_slice(&self.u.vy[i..i + lanes]);
+
                 let res_ux = v_ux - v_dp * v_gpx;
                 let res_uy = v_uy - v_dp * v_gpy;
-                
-                res_ux.write_to_slice(&mut self.u.vx[i..i+lanes]);
-                res_uy.write_to_slice(&mut self.u.vy[i..i+lanes]);
+
+                res_ux.write_to_slice(&mut self.u.vx[i..i + lanes]);
+                res_uy.write_to_slice(&mut self.u.vy[i..i + lanes]);
                 i += lanes;
             }
             while i < self.mesh.num_cells() {
@@ -446,12 +505,12 @@ impl<T: Float> PisoSolver<T> {
                 self.u.vy[i] -= d_p[i] * grad_p_prime.vy[i];
                 i += 1;
             }
-            
+
             // Correct Fluxes
             for i in 0..self.mesh.num_faces() {
                 let owner = self.mesh.face_owner[i];
                 let neighbor = self.mesh.face_neighbor[i];
-                
+
                 let mut d_face = d_p[owner];
                 if let Some(n) = neighbor {
                     d_face = (d_p[owner] + d_p[n]) * T::val_from_f64(0.5);
@@ -461,11 +520,11 @@ impl<T: Float> PisoSolver<T> {
                         d_face = (d_p[owner] + d_p_ghosts[local_ghost_idx]) * T::val_from_f64(0.5);
                     }
                 }
-                
+
                 let mut p_grad_n = T::zero();
                 let c_own = Vector2::new(self.mesh.cell_cx[owner], self.mesh.cell_cy[owner]);
                 let f_c = Vector2::new(self.mesh.face_cx[i], self.mesh.face_cy[i]);
-                
+
                 if let Some(n) = neighbor {
                     let c_neigh = Vector2::new(self.mesh.cell_cx[n], self.mesh.cell_cy[n]);
                     let dist = (c_neigh - c_own).norm();
@@ -477,7 +536,9 @@ impl<T: Float> PisoSolver<T> {
                             let p_ghost = p_prime_ghosts[local_ghost_idx];
                             let dist = if local_ghost_idx < self.ghost_centers.len() {
                                 (self.ghost_centers[local_ghost_idx] - c_own).norm()
-                            } else { (f_c - c_own).norm() * 2.0 };
+                            } else {
+                                (f_c - c_own).norm() * 2.0
+                            };
                             p_grad_n = (p_ghost - p_prime[owner]) / T::val_from_f64(dist);
                         }
                     } else if let Some(bt) = self.mesh.face_boundary[i] {
@@ -487,18 +548,18 @@ impl<T: Float> PisoSolver<T> {
                         }
                     }
                 }
-                
+
                 let correction = d_face * T::val_from_f64(self.mesh.face_area[i]) * p_grad_n;
                 self.fluxes[i] = flux_star[i] - correction;
             }
         }
-        
+
         self.time += self.dt;
         self.residuals.push(("Ux".to_string(), init_res_ux));
         self.residuals.push(("Uy".to_string(), init_res_uy));
         self.residuals.push(("P".to_string(), init_res_p));
     }
-    
+
     pub fn check_connectivity(&self) {
         let mut visited = vec![false; self.mesh.num_cells()];
         let mut stack = Vec::new();

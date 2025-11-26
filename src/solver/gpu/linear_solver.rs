@@ -87,7 +87,7 @@ impl GpuSolver {
                 let r_r = self.read_scalar_r_r().await;
                 let res = r_r.sqrt();
                 final_resid = res;
-                
+
                 if iter == 0 {
                     init_resid = res;
                 }

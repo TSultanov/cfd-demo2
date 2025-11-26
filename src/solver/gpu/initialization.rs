@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use wgpu::util::DeviceExt;
 
-use super::structs::{GpuConstants, SolverParams, GpuSolver};
+use super::structs::{GpuConstants, GpuSolver, SolverParams};
 
 impl GpuSolver {
     pub async fn new(mesh: &Mesh) -> Self {
@@ -937,18 +937,16 @@ impl GpuSolver {
 
         let bgl_dot_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Dot Params Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-            ],
+                count: None,
+            }],
         });
 
         let bgl_dot_inputs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -995,9 +993,7 @@ impl GpuSolver {
                         binding: 0,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage {
-                                read_only: false,
-                            },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -1007,9 +1003,7 @@ impl GpuSolver {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage {
-                                read_only: false,
-                            },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -1019,9 +1013,7 @@ impl GpuSolver {
                         binding: 2,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage {
-                                read_only: true,
-                            },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -1031,9 +1023,7 @@ impl GpuSolver {
                         binding: 3,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage {
-                                read_only: true,
-                            },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -1043,9 +1033,7 @@ impl GpuSolver {
                         binding: 4,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage {
-                                read_only: true,
-                            },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -1055,9 +1043,7 @@ impl GpuSolver {
                         binding: 5,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage {
-                                read_only: true,
-                            },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -1396,13 +1382,11 @@ impl GpuSolver {
             push_constant_ranges: &[],
         });
 
-        let pl_mesh_fields_state = device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("Mesh Fields State Pipeline Layout"),
-                bind_group_layouts: &[&bgl_mesh, &bgl_fields, &bgl_linear_state_ro],
-                push_constant_ranges: &[],
-            },
-        );
+        let pl_mesh_fields_state = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Mesh Fields State Pipeline Layout"),
+            bind_group_layouts: &[&bgl_mesh, &bgl_fields, &bgl_linear_state_ro],
+            push_constant_ranges: &[],
+        });
 
         let pipeline_gradient = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Gradient Pipeline"),

@@ -1,6 +1,6 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use criterion::{criterion_group, criterion_main, Criterion};
 use nalgebra::Vector2;
 
 fn gpu_solver_step_benchmark(c: &mut Criterion) {

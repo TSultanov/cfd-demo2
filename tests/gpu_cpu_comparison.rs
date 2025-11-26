@@ -1,7 +1,7 @@
 use cfd2::solver::gpu::GpuSolver;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use cfd2::solver::piso::PisoSolver;
-use nalgebra::{Vector2, Point2};
+use nalgebra::{Point2, Vector2};
 
 #[test]
 fn test_gpu_cpu_comparison() {
@@ -13,7 +13,7 @@ fn test_gpu_cpu_comparison() {
         obstacle_radius: 0.2,
     };
     // Use a coarser mesh for test speed, but fine enough to capture geometry
-    let cell_size = 0.05; 
+    let cell_size = 0.05;
     let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, domain_size);
     mesh.smooth(&geo, 0.3, 50);
     println!("Mesh generated with {} cells", mesh.num_cells());
@@ -22,14 +22,14 @@ fn test_gpu_cpu_comparison() {
     for i in 0..mesh.num_cells() {
         let mut sum_na = Vector2::new(0.0, 0.0);
         let start = mesh.cell_face_offsets[i];
-        let end = mesh.cell_face_offsets[i+1];
+        let end = mesh.cell_face_offsets[i + 1];
         for k in start..end {
             let face_idx = mesh.cell_faces[k];
             let nx = mesh.face_nx[face_idx];
             let ny = mesh.face_ny[face_idx];
             let area = mesh.face_area[face_idx];
             let owner = mesh.face_owner[face_idx];
-            
+
             let mut normal = Vector2::new(nx, ny);
             if owner != i {
                 normal = -normal;
@@ -53,7 +53,6 @@ fn test_gpu_cpu_comparison() {
     // If we change constants.dt after new(), buffer is not updated.
     // We need to update the buffer.
 
-
     let dt = 0.0001;
     let density = 1.0;
     let viscosity = 0.01;
@@ -72,7 +71,6 @@ fn test_gpu_cpu_comparison() {
 
     for i in 0..num_cells {
         let cx = mesh.cell_cx[i];
-        let cy = mesh.cell_cy[i];
         if cx < cell_size {
             u_init[i] = (1.0, 0.0);
             cpu_solver.u.vx[i] = 1.0;
@@ -89,13 +87,21 @@ fn test_gpu_cpu_comparison() {
         // Inspect GPU internals
         let gpu_u_vec = pollster::block_on(gpu_solver.get_u());
         let gpu_p = pollster::block_on(gpu_solver.get_p());
-        
+
         // Stats
         let mut max_cpu_p = 0.0;
-        for p in &cpu_solver.p.values { if p.abs() > max_cpu_p { max_cpu_p = p.abs(); } }
+        for p in &cpu_solver.p.values {
+            if p.abs() > max_cpu_p {
+                max_cpu_p = p.abs();
+            }
+        }
         let mut max_gpu_p = 0.0;
-        for p in &gpu_p { if p.abs() > max_gpu_p { max_gpu_p = p.abs(); } }
-        
+        for p in &gpu_p {
+            if p.abs() > max_gpu_p {
+                max_gpu_p = p.abs();
+            }
+        }
+
         println!("  CPU Max P: {:.4}, GPU Max P: {:.4}", max_cpu_p, max_gpu_p);
 
         // Compare results
@@ -135,8 +141,14 @@ fn test_gpu_cpu_comparison() {
             }
         }
 
-        println!("  Max diff U: {:.4}, Max diff P: {:.4}", max_diff_u, max_diff_p);
-        println!("    Mean pressure bias: {:.4}", sum_diff_p / num_cells as f64);
+        println!(
+            "  Max diff U: {:.4}, Max diff P: {:.4}",
+            max_diff_u, max_diff_p
+        );
+        println!(
+            "    Mean pressure bias: {:.4}",
+            sum_diff_p / num_cells as f64
+        );
         println!(
             "    Worst U cell {} ({}) at ({:.3}, {:.3}): cpu=({:.4},{:.4}) gpu=({:.4},{:.4})",
             max_diff_u_idx,
@@ -168,18 +180,16 @@ fn test_gpu_cpu_comparison() {
                     let boundary = mesh.face_boundary[face_idx];
                     println!(
                         "      Face {:>4} owner={} neigh={:?} bc={:?}: cpu={:.4}, gpu={:.4}",
-                        face_idx,
-                        owner,
-                        neighbor,
-                        boundary,
-                        flux_cpu,
-                        flux_gpu
+                        face_idx, owner, neighbor, boundary, flux_cpu, flux_gpu
                     );
                 }
             }
 
             let debug_cell = 10usize;
-            if let (Some(ref mat), Some(ref rhs_vec)) = (&cpu_solver.last_pressure_matrix, &cpu_solver.last_pressure_rhs) {
+            if let (Some(ref mat), Some(ref rhs_vec)) = (
+                &cpu_solver.last_pressure_matrix,
+                &cpu_solver.last_pressure_rhs,
+            ) {
                 let start = mat.row_offsets[debug_cell];
                 let end = mat.row_offsets[debug_cell + 1];
                 let cpu_row: Vec<(usize, f64)> = (start..end)
@@ -204,8 +214,8 @@ fn test_gpu_cpu_comparison() {
         }
 
         if max_diff_u > 1.0 || max_diff_p > 100.0 {
-             println!("Divergence detected at step {}", step);
-             break;
+            println!("Divergence detected at step {}", step);
+            break;
         }
     }
 }

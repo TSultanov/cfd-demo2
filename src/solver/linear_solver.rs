@@ -47,12 +47,12 @@ impl<T: Float> SparseMatrix<T> {
         // First pass: consolidate duplicates by summing values for same (row, col)
         // Group triplets by row, then by column within each row
         let mut row_data: Vec<AHashMap<usize, T>> = vec![AHashMap::new(); n_rows];
-        
+
         for &(r, c, v) in triplets {
             let entry = row_data[r].entry(c).or_insert(T::zero());
             *entry = *entry + v;
         }
-        
+
         // Count unique entries per row
         let mut row_counts = vec![0; n_rows];
         for r in 0..n_rows {
@@ -63,7 +63,7 @@ impl<T: Float> SparseMatrix<T> {
         for i in 0..n_rows {
             row_offsets[i + 1] = row_offsets[i] + row_counts[i];
         }
-        
+
         let total_entries = row_offsets[n_rows];
 
         let mut mat = Self::new(n_rows, n_cols);
@@ -76,7 +76,7 @@ impl<T: Float> SparseMatrix<T> {
             let start = row_offsets[r];
             let mut cols: Vec<_> = row_data[r].iter().collect();
             cols.sort_by_key(|&(c, _)| *c);
-            
+
             for (i, (&col, &val)) in cols.iter().enumerate() {
                 mat.values[start + i] = val;
                 mat.col_indices[start + i] = col;

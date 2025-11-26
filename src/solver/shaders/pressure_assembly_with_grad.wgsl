@@ -41,6 +41,7 @@ struct Constants {
 @group(1) @binding(3) var<uniform> constants: Constants;
 @group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
 @group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
+@group(1) @binding(8) var<storage, read_write> grad_p_prime: array<Vector2>;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -62,8 +63,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var diag_coeff: f32 = 0.0;
     var rhs_val: f32 = 0.0;
     
-    // Gradient accumulator (Green-Gauss)
-    var grad = Vector2(0.0, 0.0);
+
     
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
@@ -138,10 +138,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         
-        // Accumulate gradient contribution
-        // Using outward normal for this cell
-        grad.x += p_f * normal.x * area;
-        grad.y += p_f * normal.y * area;
+        // Gradient accumulation removed
         
         if (!is_boundary) {
             // Vector from this cell to other cell
@@ -191,10 +188,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let k_y = k_y_raw * k_scale;
             
             // Interpolate pressure gradient to face
-            // Note: We use the OLD grad_p values here (from previous iteration)
+            // Note: We use the OLD grad_p_prime values here (from previous iteration)
             // This is the deferred correction approach - acceptable for PISO
-            let grad_p_own = grad_p[idx];
-            let grad_p_neigh = grad_p[other_idx];
+            let grad_p_own = grad_p_prime[idx];
+            let grad_p_neigh = grad_p_prime[other_idx];
             
             // Distance-weighted interpolation
             var interp_f = 0.5;
@@ -228,10 +225,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
-    // Finalize gradient
-    grad.x /= vol;
-    grad.y /= vol;
-    grad_p[idx] = grad;
+    // Gradient calculation removed to avoid race condition
+    // grad_p is now pre-computed and read-only in this kernel
+
     
     // Write matrix and RHS
     let diag_idx = diagonal_indices[idx];

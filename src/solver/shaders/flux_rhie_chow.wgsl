@@ -122,12 +122,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                  vec2<f32>(face_center.x, face_center.y),
              );
              if (dist_face > 1e-6) {
-                 let grad_p_n = grad_p_avg.x * normal.x + grad_p_avg.y * normal.y;
-                 let p_owner = p[owner];
-                 // Outlet (Dirichlet p=0)
-                 let p_face = 0.0;
-                 let p_grad_f = (p_face - p_owner) / dist_face;
-                 rc_term = d_p_face * area * (grad_p_n - p_grad_f);
+                 // Disable Rhie-Chow at outlet to prevent instability
+                 rc_term = 0.0;
              }
              fluxes[idx] = constants.density * (u_n * area + rc_term);
         } else {

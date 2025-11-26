@@ -15,7 +15,7 @@ impl GpuSolver {
 
     pub async fn solve(&self) -> super::structs::LinearSolverStats {
         let start_time = std::time::Instant::now();
-        let max_iter = 1000;
+        let max_iter = 100;
         let abs_tol = 1e-6;
         let rel_tol = 1e-4;
         let n = self.num_cells;
@@ -99,10 +99,10 @@ impl GpuSolver {
                 }
 
                 // Stagnation check
-                if iter > 0 && res >= 0.999 * prev_res {
-                    final_iter = iter + 1;
-                    break;
-                }
+                // if iter > 0 && res >= 0.999 * prev_res {
+                //     final_iter = iter + 1;
+                //     break;
+                // }
                 prev_res = res;
             }
 
@@ -165,11 +165,11 @@ impl GpuSolver {
     /// This avoids a separate kernel dispatch for update_u_component.
     pub async fn solve_and_update_u(&self) -> super::structs::LinearSolverStats {
         let stats = self.solve().await;
-        
+
         // Run update_u_component as part of this method instead of separate dispatch
         let workgroup_size = 64;
         let num_groups = self.num_cells.div_ceil(workgroup_size);
-        
+
         let mut encoder =
             self.context
                 .device
@@ -188,7 +188,7 @@ impl GpuSolver {
             cpass.dispatch_workgroups(num_groups, 1, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
-        
+
         stats
     }
 

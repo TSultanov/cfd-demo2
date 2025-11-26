@@ -1780,6 +1780,7 @@ impl GpuSolver {
             b_fluxes,
             b_grad_p,
             b_grad_component,
+            b_grad_p_prime,
             bg_mesh,
             bg_fields,
             bg_solver,

@@ -212,7 +212,7 @@ impl GpuSolver {
         // PIMPLE Loop (outer iterations with convergence control)
         let max_outer_iters = 40;
         let outer_tol_u = 1e-3;
-        let outer_tol_p = 1e-2;
+        let outer_tol_p = 1e-3;
         let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 1%
 
         let mut prev_residual_u = f64::MAX;
@@ -240,10 +240,18 @@ impl GpuSolver {
             // 2. Pressure Corrector (PISO inner loop)
             let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
 
-            for _ in 0..num_piso_iters {
+            // Zero grad_p_prime at the start of PISO loop (since p' is initially 0)
+            self.zero_buffer(&self.b_grad_p_prime, (self.num_cells as u64) * 8);
+
+            for piso_iter in 0..num_piso_iters {
                 // Set component to 2 for Pressure Gradient calculation
                 self.constants.component = 2;
                 self.update_constants();
+
+                // Update gradient if P has changed (after first iteration)
+                if piso_iter > 0 {
+                    self.compute_gradient();
+                }
 
                 // Flux interpolation with Rhie-Chow, then combined gradient + pressure assembly
                 {
@@ -335,15 +343,15 @@ impl GpuSolver {
                 }
 
                 // Stagnation check: if residuals aren't decreasing, stop iterating
-                let u_stagnated = max_diff_u >= stagnation_factor * prev_residual_u;
-                let p_stagnated = max_diff_p >= stagnation_factor * prev_residual_p;
-                if u_stagnated && p_stagnated && outer_iter > 2 {
-                    println!(
-                        "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
-                        outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
-                    );
-                    break;
-                }
+                // let u_stagnated = max_diff_u >= stagnation_factor * prev_residual_u;
+                // let p_stagnated = max_diff_p >= stagnation_factor * prev_residual_p;
+                // if u_stagnated && p_stagnated && outer_iter > 2 {
+                //     println!(
+                //         "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
+                //         outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
+                //     );
+                //     break;
+                // }
 
                 prev_residual_u = max_diff_u;
                 prev_residual_p = max_diff_p;

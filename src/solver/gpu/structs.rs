@@ -61,6 +61,7 @@ pub struct GpuSolver {
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_p: wgpu::Buffer,
     pub b_grad_component: wgpu::Buffer,
+    pub b_grad_p_prime: wgpu::Buffer,
 
     // Matrix Structure (CSR)
     pub b_row_offsets: wgpu::Buffer,

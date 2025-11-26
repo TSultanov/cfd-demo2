@@ -10,8 +10,10 @@ struct Constants {
     density: f32,
     component: u32,
     alpha_p: f32,
-    padding1: u32,
-    padding2: u32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    padding: u32,
 }
 
 // Group 0: Mesh

@@ -233,6 +233,14 @@ impl GpuSolver {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let b_u_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("U Old Buffer"),
+            contents: bytemuck::cast_slice(&zero_vecs),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        });
+
         let zero_scalars = vec![0.0f32; num_cells as usize];
         let b_p = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("P Buffer"),
@@ -279,7 +287,9 @@ impl GpuSolver {
             component: 0,
             alpha_p: 1.0, // Default pressure relaxation
             scheme: 0,    // Upwind
+            alpha_u: 0.7, // Default velocity under-relaxation
             stride_x: 65535 * 64,
+            padding: 0,
         };
         let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Constants Buffer"),
@@ -641,6 +651,17 @@ impl GpuSolver {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 7: U Old (for under-relaxation)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -1145,6 +1166,10 @@ impl GpuSolver {
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: b_grad_component.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: b_u_old.as_entire_binding(),
                 },
             ],
         });
@@ -1739,6 +1764,7 @@ impl GpuSolver {
 
             b_constants,
             b_u,
+            b_u_old,
             b_p,
             b_d_p,
             b_fluxes,
@@ -1784,6 +1810,9 @@ impl GpuSolver {
             stats_ux: Mutex::new(Default::default()),
             stats_uy: Mutex::new(Default::default()),
             stats_p: Mutex::new(Default::default()),
+            outer_residual_u: Mutex::new(0.0),
+            outer_residual_p: Mutex::new(0.0),
+            outer_iterations: Mutex::new(0),
         }
     }
 }

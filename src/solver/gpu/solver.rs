@@ -40,6 +40,11 @@ impl GpuSolver {
         self.update_constants();
     }
 
+    pub fn set_alpha_u(&mut self, alpha_u: f32) {
+        self.constants.alpha_u = alpha_u;
+        self.update_constants();
+    }
+
     pub fn set_density(&mut self, rho: f32) {
         self.constants.density = rho;
         self.update_constants();
@@ -186,9 +191,6 @@ impl GpuSolver {
     }
 
     pub fn step(&mut self) {
-        // Initialize fluxes based on current U (important for first step)
-        self.compute_fluxes();
-
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
         let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
@@ -197,98 +199,205 @@ impl GpuSolver {
         let dispatch_faces_x = num_groups_faces.min(max_groups_x);
         let dispatch_faces_y = num_groups_faces.div_ceil(max_groups_x);
 
-        // 1. Momentum Predictor
+        // Save old velocity for under-relaxation
+        self.copy_u_to_u_old();
 
-        // 1. Momentum Predictor
+        // Initialize fluxes based on current U
+        self.compute_fluxes();
 
-        // Gradient P is now computed inside momentum_assembly (component 0)
+        // Initialize d_p by running a preliminary momentum assembly
+        // This is crucial for the first timestep where d_p would otherwise be zero
+        self.initialize_d_p(num_groups_cells);
 
-        // Solve Ux (Component 0)
+        // PIMPLE Loop (outer iterations with convergence control)
+        let max_outer_iters = 40;
+        let outer_tol_u = 1e-3;
+        let outer_tol_p = 1e-2;
+        
+        for outer_iter in 0..max_outer_iters {
+            // 1. Momentum Predictor
+            
+            // Save velocity and pressure before solve for convergence check
+            let (u_before, p_before) = if outer_iter > 0 {
+                (Some(pollster::block_on(self.get_u())), Some(pollster::block_on(self.get_p())))
+            } else {
+                (None, None)
+            };
 
-        // Solve Ux (Component 0)
-        self.solve_momentum(0, num_groups_cells);
+            // Solve Ux (Component 0) - also computes d_p and grad_p
+            self.solve_momentum(0, num_groups_cells);
 
-        // Solve Uy (Component 1)
-        self.solve_momentum(1, num_groups_cells);
+            // Solve Uy (Component 1)
+            self.solve_momentum(1, num_groups_cells);
 
-        // 2. Pressure Corrector
+            // 2. Pressure Corrector (PISO inner loop)
+            let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
+            
+            for _ in 0..num_piso_iters {
+                // Set component to 2 for Pressure Gradient calculation
+                self.constants.component = 2;
+                self.update_constants();
 
-        // PISO Loop
-        for _ in 0..2 {
-            // Set component to 2 for Pressure Gradient calculation
-            self.constants.component = 2;
-            self.update_constants();
-
-            // Gradient, flux interpolation, and pressure assembly
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("PISO Pre-Solve Encoder"),
+                // Gradient, flux interpolation, and pressure assembly
+                {
+                    let mut encoder =
+                        self.context
+                            .device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("PISO Pre-Solve Encoder"),
+                            });
+                    {
+                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Gradient Pass"),
+                            timestamp_writes: None,
                         });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Gradient Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_gradient);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                        cpass.set_pipeline(&self.pipeline_gradient);
+                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                        cpass.set_bind_group(1, &self.bg_fields, &[]);
+                        cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                    }
+                    {
+                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Flux RC Pass"),
+                            timestamp_writes: None,
+                        });
+                        cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
+                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                        cpass.set_bind_group(1, &self.bg_fields, &[]);
+                        cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
+                    }
+                    {
+                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Pressure Assembly Pass"),
+                            timestamp_writes: None,
+                        });
+                        cpass.set_pipeline(&self.pipeline_pressure_assembly);
+                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                        cpass.set_bind_group(1, &self.bg_fields, &[]);
+                        cpass.set_bind_group(2, &self.bg_solver, &[]);
+                        cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                    }
+                    self.context.queue.submit(Some(encoder.finish()));
                 }
+
+                // Solve Pressure (p_prime)
+                self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
+                let stats = pollster::block_on(self.solve());
+                *self.stats_p.lock().unwrap() = stats;
+
+                // Velocity Correction
                 {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Flux RC Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
+                    let mut encoder =
+                        self.context
+                            .device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Velocity Correction Encoder"),
+                            });
+                    {
+                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Velocity Correction Pass"),
+                            timestamp_writes: None,
+                        });
+                        cpass.set_pipeline(&self.pipeline_velocity_correction);
+                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                        cpass.set_bind_group(1, &self.bg_fields, &[]);
+                        cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
+                        cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                    }
+                    self.context.queue.submit(Some(encoder.finish()));
                 }
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Pressure Assembly Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_pressure_assembly);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &self.bg_solver, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-                self.context.queue.submit(Some(encoder.finish()));
             }
 
-            // Solve Pressure (p_prime)
-            self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-            let stats = pollster::block_on(self.solve());
-            *self.stats_p.lock().unwrap() = stats;
-
-            // Velocity Correction
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Velocity Correction Encoder"),
-                        });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Velocity Correction Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_velocity_correction);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+            // Check for outer loop convergence (after first iteration)
+            if let (Some(u_before), Some(p_before)) = (u_before, p_before) {
+                let u_after = pollster::block_on(self.get_u());
+                let p_after = pollster::block_on(self.get_p());
+                
+                // Calculate velocity residual (max change)
+                let mut max_diff_u = 0.0f64;
+                for (before, after) in u_before.iter().zip(u_after.iter()) {
+                    let diff_x = (after.0 - before.0).abs();
+                    let diff_y = (after.1 - before.1).abs();
+                    max_diff_u = max_diff_u.max(diff_x).max(diff_y);
                 }
-                self.context.queue.submit(Some(encoder.finish()));
+                
+                // Calculate pressure residual (max change)
+                let mut max_diff_p = 0.0f64;
+                for (before, after) in p_before.iter().zip(p_after.iter()) {
+                    let diff = (after - before).abs();
+                    max_diff_p = max_diff_p.max(diff);
+                }
+                
+                // Store outer loop stats
+                *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
+                *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
+                *self.outer_iterations.lock().unwrap() = outer_iter + 1;
+                
+                // Converged if both U and P are below tolerance
+                if max_diff_u < outer_tol_u && max_diff_p < outer_tol_p {
+                    break;
+                }
+            } else {
+                // First iteration - store initial values
+                *self.outer_residual_u.lock().unwrap() = f32::MAX;
+                *self.outer_residual_p.lock().unwrap() = f32::MAX;
+                *self.outer_iterations.lock().unwrap() = 1;
             }
         }
 
+        // Update time
+        self.constants.time += self.constants.dt;
+        self.update_constants();
+
+        self.context.device.poll(wgpu::Maintain::Wait);
+    }
+
+    /// Copy current velocity to u_old buffer for under-relaxation
+    fn copy_u_to_u_old(&self) {
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Copy U to U_old Encoder"),
+                });
+        encoder.copy_buffer_to_buffer(
+            &self.b_u,
+            0,
+            &self.b_u_old,
+            0,
+            (self.num_cells as u64) * 8, // 2 floats per cell
+        );
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Initialize d_p values before PISO loop by running momentum assembly
+    /// This ensures d_p is non-zero even at the first timestep
+    fn initialize_d_p(&mut self, num_groups: u32) {
+        // Run momentum assembly for component 0 just to compute d_p
+        // We don't solve the system, just assemble to get the diagonal coefficients
+        self.constants.component = 0;
+        self.update_constants();
+
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Initial D_P Assembly Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Initial Momentum Assembly Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_momentum_assembly);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.set_bind_group(2, &self.bg_solver, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
         self.context.device.poll(wgpu::Maintain::Wait);
     }
 

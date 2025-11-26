@@ -86,6 +86,9 @@ struct CachedGpuStats {
     stats_ux: LinearSolverStats,
     stats_uy: LinearSolverStats,
     stats_p: LinearSolverStats,
+    outer_residual_u: f32,
+    outer_residual_p: f32,
+    outer_iterations: u32,
 }
 
 pub struct CFDApp {
@@ -111,6 +114,8 @@ pub struct CFDApp {
     adaptive_dt: bool,
     target_cfl: f64,
     render_mode: RenderMode,
+    alpha_u: f64,
+    alpha_p: f64,
 }
 
 impl CFDApp {
@@ -138,6 +143,8 @@ impl CFDApp {
             adaptive_dt: true,
             target_cfl: 0.5,
             render_mode: RenderMode::BatchedMesh,
+            alpha_u: 0.7,
+            alpha_p: 0.3,
         }
     }
 
@@ -166,6 +173,8 @@ impl CFDApp {
         gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
         gpu_solver.set_density(self.current_fluid.density as f32);
         gpu_solver.set_scheme(self.selected_scheme.gpu_id());
+        gpu_solver.set_alpha_u(self.alpha_u as f32);
+        gpu_solver.set_alpha_p(self.alpha_p as f32);
         gpu_solver.set_u(&initial_u);
         gpu_solver.set_p(&initial_p);
 
@@ -279,6 +288,14 @@ impl CFDApp {
 
     fn update_gpu_scheme(&self) {
         self.with_gpu_solver(|solver| solver.set_scheme(self.selected_scheme.gpu_id()));
+    }
+
+    fn update_gpu_alpha_u(&self) {
+        self.with_gpu_solver(|solver| solver.set_alpha_u(self.alpha_u as f32));
+    }
+
+    fn update_gpu_alpha_p(&self) {
+        self.with_gpu_solver(|solver| solver.set_alpha_p(self.alpha_p as f32));
     }
 
     /// Render the CFD mesh using egui's batched mesh for maximum performance
@@ -534,6 +551,21 @@ impl eframe::App for CFDApp {
                     self.selected_scheme = Scheme::QUICK;
                     self.update_gpu_scheme();
                 }
+
+                ui.separator();
+                ui.label("Under-Relaxation Factors");
+                if ui
+                    .add(egui::Slider::new(&mut self.alpha_u, 0.1..=1.0).text("α_U (Velocity)"))
+                    .changed()
+                {
+                    self.update_gpu_alpha_u();
+                }
+                if ui
+                    .add(egui::Slider::new(&mut self.alpha_p, 0.1..=1.0).text("α_P (Pressure)"))
+                    .changed()
+                {
+                    self.update_gpu_alpha_p();
+                }
             });
 
             if ui.button("Initialize / Reset").clicked() {
@@ -588,6 +620,9 @@ impl eframe::App for CFDApp {
                                         stats_ux: *solver.stats_ux.lock().unwrap(),
                                         stats_uy: *solver.stats_uy.lock().unwrap(),
                                         stats_p: *solver.stats_p.lock().unwrap(),
+                                        outer_residual_u: *solver.outer_residual_u.lock().unwrap(),
+                                        outer_residual_p: *solver.outer_residual_p.lock().unwrap(),
+                                        outer_iterations: *solver.outer_iterations.lock().unwrap(),
                                     };
 
                                     if let Ok(mut results) = shared_results.lock() {
@@ -649,6 +684,10 @@ impl eframe::App for CFDApp {
                 ui.label(format!(
                     "P:  {} iters, res {:.2e}, {:.2?}",
                     stats.stats_p.iterations, stats.stats_p.residual, stats.stats_p.time
+                ));
+                ui.label(format!(
+                    "PIMPLE: {} iters, U:{:.2e} P:{:.2e}",
+                    stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p
                 ));
             }
         });

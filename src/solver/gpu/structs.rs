@@ -21,7 +21,9 @@ pub struct GpuConstants {
     pub component: u32, // 0: x, 1: y
     pub alpha_p: f32,   // Pressure relaxation
     pub scheme: u32,    // 0: Upwind, 1: SOU, 2: QUICK
+    pub alpha_u: f32,   // Velocity under-relaxation
     pub stride_x: u32,
+    pub padding: u32,
 }
 
 #[repr(C)]
@@ -53,6 +55,7 @@ pub struct GpuSolver {
 
     // Field buffers
     pub b_u: wgpu::Buffer,
+    pub b_u_old: wgpu::Buffer, // For velocity under-relaxation
     pub b_p: wgpu::Buffer,
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
@@ -138,4 +141,7 @@ pub struct GpuSolver {
     pub stats_ux: Mutex<LinearSolverStats>,
     pub stats_uy: Mutex<LinearSolverStats>,
     pub stats_p: Mutex<LinearSolverStats>,
+    pub outer_residual_u: Mutex<f32>,
+    pub outer_residual_p: Mutex<f32>,
+    pub outer_iterations: Mutex<u32>,
 }

@@ -1,6 +1,6 @@
 use crate::solver::float::{Float, Simd};
 use crate::solver::fvm::{Fvm, ScalarField, Scheme, VectorField};
-use crate::solver::linear_solver::{solve_bicgstab, SerialOps, SolverOps, SparseMatrix};
+use crate::solver::linear_solver::{solve_bicgstab, solve_cg, SerialOps, SolverOps, SparseMatrix};
 use crate::solver::mesh::{BoundaryType, Mesh};
 use nalgebra::Vector2;
 use std::collections::HashMap;
@@ -298,16 +298,18 @@ impl<T: Float> PisoSolver<T> {
                         let grad_p_neigh = Vector2::new(grad_p.vx[neigh], grad_p.vy[neigh]);
                         let grad_p_avg = grad_p_own + (grad_p_neigh - grad_p_own) * f;
 
-                        let grad_p_n = grad_p_avg.dot(&normal);
+                        let d_vec =
+                            Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh]) - c_i;
+                        let d_dir = d_vec.normalize();
+                        let d_dir_t =
+                            Vector2::new(T::val_from_f64(d_dir.x), T::val_from_f64(d_dir.y));
+                        let grad_p_d = grad_p_avg.dot(&d_dir_t);
 
-                        let dist =
-                            (Vector2::new(self.mesh.cell_cx[neigh], self.mesh.cell_cy[neigh])
-                                - c_i)
-                                .norm();
+                        let dist = d_vec.norm();
                         let p_grad_face =
                             (self.p.values[neigh] - self.p.values[i]) / T::val_from_f64(dist);
 
-                        let rc_term = d_p_face * f_area * (grad_p_n - p_grad_face);
+                        let rc_term = d_p_face * f_area * (grad_p_d - p_grad_face);
 
                         (u_face.dot(&normal) * f_area + rc_term, d_p_face)
                     } else {
@@ -358,23 +360,35 @@ impl<T: Float> PisoSolver<T> {
                                         );
                                         let grad_p_avg = Vector2::new(grad_p.vx[i], grad_p.vy[i])
                                             + (gp_g - Vector2::new(grad_p.vx[i], grad_p.vy[i])) * f;
-                                        let grad_p_n = grad_p_avg.dot(&normal);
 
-                                        let p_ghost = p_ghosts_loop[local_ghost_idx];
-                                        let dist = if let Some(gc) =
+                                        let d_vec = if let Some(gc) =
                                             self.ghost_centers.get(local_ghost_idx)
                                         {
-                                            let dx = gc.x - self.mesh.cell_cx[i];
-                                            let dy = gc.y - self.mesh.cell_cy[i];
-                                            (dx * dx + dy * dy).sqrt()
+                                            Vector2::new(gc.x, gc.y) - c_i
                                         } else {
-                                            (f_c - c_i).norm() * 2.0
+                                            (f_c - c_i) * 2.0
                                         };
+                                        let d_dir = d_vec.normalize();
+                                        let d_dir_t = Vector2::new(
+                                            T::val_from_f64(d_dir.x),
+                                            T::val_from_f64(d_dir.y),
+                                        );
+                                        let grad_p_d = grad_p_avg.dot(&d_dir_t);
+
+                                        let p_ghost = p_ghosts_loop[local_ghost_idx];
+                                        let dist = d_vec.norm();
 
                                         let p_grad_face =
                                             (p_ghost - self.p.values[i]) / T::val_from_f64(dist);
-                                        let rc_term = d_face * f_area * (grad_p_n - p_grad_face);
-                                        flux += rc_term;
+                                        // Skip Rhie-Chow for parallel interface to avoid instability
+                                        if !matches!(
+                                            self.mesh.face_boundary[face_idx],
+                                            Some(BoundaryType::ParallelInterface(_, _))
+                                        ) {
+                                            let rc_term =
+                                                d_face * f_area * (grad_p_d - p_grad_face);
+                                            flux += rc_term;
+                                        }
                                     }
                                 }
                             }
@@ -444,7 +458,7 @@ impl<T: Float> PisoSolver<T> {
             }
 
             let mut p_prime = vec![T::zero(); self.mesh.num_cells()];
-            let (_iter_p, _res_p, init_res_p_step) = solve_bicgstab(
+            let (_iter_p, _res_p, init_res_p_step) = solve_cg(
                 &mat_p,
                 &p_rhs,
                 &mut p_prime,

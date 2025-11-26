@@ -146,13 +146,10 @@ pub fn solve_bicgstab<T: Float, O: SolverOps<T>>(
     for iter in 0..max_iter {
         rho_new = ops.dot(&r0, &r);
 
-        if rho_new.is_nan() {
-            println!("BiCGStab: rho_new is NaN at iter {}", iter);
-            return (iter, T::nan(), init_resid);
-        }
-
-        if rho_new.abs() < T::val_from_f64(1e-20) {
-            break;
+        if rho_new.abs() < T::val_from_f64(1e-20) || rho_new.is_nan() {
+            // Breakdown
+            let res_norm = ops.norm(&r);
+            return (iter + 1, res_norm, T::val_from_f64(f64::NAN));
         }
 
         if iter == 0 {

@@ -383,11 +383,10 @@ impl Fvm {
                             }
                         }
 
-                        if !handled
-                            && flux > T::zero() {
-                                // Outflow: Use Upwind (Zero Gradient) to prevent reflections.
-                            }
-                            // Inflow: phi_ho = phi_upwind (BC value)
+                        if !handled && flux > T::zero() {
+                            // Outflow: Use Upwind (Zero Gradient) to prevent reflections.
+                        }
+                        // Inflow: phi_ho = phi_upwind (BC value)
                     }
 
                     // Correction term: flux * (phi_ho - phi_upwind)

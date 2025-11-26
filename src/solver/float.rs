@@ -1,28 +1,12 @@
-use num_traits::{FromPrimitive, ToPrimitive};
-use std::fmt::{Debug, Display};
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, Div, Mul, Sub};
 use wide::{f32x8, f64x4};
 
-pub trait Float:
-    num_traits::Float
-    + FromPrimitive
-    + ToPrimitive
-    + Debug
-    + Display
-    + Sum
-    + Copy
-    + Send
-    + Sync
-    + 'static
-    + AddAssign
-    + SubAssign
-    + MulAssign
-    + DivAssign
-{
+pub trait Float: nalgebra::RealField + Sum + Copy + Send + Sync + 'static {
     type Simd: Simd<Element = Self>;
     fn val_from_f64(v: f64) -> Self;
     fn val_to_f64(self) -> f64;
+    fn is_nan(self) -> bool;
 }
 
 pub trait Simd:
@@ -42,6 +26,9 @@ impl Float for f64 {
     }
     fn val_to_f64(self) -> f64 {
         self
+    }
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 }
 
@@ -67,6 +54,9 @@ impl Float for f32 {
     }
     fn val_to_f64(self) -> f64 {
         self as f64
+    }
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 }
 

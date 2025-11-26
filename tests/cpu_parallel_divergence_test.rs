@@ -65,7 +65,7 @@ fn test_cpu_parallel_divergence() {
     // Run loop with adaptive timestep
     println!("Starting Parallel simulation loop...");
     let max_steps = 1000;
-    let target_cfl = 0.1; // Reduced CFL
+    let target_cfl = 0.5; // Increased CFL to test stability
 
     for step in 0..max_steps {
         // Adaptive Timestep Logic

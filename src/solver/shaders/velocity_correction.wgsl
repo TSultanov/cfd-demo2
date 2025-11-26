@@ -135,7 +135,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let dy = f_center.y - center.y;
                     let dist = sqrt(dx * dx + dy * dy);
                     if (dist > 1e-6) {
-                        let grad_p_f = (0.0 - val_c) / dist;
+                        // Outlet (Dirichlet p'=0)
+                        // Consistent with pressure assembly
+                        let p_face = 0.0;
+                        let grad_p_f = (p_face - val_c) / dist;
                         fluxes[face_idx] -= constants.density * d_p_face * area * grad_p_f;
                     }
                 }

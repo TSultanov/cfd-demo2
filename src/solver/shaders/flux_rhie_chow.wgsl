@@ -49,9 +49,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     // Ensure normal points out of owner
     var normal = face_normals[idx];
-    let c_own = cell_centers[owner];
-    let dx_vec = face_center.x - c_own.x;
-    let dy_vec = face_center.y - c_own.y;
+    let c_owner = cell_centers[owner];
+    let dx_vec = face_center.x - c_owner.x;
+    let dy_vec = face_center.y - c_owner.y;
     if (dx_vec * normal.x + dy_vec * normal.y < 0.0) {
         normal.x = -normal.x;
         normal.y = -normal.y;
@@ -67,10 +67,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d_p_neigh = d_p[neigh_idx];
         let grad_p_neigh = grad_p[neigh_idx];
         
-        let c_own = cell_centers[owner];
         let c_neigh = cell_centers[neigh_idx];
         
-        let d_own = distance(vec2<f32>(c_own.x, c_own.y), vec2<f32>(face_center.x, face_center.y));
+        let d_own = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(face_center.x, face_center.y));
         let d_neigh = distance(vec2<f32>(c_neigh.x, c_neigh.y), vec2<f32>(face_center.x, face_center.y));
         
         let total_dist = d_own + d_neigh;
@@ -92,8 +91,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         grad_p_avg.x = lambda * grad_p_avg.x + (1.0 - lambda) * grad_p_neigh.x;
         grad_p_avg.y = lambda * grad_p_avg.y + (1.0 - lambda) * grad_p_neigh.y;
         
-        let dx = c_neigh.x - c_own.x;
-        let dy = c_neigh.y - c_own.y;
+        let dx = c_neigh.x - c_owner.x;
+        let dy = c_neigh.y - c_owner.y;
         let dist = sqrt(dx*dx + dy*dy);
         
         let p_own = p[owner];
@@ -116,8 +115,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else if (boundary_type == 3u) { // Wall
              fluxes[idx] = 0.0;
         } else { // Outlet
-             // Use owner velocity
-             fluxes[idx] = constants.density * (u_face.x * normal.x + u_face.y * normal.y) * area;
+             let u_n = u_face.x * normal.x + u_face.y * normal.y;
+             var rc_term = 0.0;
+             let dist_face = distance(
+                 vec2<f32>(c_owner.x, c_owner.y),
+                 vec2<f32>(face_center.x, face_center.y),
+             );
+             if (dist_face > 1e-6) {
+                 let grad_p_n = grad_p_avg.x * normal.x + grad_p_avg.y * normal.y;
+                 let p_owner = p[owner];
+                 // Outlet (Dirichlet p=0)
+                 let p_face = 0.0;
+                 let p_grad_f = (p_face - p_owner) / dist_face;
+                 rc_term = d_p_face * area * (grad_p_n - p_grad_f);
+             }
+             fluxes[idx] = constants.density * (u_n * area + rc_term);
         }
     }
 }

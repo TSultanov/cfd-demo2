@@ -10,6 +10,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+/// Rendering mode for the mesh visualization
+#[derive(PartialEq, Clone, Copy)]
+enum RenderMode {
+    /// Use egui_plot polygons (slow for large meshes)
+    EguiPlot,
+    /// Use egui's built-in mesh batching (fast for large meshes)
+    BatchedMesh,
+}
+
 #[derive(PartialEq)]
 enum GeometryType {
     BackwardsStep,
@@ -405,6 +414,7 @@ pub struct CFDApp {
     show_mesh_lines: bool,
     adaptive_dt: bool,
     target_cfl: f64,
+    render_mode: RenderMode,
 }
 
 impl CFDApp {
@@ -435,6 +445,7 @@ impl CFDApp {
             show_mesh_lines: true,
             adaptive_dt: true,
             target_cfl: 0.5,
+            render_mode: RenderMode::BatchedMesh, // Default to fast rendering
         }
     }
 
@@ -687,6 +698,139 @@ impl CFDApp {
                     }
                     self.cpu_solver = Some(CpuSolverWrapper::SerialF64(solver));
                 }
+            }
+        }
+    }
+
+    /// Render the CFD mesh using egui's batched mesh for maximum performance
+    fn render_batched_mesh(
+        &self,
+        ui: &mut egui::Ui,
+        cells: &[Vec<[f64; 2]>],
+        values: &[f64],
+        min_val: f64,
+        max_val: f64,
+    ) {
+        // Calculate the bounding box of the mesh
+        let (mesh_min_x, mesh_max_x, mesh_min_y, mesh_max_y) = {
+            let mut min_x = f64::MAX;
+            let mut max_x = f64::MIN;
+            let mut min_y = f64::MAX;
+            let mut max_y = f64::MIN;
+            for polygon in cells {
+                for &[x, y] in polygon {
+                    min_x = min_x.min(x);
+                    max_x = max_x.max(x);
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                }
+            }
+            (min_x, max_x, min_y, max_y)
+        };
+
+        let mesh_width = mesh_max_x - mesh_min_x;
+        let mesh_height = mesh_max_y - mesh_min_y;
+        
+        // Maintain aspect ratio
+        let available_rect = ui.available_rect_before_wrap();
+        let aspect = mesh_width / mesh_height;
+        
+        let (render_width, render_height) = if available_rect.width() / available_rect.height() > aspect as f32 {
+            // Available space is wider than mesh
+            let h = available_rect.height();
+            let w = h * aspect as f32;
+            (w, h)
+        } else {
+            // Available space is taller than mesh
+            let w = available_rect.width();
+            let h = w / aspect as f32;
+            (w, h)
+        };
+
+        let (response, painter) = ui.allocate_painter(
+            egui::vec2(render_width, render_height),
+            egui::Sense::hover(),
+        );
+        let rect = response.rect;
+
+        // Build a single egui mesh with all triangles
+        let mut egui_mesh = egui::Mesh::default();
+        
+        let range = max_val - min_val;
+        let range = if range.abs() < 1e-10 { 1.0 } else { range };
+
+        for (cell_idx, polygon) in cells.iter().enumerate() {
+            if polygon.len() < 3 {
+                continue;
+            }
+
+            let val = values.get(cell_idx).copied().unwrap_or(0.0);
+            let t = ((val - min_val) / range).clamp(0.0, 1.0);
+            let color = get_color(t);
+
+            // Convert polygon points to screen coordinates
+            let screen_pts: Vec<egui::Pos2> = polygon
+                .iter()
+                .map(|&[x, y]| {
+                    let nx = ((x - mesh_min_x) / mesh_width) as f32;
+                    // Flip Y coordinate for screen space
+                    let ny = 1.0 - ((y - mesh_min_y) / mesh_height) as f32;
+                    egui::pos2(
+                        rect.min.x + nx * rect.width(),
+                        rect.min.y + ny * rect.height(),
+                    )
+                })
+                .collect();
+
+            // Triangulate using fan from first vertex
+            let base_idx = egui_mesh.vertices.len() as u32;
+            
+            // Add all vertices with the same color
+            for pt in &screen_pts {
+                egui_mesh.vertices.push(egui::epaint::Vertex {
+                    pos: *pt,
+                    uv: egui::pos2(0.0, 0.0), // No texture
+                    color,
+                });
+            }
+
+            // Add triangle indices (fan triangulation)
+            for i in 1..screen_pts.len() - 1 {
+                egui_mesh.indices.push(base_idx);
+                egui_mesh.indices.push(base_idx + i as u32);
+                egui_mesh.indices.push(base_idx + i as u32 + 1);
+            }
+        }
+
+        // Draw the mesh in a single call
+        painter.add(egui::Shape::mesh(egui_mesh));
+
+        // Optionally draw mesh lines
+        if self.show_mesh_lines {
+            for polygon in cells {
+                if polygon.len() < 3 {
+                    continue;
+                }
+
+                let screen_pts: Vec<egui::Pos2> = polygon
+                    .iter()
+                    .map(|&[x, y]| {
+                        let nx = ((x - mesh_min_x) / mesh_width) as f32;
+                        let ny = 1.0 - ((y - mesh_min_y) / mesh_height) as f32;
+                        egui::pos2(
+                            rect.min.x + nx * rect.width(),
+                            rect.min.y + ny * rect.height(),
+                        )
+                    })
+                    .collect();
+
+                // Draw closed polygon outline
+                let mut points = screen_pts.clone();
+                points.push(screen_pts[0]); // Close the polygon
+                painter.add(egui::Shape::line(
+                    points,
+                    egui::Stroke::new(0.5, egui::Color32::from_gray(100)),
+                ));
             }
         }
     }
@@ -948,6 +1092,11 @@ impl eframe::App for CFDApp {
 
             ui.separator();
             ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
+            
+            ui.separator();
+            ui.label("Render Mode:");
+            ui.radio_value(&mut self.render_mode, RenderMode::BatchedMesh, "Fast (Batched)");
+            ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
 
             ui.separator();
 
@@ -1133,12 +1282,9 @@ impl eframe::App for CFDApp {
                             let next_dt =
                                 (self.target_cfl * self.min_cell_size / max_vel).clamp(1e-5, 0.1);
                             solver.set_dt(next_dt);
-                            self.timestep = next_dt; // Update UI slider too? Or just display?
-                                                     // Let's just update the solver. The slider is bound to self.timestep.
-                                                     // If we want the slider to update, we should update self.timestep.
+                            self.timestep = next_dt;
                         }
                     } else {
-                        // If not adaptive, ensure solver uses the fixed timestep from slider
                         solver.set_dt(self.timestep);
                     }
 
@@ -1147,49 +1293,41 @@ impl eframe::App for CFDApp {
                 }
             }
 
-            if let Some(solver) = &self.cpu_solver {
-                if let Some(vals) = &values {
-                    Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
-                        let cells = solver.get_all_cells_vertices();
-                        for (i, polygon_points) in cells.iter().enumerate() {
-                            let val = vals[i];
-                            let t = (val - min_val) / (max_val - min_val);
-
-                            let color = get_color(t);
-
-                            plot_ui.polygon(
-                                Polygon::new(PlotPoints::new(polygon_points.clone()))
-                                    .fill_color(color)
-                                    .stroke(if self.show_mesh_lines {
-                                        egui::Stroke::new(1.0, egui::Color32::BLACK)
-                                    } else {
-                                        egui::Stroke::NONE
-                                    }),
-                            );
-                        }
-                    });
-                }
+            // Get the cells to render
+            let cells = if let Some(solver) = &self.cpu_solver {
+                Some(solver.get_all_cells_vertices())
             } else if self.gpu_solver.is_some() && !self.cached_cells.is_empty() {
-                // GPU mode: use cached_cells for plotting
-                if let Some(vals) = &values {
-                    Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
-                        for (i, polygon_points) in self.cached_cells.iter().enumerate() {
-                            let val = vals[i];
-                            let t = (val - min_val) / (max_val - min_val);
+                Some(self.cached_cells.clone())
+            } else {
+                None
+            };
 
-                            let color = get_color(t);
+            if let (Some(cells), Some(vals)) = (cells, &values) {
+                match self.render_mode {
+                    RenderMode::BatchedMesh => {
+                        // Fast batched rendering using egui's native mesh
+                        self.render_batched_mesh(ui, &cells, vals, min_val, max_val);
+                    }
+                    RenderMode::EguiPlot => {
+                        // Slower egui_plot rendering (kept for comparison/debugging)
+                        Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
+                            for (i, polygon_points) in cells.iter().enumerate() {
+                                let val = vals[i];
+                                let t = (val - min_val) / (max_val - min_val);
+                                let color = get_color(t);
 
-                            plot_ui.polygon(
-                                Polygon::new(PlotPoints::new(polygon_points.clone()))
-                                    .fill_color(color)
-                                    .stroke(if self.show_mesh_lines {
-                                        egui::Stroke::new(1.0, egui::Color32::BLACK)
-                                    } else {
-                                        egui::Stroke::NONE
-                                    }),
-                            );
-                        }
-                    });
+                                plot_ui.polygon(
+                                    Polygon::new("", PlotPoints::new(polygon_points.clone()))
+                                        .fill_color(color)
+                                        .stroke(if self.show_mesh_lines {
+                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
+                                        } else {
+                                            egui::Stroke::NONE
+                                        }),
+                                );
+                            }
+                        });
+                    }
                 }
             } else {
                 ui.centered_and_justified(|ui| {
@@ -1212,4 +1350,5 @@ fn get_color(t: f64) -> egui::Color32 {
     };
 
     egui::Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+
 }

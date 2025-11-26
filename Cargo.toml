@@ -7,9 +7,9 @@ edition = "2021"
 inherits = "release"
 
 [dependencies]
-egui = "0.24"
-eframe = "0.24"
-egui_plot = "0.24"
+egui = "0.33"
+eframe = { version = "0.33", default-features = false, features = ["glow", "default_fonts"] }
+egui_plot = "0.34"
 nalgebra = "0.32"
 geo = "0.26"
 rand = "0.8"

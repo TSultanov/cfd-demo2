@@ -165,11 +165,7 @@ impl CfdRenderResources {
     }
 
     /// Update the vertex buffer with new mesh data
-    pub fn update_mesh(
-        &mut self,
-        queue: &wgpu::Queue,
-        vertices: &[CfdVertex],
-    ) {
+    pub fn update_mesh(&mut self, queue: &wgpu::Queue, vertices: &[CfdVertex]) {
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
     }
@@ -197,7 +193,7 @@ pub fn triangulate_polygon(vertices: &[[f64; 2]]) -> Vec<[usize; 3]> {
     if vertices.len() < 3 {
         return Vec::new();
     }
-    
+
     let mut triangles = Vec::with_capacity(vertices.len() - 2);
     for i in 1..vertices.len() - 1 {
         triangles.push([0, i, i + 1]);
@@ -214,17 +210,17 @@ pub fn build_mesh_vertices(
 ) -> Vec<CfdVertex> {
     let range = max_val - min_val;
     let range = if range.abs() < 1e-10 { 1.0 } else { range };
-    
+
     let mut vertices = Vec::new();
-    
+
     for (cell_idx, polygon) in cells.iter().enumerate() {
         if polygon.len() < 3 {
             continue;
         }
-        
+
         let val = values.get(cell_idx).copied().unwrap_or(0.0);
         let normalized = ((val - min_val) / range).clamp(0.0, 1.0) as f32;
-        
+
         // Triangulate the polygon using fan triangulation
         for i in 1..polygon.len() - 1 {
             // Triangle: polygon[0], polygon[i], polygon[i+1]
@@ -245,7 +241,7 @@ pub fn build_mesh_vertices(
             });
         }
     }
-    
+
     vertices
 }
 
@@ -255,7 +251,7 @@ pub fn compute_bounds(cells: &[Vec<[f64; 2]>]) -> (f64, f64, f64, f64) {
     let mut max_x = f64::MIN;
     let mut min_y = f64::MAX;
     let mut max_y = f64::MIN;
-    
+
     for polygon in cells {
         for &[x, y] in polygon {
             min_x = min_x.min(x);
@@ -264,6 +260,6 @@ pub fn compute_bounds(cells: &[Vec<[f64; 2]>]) -> (f64, f64, f64, f64) {
             max_y = max_y.max(y);
         }
     }
-    
+
     (min_x, max_x, min_y, max_y)
 }

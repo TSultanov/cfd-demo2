@@ -334,9 +334,21 @@ impl<T: Float> PisoSolver<T> {
                                     let d_p_g = d_p_ghosts[local_ghost_idx];
 
                                     // Interpolate
-                                    u_b = (u_own + u_g) * T::val_from_f64(0.5);
+                                    let dist_own = (f_c - c_i).norm();
+                                    let dist_ghost =
+                                        if let Some(gc) = self.ghost_centers.get(local_ghost_idx) {
+                                            let dx = gc.x - self.mesh.face_cx[face_idx];
+                                            let dy = gc.y - self.mesh.face_cy[face_idx];
+                                            (dx * dx + dy * dy).sqrt()
+                                        } else {
+                                            dist_own
+                                        };
+
+                                    let f = T::val_from_f64(dist_own / (dist_own + dist_ghost));
+                                    u_b = u_own + (u_g - u_own) * f;
+
                                     flux = u_b.dot(&normal) * f_area;
-                                    d_face = (d_p[i] + d_p_g) * T::val_from_f64(0.5);
+                                    d_face = d_p[i] + (d_p_g - d_p[i]) * f;
 
                                     // Rhie-Chow
                                     if local_ghost_idx < gp_x_ghosts.len() {
@@ -344,9 +356,8 @@ impl<T: Float> PisoSolver<T> {
                                             gp_x_ghosts[local_ghost_idx],
                                             gp_y_ghosts[local_ghost_idx],
                                         );
-                                        let grad_p_avg = (Vector2::new(grad_p.vx[i], grad_p.vy[i])
-                                            + gp_g)
-                                            * T::val_from_f64(0.5);
+                                        let grad_p_avg = Vector2::new(grad_p.vx[i], grad_p.vy[i])
+                                            + (gp_g - Vector2::new(grad_p.vx[i], grad_p.vy[i])) * f;
                                         let grad_p_n = grad_p_avg.dot(&normal);
 
                                         let p_ghost = p_ghosts_loop[local_ghost_idx];
@@ -517,7 +528,18 @@ impl<T: Float> PisoSolver<T> {
                 } else if let Some(ghost_idx) = self.ghost_map.get(&i) {
                     let local_ghost_idx = ghost_idx - self.mesh.num_cells();
                     if local_ghost_idx < d_p_ghosts.len() {
-                        d_face = (d_p[owner] + d_p_ghosts[local_ghost_idx]) * T::val_from_f64(0.5);
+                        let c_own =
+                            Vector2::new(self.mesh.cell_cx[owner], self.mesh.cell_cy[owner]);
+                        let f_c = Vector2::new(self.mesh.face_cx[i], self.mesh.face_cy[i]);
+                        let dist_own = (f_c - c_own).norm();
+                        let dist_ghost = if local_ghost_idx < self.ghost_centers.len() {
+                            let gc = self.ghost_centers[local_ghost_idx];
+                            (gc - f_c).norm()
+                        } else {
+                            dist_own
+                        };
+                        let f = T::val_from_f64(dist_own / (dist_own + dist_ghost));
+                        d_face = d_p[owner] + (d_p_ghosts[local_ghost_idx] - d_p[owner]) * f;
                     }
                 }
 

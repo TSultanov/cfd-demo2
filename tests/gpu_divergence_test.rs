@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::structs::GpuSolver;
+use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
-use cfd2::solver::piso::PisoSolver;
 use nalgebra::{Point2, Vector2};
 
 #[test]
@@ -27,38 +26,24 @@ fn test_gpu_divergence_channel_obstacle() {
     let density = 1.0;
     let viscosity = 0.01;
 
-    // CPU Init for initial conditions
-    let mut solver = PisoSolver::<f64>::new(mesh.clone());
-    solver.dt = timestep;
-    solver.density = density;
-    solver.viscosity = viscosity;
-
-    let n_cells = solver.mesh.num_cells();
-    for i in 0..n_cells {
-        let cx = solver.mesh.cell_cx[i];
-        // let cy = solver.mesh.cell_cy[i];
-        if cx < max_cell_size {
-            solver.u.vx[i] = 1.0;
-            solver.u.vy[i] = 0.0;
-        }
-    }
-
     // GPU Init
     println!("Initializing GPU solver...");
-    let mut gpu_solver = pollster::block_on(GpuSolver::new(&solver.mesh));
+    let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh));
     gpu_solver.set_dt(timestep as f32);
     gpu_solver.set_viscosity(viscosity as f32);
     gpu_solver.set_density(density as f32);
     gpu_solver.set_scheme(0); // Upwind
 
-    // Upload initial U
-    let u_init: Vec<(f64, f64)> = solver
-        .u
-        .vx
-        .iter()
-        .zip(solver.u.vy.iter())
-        .map(|(&x, &y)| (x, y))
-        .collect();
+    // Initial Conditions
+    let mut u_init = Vec::new();
+    for i in 0..mesh.num_cells() {
+        let cx = mesh.cell_cx[i];
+        if cx < max_cell_size {
+            u_init.push((1.0, 0.0));
+        } else {
+            u_init.push((0.0, 0.0));
+        }
+    }
     gpu_solver.set_u(&u_init);
 
     // Run loop

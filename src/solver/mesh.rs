@@ -8,7 +8,6 @@ pub enum BoundaryType {
     Inlet,
     Outlet,
     Wall,
-    ParallelInterface(usize, usize), // Rank of the neighbor, Remote Cell Index
 }
 
 #[derive(Default, Clone)]

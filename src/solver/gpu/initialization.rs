@@ -45,7 +45,6 @@ impl GpuSolver {
                 Some(BoundaryType::Inlet) => 1,
                 Some(BoundaryType::Outlet) => 2,
                 Some(BoundaryType::Wall) => 3,
-                Some(BoundaryType::ParallelInterface(_, _)) => 4,
             })
             .collect();
         let b_face_boundary = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

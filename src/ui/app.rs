@@ -302,6 +302,7 @@ impl CpuSolverWrapper {
 #[derive(Default, Clone)]
 struct CachedGpuStats {
     time: f32,
+    dt: f32,
     stats_ux: LinearSolverStats,
     stats_uy: LinearSolverStats,
     stats_p: LinearSolverStats,
@@ -332,6 +333,8 @@ pub struct CFDApp {
     selected_scheme: Scheme,
     current_fluid: Fluid,
     show_mesh_lines: bool,
+    adaptive_dt: bool,
+    target_cfl: f64,
 }
 
 impl CFDApp {
@@ -360,6 +363,8 @@ impl CFDApp {
             selected_scheme: Scheme::Upwind,
             current_fluid: Fluid::presets()[0].clone(),
             show_mesh_lines: true,
+            adaptive_dt: true,
+            target_cfl: 0.5,
         }
     }
 
@@ -710,6 +715,11 @@ impl eframe::App for CFDApp {
 
                 ui.add(egui::Slider::new(&mut self.timestep, 0.0001..=0.1).text("Timestep"));
 
+                ui.checkbox(&mut self.adaptive_dt, "Adaptive Timestep");
+                if self.adaptive_dt {
+                    ui.add(egui::Slider::new(&mut self.target_cfl, 0.1..=1.0).text("Target CFL"));
+                }
+
                 // Show CFL warning
                 if cfl > 1.0 {
                     ui.colored_label(
@@ -785,49 +795,78 @@ impl eframe::App for CFDApp {
                 && ui
                     .button(if self.is_running { "Pause" } else { "Run" })
                     .clicked()
-                {
-                    self.is_running = !self.is_running;
+            {
+                self.is_running = !self.is_running;
 
-                    if let Some(gpu_solver) = &self.gpu_solver {
-                        if self.is_running {
-                            self.gpu_solver_running.store(true, Ordering::Relaxed);
-                            let solver_arc = gpu_solver.clone();
-                            let running_flag = self.gpu_solver_running.clone();
-                            let shared_results = self.shared_results.clone();
-                            let shared_gpu_stats = self.shared_gpu_stats.clone();
-                            let ctx_clone = ctx.clone();
-                            thread::spawn(move || {
-                                while running_flag.load(Ordering::Relaxed) {
-                                    if let Ok(mut solver) = solver_arc.lock() {
-                                        solver.step();
-                                        // Fetch results while holding the lock
-                                        let u = pollster::block_on(solver.get_u());
-                                        let p = pollster::block_on(solver.get_p());
+                if let Some(gpu_solver) = &self.gpu_solver {
+                    if self.is_running {
+                        self.gpu_solver_running.store(true, Ordering::Relaxed);
+                        let solver_arc = gpu_solver.clone();
+                        let running_flag = self.gpu_solver_running.clone();
+                        let shared_results = self.shared_results.clone();
+                        let shared_gpu_stats = self.shared_gpu_stats.clone();
+                        let ctx_clone = ctx.clone();
+                        let adaptive_dt_clone = self.adaptive_dt;
+                        let target_cfl_clone = self.target_cfl;
+                        let min_cell_size_clone = self.min_cell_size;
+                        thread::spawn(move || {
+                            while running_flag.load(Ordering::Relaxed) {
+                                if let Ok(mut solver) = solver_arc.lock() {
+                                    // Adaptive Timestep Logic
+                                    if adaptive_dt_clone {
+                                        // We need current max velocity.
+                                        // We can get it from the previous step's result (u).
+                                        // Since we just called step(), let's fetch u first.
+                                    }
 
-                                        // Capture stats while we have the lock
-                                        let stats = CachedGpuStats {
-                                            time: solver.constants.time,
-                                            stats_ux: *solver.stats_ux.lock().unwrap(),
-                                            stats_uy: *solver.stats_uy.lock().unwrap(),
-                                            stats_p: *solver.stats_p.lock().unwrap(),
-                                        };
+                                    solver.step();
+                                    // Fetch results while holding the lock
+                                    let u = pollster::block_on(solver.get_u());
+                                    let p = pollster::block_on(solver.get_p());
 
-                                        if let Ok(mut results) = shared_results.lock() {
-                                            *results = Some((u, p));
+                                    // Adaptive Timestep Calculation
+                                    if adaptive_dt_clone {
+                                        let mut max_vel = 0.0f64;
+                                        for (vx, vy) in &u {
+                                            let v = (vx.powi(2) + vy.powi(2)).sqrt();
+                                            if v > max_vel {
+                                                max_vel = v;
+                                            }
                                         }
-                                        if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
-                                            *gpu_stats = stats;
+
+                                        if max_vel > 1e-6 {
+                                            let next_dt = (target_cfl_clone * min_cell_size_clone
+                                                / max_vel)
+                                                .clamp(1e-5, 0.1);
+                                            solver.set_dt(next_dt as f32);
                                         }
                                     }
-                                    ctx_clone.request_repaint();
-                                    thread::sleep(std::time::Duration::from_millis(1));
+
+                                    // Capture stats while we have the lock
+                                    let stats = CachedGpuStats {
+                                        time: solver.constants.time,
+                                        dt: solver.constants.dt,
+                                        stats_ux: *solver.stats_ux.lock().unwrap(),
+                                        stats_uy: *solver.stats_uy.lock().unwrap(),
+                                        stats_p: *solver.stats_p.lock().unwrap(),
+                                    };
+
+                                    if let Ok(mut results) = shared_results.lock() {
+                                        *results = Some((u, p));
+                                    }
+                                    if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
+                                        *gpu_stats = stats;
+                                    }
                                 }
-                            });
-                        } else {
-                            self.gpu_solver_running.store(false, Ordering::Relaxed);
-                        }
+                                ctx_clone.request_repaint();
+                                thread::sleep(std::time::Duration::from_millis(1));
+                            }
+                        });
+                    } else {
+                        self.gpu_solver_running.store(false, Ordering::Relaxed);
                     }
                 }
+            }
 
             ui.separator();
 
@@ -856,6 +895,7 @@ impl eframe::App for CFDApp {
 
                 let stats = &self.cached_gpu_stats;
                 ui.label(format!("Time: {:.3}", stats.time));
+                ui.label(format!("dt: {:.2e}", stats.dt));
                 ui.label("GPU Solver Stats:");
                 ui.label(format!(
                     "Ux: {} iters, res {:.2e}, {:.2?}",

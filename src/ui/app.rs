@@ -98,6 +98,7 @@ pub struct CFDApp {
     cached_gpu_stats: CachedGpuStats,
     mesh: Option<Mesh>,
     cached_cells: Vec<Vec<[f64; 2]>>,
+    actual_min_cell_size: f64,
     min_cell_size: f64,
     max_cell_size: f64,
     timestep: f64,
@@ -124,6 +125,7 @@ impl CFDApp {
             cached_gpu_stats: CachedGpuStats::default(),
             mesh: None,
             cached_cells: Vec::new(),
+            actual_min_cell_size: 0.01,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
             timestep: 0.01,
@@ -170,6 +172,14 @@ impl CFDApp {
         self.cached_u = initial_u;
         self.cached_p = initial_p;
         self.cached_cells = Self::cache_cells(&mesh);
+        
+        // Compute actual min cell size
+        self.actual_min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
+            
         self.mesh = Some(mesh);
 
         self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
@@ -547,7 +557,7 @@ impl eframe::App for CFDApp {
                         let ctx_clone = ctx.clone();
                         let adaptive_dt_clone = self.adaptive_dt;
                         let target_cfl_clone = self.target_cfl;
-                        let min_cell_size_clone = self.min_cell_size;
+                        let min_cell_size_clone = self.actual_min_cell_size;
                         thread::spawn(move || {
                             while running_flag.load(Ordering::Relaxed) {
                                 if let Ok(mut solver) = solver_arc.lock() {
@@ -567,7 +577,7 @@ impl eframe::App for CFDApp {
                                         if max_vel > 1e-6 {
                                             let next_dt = (target_cfl_clone * min_cell_size_clone
                                                 / max_vel)
-                                                .clamp(1e-5, 0.1);
+                                                .clamp(1e-9, 0.1);
                                             solver.set_dt(next_dt as f32);
                                         }
                                     }

@@ -137,8 +137,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             
             // k_vec = S - d_vec * (area / dist)
             // This is the component of S perpendicular to d_vec
-            let k_x = s_x - d_vec_x * (area / dist);
-            let k_y = s_y - d_vec_y * (area / dist);
+            let k_x_raw = s_x - d_vec_x * (area / dist);
+            let k_y_raw = s_y - d_vec_y * (area / dist);
+            
+            // Limit non-orthogonality vector magnitude for stability
+            // |k| <= 0.5 * area (approx 26.5 degrees max effective angle)
+            let k_mag = sqrt(k_x_raw * k_x_raw + k_y_raw * k_y_raw);
+            let k_limit = 0.5 * area;
+            var k_scale = 1.0;
+            if (k_mag > k_limit) {
+                k_scale = k_limit / k_mag;
+            }
+            let k_x = k_x_raw * k_scale;
+            let k_y = k_y_raw * k_scale;
             
             // Interpolate gradient to face
             let grad_own = grad_component[idx];
@@ -157,7 +168,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let grad_f_y = grad_own.y + interp_f * (grad_neigh.y - grad_own.y);
             
             // Correction flux = mu * dot(grad_f, k_vec)
-            let correction_flux = mu * (grad_f_x * k_x + grad_f_y * k_y);
+            // Under-relaxed for stability (0.5)
+            let correction_flux = 0.5 * mu * (grad_f_x * k_x + grad_f_y * k_y);
             
             // Subtract from RHS (since diffusion is -div(mu * grad(phi)))
             rhs_val -= correction_flux;

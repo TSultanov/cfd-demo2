@@ -114,7 +114,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
              fluxes[idx] = constants.density * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
         } else if (boundary_type == 3u) { // Wall
              fluxes[idx] = 0.0;
-        } else { // Outlet
+        } else if (boundary_type == 2u) { // Outlet
              let u_n = u_face.x * normal.x + u_face.y * normal.y;
              var rc_term = 0.0;
              let dist_face = distance(
@@ -130,6 +130,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                  rc_term = d_p_face * area * (grad_p_n - p_grad_f);
              }
              fluxes[idx] = constants.density * (u_n * area + rc_term);
+        } else {
+             // Symmetry / Empty / Undefined
+             fluxes[idx] = 0.0;
         }
     }
 }

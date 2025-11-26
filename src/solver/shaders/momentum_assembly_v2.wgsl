@@ -199,7 +199,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (flux > 0.0) {
                     diag_coeff += flux;
                 }
-            } else { // Outlet or Parallel
+            } else if (boundary_type == 2u) { // Outlet
                 // Zero gradient (Neumann) boundary condition for velocity
                 // No diffusion contribution (du/dn = 0)
                 // Convection: outflow only
@@ -208,6 +208,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
                 // For backflow (flux < 0), we ignore it to prevent instability
                 // This is a common practice for outlet BCs
+            } else {
+                // Symmetry / Empty / Undefined
+                // Zero flux (flux should be 0 from flux_rhie_chow)
+                // Zero gradient (du/dn = 0) -> No diffusion
+                // So no contribution to diag_coeff or rhs
             }
         }
 

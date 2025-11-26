@@ -38,7 +38,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let c_neigh = cell_centers[neigh_idx];
         let f_center = face_centers[idx];
 
-        // CPU reference uses simple averaging for d_p on flux correction
+        // Use simple average to match CPU (piso.rs line 545-546)
         d_p_face = 0.5 * (d_p_face + d_p[neigh_idx]);
 
         let p_prime_neigh = x[neigh_idx];

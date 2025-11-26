@@ -186,12 +186,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     diag_coeff += flux;
                 }
             } else { // Outlet or Parallel
+                // Zero gradient (Neumann) boundary condition for velocity
+                // No diffusion contribution (du/dn = 0)
+                // Convection: outflow only
                 if (flux > 0.0) {
                     diag_coeff += flux;
-                } else {
-                    // Backflow: Treat explicitly to maintain diagonal dominance
-                    rhs_val -= flux * val_old;
                 }
+                // For backflow (flux < 0), we ignore it to prevent instability
+                // This is a common practice for outlet BCs
             }
         }
 

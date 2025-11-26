@@ -10,7 +10,7 @@ struct Constants {
     density: f32,
     component: u32,
     alpha_p: f32,
-    padding1: u32,
+    scheme: u32,
     stride_x: u32,
 }
 
@@ -77,10 +77,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lambda = d_neigh / total_dist;
         }
         
+        // Linear interpolation to face (CPU uses: val_owner + f * (val_neigh - val_owner) where f = d_own/(d_own+d_neigh))
+        // Here lambda = d_neigh / total = weight for owner, so (1-lambda) = d_own/total = weight for neighbor
+        // u_face = lambda * u_own + (1-lambda) * u_neigh  
+        // This is equivalent to u_own + (1-lambda) * (u_neigh - u_own) = u_own + f * (u_neigh - u_own)
         u_face.x = lambda * u_face.x + (1.0 - lambda) * u_neigh.x;
         u_face.y = lambda * u_face.y + (1.0 - lambda) * u_neigh.y;
         
-        d_p_face = lambda * d_p_face + (1.0 - lambda) * d_p_neigh;
+        // d_p interpolation: use simple average to match CPU flux correction
+        d_p_face = 0.5 * (d_p_face + d_p_neigh);
         
         grad_p_avg.x = lambda * grad_p_avg.x + (1.0 - lambda) * grad_p_neigh.x;
         grad_p_avg.y = lambda * grad_p_avg.y + (1.0 - lambda) * grad_p_neigh.y;

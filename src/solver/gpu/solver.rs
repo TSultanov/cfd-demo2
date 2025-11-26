@@ -213,17 +213,20 @@ impl GpuSolver {
         let max_outer_iters = 40;
         let outer_tol_u = 1e-3;
         let outer_tol_p = 1e-2;
-        let stagnation_factor = 0.99; // Consider stagnated if residual doesn't decrease by at least 1%
-        
+        let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 1%
+
         let mut prev_residual_u = f64::MAX;
         let mut prev_residual_p = f64::MAX;
-        
+
         for outer_iter in 0..max_outer_iters {
             // 1. Momentum Predictor
-            
+
             // Save velocity and pressure before solve for convergence check
             let (u_before, p_before) = if outer_iter > 0 {
-                (Some(pollster::block_on(self.get_u())), Some(pollster::block_on(self.get_p())))
+                (
+                    Some(pollster::block_on(self.get_u())),
+                    Some(pollster::block_on(self.get_p())),
+                )
             } else {
                 (None, None)
             };
@@ -236,7 +239,7 @@ impl GpuSolver {
 
             // 2. Pressure Corrector (PISO inner loop)
             let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
-            
+
             for _ in 0..num_piso_iters {
                 // Set component to 2 for Pressure Gradient calculation
                 self.constants.component = 2;
@@ -244,12 +247,11 @@ impl GpuSolver {
 
                 // Flux interpolation with Rhie-Chow, then combined gradient + pressure assembly
                 {
-                    let mut encoder =
-                        self.context
-                            .device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("PISO Pre-Solve Encoder"),
-                            });
+                    let mut encoder = self.context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("PISO Pre-Solve Encoder"),
+                        },
+                    );
                     {
                         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some("Flux RC Pass"),
@@ -282,12 +284,11 @@ impl GpuSolver {
 
                 // Velocity Correction
                 {
-                    let mut encoder =
-                        self.context
-                            .device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("Velocity Correction Encoder"),
-                            });
+                    let mut encoder = self.context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("Velocity Correction Encoder"),
+                        },
+                    );
                     {
                         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                             label: Some("Velocity Correction Pass"),
@@ -307,7 +308,7 @@ impl GpuSolver {
             if let (Some(u_before), Some(p_before)) = (u_before, p_before) {
                 let u_after = pollster::block_on(self.get_u());
                 let p_after = pollster::block_on(self.get_p());
-                
+
                 // Calculate velocity residual (max change)
                 let mut max_diff_u = 0.0f64;
                 for (before, after) in u_before.iter().zip(u_after.iter()) {
@@ -315,24 +316,24 @@ impl GpuSolver {
                     let diff_y = (after.1 - before.1).abs();
                     max_diff_u = max_diff_u.max(diff_x).max(diff_y);
                 }
-                
+
                 // Calculate pressure residual (max change)
                 let mut max_diff_p = 0.0f64;
                 for (before, after) in p_before.iter().zip(p_after.iter()) {
                     let diff = (after - before).abs();
                     max_diff_p = max_diff_p.max(diff);
                 }
-                
+
                 // Store outer loop stats
                 *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
                 *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
                 *self.outer_iterations.lock().unwrap() = outer_iter + 1;
-                
+
                 // Converged if both U and P are below tolerance
                 if max_diff_u < outer_tol_u && max_diff_p < outer_tol_p {
                     break;
                 }
-                
+
                 // Stagnation check: if residuals aren't decreasing, stop iterating
                 let u_stagnated = max_diff_u >= stagnation_factor * prev_residual_u;
                 let p_stagnated = max_diff_p >= stagnation_factor * prev_residual_p;
@@ -343,7 +344,7 @@ impl GpuSolver {
                     );
                     break;
                 }
-                
+
                 prev_residual_u = max_diff_u;
                 prev_residual_p = max_diff_p;
             } else {
@@ -423,7 +424,7 @@ impl GpuSolver {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Momentum Pre-Solve Encoder"),
                     });
-            
+
             // Compute gradients BEFORE assembly for higher order schemes
             // The gradient of the OLD field is needed for deferred correction
             if self.constants.scheme != 0 {
@@ -436,7 +437,7 @@ impl GpuSolver {
                 cpass.set_bind_group(1, &self.bg_fields, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
-            
+
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("Momentum Assembly Pass"),
@@ -448,12 +449,12 @@ impl GpuSolver {
                 cpass.set_bind_group(2, &self.bg_solver, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
-            
+
             self.context.queue.submit(Some(encoder.finish()));
         }
 
         self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-        
+
         // Use combined solve + update_u to avoid separate kernel dispatch
         let stats = pollster::block_on(self.solve_and_update_u());
         if component == 0 {

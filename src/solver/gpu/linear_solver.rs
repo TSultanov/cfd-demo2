@@ -99,7 +99,7 @@ impl GpuSolver {
                 }
 
                 // Stagnation check
-                if iter > 0 && res >= 0.99 * prev_res {
+                if iter > 0 && res >= 0.999 * prev_res {
                     final_iter = iter + 1;
                     break;
                 }

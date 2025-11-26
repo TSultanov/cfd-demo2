@@ -368,7 +368,7 @@ impl GpuSolver {
 
         // Dot Product & Params
         let workgroup_size = 64;
-        let num_groups = (num_cells + workgroup_size - 1) / workgroup_size;
+        let num_groups = num_cells.div_ceil(workgroup_size);
 
         let b_dot_result = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dot Result Buffer"),

@@ -446,7 +446,7 @@ fn partition_mesh(mesh: Mesh, n_parts: usize) -> Vec<Mesh> {
     cell_indices.sort_by(|&a, &b| mesh.cell_cx[a].partial_cmp(&mesh.cell_cx[b]).unwrap());
 
     // 2. Split indices
-    let chunk_size = (cell_indices.len() + n_parts - 1) / n_parts;
+    let chunk_size = cell_indices.len().div_ceil(n_parts);
     let mut chunks = vec![Vec::new(); n_parts];
     let mut cell_to_part = vec![0; mesh.num_cells()];
     let mut cell_to_local = vec![0; mesh.num_cells()];
@@ -477,11 +477,7 @@ fn partition_mesh(mesh: Mesh, n_parts: usize) -> Vec<Mesh> {
             let neighbor = mesh.face_neighbor[f_idx];
 
             let owner_part = cell_to_part[owner];
-            let neighbor_part = if let Some(n) = neighbor {
-                Some(cell_to_part[n])
-            } else {
-                None
-            };
+            let neighbor_part = neighbor.map(|n| cell_to_part[n]);
 
             if owner_part == part_id {
                 // I am owner

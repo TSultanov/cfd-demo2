@@ -137,13 +137,13 @@ impl Fvm {
             let area = T::val_from_f64(mesh.face_area[face_idx]);
 
             // Contribution to owner
-            grad_x[owner] = grad_x[owner] + val_face * nx * area;
-            grad_y[owner] = grad_y[owner] + val_face * ny * area;
+            grad_x[owner] += val_face * nx * area;
+            grad_y[owner] += val_face * ny * area;
 
             // Contribution to neighbor
             if let Some(neigh) = neighbor {
-                grad_x[neigh] = grad_x[neigh] - val_face * nx * area;
-                grad_y[neigh] = grad_y[neigh] - val_face * ny * area;
+                grad_x[neigh] -= val_face * nx * area;
+                grad_y[neigh] -= val_face * ny * area;
             }
         }
 
@@ -154,8 +154,8 @@ impl Fvm {
                 println!("Warning: Small cell volume for cell {}: {}", i, vol);
             }
             let vol_t = T::val_from_f64(vol);
-            grad_x[i] = grad_x[i] / vol_t;
-            grad_y[i] = grad_y[i] / vol_t;
+            grad_x[i] /= vol_t;
+            grad_y[i] /= vol_t;
             i += 1;
         }
 
@@ -287,7 +287,7 @@ impl Fvm {
                             if !handled {
                                 if let Some(bv) = boundary_value(bt) {
                                     // Dirichlet: flux * val_b. Move to RHS.
-                                    rhs[i] = rhs[i] - flux * bv;
+                                    rhs[i] -= flux * bv;
                                     val = bv;
                                 } else {
                                     // Neumann (Zero Gradient): phi_b = phi_P
@@ -295,7 +295,7 @@ impl Fvm {
                                         // Inflow with Neumann is unstable and can make diagonal negative.
                                         // Treat as Dirichlet with value from previous step (Explicit)
                                         // phi_b = phi_old[i]
-                                        rhs[i] = rhs[i] - flux * phi_old.values[i];
+                                        rhs[i] -= flux * phi_old.values[i];
                                         val = phi_old.values[i];
                                     } else {
                                         triplets.push((i, i, flux));
@@ -355,7 +355,7 @@ impl Fvm {
                     } else {
                         // Boundary Face
                         let mut handled = false;
-                        if let Some(_) = mesh.face_boundary[face_idx] {
+                        if mesh.face_boundary[face_idx].is_some() {
                             if let Some(map) = ghost_map {
                                 if map.contains_key(&face_idx) {
                                     // Parallel Interface
@@ -383,18 +383,17 @@ impl Fvm {
                             }
                         }
 
-                        if !handled {
-                            if flux > T::zero() {
+                        if !handled
+                            && flux > T::zero() {
                                 // Outflow: Use Upwind (Zero Gradient) to prevent reflections.
                             }
                             // Inflow: phi_ho = phi_upwind (BC value)
-                        }
                     }
 
                     // Correction term: flux * (phi_ho - phi_upwind)
                     // Move to RHS: ... = ... - correction
                     let correction = flux * (phi_ho - phi_upwind);
-                    rhs[i] = rhs[i] - correction;
+                    rhs[i] -= correction;
                 }
 
                 // Diffusion: -div(gamma grad phi) -> -sum(gamma * grad_phi * S)
@@ -442,7 +441,7 @@ impl Fvm {
 
                         // Subtract from RHS (since it's -div(flux))
                         // flux is out of i.
-                        rhs[i] = rhs[i] - correction_flux;
+                        rhs[i] -= correction_flux;
                     }
                 } else {
                     // Boundary diffusion
@@ -499,7 +498,7 @@ impl Fvm {
                                 // LHS: + diff_coeff * phi_P
                                 // RHS: + diff_coeff * phi_b
                                 triplets.push((i, i, diff_coeff));
-                                rhs[i] = rhs[i] + diff_coeff * bv;
+                                rhs[i] += diff_coeff * bv;
                             } else {
                                 // Neumann (Zero Gradient): grad_phi = 0 -> flux = 0
                                 // No contribution
@@ -539,9 +538,9 @@ impl Fvm {
 
                 if let Some(n) = n_idx {
                     let n_vol = T::val_from_f64(mesh.cell_vol[n]);
-                    sum_gx = sum_gx + grads.vx[n] * n_vol;
-                    sum_gy = sum_gy + grads.vy[n] * n_vol;
-                    sum_vol = sum_vol + n_vol;
+                    sum_gx += grads.vx[n] * n_vol;
+                    sum_gy += grads.vy[n] * n_vol;
+                    sum_vol += n_vol;
                 }
             }
 
@@ -563,8 +562,8 @@ impl Fvm {
             let mag = (grads.vx[i].powi(2) + grads.vy[i].powi(2)).sqrt();
             if mag > max_mag {
                 let scale = max_mag / mag;
-                limited_vx[i] = limited_vx[i] * scale;
-                limited_vy[i] = limited_vy[i] * scale;
+                limited_vx[i] *= scale;
+                limited_vy[i] *= scale;
             }
         }
         VectorField {
@@ -636,8 +635,8 @@ impl Fvm {
                 }
             }
 
-            grads.vx[i] = grads.vx[i] * alpha;
-            grads.vy[i] = grads.vy[i] * alpha;
+            grads.vx[i] *= alpha;
+            grads.vy[i] *= alpha;
         }
     }
 }

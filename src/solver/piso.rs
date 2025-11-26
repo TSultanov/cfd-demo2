@@ -406,7 +406,7 @@ impl<T: Float> PisoSolver<T> {
                             p_triplets.push((i, i, d_coeff));
                             p_triplets.push((i, *ghost_idx, -d_coeff));
                         } else if let Some(bt) = self.mesh.face_boundary[face_idx] {
-                            if let Some(_) = p_bc(bt) {
+                            if p_bc(bt).is_some() {
                                 // Dirichlet
                                 let dist = (f_c - c_i).norm();
                                 let d_coeff = d_face_val * f_area / T::val_from_f64(dist);
@@ -529,23 +529,21 @@ impl<T: Float> PisoSolver<T> {
                     let c_neigh = Vector2::new(self.mesh.cell_cx[n], self.mesh.cell_cy[n]);
                     let dist = (c_neigh - c_own).norm();
                     p_grad_n = (p_prime[n] - p_prime[owner]) / T::val_from_f64(dist);
-                } else {
-                    if let Some(ghost_idx) = self.ghost_map.get(&i) {
-                        let local_ghost_idx = ghost_idx - self.mesh.num_cells();
-                        if local_ghost_idx < p_prime_ghosts.len() {
-                            let p_ghost = p_prime_ghosts[local_ghost_idx];
-                            let dist = if local_ghost_idx < self.ghost_centers.len() {
-                                (self.ghost_centers[local_ghost_idx] - c_own).norm()
-                            } else {
-                                (f_c - c_own).norm() * 2.0
-                            };
-                            p_grad_n = (p_ghost - p_prime[owner]) / T::val_from_f64(dist);
-                        }
-                    } else if let Some(bt) = self.mesh.face_boundary[i] {
-                        if matches!(bt, BoundaryType::Outlet) {
-                            let dist = (f_c - c_own).norm();
-                            p_grad_n = (T::zero() - p_prime[owner]) / T::val_from_f64(dist);
-                        }
+                } else if let Some(ghost_idx) = self.ghost_map.get(&i) {
+                    let local_ghost_idx = ghost_idx - self.mesh.num_cells();
+                    if local_ghost_idx < p_prime_ghosts.len() {
+                        let p_ghost = p_prime_ghosts[local_ghost_idx];
+                        let dist = if local_ghost_idx < self.ghost_centers.len() {
+                            (self.ghost_centers[local_ghost_idx] - c_own).norm()
+                        } else {
+                            (f_c - c_own).norm() * 2.0
+                        };
+                        p_grad_n = (p_ghost - p_prime[owner]) / T::val_from_f64(dist);
+                    }
+                } else if let Some(bt) = self.mesh.face_boundary[i] {
+                    if matches!(bt, BoundaryType::Outlet) {
+                        let dist = (f_c - c_own).norm();
+                        p_grad_n = (T::zero() - p_prime[owner]) / T::val_from_f64(dist);
                     }
                 }
 

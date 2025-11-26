@@ -781,8 +781,8 @@ impl eframe::App for CFDApp {
                 self.init_solver();
             }
 
-            if self.cpu_solver.is_some() || self.gpu_solver.is_some() {
-                if ui
+            if (self.cpu_solver.is_some() || self.gpu_solver.is_some())
+                && ui
                     .button(if self.is_running { "Pause" } else { "Run" })
                     .clicked()
                 {
@@ -828,7 +828,6 @@ impl eframe::App for CFDApp {
                         }
                     }
                 }
-            }
 
             ui.separator();
 

@@ -187,8 +187,8 @@ impl GpuSolver {
 
     pub fn step(&mut self) {
         let workgroup_size = 64;
-        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
-        let num_groups_faces = (self.num_faces + workgroup_size - 1) / workgroup_size;
+        let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
+        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
 
         // 1. Momentum Predictor
 
@@ -385,7 +385,7 @@ impl GpuSolver {
         self.update_constants();
 
         let workgroup_size = 64;
-        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
+        let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
 
         let mut encoder =
             self.context
@@ -412,7 +412,7 @@ impl GpuSolver {
         self.update_constants();
 
         let workgroup_size = 64;
-        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
+        let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
 
         let mut encoder =
             self.context
@@ -439,7 +439,7 @@ impl GpuSolver {
         self.update_constants();
 
         let workgroup_size = 64;
-        let num_groups_cells = (self.num_cells + workgroup_size - 1) / workgroup_size;
+        let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
 
         let mut encoder =
             self.context

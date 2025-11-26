@@ -50,7 +50,7 @@ impl<T: Float> SparseMatrix<T> {
 
         for &(r, c, v) in triplets {
             let entry = row_data[r].entry(c).or_insert(T::zero());
-            *entry = *entry + v;
+            *entry += v;
         }
 
         // Count unique entries per row
@@ -93,7 +93,7 @@ impl<T: Float> SparseMatrix<T> {
         for i in 0..self.n_rows {
             let mut sum = T::zero();
             for j in self.row_offsets[i]..self.row_offsets[i + 1] {
-                sum = sum + self.values[j] * x[self.col_indices[j]];
+                sum += self.values[j] * x[self.col_indices[j]];
             }
             y[i] = sum;
         }
@@ -221,7 +221,7 @@ pub fn solve_bicgstab<T: Float, O: SolverOps<T>>(
                 i += lanes;
             }
             while i < n {
-                x[i] = x[i] + alpha * p[i];
+                x[i] += alpha * p[i];
                 i += 1;
             }
             return (iter + 1, norm_s, init_resid);
@@ -337,8 +337,8 @@ pub fn solve_cg<T: Float, O: SolverOps<T>>(
             i += lanes;
         }
         while i < n {
-            x[i] = x[i] + alpha * p[i];
-            r[i] = r[i] - alpha * q[i];
+            x[i] += alpha * p[i];
+            r[i] -= alpha * q[i];
             i += 1;
         }
 
@@ -385,7 +385,7 @@ pub fn dot<T: Float>(a: &[T], b: &[T]) -> T {
     let mut s = arr.iter().cloned().sum();
 
     while i < n {
-        s = s + a[i] * b[i];
+        s += a[i] * b[i];
         i += 1;
     }
     s

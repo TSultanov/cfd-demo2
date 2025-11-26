@@ -20,7 +20,7 @@ impl GpuSolver {
         let rel_tol = 1e-4;
         let n = self.num_cells;
         let workgroup_size = 64;
-        let num_groups = (n + workgroup_size - 1) / workgroup_size;
+        let num_groups = n.div_ceil(workgroup_size);
 
         // Initialize r = b - Ax. Since x=0, r = b.
         let size = (n as u64) * 4;

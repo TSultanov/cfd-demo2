@@ -33,8 +33,9 @@ struct Constants {
 @group(1) @binding(1) var<storage, read_write> p: array<f32>;
 @group(1) @binding(2) var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(3) var<uniform> constants: Constants;
-@group(1) @binding(4) var<storage, read_write> grad_p_prime: array<Vector2>;
+@group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>; // Keep binding 4 as grad_p (unused here or maybe used? No, previously it was overwriting it)
 @group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
+@group(1) @binding(8) var<storage, read_write> grad_p_prime: array<Vector2>; // New binding
 
 // Linear solver state (p_prime sits in x)
 @group(2) @binding(0) var<storage, read> x: array<f32>;
@@ -124,7 +125,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let dist = sqrt(dx * dx + dy * dy);
                 if (dist > 1e-6) {
                     let grad_p_f = (x[neigh] - val_c) / dist;
-                    fluxes[face_idx] -= d_p_face * area * grad_p_f;
+                    fluxes[face_idx] -= constants.density * d_p_face * area * grad_p_f;
                 }
             } else {
                 let boundary_type = face_boundary[face_idx];
@@ -135,7 +136,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let dist = sqrt(dx * dx + dy * dy);
                     if (dist > 1e-6) {
                         let grad_p_f = (0.0 - val_c) / dist;
-                        fluxes[face_idx] -= d_p_face * area * grad_p_f;
+                        fluxes[face_idx] -= constants.density * d_p_face * area * grad_p_f;
                     }
                 }
             }

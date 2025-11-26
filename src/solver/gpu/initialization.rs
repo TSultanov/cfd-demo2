@@ -279,6 +279,13 @@ impl GpuSolver {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let b_grad_p_prime = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Grad P Prime Buffer"),
+            size: (num_cells as u64 * std::mem::size_of::<[f32; 2]>() as u64),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let constants = GpuConstants {
             dt: 0.0001, // Reduced dt
             time: 0.0,
@@ -513,26 +520,6 @@ impl GpuSolver {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 8,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 9,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
                     binding: 10,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
@@ -662,6 +649,17 @@ impl GpuSolver {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 8: Grad P Prime
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -1109,14 +1107,6 @@ impl GpuSolver {
                     resource: b_cell_faces.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: b_row_offsets.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 9,
-                    resource: b_col_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
                     binding: 10,
                     resource: b_cell_face_matrix_indices.as_entire_binding(),
                 },
@@ -1170,6 +1160,10 @@ impl GpuSolver {
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: b_u_old.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: b_grad_p_prime.as_entire_binding(),
                 },
             ],
         });

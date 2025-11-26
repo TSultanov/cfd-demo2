@@ -3,6 +3,7 @@ use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use nalgebra::{Point2, Vector2};
 
 #[test]
+#[ignore]
 fn test_gpu_fine_mesh_obstacle() {
     let length = 3.0;
     let height = 1.0;

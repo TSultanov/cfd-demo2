@@ -25,7 +25,7 @@ impl GpuContext {
                     label: None,
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits {
-                        max_storage_buffers_per_shader_stage: 16,
+                        max_storage_buffers_per_shader_stage: 31,
                         ..wgpu::Limits::downlevel_defaults()
                     },
                 },

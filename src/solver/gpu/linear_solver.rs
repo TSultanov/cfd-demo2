@@ -53,7 +53,7 @@ impl GpuSolver {
         let mut final_iter = max_iter;
         let mut prev_res = f32::MAX;
 
-        for _iter in 0..max_iter {
+        for iter in 0..max_iter {
             // 1. rho_new = (r0, r) -> b_dot_result
             // 2. r_r = (r, r) -> b_dot_result_2
             self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_r0r_rr, num_groups);
@@ -63,8 +63,8 @@ impl GpuSolver {
 
             pending_commands = true;
 
-            // Check convergence every 50 iterations
-            if _iter % 50 == 0 {
+            // Check convergence every 5 iterations
+            if iter % 5 == 0 {
                 // Submit pending commands before reading back
                 if pending_commands {
                     let start = if self.profiling_enabled.load(Ordering::Relaxed) {
@@ -88,19 +88,19 @@ impl GpuSolver {
                 let res = r_r.sqrt();
                 final_resid = res;
                 
-                if _iter == 0 {
+                if iter == 0 {
                     init_resid = res;
                 }
 
-                if res < abs_tol || (_iter > 0 && res < rel_tol * init_resid) {
+                if res < abs_tol || (iter > 0 && res < rel_tol * init_resid) {
                     converged = true;
-                    final_iter = _iter + 1;
+                    final_iter = iter + 1;
                     break;
                 }
 
                 // Stagnation check
-                if _iter > 0 && res >= 0.99 * prev_res {
-                    final_iter = _iter + 1;
+                if iter > 0 && res >= 0.99 * prev_res {
+                    final_iter = iter + 1;
                     break;
                 }
                 prev_res = res;

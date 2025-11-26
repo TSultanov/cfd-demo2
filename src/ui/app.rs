@@ -1,10 +1,11 @@
 use eframe::egui;
 use egui_plot::{Plot, Polygon, PlotPoints};
 use crate::solver::piso::PisoSolver;
-use crate::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle};
+use crate::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh};
 use crate::solver::fvm::Scheme;
 use nalgebra::{Vector2, Point2};
 use crate::solver::gpu::GpuSolver;
+use crate::solver::gpu::structs::LinearSolverStats;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -342,13 +343,27 @@ impl CpuSolverWrapper {
     }
 }
 
+// Cached GPU solver stats for UI display (avoids lock contention)
+#[derive(Default, Clone)]
+struct CachedGpuStats {
+    time: f32,
+    stats_ux: LinearSolverStats,
+    stats_uy: LinearSolverStats,
+    stats_p: LinearSolverStats,
+}
+
 pub struct CFDApp {
     cpu_solver: Option<CpuSolverWrapper>,
     gpu_solver: Option<Arc<Mutex<GpuSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
     shared_results: Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>,
+    shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
+    cached_gpu_stats: CachedGpuStats,
+    // For GPU mode: store mesh and cell vertices separately since cpu_solver is None
+    mesh: Option<Mesh>,
+    cached_cells: Vec<Vec<[f64; 2]>>,
     use_parallel: bool,
     use_gpu: bool,
     precision: Precision,
@@ -371,8 +386,12 @@ impl CFDApp {
             gpu_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
             shared_results: Arc::new(Mutex::new(None)),
+            shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
             cached_u: Vec::new(),
             cached_p: Vec::new(),
+            cached_gpu_stats: CachedGpuStats::default(),
+            mesh: None,
+            cached_cells: Vec::new(),
             use_parallel: false,
             use_gpu: false,
             precision: Precision::F64,
@@ -427,7 +446,7 @@ impl CFDApp {
         if self.use_gpu {
             // GPU solver uses f64 for setup but runs in f32 internally (mostly)
             // We'll use f64 PisoSolver for initialization
-            let mut solver = PisoSolver::<f64>::new(mesh);
+            let mut solver = PisoSolver::<f64>::new(mesh.clone());
             solver.dt = self.timestep;
             solver.density = self.current_fluid.density;
             solver.viscosity = self.current_fluid.viscosity;
@@ -446,7 +465,7 @@ impl CFDApp {
             };
             gpu_solver.set_scheme(scheme_idx);
             
-            // CPU Init Logic
+            // CPU Init Logic (for initial velocity setup)
             let n_cells = solver.mesh.num_cells();
             for i in 0..n_cells {
                 let cx = solver.mesh.cell_cx[i];
@@ -475,13 +494,33 @@ impl CFDApp {
             // Initialize cached values
             self.cached_u = u_init;
             self.cached_p = vec![0.0; n_cells];
+            
+            // Cache cell vertices for plotting (since we won't have cpu_solver)
+            self.cached_cells = {
+                let mut cells = Vec::with_capacity(n_cells);
+                for i in 0..n_cells {
+                    let start = mesh.cell_vertex_offsets[i];
+                    let end = mesh.cell_vertex_offsets[i+1];
+                    let polygon_points: Vec<[f64; 2]> = (start..end)
+                        .map(|k| {
+                            let v_idx = mesh.cell_vertices[k];
+                            [mesh.vx[v_idx], mesh.vy[v_idx]]
+                        })
+                        .collect();
+                    cells.push(polygon_points);
+                }
+                cells
+            };
+            
+            // Store mesh for stats display
+            self.mesh = Some(mesh);
 
-            // We keep a CPU solver around just in case, but for GPU mode we mainly use gpu_solver
-            // Actually, the original code kept `self.solver = Some(solver)`.
-            // We can wrap it.
-            self.cpu_solver = Some(CpuSolverWrapper::SerialF64(solver));
+            // GPU mode: don't keep cpu_solver around
+            self.cpu_solver = None;
             self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
             self.shared_results = Arc::new(Mutex::new(None));
+            self.shared_gpu_stats = Arc::new(Mutex::new(CachedGpuStats::default()));
+            self.cached_gpu_stats = CachedGpuStats::default();
             
         } else if self.use_parallel {
             self.gpu_solver = None;
@@ -731,6 +770,7 @@ impl eframe::App for CFDApp {
                             let solver_arc = gpu_solver.clone();
                             let running_flag = self.gpu_solver_running.clone();
                             let shared_results = self.shared_results.clone();
+                            let shared_gpu_stats = self.shared_gpu_stats.clone();
                             let ctx_clone = ctx.clone();
                             thread::spawn(move || {
                                 while running_flag.load(Ordering::Relaxed) {
@@ -740,8 +780,19 @@ impl eframe::App for CFDApp {
                                         let u = pollster::block_on(solver.get_u());
                                         let p = pollster::block_on(solver.get_p());
                                         
+                                        // Capture stats while we have the lock
+                                        let stats = CachedGpuStats {
+                                            time: solver.constants.time,
+                                            stats_ux: *solver.stats_ux.lock().unwrap(),
+                                            stats_uy: *solver.stats_uy.lock().unwrap(),
+                                            stats_p: *solver.stats_p.lock().unwrap(),
+                                        };
+                                        
                                         if let Ok(mut results) = shared_results.lock() {
                                             *results = Some((u, p));
+                                        }
+                                        if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
+                                            *gpu_stats = stats;
                                         }
                                     }
                                     ctx_clone.request_repaint();
@@ -774,64 +825,35 @@ impl eframe::App for CFDApp {
                 for (name, val) in solver.residuals() {
                     ui.label(format!("{}: {:.6}", name, val));
                 }
-            } else if let Some(gpu_solver) = &self.gpu_solver {
-                if let Ok(solver) = gpu_solver.try_lock() {
-                     ui.label(format!("Time: {:.3}", solver.constants.time));
-                     ui.label("GPU Solver Stats:");
-                     
-                     let stats_ux = *solver.stats_ux.lock().unwrap();
-                     let stats_uy = *solver.stats_uy.lock().unwrap();
-                     let stats_p = *solver.stats_p.lock().unwrap();
-                     
-                     ui.label(format!("Ux: {} iters, res {:.2e}, {:.2?}", stats_ux.iterations, stats_ux.residual, stats_ux.time));
-                     ui.label(format!("Uy: {} iters, res {:.2e}, {:.2?}", stats_uy.iterations, stats_uy.residual, stats_uy.time));
-                     ui.label(format!("P:  {} iters, res {:.2e}, {:.2?}", stats_p.iterations, stats_p.residual, stats_p.time));
-                } else {
-                    ui.label("GPU Solver Running...");
+            } else if self.gpu_solver.is_some() {
+                // Update cached stats from shared data
+                if let Ok(stats) = self.shared_gpu_stats.try_lock() {
+                    self.cached_gpu_stats = stats.clone();
                 }
+                
+                let stats = &self.cached_gpu_stats;
+                ui.label(format!("Time: {:.3}", stats.time));
+                ui.label("GPU Solver Stats:");
+                ui.label(format!("Ux: {} iters, res {:.2e}, {:.2?}", stats.stats_ux.iterations, stats.stats_ux.residual, stats.stats_ux.time));
+                ui.label(format!("Uy: {} iters, res {:.2e}, {:.2?}", stats.stats_uy.iterations, stats.stats_uy.residual, stats.stats_uy.time));
+                ui.label(format!("P:  {} iters, res {:.2e}, {:.2?}", stats.stats_p.iterations, stats.stats_p.residual, stats.stats_p.time));
             }
         });
 
         // Calculate stats for plot and legend
-        let (min_val, max_val, values) = if let Some(solver) = &self.cpu_solver {
-            if let Some(_gpu_solver) = &self.gpu_solver {
-                // Fetch from shared results
-                if let Ok(mut results) = self.shared_results.lock() {
-                    if let Some((u, p)) = results.take() {
-                        self.cached_u = u;
-                        self.cached_p = p;
-                    }
+        let (min_val, max_val, values) = if self.gpu_solver.is_some() {
+            // GPU mode: Fetch from shared results
+            if let Ok(mut results) = self.shared_results.lock() {
+                if let Some((u, p)) = results.take() {
+                    self.cached_u = u;
+                    self.cached_p = p;
                 }
-                
-                let u = &self.cached_u;
-                let p = &self.cached_p;
-                
-                if !u.is_empty() {
-                    let mut min_val = f64::MAX;
-                    let mut max_val = f64::MIN;
-                    let mut values = Vec::with_capacity(u.len());
-                    
-                    for i in 0..u.len() {
-                        let val = match self.plot_field {
-                            PlotField::Pressure => p[i],
-                            PlotField::VelocityX => u[i].0,
-                            PlotField::VelocityY => u[i].1,
-                            PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
-                        };
-                        if val < min_val { min_val = val; }
-                        if val > max_val { max_val = val; }
-                        values.push(val);
-                    }
-                    
-                    if (max_val - min_val).abs() < 1e-6 {
-                        max_val = min_val + 1.0;
-                    }
-                    (min_val, max_val, Some(values))
-                } else {
-                    (0.0, 1.0, None)
-                }
-            } else {
-                let (u, p) = solver.get_results();
+            }
+            
+            let u = &self.cached_u;
+            let p = &self.cached_p;
+            
+            if !u.is_empty() {
                 let mut min_val = f64::MAX;
                 let mut max_val = f64::MIN;
                 let mut values = Vec::with_capacity(u.len());
@@ -852,15 +874,52 @@ impl eframe::App for CFDApp {
                     max_val = min_val + 1.0;
                 }
                 (min_val, max_val, Some(values))
+            } else {
+                (0.0, 1.0, None)
             }
+        } else if let Some(solver) = &self.cpu_solver {
+            // CPU mode
+            let (u, p) = solver.get_results();
+            let mut min_val = f64::MAX;
+            let mut max_val = f64::MIN;
+            let mut values = Vec::with_capacity(u.len());
+            
+            for i in 0..u.len() {
+                let val = match self.plot_field {
+                    PlotField::Pressure => p[i],
+                    PlotField::VelocityX => u[i].0,
+                    PlotField::VelocityY => u[i].1,
+                    PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
+                };
+                if val < min_val { min_val = val; }
+                if val > max_val { max_val = val; }
+                values.push(val);
+            }
+            
+            if (max_val - min_val).abs() < 1e-6 {
+                max_val = min_val + 1.0;
+            }
+            (min_val, max_val, Some(values))
         } else {
             (0.0, 1.0, None)
         };
 
         egui::SidePanel::right("legend").show(ctx, |ui| {
+            // Show mesh stats from cpu_solver or self.mesh (for GPU mode)
             if let Some(solver) = &self.cpu_solver {
                 ui.heading("Mesh Stats");
                 let mesh = solver.get_mesh();
+                ui.label(format!("Cells: {}", mesh.num_cells()));
+                ui.label(format!("Faces: {}", mesh.num_faces()));
+                ui.label(format!("Vertices: {}", mesh.num_vertices()));
+                if !mesh.cell_vol.is_empty() {
+                    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let max_vol = mesh.cell_vol.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    ui.label(format!("Cell vol: {:.2e} - {:.2e}", min_vol, max_vol));
+                }
+                ui.separator();
+            } else if let Some(mesh) = &self.mesh {
+                ui.heading("Mesh Stats");
                 ui.label(format!("Cells: {}", mesh.num_cells()));
                 ui.label(format!("Faces: {}", mesh.num_faces()));
                 ui.label(format!("Vertices: {}", mesh.num_vertices()));
@@ -921,6 +980,30 @@ impl eframe::App for CFDApp {
                         .show(ui, |plot_ui| {
                             let cells = solver.get_all_cells_vertices();
                             for (i, polygon_points) in cells.iter().enumerate() {
+                                let val = vals[i];
+                                let t = (val - min_val) / (max_val - min_val);
+                                
+                                let color = get_color(t);
+                                
+                                plot_ui.polygon(
+                                    Polygon::new(PlotPoints::new(polygon_points.clone()))
+                                        .fill_color(color)
+                                        .stroke(if self.show_mesh_lines {
+                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
+                                        } else {
+                                            egui::Stroke::NONE
+                                        })
+                                );
+                            }
+                        });
+                }
+            } else if self.gpu_solver.is_some() && !self.cached_cells.is_empty() {
+                // GPU mode: use cached_cells for plotting
+                if let Some(vals) = &values {
+                    Plot::new("cfd_plot")
+                        .data_aspect(1.0)
+                        .show(ui, |plot_ui| {
+                            for (i, polygon_points) in self.cached_cells.iter().enumerate() {
                                 let val = vals[i];
                                 let t = (val - min_val) / (max_val - min_val);
                                 

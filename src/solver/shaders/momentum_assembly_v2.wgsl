@@ -241,14 +241,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
             let d_o = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
             
-            if (constants.scheme == 1u) { // Central
-                let total_dist = d_c + d_o;
-                var lambda = 0.5;
-                if (total_dist > 1e-6) {
-                    lambda = d_o / total_dist;
-                }
-                phi_ho = lambda * val_old + (1.0 - lambda) * val_other;
-            } else if (constants.scheme == 2u) { // QUICK (Linear Upwind)
+            if (constants.scheme == 1u) { // Second Order Upwind (Linear Upwind)
                 if (flux > 0.0) {
                     // From Owner
                     let grad = grad_component[idx];
@@ -261,6 +254,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let r_x = f_center.x - other_center.x;
                     let r_y = f_center.y - other_center.y;
                     phi_ho = val_other + (grad.x * r_x + grad.y * r_y);
+                }
+            } else if (constants.scheme == 2u) { // QUICK
+                // phi_f = 5/8 phi_C + 3/8 phi_D + 1/8 (grad_C . d_CD)
+                // where C is upwind, D is downwind
+                
+                if (flux > 0.0) {
+                    // C = Owner, D = Neighbor
+                    let grad = grad_component[idx];
+                    let d_cd_x = other_center.x - center.x;
+                    let d_cd_y = other_center.y - center.y;
+                    
+                    let grad_term = grad.x * d_cd_x + grad.y * d_cd_y;
+                    phi_ho = 0.625 * val_old + 0.375 * val_other + 0.125 * grad_term;
+                } else {
+                    // C = Neighbor, D = Owner
+                    let grad = grad_component[other_idx];
+                    let d_cd_x = center.x - other_center.x;
+                    let d_cd_y = center.y - other_center.y;
+                    
+                    let grad_term = grad.x * d_cd_x + grad.y * d_cd_y;
+                    phi_ho = 0.625 * val_other + 0.375 * val_old + 0.125 * grad_term;
                 }
             }
             

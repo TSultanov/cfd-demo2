@@ -509,12 +509,12 @@ impl eframe::App for CFDApp {
                 }
                 if ui
                     .radio(
-                        matches!(self.selected_scheme, Scheme::Central),
-                        "Central (2nd Order)",
+                        matches!(self.selected_scheme, Scheme::SecondOrderUpwind),
+                        "Second Order Upwind",
                     )
                     .clicked()
                 {
-                    self.selected_scheme = Scheme::Central;
+                    self.selected_scheme = Scheme::SecondOrderUpwind;
                     self.update_gpu_scheme();
                 }
                 if ui

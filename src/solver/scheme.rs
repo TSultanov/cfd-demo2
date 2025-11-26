@@ -2,7 +2,7 @@
 pub enum Scheme {
     #[default]
     Upwind,
-    Central,
+    SecondOrderUpwind,
     QUICK,
 }
 
@@ -10,7 +10,7 @@ impl Scheme {
     pub fn gpu_id(self) -> u32 {
         match self {
             Scheme::Upwind => 0,
-            Scheme::Central => 1,
+            Scheme::SecondOrderUpwind => 1,
             Scheme::QUICK => 2,
         }
     }

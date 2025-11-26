@@ -20,7 +20,7 @@ pub struct GpuConstants {
     pub density: f32,
     pub component: u32, // 0: x, 1: y
     pub alpha_p: f32,   // Pressure relaxation
-    pub scheme: u32,    // 0: Upwind, 1: Central, 2: QUICK
+    pub scheme: u32,    // 0: Upwind, 1: SOU, 2: QUICK
     pub stride_x: u32,
 }
 

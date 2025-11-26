@@ -121,7 +121,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_p_own = d_p[idx];
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             
-            let coeff = d_p_face * area / dist;
+            let coeff = constants.density * d_p_face * area / dist;
             
             let mat_idx = cell_face_matrix_indices[k];
             if (mat_idx != 4294967295u) {
@@ -156,8 +156,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let grad_p_f_x = grad_p_own.x + interp_f * (grad_p_neigh.x - grad_p_own.x);
             let grad_p_f_y = grad_p_own.y + interp_f * (grad_p_neigh.y - grad_p_own.y);
             
-            // Correction flux = d_p_face * dot(grad_p_f, k_vec)
-            let correction_flux = d_p_face * (grad_p_f_x * k_x + grad_p_f_y * k_y);
+            // Correction flux = rho * d_p_face * dot(grad_p_f, k_vec)
+            let correction_flux = constants.density * d_p_face * (grad_p_f_x * k_x + grad_p_f_y * k_y);
             
             // Subtract from RHS (pressure equation is Laplacian)
             rhs_val -= correction_flux;
@@ -169,7 +169,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let dist = sqrt(dx*dx + dy*dy);
                 
                 let d_p_own = d_p[idx];
-                let coeff = d_p_own * area / dist;
+                let coeff = constants.density * d_p_own * area / dist;
                 
                 diag_coeff += coeff;
                 // rhs += coeff * 0.0

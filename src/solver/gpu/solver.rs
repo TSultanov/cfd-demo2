@@ -186,6 +186,9 @@ impl GpuSolver {
     }
 
     pub fn step(&mut self) {
+        // Initialize fluxes based on current U (important for first step)
+        self.compute_fluxes();
+
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
         let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
@@ -461,6 +464,33 @@ impl GpuSolver {
             cpass.set_bind_group(1, &self.bg_fields, &[]);
             cpass.set_bind_group(2, &self.bg_solver, &[]);
             cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+        self.context.device.poll(wgpu::Maintain::Wait);
+    }
+
+    pub fn compute_fluxes(&mut self) {
+        let workgroup_size = 64;
+        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
+        let max_groups_x = 65535;
+        let dispatch_faces_x = num_groups_faces.min(max_groups_x);
+        let dispatch_faces_y = num_groups_faces.div_ceil(max_groups_x);
+
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Flux Computation Encoder"),
+                });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Flux RC Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
         self.context.device.poll(wgpu::Maintain::Wait);

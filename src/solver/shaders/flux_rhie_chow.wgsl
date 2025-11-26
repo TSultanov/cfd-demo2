@@ -103,19 +103,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let rc_term = d_p_face * area * (grad_p_n - p_grad_f);
         
         let u_n = u_face.x * normal.x + u_face.y * normal.y;
-        fluxes[idx] = u_n * area + rc_term;
+        fluxes[idx] = constants.density * (u_n * area + rc_term);
         
     } else {
         // Boundary
         if (boundary_type == 1u) { // Inlet
              // Fixed U
              let u_bc = Vector2(1.0, 0.0);
-             fluxes[idx] = (u_bc.x * normal.x + u_bc.y * normal.y) * area;
+             fluxes[idx] = constants.density * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
         } else if (boundary_type == 3u) { // Wall
              fluxes[idx] = 0.0;
         } else { // Outlet
              // Use owner velocity
-             fluxes[idx] = (u_face.x * normal.x + u_face.y * normal.y) * area;
+             fluxes[idx] = constants.density * (u_face.x * normal.x + u_face.y * normal.y) * area;
         }
     }
 }

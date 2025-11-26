@@ -106,9 +106,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d_vec_y = other_center.y - center.y;
         let dist = sqrt(d_vec_x*d_vec_x + d_vec_y*d_vec_y);
         
-        // Diffusion: nu * A / dist (nu = viscosity / density = kinematic viscosity)
-        let nu = constants.viscosity / constants.density;
-        let diff_coeff = nu * area / dist;
+        // Diffusion: mu * A / dist (mu = viscosity)
+        let mu = constants.viscosity;
+        let diff_coeff = mu * area / dist;
         
         // Convection: Upwind
         var conv_coeff_diag: f32 = 0.0;
@@ -156,10 +156,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let grad_f_x = grad_own.x + interp_f * (grad_neigh.x - grad_own.x);
             let grad_f_y = grad_own.y + interp_f * (grad_neigh.y - grad_own.y);
             
-            // Correction flux = nu * dot(grad_f, k_vec) (nu = kinematic viscosity)
-            let correction_flux = nu * (grad_f_x * k_x + grad_f_y * k_y);
+            // Correction flux = mu * dot(grad_f, k_vec)
+            let correction_flux = mu * (grad_f_x * k_x + grad_f_y * k_y);
             
-            // Subtract from RHS (since diffusion is -div(nu * grad(phi)))
+            // Subtract from RHS (since diffusion is -div(mu * grad(phi)))
             rhs_val -= correction_flux;
         } else {
             // Boundary Conditions
@@ -269,20 +269,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
-    // Pressure Gradient Source: -grad(p) * V / rho
+    // Pressure Gradient Source: -grad(p) * V
     if (constants.component == 0u) {
         grad_p_accum.x /= vol;
         grad_p_accum.y /= vol;
         grad_p[idx] = grad_p_accum;
         
-        rhs_val -= (grad_p_accum.x / constants.density) * vol;
+        rhs_val -= grad_p_accum.x * vol;
     } else {
         let gp = grad_p[idx];
-        rhs_val -= (gp.y / constants.density) * vol;
+        rhs_val -= gp.y * vol;
     }
 
     // Time term
-    let time_coeff = vol / constants.dt;
+    let time_coeff = vol * constants.density / constants.dt;
     diag_coeff += time_coeff;
     rhs_val += time_coeff * val_old;
 
@@ -291,7 +291,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (constants.component == 0u) {
         if (abs(diag_coeff) > 1e-20) {
-            d_p[idx] = vol / (diag_coeff * constants.density);
+            d_p[idx] = vol / diag_coeff;
         } else {
             d_p[idx] = 0.0;
         }

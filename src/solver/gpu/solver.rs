@@ -190,6 +190,10 @@ impl GpuSolver {
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
         let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
 
+        let max_groups_x = 65535;
+        let dispatch_faces_x = num_groups_faces.min(max_groups_x);
+        let dispatch_faces_y = num_groups_faces.div_ceil(max_groups_x);
+
         // 1. Momentum Predictor
 
         // 1. Momentum Predictor
@@ -238,7 +242,7 @@ impl GpuSolver {
                     cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
                     cpass.set_bind_group(0, &self.bg_mesh, &[]);
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.dispatch_workgroups(num_groups_faces, 1, 1);
+                    cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
                 }
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

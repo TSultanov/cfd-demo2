@@ -280,7 +280,7 @@ impl GpuSolver {
             component: 0,
             alpha_p: 1.0, // Default pressure relaxation
             scheme: 0,    // Upwind
-            padding: 0,
+            stride_x: 65535 * 64,
         };
         let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Constants Buffer"),

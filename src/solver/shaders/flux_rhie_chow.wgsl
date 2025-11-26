@@ -11,7 +11,7 @@ struct Constants {
     component: u32,
     alpha_p: f32,
     padding1: u32,
-    padding2: u32,
+    stride_x: u32,
 }
 
 // Group 0: Mesh
@@ -34,7 +34,7 @@ struct Constants {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= arrayLength(&face_areas)) {
         return;
     }

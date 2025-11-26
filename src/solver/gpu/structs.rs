@@ -21,7 +21,7 @@ pub struct GpuConstants {
     pub component: u32, // 0: x, 1: y
     pub alpha_p: f32,   // Pressure relaxation
     pub scheme: u32,    // 0: Upwind, 1: Central, 2: QUICK
-    pub padding: u32,
+    pub stride_x: u32,
 }
 
 #[repr(C)]

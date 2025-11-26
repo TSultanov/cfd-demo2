@@ -296,6 +296,76 @@ impl CpuSolverWrapper {
             }
         }
     }
+
+    fn set_dt(&mut self, dt: f64) {
+        match self {
+            Self::SerialF32(s) => s.dt = dt as f32,
+            Self::SerialF64(s) => s.dt = dt,
+            Self::ParallelF32(s) => {
+                for part in &s.partitions {
+                    let mut s = part.write().unwrap();
+                    s.dt = dt as f32;
+                }
+            }
+            Self::ParallelF64(s) => {
+                for part in &s.partitions {
+                    let mut s = part.write().unwrap();
+                    s.dt = dt;
+                }
+            }
+        }
+    }
+
+    fn get_max_velocity(&self) -> f64 {
+        match self {
+            Self::SerialF32(s) => {
+                let mut max_v = 0.0;
+                for i in 0..s.u.vx.len() {
+                    let v = (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt();
+                    if v > max_v {
+                        max_v = v;
+                    }
+                }
+                max_v as f64
+            }
+            Self::SerialF64(s) => {
+                let mut max_v = 0.0;
+                for i in 0..s.u.vx.len() {
+                    let v = (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt();
+                    if v > max_v {
+                        max_v = v;
+                    }
+                }
+                max_v
+            }
+            Self::ParallelF32(s) => {
+                let mut max_v = 0.0;
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.u.vx.len() {
+                        let v = (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt();
+                        if v > max_v {
+                            max_v = v;
+                        }
+                    }
+                }
+                max_v as f64
+            }
+            Self::ParallelF64(s) => {
+                let mut max_v = 0.0;
+                for part in &s.partitions {
+                    let s = part.read().unwrap();
+                    for i in 0..s.u.vx.len() {
+                        let v = (s.u.vx[i].powi(2) + s.u.vy[i].powi(2)).sqrt();
+                        if v > max_v {
+                            max_v = v;
+                        }
+                    }
+                }
+                max_v
+            }
+        }
+    }
 }
 
 // Cached GPU solver stats for UI display (avoids lock contention)
@@ -1057,6 +1127,21 @@ impl eframe::App for CFDApp {
                 if self.gpu_solver.is_some() {
                     // GPU solver runs in background thread
                 } else if let Some(solver) = &mut self.cpu_solver {
+                    if self.adaptive_dt {
+                        let max_vel = solver.get_max_velocity();
+                        if max_vel > 1e-6 {
+                            let next_dt =
+                                (self.target_cfl * self.min_cell_size / max_vel).clamp(1e-5, 0.1);
+                            solver.set_dt(next_dt);
+                            self.timestep = next_dt; // Update UI slider too? Or just display?
+                                                     // Let's just update the solver. The slider is bound to self.timestep.
+                                                     // If we want the slider to update, we should update self.timestep.
+                        }
+                    } else {
+                        // If not adaptive, ensure solver uses the fixed timestep from slider
+                        solver.set_dt(self.timestep);
+                    }
+
                     solver.step();
                     ctx.request_repaint();
                 }

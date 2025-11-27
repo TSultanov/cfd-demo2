@@ -94,7 +94,7 @@ fn bicgstab_update_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
 
     var beta = 0.0;
-    if (abs(scalars.omega) >= 1e-20) {
+    if (abs(scalars.omega) >= 1e-20 && abs(scalars.rho_old) >= 1e-20) {
         beta = (scalars.rho_new / scalars.rho_old) * (scalars.alpha / scalars.omega);
     }
 

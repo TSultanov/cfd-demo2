@@ -211,7 +211,7 @@ impl GpuSolver {
 
         // Save old velocity for under-relaxation
         self.copy_u_to_u_old();
-        
+
         // Save old pressure for restart
         self.copy_p_to_p_old();
 
@@ -279,10 +279,11 @@ impl GpuSolver {
                             },
                         );
                         {
-                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("Flux RC Pass"),
-                                timestamp_writes: None,
-                            });
+                            let mut cpass =
+                                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: Some("Flux RC Pass"),
+                                    timestamp_writes: None,
+                                });
                             cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
                             cpass.set_bind_group(0, &self.bg_mesh, &[]);
                             cpass.set_bind_group(1, &self.bg_fields, &[]);
@@ -290,10 +291,11 @@ impl GpuSolver {
                         }
                         {
                             // Combined gradient + pressure assembly (merged kernel)
-                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("Pressure Assembly With Grad Pass"),
-                                timestamp_writes: None,
-                            });
+                            let mut cpass =
+                                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: Some("Pressure Assembly With Grad Pass"),
+                                    timestamp_writes: None,
+                                });
                             cpass.set_pipeline(&self.pipeline_pressure_assembly_with_grad);
                             cpass.set_bind_group(0, &self.bg_mesh, &[]);
                             cpass.set_bind_group(1, &self.bg_fields, &[]);
@@ -305,13 +307,13 @@ impl GpuSolver {
 
                     // Solve Pressure (p_prime)
                     self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-                    
+
                     let stats = if use_cg_for_p {
                         pollster::block_on(self.solve_cg("P"))
                     } else {
                         pollster::block_on(self.solve("P"))
                     };
-                    
+
                     if stats.diverged {
                         if use_cg_for_p {
                             println!("CG solver also diverged. Aborting PIMPLE loop.");
@@ -336,10 +338,11 @@ impl GpuSolver {
                             },
                         );
                         {
-                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("Velocity Correction Pass"),
-                                timestamp_writes: None,
-                            });
+                            let mut cpass =
+                                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                    label: Some("Velocity Correction Pass"),
+                                    timestamp_writes: None,
+                                });
                             cpass.set_pipeline(&self.pipeline_velocity_correction);
                             cpass.set_bind_group(0, &self.bg_mesh, &[]);
                             cpass.set_bind_group(1, &self.bg_fields, &[]);
@@ -383,7 +386,10 @@ impl GpuSolver {
                     *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
                     *self.outer_iterations.lock().unwrap() = outer_iter + 1;
 
-                    println!("PIMPLE Residuals - U: {:.2e}, P: {:.2e}", max_diff_u, max_diff_p);
+                    println!(
+                        "PIMPLE Residuals - U: {:.2e}, P: {:.2e}",
+                        max_diff_u, max_diff_p
+                    );
 
                     // Converged if both U and P are below tolerance
                     if max_diff_u < outer_tol_u && max_diff_p < outer_tol_p {
@@ -434,7 +440,7 @@ impl GpuSolver {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Copy U to U_old Encoder"),
                 });
-        
+
         // Copy u_old to u_old_old first
         encoder.copy_buffer_to_buffer(
             &self.b_u_old,
@@ -673,15 +679,9 @@ impl GpuSolver {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Initialize History Encoder"),
                 });
-        
+
         // Copy u to u_old
-        encoder.copy_buffer_to_buffer(
-            &self.b_u,
-            0,
-            &self.b_u_old,
-            0,
-            (self.num_cells as u64) * 8,
-        );
+        encoder.copy_buffer_to_buffer(&self.b_u, 0, &self.b_u_old, 0, (self.num_cells as u64) * 8);
 
         // Copy u to u_old_old
         encoder.copy_buffer_to_buffer(
@@ -696,53 +696,35 @@ impl GpuSolver {
     }
 
     fn copy_p_to_p_old(&self) {
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Copy P to P_old Encoder"),
-            });
-        encoder.copy_buffer_to_buffer(
-            &self.b_p,
-            0,
-            &self.b_p_old,
-            0,
-            (self.num_cells as u64) * 4,
-        );
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Copy P to P_old Encoder"),
+                });
+        encoder.copy_buffer_to_buffer(&self.b_p, 0, &self.b_p_old, 0, (self.num_cells as u64) * 4);
         self.context.queue.submit(Some(encoder.finish()));
     }
 
     fn restore_p_from_p_old(&self) {
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Restore P from P_old Encoder"),
-            });
-        encoder.copy_buffer_to_buffer(
-            &self.b_p_old,
-            0,
-            &self.b_p,
-            0,
-            (self.num_cells as u64) * 4,
-        );
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Restore P from P_old Encoder"),
+                });
+        encoder.copy_buffer_to_buffer(&self.b_p_old, 0, &self.b_p, 0, (self.num_cells as u64) * 4);
         self.context.queue.submit(Some(encoder.finish()));
     }
 
     fn restore_u_from_u_old(&self) {
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Restore U from U_old Encoder"),
-            });
-        encoder.copy_buffer_to_buffer(
-            &self.b_u_old,
-            0,
-            &self.b_u,
-            0,
-            (self.num_cells as u64) * 8,
-        );
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Restore U from U_old Encoder"),
+                });
+        encoder.copy_buffer_to_buffer(&self.b_u_old, 0, &self.b_u, 0, (self.num_cells as u64) * 8);
         self.context.queue.submit(Some(encoder.finish()));
     }
 }

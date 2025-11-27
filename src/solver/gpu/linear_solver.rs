@@ -26,6 +26,7 @@ impl GpuSolver {
 
         // Initialize r = b - Ax. Since x=0, r = b.
         let size = (n as u64) * 4;
+        self.zero_buffer(&self.b_x, size);
         let mut encoder =
             self.context
                 .device
@@ -50,7 +51,7 @@ impl GpuSolver {
                 });
         let mut pending_commands = false;
         let mut init_resid = 0.0;
-        let mut final_resid = 0.0;
+        let mut final_resid = f32::INFINITY;
         let mut converged = false;
         let mut final_iter = max_iter;
         let mut prev_res = f32::MAX;
@@ -88,7 +89,6 @@ impl GpuSolver {
 
                 let r_r = self.read_scalar_r_r().await;
                 let res = r_r.sqrt();
-                final_resid = res;
 
                 if iter == 0 {
                     init_resid = res;
@@ -101,7 +101,10 @@ impl GpuSolver {
                 }
 
                 // Stagnation check
-                if iter > 0 && (res - prev_res).abs() < stagnation_factor && res < stagnation_tolerance {
+                if iter > 0
+                    && (res - prev_res).abs() < stagnation_factor
+                    && res < stagnation_tolerance
+                {
                     final_iter = iter + 1;
                     break;
                 }
@@ -155,13 +158,38 @@ impl GpuSolver {
             self.context.queue.submit(Some(encoder.finish()));
         }
 
+        // Refresh residual using the latest r to avoid reporting stale values.
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Final Residual Encoder"),
+                    });
+            self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_r0r_rr, num_groups);
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_rho_new_r_r, num_groups);
+            self.context.queue.submit(Some(encoder.finish()));
+
+            let r_r = self.read_scalar_r_r().await;
+            final_resid = r_r.sqrt();
+        }
+
         // Check for divergence
-        let diverged = !converged && (final_resid.is_nan() || final_resid.is_infinite() || final_resid > init_resid * 10.0);
-        
+        let diverged = !converged
+            && (final_resid.is_nan()
+                || final_resid.is_infinite()
+                || final_resid > init_resid * 10.0);
+
         if diverged {
-            println!("BiCGStab diverged for {}. Residual: {:.2e}.", field_name, final_resid);
+            println!(
+                "BiCGStab diverged for {}. Residual: {:.2e}.",
+                field_name, final_resid
+            );
         } else {
-            println!("Solved {}: {} iterations, Residual: {:.2e}", field_name, final_iter, final_resid);
+            println!(
+                "Solved {}: {} iterations, Residual: {:.2e}",
+                field_name, final_iter, final_resid
+            );
         }
 
         super::structs::LinearSolverStats {
@@ -295,7 +323,7 @@ impl GpuSolver {
                 // Let's check GpuScalars struct in scalars.wgsl.
                 // struct GpuScalars { rho_old, rho_new, ... }
                 // rho_old is 0, rho_new is 4.
-                
+
                 let rho_new = self.read_scalar_rho_new().await;
                 let res = rho_new.sqrt();
                 final_resid = res;
@@ -325,12 +353,15 @@ impl GpuSolver {
             // rho_old = rho_new
             self.encode_scalar_compute(&mut encoder, &self.pipeline_update_rho_old);
         }
-        
+
         if pending_commands {
             self.context.queue.submit(Some(encoder.finish()));
         }
 
-        println!("Solved CG {}: {} iterations, Residual: {:.2e}", field_name, final_iter, final_resid);
+        println!(
+            "Solved CG {}: {} iterations, Residual: {:.2e}",
+            field_name, final_iter, final_resid
+        );
 
         let diverged = final_resid.is_nan() || final_resid.is_infinite();
 
@@ -463,10 +494,15 @@ impl GpuSolver {
     async fn read_scalar_rho_new(&self) -> f32 {
         let offset = 4;
         let size = 4;
-        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Read Scalar Encoder") });
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Read Scalar Encoder"),
+                });
         encoder.copy_buffer_to_buffer(&self.b_scalars, offset, &self.b_staging_scalar, 0, size);
         self.context.queue.submit(Some(encoder.finish()));
-        
+
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
@@ -480,5 +516,3 @@ impl GpuSolver {
         val
     }
 }
-
-

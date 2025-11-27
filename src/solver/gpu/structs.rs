@@ -57,7 +57,7 @@ pub struct GpuSolver {
 
     // Field buffers
     pub b_u: wgpu::Buffer,
-    pub b_u_old: wgpu::Buffer, // For velocity under-relaxation
+    pub b_u_old: wgpu::Buffer,     // For velocity under-relaxation
     pub b_u_old_old: wgpu::Buffer, // For 2nd order time stepping
     pub b_p: wgpu::Buffer,
     pub b_p_old: wgpu::Buffer, // For restarting PIMPLE loop

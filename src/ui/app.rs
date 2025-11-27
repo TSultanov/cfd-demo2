@@ -651,26 +651,6 @@ impl eframe::App for CFDApp {
 
             ui.separator();
 
-            ui.label("Plot Field");
-            ui.radio_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
-            ui.radio_value(&mut self.plot_field, PlotField::VelocityX, "Velocity X");
-            ui.radio_value(&mut self.plot_field, PlotField::VelocityY, "Velocity Y");
-            ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
-
-            ui.separator();
-            ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
-
-            ui.separator();
-            ui.label("Render Mode:");
-            ui.radio_value(
-                &mut self.render_mode,
-                RenderMode::BatchedMesh,
-                "Fast (Batched)",
-            );
-            ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
-
-            ui.separator();
-
             if self.gpu_solver.is_some() {
                 if let Ok(stats) = self.shared_gpu_stats.try_lock() {
                     self.cached_gpu_stats = stats.clone();
@@ -784,6 +764,28 @@ impl eframe::App for CFDApp {
 
                 ui.label(format!("Min: {:.4}", min_val));
             }
+        });
+
+        egui::TopBottomPanel::bottom("plot_controls").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Plot Field:");
+                ui.radio_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
+                ui.radio_value(&mut self.plot_field, PlotField::VelocityX, "Velocity X");
+                ui.radio_value(&mut self.plot_field, PlotField::VelocityY, "Velocity Y");
+                ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
+
+                ui.separator();
+                ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
+
+                ui.separator();
+                ui.label("Render Mode:");
+                ui.radio_value(
+                    &mut self.render_mode,
+                    RenderMode::BatchedMesh,
+                    "Fast (Batched)",
+                );
+                ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
+            });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {

@@ -18,8 +18,8 @@ impl GpuSolver {
         let max_iter = 1000;
         let abs_tol = 1e-6;
         let rel_tol = 1e-4;
-        let stagnation_tolerance = 1e-2;
-        let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
+        // let stagnation_tolerance = 1e-3;
+        // let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
         let n = self.num_cells;
         let workgroup_size = 64;
         let num_groups = n.div_ceil(workgroup_size);
@@ -53,7 +53,7 @@ impl GpuSolver {
         let mut final_resid = 0.0;
         let mut converged = false;
         let mut final_iter = max_iter;
-        let mut prev_res = f32::MAX;
+        // let mut prev_res = f32::MAX;
 
         for iter in 0..max_iter {
             // 1. rho_new = (r0, r) -> b_dot_result
@@ -101,11 +101,11 @@ impl GpuSolver {
                 }
 
                 // Stagnation check
-                if iter > 0 && res >= stagnation_factor * prev_res && res < stagnation_tolerance {
-                    final_iter = iter + 1;
-                    break;
-                }
-                prev_res = res;
+                // if iter > 0 && res >= stagnation_factor * prev_res && res < stagnation_tolerance {
+                //     final_iter = iter + 1;
+                //     break;
+                // }
+                // prev_res = res;
             }
 
             // p = r + beta * (p - omega * v)

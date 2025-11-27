@@ -211,13 +211,13 @@ impl GpuSolver {
 
         // PIMPLE Loop (outer iterations with convergence control)
         let max_outer_iters = 40;
-        let outer_tol_u = 1e-3;
-        let outer_tol_p = 1e-3;
-        let stagnation_tolerance = 1e-2;
-        let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
+        let outer_tol_u = 1e-4;
+        let outer_tol_p = 1e-4;
+        // let stagnation_tolerance = 1e-3;
+        // let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
 
-        let mut prev_residual_u = f64::MAX;
-        let mut prev_residual_p = f64::MAX;
+        // let mut prev_residual_u = f64::MAX;
+        // let mut prev_residual_p = f64::MAX;
 
         for outer_iter in 0..max_outer_iters {
             // 1. Momentum Predictor
@@ -352,23 +352,23 @@ impl GpuSolver {
                 }
 
                 // Stagnation check: if residuals aren't decreasing, stop iterating
-                let u_stagnated = max_diff_u >= stagnation_factor * prev_residual_u;
-                let p_stagnated = max_diff_p >= stagnation_factor * prev_residual_p;
-                if u_stagnated
-                    && p_stagnated
-                    && outer_iter > 2
-                    && max_diff_u < stagnation_tolerance
-                    && max_diff_p < stagnation_tolerance
-                {
-                    println!(
-                        "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
-                        outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
-                    );
-                    break;
-                }
+                // let u_stagnated = max_diff_u >= stagnation_factor * prev_residual_u;
+                // let p_stagnated = max_diff_p >= stagnation_factor * prev_residual_p;
+                // if u_stagnated
+                //     && p_stagnated
+                //     && outer_iter > 2
+                //     && max_diff_u < stagnation_tolerance
+                //     && max_diff_p < stagnation_tolerance
+                // {
+                //     println!(
+                //         "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
+                //         outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
+                //     );
+                //     break;
+                // }
 
-                prev_residual_u = max_diff_u;
-                prev_residual_p = max_diff_p;
+                // prev_residual_u = max_diff_u;
+                // prev_residual_p = max_diff_p;
             } else {
                 // First iteration - store initial values
                 *self.outer_residual_u.lock().unwrap() = f32::MAX;

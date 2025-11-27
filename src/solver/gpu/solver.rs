@@ -226,6 +226,7 @@ impl GpuSolver {
         let max_outer_iters = 100;
         let outer_tol_u = 1e-3;
         let outer_tol_p = 1e-3;
+        let stagnation_tolerance = 1e-2;
         let stagnation_factor = 1e-2;
 
         let mut use_cg_for_p = false;
@@ -396,6 +397,8 @@ impl GpuSolver {
                     if u_stagnated
                         && p_stagnated
                         && outer_iter > 2
+                        && max_diff_u < stagnation_tolerance
+                        && max_diff_p < stagnation_tolerance
                     {
                         println!(
                             "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",

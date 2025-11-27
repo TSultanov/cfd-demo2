@@ -1366,7 +1366,7 @@ impl GpuSolver {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: b_p.as_entire_binding(),
+                    resource: b_p_solver.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

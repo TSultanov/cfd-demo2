@@ -38,6 +38,7 @@ struct Constants {
 @group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
 @group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
 @group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
+@group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -60,9 +61,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var diag_coeff: f32 = 0.0;
     var rhs_val: f32 = 0.0;
     
-    // Time derivative: V/dt * u_old
-    let u_old = u[idx];
-    let val_old = select(u_old.x, u_old.y, constants.component == 1u);
+    // Time derivative: V/dt * u_old (from previous timestep)
+    let u_n = u_old[idx];
+    let val_old = select(u_n.x, u_n.y, constants.component == 1u);
     
     // Variables for gradient calculation (only used if component == 0)
     let val_c_p = p[idx];
@@ -247,8 +248,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         // Deferred Correction for Higher Order Schemes
         if (constants.scheme != 0u && !is_boundary) {
-            let u_other = u[other_idx];
-            let val_other = select(u_other.x, u_other.y, constants.component == 1u);
+            let u_other_old = u_old[other_idx];
+            let val_other = select(u_other_old.x, u_other_old.y, constants.component == 1u);
             
             var phi_upwind = val_old;
             if (flux < 0.0) {

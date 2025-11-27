@@ -1,6 +1,6 @@
 pub mod buffers;
 pub mod context;
-pub mod initialization;
+pub mod init;
 pub mod linear_solver;
 pub mod solver;
 pub mod structs;

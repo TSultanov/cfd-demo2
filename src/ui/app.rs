@@ -78,6 +78,21 @@ impl Fluid {
     }
 }
 
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum TimeScheme {
+    Euler,
+    BDF2,
+}
+
+impl TimeScheme {
+    fn gpu_id(self) -> u32 {
+        match self {
+            TimeScheme::Euler => 0,
+            TimeScheme::BDF2 => 1,
+        }
+    }
+}
+
 // Cached GPU solver stats for UI display (avoids lock contention)
 #[derive(Default, Clone)]
 struct CachedGpuStats {
@@ -116,6 +131,7 @@ pub struct CFDApp {
     render_mode: RenderMode,
     alpha_u: f64,
     alpha_p: f64,
+    time_scheme: TimeScheme,
 }
 
 impl CFDApp {
@@ -145,6 +161,7 @@ impl CFDApp {
             render_mode: RenderMode::BatchedMesh,
             alpha_u: 0.7,
             alpha_p: 0.3,
+            time_scheme: TimeScheme::Euler,
         }
     }
 
@@ -175,8 +192,10 @@ impl CFDApp {
         gpu_solver.set_scheme(self.selected_scheme.gpu_id());
         gpu_solver.set_alpha_u(self.alpha_u as f32);
         gpu_solver.set_alpha_p(self.alpha_p as f32);
+        gpu_solver.set_time_scheme(self.time_scheme.gpu_id());
         gpu_solver.set_u(&initial_u);
         gpu_solver.set_p(&initial_p);
+        gpu_solver.initialize_history();
 
         self.cached_u = initial_u;
         self.cached_p = initial_p;
@@ -296,6 +315,10 @@ impl CFDApp {
 
     fn update_gpu_alpha_p(&self) {
         self.with_gpu_solver(|solver| solver.set_alpha_p(self.alpha_p as f32));
+    }
+
+    fn update_gpu_time_scheme(&self) {
+        self.with_gpu_solver(|solver| solver.set_time_scheme(self.time_scheme.gpu_id()));
     }
 
     /// Render the CFD mesh using egui's batched mesh for maximum performance
@@ -567,6 +590,25 @@ impl eframe::App for CFDApp {
                     self.update_gpu_alpha_p();
                 }
             });
+
+            ui.separator();
+            ui.label("Time Stepping Scheme");
+            egui::ComboBox::from_label("Time Scheme")
+                .selected_text(format!("{:?}", self.time_scheme))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_value(&mut self.time_scheme, TimeScheme::Euler, "Euler")
+                        .clicked()
+                    {
+                        self.update_gpu_time_scheme();
+                    }
+                    if ui
+                        .selectable_value(&mut self.time_scheme, TimeScheme::BDF2, "BDF2")
+                        .clicked()
+                    {
+                        self.update_gpu_time_scheme();
+                    }
+                });
 
             if ui.button("Initialize / Reset").clicked() {
                 self.init_solver();

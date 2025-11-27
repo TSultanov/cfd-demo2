@@ -26,6 +26,11 @@ impl GpuSolver {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
+        if self.constants.dt > 0.0 {
+            self.constants.dt_old = self.constants.dt;
+        } else {
+            self.constants.dt_old = dt;
+        }
         self.constants.dt = dt;
         self.update_constants();
     }
@@ -52,6 +57,11 @@ impl GpuSolver {
 
     pub fn set_scheme(&mut self, scheme: u32) {
         self.constants.scheme = scheme;
+        self.update_constants();
+    }
+
+    pub fn set_time_scheme(&mut self, scheme: u32) {
+        self.constants.time_scheme = scheme;
         self.update_constants();
     }
 
@@ -392,6 +402,16 @@ impl GpuSolver {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Copy U to U_old Encoder"),
                 });
+        
+        // Copy u_old to u_old_old first
+        encoder.copy_buffer_to_buffer(
+            &self.b_u_old,
+            0,
+            &self.b_u_old_old,
+            0,
+            (self.num_cells as u64) * 8,
+        );
+
         encoder.copy_buffer_to_buffer(
             &self.b_u,
             0,
@@ -609,6 +629,35 @@ impl GpuSolver {
             cpass.set_bind_group(1, &self.bg_fields, &[]);
             cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
         }
+        self.context.queue.submit(Some(encoder.finish()));
+        self.context.device.poll(wgpu::Maintain::Wait);
+    }
+
+    pub fn initialize_history(&self) {
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Initialize History Encoder"),
+                });
+        
+        // Copy u to u_old
+        encoder.copy_buffer_to_buffer(
+            &self.b_u,
+            0,
+            &self.b_u_old,
+            0,
+            (self.num_cells as u64) * 8,
+        );
+
+        // Copy u to u_old_old
+        encoder.copy_buffer_to_buffer(
+            &self.b_u,
+            0,
+            &self.b_u_old_old,
+            0,
+            (self.num_cells as u64) * 8,
+        );
         self.context.queue.submit(Some(encoder.finish()));
         self.context.device.poll(wgpu::Maintain::Wait);
     }

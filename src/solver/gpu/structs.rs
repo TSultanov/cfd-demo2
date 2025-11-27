@@ -15,6 +15,7 @@ pub struct LinearSolverStats {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct GpuConstants {
     pub dt: f32,
+    pub dt_old: f32,
     pub time: f32,
     pub viscosity: f32,
     pub density: f32,
@@ -23,7 +24,7 @@ pub struct GpuConstants {
     pub scheme: u32,    // 0: Upwind, 1: SOU, 2: QUICK
     pub alpha_u: f32,   // Velocity under-relaxation
     pub stride_x: u32,
-    pub padding: u32,
+    pub time_scheme: u32, // 0: Euler, 1: BDF2
 }
 
 #[repr(C)]
@@ -56,6 +57,7 @@ pub struct GpuSolver {
     // Field buffers
     pub b_u: wgpu::Buffer,
     pub b_u_old: wgpu::Buffer, // For velocity under-relaxation
+    pub b_u_old_old: wgpu::Buffer, // For 2nd order time stepping
     pub b_p: wgpu::Buffer,
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,

@@ -1,5 +1,6 @@
 struct Constants {
     dt: f32,
+    dt_old: f32,
     time: f32,
     viscosity: f32,
     density: f32,

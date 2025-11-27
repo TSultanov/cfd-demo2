@@ -241,6 +241,14 @@ impl GpuSolver {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let b_u_old_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("U Old Old Buffer"),
+            contents: bytemuck::cast_slice(&zero_vecs),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        });
+
         let zero_scalars = vec![0.0f32; num_cells as usize];
         let b_p = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("P Buffer"),
@@ -288,6 +296,7 @@ impl GpuSolver {
 
         let constants = GpuConstants {
             dt: 0.0001, // Reduced dt
+            dt_old: 0.0001,
             time: 0.0,
             viscosity: 0.01,
             density: 1.0,
@@ -296,7 +305,7 @@ impl GpuSolver {
             scheme: 0,    // Upwind
             alpha_u: 0.7, // Default velocity under-relaxation
             stride_x: 65535 * 64,
-            padding: 0,
+            time_scheme: 0,
         };
         let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Constants Buffer"),
@@ -660,6 +669,17 @@ impl GpuSolver {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 9: U Old Old
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -1164,6 +1184,10 @@ impl GpuSolver {
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: b_grad_p_prime.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: b_u_old_old.as_entire_binding(),
                 },
             ],
         });
@@ -1775,6 +1799,7 @@ impl GpuSolver {
             b_constants,
             b_u,
             b_u_old,
+            b_u_old_old,
             b_p,
             b_d_p,
             b_fluxes,

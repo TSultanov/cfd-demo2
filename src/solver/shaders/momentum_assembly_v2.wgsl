@@ -5,6 +5,7 @@ struct Vector2 {
 
 struct Constants {
     dt: f32,
+    dt_old: f32,
     time: f32,
     viscosity: f32,
     density: f32,
@@ -13,7 +14,7 @@ struct Constants {
     scheme: u32,
     alpha_u: f32,
     stride_x: u32,
-    padding: u32,
+    time_scheme: u32,
 }
 
 // Group 0: Mesh
@@ -39,6 +40,7 @@ struct Constants {
 @group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
 @group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 @group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
+@group(1) @binding(9) var<storage, read> u_old_old: array<Vector2>;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -317,9 +319,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Time term
-    let time_coeff = vol * constants.density / constants.dt;
+    var time_coeff = vol * constants.density / constants.dt;
+    var rhs_time = time_coeff * val_old;
+
+    if (constants.time_scheme == 1u) {
+        // BDF2 with variable time step
+        let dt = constants.dt;
+        let dt_old = constants.dt_old;
+        let r = dt / dt_old;
+        
+        let u_nm1 = u_old_old[idx];
+        let val_nm1 = select(u_nm1.x, u_nm1.y, constants.component == 1u);
+        
+        // Coefficients derived:
+        // u' = 1/dt * [ (1+2r)/(1+r) * u^{n+1} - (1+r) * u^n + r^2/(1+r) * u^{n-1} ]
+        
+        time_coeff = vol * constants.density / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        rhs_time = (vol * constants.density / dt) * ( (1.0 + r) * val_old - (r * r) / (1.0 + r) * val_nm1 );
+    }
+
     diag_coeff += time_coeff;
-    rhs_val += time_coeff * val_old;
+    rhs_val += rhs_time;
 
     let diag_idx = diagonal_indices[idx];
     matrix_values[diag_idx] = diag_coeff;

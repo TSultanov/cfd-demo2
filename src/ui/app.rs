@@ -141,7 +141,7 @@ impl CFDApp {
             current_fluid: Fluid::presets()[0].clone(),
             show_mesh_lines: true,
             adaptive_dt: true,
-            target_cfl: 0.5,
+            target_cfl: 0.2,
             render_mode: RenderMode::BatchedMesh,
             alpha_u: 0.7,
             alpha_p: 0.3,

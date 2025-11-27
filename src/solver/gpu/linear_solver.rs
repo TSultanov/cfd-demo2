@@ -13,13 +13,13 @@ impl GpuSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
-    pub async fn solve(&self) -> super::structs::LinearSolverStats {
+    pub async fn solve(&self, field_name: &str) -> super::structs::LinearSolverStats {
         let start_time = std::time::Instant::now();
         let max_iter = 1000;
         let abs_tol = 1e-6;
         let rel_tol = 1e-4;
-        // let stagnation_tolerance = 1e-3;
-        // let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
+        let stagnation_tolerance = 1e-3;
+        let stagnation_factor = 1e-4;
         let n = self.num_cells;
         let workgroup_size = 64;
         let num_groups = n.div_ceil(workgroup_size);
@@ -53,7 +53,7 @@ impl GpuSolver {
         let mut final_resid = 0.0;
         let mut converged = false;
         let mut final_iter = max_iter;
-        // let mut prev_res = f32::MAX;
+        let mut prev_res = f32::MAX;
 
         for iter in 0..max_iter {
             // 1. rho_new = (r0, r) -> b_dot_result
@@ -65,8 +65,8 @@ impl GpuSolver {
 
             pending_commands = true;
 
-            // Check convergence every 5 iterations
-            if iter % 5 == 0 {
+            // Check convergence every iterations
+            if iter % 1 == 0 {
                 // Submit pending commands before reading back
                 if pending_commands {
                     let start = if self.profiling_enabled.load(Ordering::Relaxed) {
@@ -101,11 +101,11 @@ impl GpuSolver {
                 }
 
                 // Stagnation check
-                // if iter > 0 && res >= stagnation_factor * prev_res && res < stagnation_tolerance {
-                //     final_iter = iter + 1;
-                //     break;
-                // }
-                // prev_res = res;
+                if iter > 0 && (res - prev_res).abs() < stagnation_factor && res < stagnation_tolerance {
+                    final_iter = iter + 1;
+                    break;
+                }
+                prev_res = res;
             }
 
             // p = r + beta * (p - omega * v)
@@ -155,6 +155,8 @@ impl GpuSolver {
             self.context.queue.submit(Some(encoder.finish()));
         }
 
+        println!("Solved {}: {} iterations, Residual: {:.2e}", field_name, final_iter, final_resid);
+
         super::structs::LinearSolverStats {
             iterations: final_iter,
             residual: final_resid,
@@ -165,8 +167,8 @@ impl GpuSolver {
 
     /// Solve the linear system and write result directly to velocity field with under-relaxation.
     /// This avoids a separate kernel dispatch for update_u_component.
-    pub async fn solve_and_update_u(&self) -> super::structs::LinearSolverStats {
-        let stats = self.solve().await;
+    pub async fn solve_and_update_u(&self, field_name: &str) -> super::structs::LinearSolverStats {
+        let stats = self.solve(field_name).await;
 
         // Run update_u_component as part of this method instead of separate dispatch
         let workgroup_size = 64;

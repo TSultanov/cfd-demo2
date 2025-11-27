@@ -223,13 +223,13 @@ impl GpuSolver {
         let max_outer_iters = 100;
         let outer_tol_u = 1e-3;
         let outer_tol_p = 1e-3;
-        // let stagnation_tolerance = 1e-3;
-        // let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
+        let stagnation_factor = 1e-2;
 
-        // let mut prev_residual_u = f64::MAX;
-        // let mut prev_residual_p = f64::MAX;
+        let mut prev_residual_u = f64::MAX;
+        let mut prev_residual_p = f64::MAX;
 
         for outer_iter in 0..max_outer_iters {
+            println!("PIMPLE Outer Iter: {}", outer_iter + 1);
             // 1. Momentum Predictor
 
             // Save velocity and pressure before solve for convergence check
@@ -298,7 +298,7 @@ impl GpuSolver {
 
                 // Solve Pressure (p_prime)
                 self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-                let stats = pollster::block_on(self.solve());
+                let stats = pollster::block_on(self.solve("P"));
                 *self.stats_p.lock().unwrap() = stats;
 
                 // Velocity Correction
@@ -356,29 +356,30 @@ impl GpuSolver {
                 *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
                 *self.outer_iterations.lock().unwrap() = outer_iter + 1;
 
+                println!("PIMPLE Residuals - U: {:.2e}, P: {:.2e}", max_diff_u, max_diff_p);
+
                 // Converged if both U and P are below tolerance
                 if max_diff_u < outer_tol_u && max_diff_p < outer_tol_p {
+                    println!("PIMPLE Converged in {} iterations", outer_iter + 1);
                     break;
                 }
 
                 // Stagnation check: if residuals aren't decreasing, stop iterating
-                // let u_stagnated = max_diff_u >= stagnation_factor * prev_residual_u;
-                // let p_stagnated = max_diff_p >= stagnation_factor * prev_residual_p;
-                // if u_stagnated
-                //     && p_stagnated
-                //     && outer_iter > 2
-                //     && max_diff_u < stagnation_tolerance
-                //     && max_diff_p < stagnation_tolerance
-                // {
-                //     println!(
-                //         "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
-                //         outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
-                //     );
-                //     break;
-                // }
+                let u_stagnated = (max_diff_u - prev_residual_u).abs() < stagnation_factor;
+                let p_stagnated = (max_diff_p - prev_residual_p).abs() < stagnation_factor;
+                if u_stagnated
+                    && p_stagnated
+                    && outer_iter > 2
+                {
+                    println!(
+                        "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
+                        outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
+                    );
+                    break;
+                }
 
-                // prev_residual_u = max_diff_u;
-                // prev_residual_p = max_diff_p;
+                prev_residual_u = max_diff_u;
+                prev_residual_p = max_diff_p;
             } else {
                 // First iteration - store initial values
                 *self.outer_residual_u.lock().unwrap() = f32::MAX;
@@ -498,7 +499,8 @@ impl GpuSolver {
         self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
 
         // Use combined solve + update_u to avoid separate kernel dispatch
-        let stats = pollster::block_on(self.solve_and_update_u());
+        let field_name = if component == 0 { "Ux" } else { "Uy" };
+        let stats = pollster::block_on(self.solve_and_update_u(field_name));
         if component == 0 {
             *self.stats_ux.lock().unwrap() = stats;
         } else {

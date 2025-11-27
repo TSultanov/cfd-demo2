@@ -144,7 +144,7 @@ fn test_gpu_solver_init() {
         solver.step();
 
         // Solve
-        solver.solve().await;
+        solver.solve("Test").await;
 
         let x_sol = solver.get_x().await;
         let max_x = x_sol.iter().fold(0.0f32, |a, &b| a.max(b.abs()));

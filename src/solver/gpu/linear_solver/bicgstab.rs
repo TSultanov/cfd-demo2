@@ -1,0 +1,226 @@
+use crate::solver::gpu::structs::GpuSolver;
+use std::sync::atomic::Ordering;
+
+impl GpuSolver {
+    pub async fn solve(&self, field_name: &str) -> crate::solver::gpu::structs::LinearSolverStats {
+        let start_time = std::time::Instant::now();
+        let max_iter = 1000;
+        let abs_tol = 1e-6;
+        let rel_tol = 1e-4;
+        let stagnation_tolerance = 1e-3;
+        let stagnation_factor = 1e-4;
+        let n = self.num_cells;
+        let workgroup_size = 64;
+        let num_groups = n.div_ceil(workgroup_size);
+
+        // Initialize r = b - Ax. Since x=0, r = b.
+        let size = (n as u64) * 4;
+        self.zero_buffer(&self.b_x, size);
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Init Solver Encoder"),
+                });
+        encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r, 0, size);
+        encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r0, 0, size);
+        encoder.clear_buffer(&self.b_p_solver, 0, None);
+        encoder.clear_buffer(&self.b_v, 0, None);
+
+        // Init scalars
+        self.encode_scalar_compute(&mut encoder, &self.pipeline_init_scalars);
+
+        self.context.queue.submit(Some(encoder.finish()));
+
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Solver Loop Encoder"),
+                });
+        let mut pending_commands = false;
+        let mut init_resid = 0.0;
+        let mut final_resid = f32::INFINITY;
+        let mut converged = false;
+        let mut final_iter = max_iter;
+        let mut prev_res = f32::MAX;
+
+        for iter in 0..max_iter {
+            // 1. rho_new = (r0, r) -> b_dot_result
+            // 2. r_r = (r, r) -> b_dot_result_2
+            self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_r0r_rr, num_groups);
+
+            // Reduce rho_new and r_r
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_rho_new_r_r, num_groups);
+
+            pending_commands = true;
+
+            // Check convergence every iterations
+            if iter % 1 == 0 {
+                // Submit pending commands before reading back
+                if pending_commands {
+                    let start = if self.profiling_enabled.load(Ordering::Relaxed) {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
+                    self.context.queue.submit(Some(encoder.finish()));
+                    if let Some(start) = start {
+                        *self.time_compute.lock().unwrap() += start.elapsed();
+                    }
+                    encoder = self.context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("Solver Loop Encoder"),
+                        },
+                    );
+                    pending_commands = false;
+                }
+
+                let r_r = self.read_scalar_r_r().await;
+                let res = r_r.sqrt();
+
+                if iter == 0 {
+                    init_resid = res;
+                }
+
+                if res < abs_tol || (iter > 0 && res < rel_tol * init_resid) {
+                    converged = true;
+                    final_iter = iter + 1;
+                    break;
+                }
+
+                // Stagnation check
+                if iter > 0
+                    && (res - prev_res).abs() < stagnation_factor
+                    && res < stagnation_tolerance
+                {
+                    final_iter = iter + 1;
+                    break;
+                }
+                prev_res = res;
+            }
+
+            // p = r + beta * (p - omega * v)
+            self.encode_compute(
+                &mut encoder,
+                &self.pipeline_bicgstab_update_p,
+                &self.bg_linear_state,
+                num_groups,
+            );
+
+            // v = A * p
+            self.encode_spmv(&mut encoder, &self.pipeline_spmv_p_v, num_groups);
+
+            // r0_v = (r0, v)
+            self.encode_dot(&mut encoder, &self.bg_dot_r0_v, num_groups);
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_r0_v, num_groups);
+
+            // s = r - alpha * v
+            self.encode_compute(
+                &mut encoder,
+                &self.pipeline_bicgstab_update_s,
+                &self.bg_linear_state,
+                num_groups,
+            );
+
+            // t = A * s
+            self.encode_spmv(&mut encoder, &self.pipeline_spmv_s_t, num_groups);
+
+            // t_s = (t, s) -> b_dot_result
+            // t_t = (t, t) -> b_dot_result_2
+            self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_tstt, num_groups);
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_t_s_t_t, num_groups);
+
+            // x = x + alpha * p + omega * s
+            // r = s - omega * t
+            self.encode_compute(
+                &mut encoder,
+                &self.pipeline_bicgstab_update_x_r,
+                &self.bg_linear_state,
+                num_groups,
+            );
+
+            pending_commands = true;
+        }
+
+        if pending_commands {
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
+        // Refresh residual using the latest r to avoid reporting stale values.
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Final Residual Encoder"),
+                    });
+            self.encode_dot_pair(&mut encoder, &self.bg_dot_pair_r0r_rr, num_groups);
+            self.encode_scalar_reduce(&mut encoder, &self.pipeline_reduce_rho_new_r_r, num_groups);
+            self.context.queue.submit(Some(encoder.finish()));
+
+            let r_r = self.read_scalar_r_r().await;
+            final_resid = r_r.sqrt();
+        }
+
+        // Check for divergence
+        let diverged = !converged
+            && (final_resid.is_nan()
+                || final_resid.is_infinite()
+                || final_resid > init_resid * 10.0);
+
+        if diverged {
+            println!(
+                "BiCGStab diverged for {}. Residual: {:.2e}.",
+                field_name, final_resid
+            );
+        } else {
+            println!(
+                "Solved {}: {} iterations, Residual: {:.2e}",
+                field_name, final_iter, final_resid
+            );
+        }
+
+        crate::solver::gpu::structs::LinearSolverStats {
+            iterations: final_iter,
+            residual: final_resid,
+            converged,
+            diverged,
+            time: start_time.elapsed(),
+        }
+    }
+
+    /// Solve the linear system and write result directly to velocity field with under-relaxation.
+    /// This avoids a separate kernel dispatch for update_u_component.
+    pub async fn solve_and_update_u(
+        &self,
+        field_name: &str,
+    ) -> crate::solver::gpu::structs::LinearSolverStats {
+        let stats = self.solve(field_name).await;
+
+        // Run update_u_component as part of this method instead of separate dispatch
+        let workgroup_size = 64;
+        let num_groups = self.num_cells.div_ceil(workgroup_size);
+
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Update U Encoder"),
+                });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Update U Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_update_u_component);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+
+        stats
+    }
+}

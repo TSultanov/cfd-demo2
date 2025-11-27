@@ -1,26 +1,8 @@
-use crate::solver::gpu::structs::SolverParams;
-use crate::solver::mesh::Mesh;
+use super::matrix::MatrixResources;
+use super::state::StateResources;
 use std::borrow::Cow;
-use wgpu::util::DeviceExt;
 
-pub struct LinearSolverResources {
-    pub b_row_offsets: wgpu::Buffer,
-    pub b_col_indices: wgpu::Buffer,
-    pub num_nonzeros: u32,
-    pub b_matrix_values: wgpu::Buffer,
-    pub b_rhs: wgpu::Buffer,
-    pub b_x: wgpu::Buffer,
-    pub b_r: wgpu::Buffer,
-    pub b_r0: wgpu::Buffer,
-    pub b_p_solver: wgpu::Buffer,
-    pub b_v: wgpu::Buffer,
-    pub b_s: wgpu::Buffer,
-    pub b_t: wgpu::Buffer,
-    pub b_dot_result: wgpu::Buffer,
-    pub b_dot_result_2: wgpu::Buffer,
-    pub b_scalars: wgpu::Buffer,
-    pub b_staging_scalar: wgpu::Buffer,
-    pub b_solver_params: wgpu::Buffer,
+pub struct PipelineResources {
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,
@@ -44,187 +26,14 @@ pub struct LinearSolverResources {
     pub pipeline_bicgstab_update_s: wgpu::ComputePipeline,
     pub pipeline_cg_update_x_r: wgpu::ComputePipeline,
     pub pipeline_cg_update_p: wgpu::ComputePipeline,
-    pub row_offsets: Vec<u32>,
-    pub col_indices: Vec<u32>,
-    pub num_groups: u32,
 }
 
-pub fn init_linear_solver(
+pub fn init_pipelines(
     device: &wgpu::Device,
-    mesh: &Mesh,
-    num_cells: u32,
+    matrix: &MatrixResources,
+    state: &StateResources,
     bgl_mesh: &wgpu::BindGroupLayout,
-) -> LinearSolverResources {
-    // --- CSR Matrix Structure ---
-    let mut row_offsets = vec![0u32; num_cells as usize + 1];
-    let mut col_indices = Vec::new();
-
-    let mut adj = vec![Vec::new(); num_cells as usize];
-    for (i, &owner) in mesh.face_owner.iter().enumerate() {
-        if let Some(neighbor) = mesh.face_neighbor[i] {
-            adj[owner].push(neighbor);
-            adj[neighbor].push(owner);
-        }
-    }
-
-    for (i, list) in adj.iter_mut().enumerate() {
-        list.push(i); // Add diagonal
-        list.sort();
-        list.dedup();
-    }
-
-    let mut current_offset = 0;
-    for (i, list) in adj.iter().enumerate() {
-        row_offsets[i] = current_offset;
-        for &neighbor in list {
-            col_indices.push(neighbor as u32);
-        }
-        current_offset += list.len() as u32;
-    }
-    row_offsets[num_cells as usize] = current_offset;
-    let num_nonzeros = current_offset;
-
-    let b_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Row Offsets Buffer"),
-        contents: bytemuck::cast_slice(&row_offsets),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-    });
-
-    let b_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Col Indices Buffer"),
-        contents: bytemuck::cast_slice(&col_indices),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-    });
-
-    // --- Solver Buffers ---
-    let b_matrix_values = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Matrix Values Buffer"),
-        size: (num_nonzeros as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_rhs = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("RHS Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_x = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("X Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_r = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("R Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_r0 = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("R0 Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_p_solver = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("P Solver Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_v = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("V Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_s = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("S Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE,
-        mapped_at_creation: false,
-    });
-
-    let b_t = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("T Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE,
-        mapped_at_creation: false,
-    });
-
-    // Dot Product & Params
-    let workgroup_size = 64;
-    let num_groups = num_cells.div_ceil(workgroup_size);
-
-    let b_dot_result = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Dot Result Buffer"),
-        size: (num_groups as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_dot_result_2 = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Dot Result Buffer 2"),
-        size: (num_groups as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_scalars = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Scalars Buffer"),
-        size: 64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_staging_scalar = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Staging Buffer Scalar"),
-        size: 4,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let solver_params = SolverParams {
-        n: num_cells,
-        num_groups,
-        padding: [0; 2],
-    };
-    let b_solver_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Solver Params Buffer"),
-        contents: bytemuck::bytes_of(&solver_params),
-        usage: wgpu::BufferUsages::UNIFORM
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-    });
-
+) -> PipelineResources {
     // Group 2: Solver (Read/Write)
     let bgl_solver = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Solver Bind Group Layout"),
@@ -326,35 +135,35 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_matrix_values.as_entire_binding(),
+                resource: matrix.b_matrix_values.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_rhs.as_entire_binding(),
+                resource: state.b_rhs.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_x.as_entire_binding(),
+                resource: state.b_x.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: b_p_solver.as_entire_binding(),
+                resource: state.b_p_solver.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: b_v.as_entire_binding(),
+                resource: state.b_v.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
-                resource: b_s.as_entire_binding(),
+                resource: state.b_s.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 7,
-                resource: b_t.as_entire_binding(),
+                resource: state.b_t.as_entire_binding(),
             },
         ],
     });
@@ -669,7 +478,7 @@ pub fn init_linear_solver(
         layout: &bgl_dot_params,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
-            resource: b_solver_params.as_entire_binding(),
+            resource: state.b_solver_params.as_entire_binding(),
         }],
     });
 
@@ -679,23 +488,23 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_row_offsets.as_entire_binding(),
+                resource: matrix.b_row_offsets.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_col_indices.as_entire_binding(),
+                resource: matrix.b_col_indices.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_matrix_values.as_entire_binding(),
+                resource: matrix.b_matrix_values.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: b_scalars.as_entire_binding(),
+                resource: state.b_scalars.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: b_solver_params.as_entire_binding(),
+                resource: state.b_solver_params.as_entire_binding(),
             },
         ],
     });
@@ -706,27 +515,27 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_x.as_entire_binding(),
+                resource: state.b_x.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_p_solver.as_entire_binding(),
+                resource: state.b_p_solver.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: b_v.as_entire_binding(),
+                resource: state.b_v.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: b_s.as_entire_binding(),
+                resource: state.b_s.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: b_t.as_entire_binding(),
+                resource: state.b_t.as_entire_binding(),
             },
         ],
     });
@@ -737,27 +546,27 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_x.as_entire_binding(),
+                resource: state.b_x.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_p_solver.as_entire_binding(),
+                resource: state.b_p_solver.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: b_v.as_entire_binding(),
+                resource: state.b_v.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: b_s.as_entire_binding(),
+                resource: state.b_s.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: b_t.as_entire_binding(),
+                resource: state.b_t.as_entire_binding(),
             },
         ],
     });
@@ -768,15 +577,15 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_dot_result.as_entire_binding(),
+                resource: state.b_dot_result.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_r0.as_entire_binding(),
+                resource: state.b_r0.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_v.as_entire_binding(),
+                resource: state.b_v.as_entire_binding(),
             },
         ],
     });
@@ -787,15 +596,15 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_dot_result.as_entire_binding(),
+                resource: state.b_dot_result.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_p_solver.as_entire_binding(),
+                resource: state.b_p_solver.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_v.as_entire_binding(),
+                resource: state.b_v.as_entire_binding(),
             },
         ],
     });
@@ -806,15 +615,15 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_dot_result.as_entire_binding(),
+                resource: state.b_dot_result.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
         ],
     });
@@ -825,27 +634,27 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_dot_result.as_entire_binding(),
+                resource: state.b_dot_result.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_dot_result_2.as_entire_binding(),
+                resource: state.b_dot_result_2.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_r0.as_entire_binding(),
+                resource: state.b_r0.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: b_r.as_entire_binding(),
+                resource: state.b_r.as_entire_binding(),
             },
         ],
     });
@@ -856,27 +665,27 @@ pub fn init_linear_solver(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_dot_result.as_entire_binding(),
+                resource: state.b_dot_result.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_dot_result_2.as_entire_binding(),
+                resource: state.b_dot_result_2.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_t.as_entire_binding(),
+                resource: state.b_t.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: b_s.as_entire_binding(),
+                resource: state.b_s.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: b_t.as_entire_binding(),
+                resource: state.b_t.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: b_t.as_entire_binding(),
+                resource: state.b_t.as_entire_binding(),
             },
         ],
     });
@@ -885,7 +694,7 @@ pub fn init_linear_solver(
     let shader_linear = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Linear Solver Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/linear_solver.wgsl"
+            "../../../shaders/linear_solver.wgsl"
         ))),
     });
 
@@ -924,7 +733,7 @@ pub fn init_linear_solver(
     let shader_dot = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Dot Product Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/dot_product.wgsl"
+            "../../../shaders/dot_product.wgsl"
         ))),
     });
 
@@ -938,7 +747,7 @@ pub fn init_linear_solver(
     let shader_dot_pair = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Dot Pair Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/dot_product_pair.wgsl"
+            "../../../shaders/dot_product_pair.wgsl"
         ))),
     });
 
@@ -987,24 +796,7 @@ pub fn init_linear_solver(
         entry_point: "cg_update_p",
     });
 
-    LinearSolverResources {
-        b_row_offsets,
-        b_col_indices,
-        num_nonzeros,
-        b_matrix_values,
-        b_rhs,
-        b_x,
-        b_r,
-        b_r0,
-        b_p_solver,
-        b_v,
-        b_s,
-        b_t,
-        b_dot_result,
-        b_dot_result_2,
-        b_scalars,
-        b_staging_scalar,
-        b_solver_params,
+    PipelineResources {
         bg_solver,
         bg_linear_matrix,
         bg_linear_state,
@@ -1028,8 +820,5 @@ pub fn init_linear_solver(
         pipeline_bicgstab_update_s,
         pipeline_cg_update_x_r,
         pipeline_cg_update_p,
-        row_offsets,
-        col_indices,
-        num_groups,
     }
 }

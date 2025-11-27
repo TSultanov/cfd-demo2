@@ -94,7 +94,7 @@ fn test_reproduce_divergence() {
         }
 
         if max_vel > 1e-6 {
-            let target_cfl = 0.5;
+            let target_cfl = 0.2;
             let max_cfl = max_vel * (dt as f64) / actual_min_cell_size;
             let mut new_dt = (dt as f64) * target_cfl / max_cfl;
 

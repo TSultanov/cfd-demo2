@@ -210,9 +210,9 @@ impl GpuSolver {
         self.initialize_d_p(num_groups_cells);
 
         // PIMPLE Loop (outer iterations with convergence control)
-        let max_outer_iters = 40;
-        let outer_tol_u = 1e-4;
-        let outer_tol_p = 1e-4;
+        let max_outer_iters = 100;
+        let outer_tol_u = 1e-3;
+        let outer_tol_p = 1e-3;
         // let stagnation_tolerance = 1e-3;
         // let stagnation_factor = 0.999; // Consider stagnated if residual doesn't decrease by at least 0.1%
 

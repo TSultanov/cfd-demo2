@@ -179,6 +179,33 @@ impl QuadNode {
     }
 }
 
+fn compute_normal(geo: &(impl Geometry + ?Sized), p: Point2<f64>) -> Vector2<f64> {
+    let eps = 1e-6;
+    let d_x = geo.sdf(&Point2::new(p.x + eps, p.y)) - geo.sdf(&Point2::new(p.x - eps, p.y));
+    let d_y = geo.sdf(&Point2::new(p.x, p.y + eps)) - geo.sdf(&Point2::new(p.x, p.y - eps));
+    Vector2::new(d_x, d_y).normalize()
+}
+
+fn intersect_lines(
+    p1: Point2<f64>,
+    n1: Vector2<f64>,
+    p2: Point2<f64>,
+    n2: Vector2<f64>,
+) -> Option<Point2<f64>> {
+    let det = n1.x * n2.y - n1.y * n2.x;
+    if det.abs() < 1e-6 {
+        return None;
+    }
+
+    let d1 = p1.coords.dot(&n1);
+    let d2 = p2.coords.dot(&n2);
+
+    let x = (d1 * n2.y - d2 * n1.y) / det;
+    let y = (d2 * n1.x - d1 * n2.x) / det;
+
+    Some(Point2::new(x, y))
+}
+
 pub fn generate_cut_cell_mesh(
     geo: &(impl Geometry + Sync),
     min_cell_size: f64,
@@ -266,11 +293,37 @@ pub fn generate_cut_cell_mesh(
                                 || (d_curr >= -sdf_tol && d_next < -sdf_tol)
                             {
                                 // Intersection
-                                let denom = d_curr - d_next;
-                                if denom.abs() < 1e-20 {
-                                    // println!("Warning: denom too small in intersection: d_curr={}, d_next={}", d_curr, d_next);
+                                // Iterative root finding (Regula Falsi) to handle non-linear SDF
+                                let mut t_a = 0.0;
+                                let mut t_b = 1.0;
+                                let mut d_a = d_curr;
+                                let mut d_b = d_next;
+
+                                let mut t = t_a - d_a * (t_b - t_a) / (d_b - d_a);
+
+                                for _ in 0..10 {
+                                    let p_inter = p_curr + (p_next - p_curr) * t;
+                                    let d_inter = geo.sdf(&p_inter);
+
+                                    if d_inter.abs() < 1e-12 {
+                                        break;
+                                    }
+
+                                    if d_inter.signum() == d_a.signum() {
+                                        t_a = t;
+                                        d_a = d_inter;
+                                    } else {
+                                        t_b = t;
+                                        d_b = d_inter;
+                                    }
+
+                                    let denom = d_b - d_a;
+                                    if denom.abs() < 1e-20 {
+                                        break;
+                                    }
+                                    t = t_a - d_a * (t_b - t_a) / denom;
                                 }
-                                let t = d_curr / denom;
+
                                 let p_inter = p_curr + (p_next - p_curr) * t;
                                 poly_verts.push((p_inter, true));
                             }
@@ -278,7 +331,50 @@ pub fn generate_cut_cell_mesh(
                     }
 
                     if poly_verts.len() >= 3 {
-                        local_polys.push(poly_verts);
+                        // Post-process for sharp corners
+                        let mut reconstructed_poly = Vec::new();
+                        let n = poly_verts.len();
+                        for k in 0..n {
+                            let (p_curr, is_inter_curr) = poly_verts[k];
+                            let (p_next, is_inter_next) = poly_verts[(k + 1) % n];
+
+                            reconstructed_poly.push((p_curr, is_inter_curr));
+
+                            if is_inter_curr && is_inter_next {
+                                // Check normals
+                                let n1 = compute_normal(geo, p_curr);
+                                let n2 = compute_normal(geo, p_next);
+
+                                // If angle > ~30 degrees (cos < 0.866)
+                                if n1.dot(&n2) < 0.9 {
+                                    if let Some(p_corner) = intersect_lines(p_curr, n1, p_next, n2)
+                                    {
+                                        // Check if corner is within cell bounds (with tolerance)
+                                        // and "behind" the cut (SDF < 0, but we know it should be inside geometry, so SDF < 0)
+                                        // Actually, if we are cutting a concave corner, the corner is in the fluid?
+                                        // No, if it's a concave corner of the FLUID (convex corner of solid), then the fluid wraps around it.
+                                        // Wait, the chamfer is on "concave edges" of the mesh, which corresponds to "convex corners" of the fluid?
+                                        // The user image shows a red region (solid?) and blue (fluid).
+                                        // The chamfer cuts the red region. So the fluid is invading the solid?
+                                        // Or the red is fluid and blue is solid?
+                                        // "Chamfers on concave edges" usually means the mesh (fluid domain) has a chamfer where it should be a sharp corner.
+                                        // If the fluid has a 270 degree corner (concave), the solid has a 90 degree corner (convex).
+                                        // The cut cell algorithm connects the two intersection points, cutting off the fluid corner.
+                                        // So the corner point should be INSIDE the cell.
+
+                                        let tol = 1e-5;
+                                        if p_corner.x >= min.x - tol
+                                            && p_corner.x <= max.x + tol
+                                            && p_corner.y >= min.y - tol
+                                            && p_corner.y <= max.y + tol
+                                        {
+                                            reconstructed_poly.push((p_corner, true));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        local_polys.push(reconstructed_poly);
                     }
                 }
                 local_polys

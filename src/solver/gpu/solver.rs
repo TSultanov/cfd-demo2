@@ -211,6 +211,9 @@ impl GpuSolver {
 
         // Save old velocity for under-relaxation
         self.copy_u_to_u_old();
+        
+        // Save old pressure for restart
+        self.copy_p_to_p_old();
 
         // Initialize fluxes based on current U
         self.compute_fluxes();
@@ -225,167 +228,192 @@ impl GpuSolver {
         let outer_tol_p = 1e-3;
         let stagnation_factor = 1e-2;
 
-        let mut prev_residual_u = f64::MAX;
-        let mut prev_residual_p = f64::MAX;
+        let mut use_cg_for_p = false;
 
-        for outer_iter in 0..max_outer_iters {
-            println!("PIMPLE Outer Iter: {}", outer_iter + 1);
-            // 1. Momentum Predictor
+        'restart_loop: loop {
+            let mut prev_residual_u = f64::MAX;
+            let mut prev_residual_p = f64::MAX;
 
-            // Save velocity and pressure before solve for convergence check
-            let (u_before, p_before) = if outer_iter > 0 {
-                (
-                    Some(pollster::block_on(self.get_u())),
-                    Some(pollster::block_on(self.get_p())),
-                )
-            } else {
-                (None, None)
-            };
+            for outer_iter in 0..max_outer_iters {
+                println!("PIMPLE Outer Iter: {}", outer_iter + 1);
+                // 1. Momentum Predictor
 
-            // Solve Ux (Component 0) - also computes d_p and grad_p
-            self.solve_momentum(0, num_groups_cells);
+                // Save velocity and pressure before solve for convergence check
+                let (u_before, p_before) = if outer_iter > 0 {
+                    (
+                        Some(pollster::block_on(self.get_u())),
+                        Some(pollster::block_on(self.get_p())),
+                    )
+                } else {
+                    (None, None)
+                };
 
-            // Solve Uy (Component 1)
-            self.solve_momentum(1, num_groups_cells);
+                // Solve Ux (Component 0) - also computes d_p and grad_p
+                self.solve_momentum(0, num_groups_cells);
 
-            // 2. Pressure Corrector (PISO inner loop)
-            let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
+                // Solve Uy (Component 1)
+                self.solve_momentum(1, num_groups_cells);
 
-            // Zero grad_p_prime at the start of PISO loop (since p' is initially 0)
-            self.zero_buffer(&self.b_grad_p_prime, (self.num_cells as u64) * 8);
+                // 2. Pressure Corrector (PISO inner loop)
+                let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
 
-            for piso_iter in 0..num_piso_iters {
-                // Set component to 2 for Pressure Gradient calculation
-                self.constants.component = 2;
-                self.update_constants();
+                // Zero grad_p_prime at the start of PISO loop (since p' is initially 0)
+                self.zero_buffer(&self.b_grad_p_prime, (self.num_cells as u64) * 8);
 
-                // Update gradient if P has changed (after first iteration)
-                if piso_iter > 0 {
-                    self.compute_gradient();
+                for piso_iter in 0..num_piso_iters {
+                    // Set component to 2 for Pressure Gradient calculation
+                    self.constants.component = 2;
+                    self.update_constants();
+
+                    // Update gradient if P has changed (after first iteration)
+                    if piso_iter > 0 {
+                        self.compute_gradient();
+                    }
+
+                    // Flux interpolation with Rhie-Chow, then combined gradient + pressure assembly
+                    {
+                        let mut encoder = self.context.device.create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor {
+                                label: Some("PISO Pre-Solve Encoder"),
+                            },
+                        );
+                        {
+                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("Flux RC Pass"),
+                                timestamp_writes: None,
+                            });
+                            cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
+                            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                            cpass.set_bind_group(1, &self.bg_fields, &[]);
+                            cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
+                        }
+                        {
+                            // Combined gradient + pressure assembly (merged kernel)
+                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("Pressure Assembly With Grad Pass"),
+                                timestamp_writes: None,
+                            });
+                            cpass.set_pipeline(&self.pipeline_pressure_assembly_with_grad);
+                            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                            cpass.set_bind_group(1, &self.bg_fields, &[]);
+                            cpass.set_bind_group(2, &self.bg_solver, &[]);
+                            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                        }
+                        self.context.queue.submit(Some(encoder.finish()));
+                    }
+
+                    // Solve Pressure (p_prime)
+                    self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
+                    
+                    let stats = if use_cg_for_p {
+                        pollster::block_on(self.solve_cg("P"))
+                    } else {
+                        pollster::block_on(self.solve("P"))
+                    };
+                    
+                    if stats.diverged {
+                        if use_cg_for_p {
+                            println!("CG solver also diverged. Aborting PIMPLE loop.");
+                            break;
+                        }
+                        println!("Pressure solver diverged. Restarting PIMPLE loop with CG...");
+                        use_cg_for_p = true;
+                        self.restore_u_from_u_old();
+                        self.restore_p_from_p_old();
+                        self.compute_fluxes();
+                        self.initialize_d_p(num_groups_cells);
+                        continue 'restart_loop;
+                    }
+
+                    *self.stats_p.lock().unwrap() = stats;
+
+                    // Velocity Correction
+                    {
+                        let mut encoder = self.context.device.create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor {
+                                label: Some("Velocity Correction Encoder"),
+                            },
+                        );
+                        {
+                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                                label: Some("Velocity Correction Pass"),
+                                timestamp_writes: None,
+                            });
+                            cpass.set_pipeline(&self.pipeline_velocity_correction);
+                            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                            cpass.set_bind_group(1, &self.bg_fields, &[]);
+                            cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
+                            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                        }
+                        self.context.queue.submit(Some(encoder.finish()));
+                    }
                 }
 
-                // Flux interpolation with Rhie-Chow, then combined gradient + pressure assembly
-                {
-                    let mut encoder = self.context.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("PISO Pre-Solve Encoder"),
-                        },
-                    );
-                    {
-                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Flux RC Pass"),
-                            timestamp_writes: None,
-                        });
-                        cpass.set_pipeline(&self.pipeline_flux_rhie_chow);
-                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                        cpass.set_bind_group(1, &self.bg_fields, &[]);
-                        cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
+                // Check for outer loop convergence (after first iteration)
+                if let (Some(u_before), Some(p_before)) = (u_before, p_before) {
+                    let u_after = pollster::block_on(self.get_u());
+                    let p_after = pollster::block_on(self.get_p());
+
+                    // Calculate velocity residual (max change)
+                    let mut max_diff_u = 0.0f64;
+                    for (before, after) in u_before.iter().zip(u_after.iter()) {
+                        let diff_x = (after.0 - before.0).abs();
+                        let diff_y = (after.1 - before.1).abs();
+                        if diff_x.is_nan() || diff_y.is_nan() {
+                            max_diff_u = f64::NAN;
+                            break;
+                        }
+                        max_diff_u = max_diff_u.max(diff_x).max(diff_y);
                     }
-                    {
-                        // Combined gradient + pressure assembly (merged kernel)
-                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Pressure Assembly With Grad Pass"),
-                            timestamp_writes: None,
-                        });
-                        cpass.set_pipeline(&self.pipeline_pressure_assembly_with_grad);
-                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                        cpass.set_bind_group(1, &self.bg_fields, &[]);
-                        cpass.set_bind_group(2, &self.bg_solver, &[]);
-                        cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+
+                    // Calculate pressure residual (max change)
+                    let mut max_diff_p = 0.0f64;
+                    for (before, after) in p_before.iter().zip(p_after.iter()) {
+                        let diff = (after - before).abs();
+                        if diff.is_nan() {
+                            max_diff_p = f64::NAN;
+                            break;
+                        }
+                        max_diff_p = max_diff_p.max(diff);
                     }
-                    self.context.queue.submit(Some(encoder.finish()));
-                }
 
-                // Solve Pressure (p_prime)
-                self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
-                let stats = pollster::block_on(self.solve("P"));
-                *self.stats_p.lock().unwrap() = stats;
+                    // Store outer loop stats
+                    *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
+                    *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
+                    *self.outer_iterations.lock().unwrap() = outer_iter + 1;
 
-                // Velocity Correction
-                {
-                    let mut encoder = self.context.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("Velocity Correction Encoder"),
-                        },
-                    );
-                    {
-                        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Velocity Correction Pass"),
-                            timestamp_writes: None,
-                        });
-                        cpass.set_pipeline(&self.pipeline_velocity_correction);
-                        cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                        cpass.set_bind_group(1, &self.bg_fields, &[]);
-                        cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-                        cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                    }
-                    self.context.queue.submit(Some(encoder.finish()));
-                }
-            }
+                    println!("PIMPLE Residuals - U: {:.2e}, P: {:.2e}", max_diff_u, max_diff_p);
 
-            // Check for outer loop convergence (after first iteration)
-            if let (Some(u_before), Some(p_before)) = (u_before, p_before) {
-                let u_after = pollster::block_on(self.get_u());
-                let p_after = pollster::block_on(self.get_p());
-
-                // Calculate velocity residual (max change)
-                let mut max_diff_u = 0.0f64;
-                for (before, after) in u_before.iter().zip(u_after.iter()) {
-                    let diff_x = (after.0 - before.0).abs();
-                    let diff_y = (after.1 - before.1).abs();
-                    if diff_x.is_nan() || diff_y.is_nan() {
-                        max_diff_u = f64::NAN;
+                    // Converged if both U and P are below tolerance
+                    if max_diff_u < outer_tol_u && max_diff_p < outer_tol_p {
+                        println!("PIMPLE Converged in {} iterations", outer_iter + 1);
                         break;
                     }
-                    max_diff_u = max_diff_u.max(diff_x).max(diff_y);
-                }
 
-                // Calculate pressure residual (max change)
-                let mut max_diff_p = 0.0f64;
-                for (before, after) in p_before.iter().zip(p_after.iter()) {
-                    let diff = (after - before).abs();
-                    if diff.is_nan() {
-                        max_diff_p = f64::NAN;
+                    // Stagnation check: if residuals aren't decreasing, stop iterating
+                    let u_stagnated = (max_diff_u - prev_residual_u).abs() < stagnation_factor;
+                    let p_stagnated = (max_diff_p - prev_residual_p).abs() < stagnation_factor;
+                    if u_stagnated
+                        && p_stagnated
+                        && outer_iter > 2
+                    {
+                        println!(
+                            "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
+                            outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
+                        );
                         break;
                     }
-                    max_diff_p = max_diff_p.max(diff);
+
+                    prev_residual_u = max_diff_u;
+                    prev_residual_p = max_diff_p;
+                } else {
+                    // First iteration - store initial values
+                    *self.outer_residual_u.lock().unwrap() = f32::MAX;
+                    *self.outer_residual_p.lock().unwrap() = f32::MAX;
+                    *self.outer_iterations.lock().unwrap() = 1;
                 }
-
-                // Store outer loop stats
-                *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
-                *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
-                *self.outer_iterations.lock().unwrap() = outer_iter + 1;
-
-                println!("PIMPLE Residuals - U: {:.2e}, P: {:.2e}", max_diff_u, max_diff_p);
-
-                // Converged if both U and P are below tolerance
-                if max_diff_u < outer_tol_u && max_diff_p < outer_tol_p {
-                    println!("PIMPLE Converged in {} iterations", outer_iter + 1);
-                    break;
-                }
-
-                // Stagnation check: if residuals aren't decreasing, stop iterating
-                let u_stagnated = (max_diff_u - prev_residual_u).abs() < stagnation_factor;
-                let p_stagnated = (max_diff_p - prev_residual_p).abs() < stagnation_factor;
-                if u_stagnated
-                    && p_stagnated
-                    && outer_iter > 2
-                {
-                    println!(
-                        "PIMPLE stagnated at iter {}: U={:.2e} (prev {:.2e}), P={:.2e} (prev {:.2e})",
-                        outer_iter + 1, max_diff_u, prev_residual_u, max_diff_p, prev_residual_p
-                    );
-                    break;
-                }
-
-                prev_residual_u = max_diff_u;
-                prev_residual_p = max_diff_p;
-            } else {
-                // First iteration - store initial values
-                *self.outer_residual_u.lock().unwrap() = f32::MAX;
-                *self.outer_residual_p.lock().unwrap() = f32::MAX;
-                *self.outer_iterations.lock().unwrap() = 1;
             }
+            break;
         }
 
         // Update time
@@ -662,5 +690,56 @@ impl GpuSolver {
         );
         self.context.queue.submit(Some(encoder.finish()));
         self.context.device.poll(wgpu::Maintain::Wait);
+    }
+
+    fn copy_p_to_p_old(&self) {
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Copy P to P_old Encoder"),
+            });
+        encoder.copy_buffer_to_buffer(
+            &self.b_p,
+            0,
+            &self.b_p_old,
+            0,
+            (self.num_cells as u64) * 4,
+        );
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    fn restore_p_from_p_old(&self) {
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Restore P from P_old Encoder"),
+            });
+        encoder.copy_buffer_to_buffer(
+            &self.b_p_old,
+            0,
+            &self.b_p,
+            0,
+            (self.num_cells as u64) * 4,
+        );
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    fn restore_u_from_u_old(&self) {
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Restore U from U_old Encoder"),
+            });
+        encoder.copy_buffer_to_buffer(
+            &self.b_u_old,
+            0,
+            &self.b_u,
+            0,
+            (self.num_cells as u64) * 8,
+        );
+        self.context.queue.submit(Some(encoder.finish()));
     }
 }

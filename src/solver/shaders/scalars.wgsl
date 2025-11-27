@@ -149,3 +149,48 @@ fn init_scalars() {
 fn update_rho_old() {
     scalars.rho_old = scalars.rho_new;
 }
+
+@compute @workgroup_size(64)
+fn init_cg_scalars(@builtin(local_invocation_id) local_id: vec3<u32>) {
+    let n = params.num_groups;
+    let lid = local_id.x;
+    
+    var sum = 0.0;
+    for (var i = lid; i < n; i += 64u) {
+        sum += dot_result_1[i];
+    }
+    
+    scratch1[lid] = sum;
+    workgroupBarrier();
+    
+    for (var i = 32u; i > 0u; i >>= 1u) {
+        if (lid < i) {
+            scratch1[lid] += scratch1[lid + i];
+        }
+        workgroupBarrier();
+    }
+    
+    if (lid == 0u) {
+        scalars.rho_old = scratch1[0];
+        scalars.alpha = 0.0;
+        scalars.beta = 0.0;
+    }
+}
+
+@compute @workgroup_size(1)
+fn update_cg_alpha() {
+    if (abs(scalars.r0_v) < 1e-20) {
+        scalars.alpha = 0.0;
+    } else {
+        scalars.alpha = scalars.rho_old / scalars.r0_v;
+    }
+}
+
+@compute @workgroup_size(1)
+fn update_cg_beta() {
+    if (abs(scalars.rho_old) < 1e-20) {
+        scalars.beta = 0.0;
+    } else {
+        scalars.beta = scalars.rho_new / scalars.rho_old;
+    }
+}

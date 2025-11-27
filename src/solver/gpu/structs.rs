@@ -8,6 +8,7 @@ pub struct LinearSolverStats {
     pub iterations: u32,
     pub residual: f32,
     pub converged: bool,
+    pub diverged: bool,
     pub time: std::time::Duration,
 }
 
@@ -59,6 +60,7 @@ pub struct GpuSolver {
     pub b_u_old: wgpu::Buffer, // For velocity under-relaxation
     pub b_u_old_old: wgpu::Buffer, // For 2nd order time stepping
     pub b_p: wgpu::Buffer,
+    pub b_p_old: wgpu::Buffer, // For restarting PIMPLE loop
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_p: wgpu::Buffer,
@@ -106,6 +108,8 @@ pub struct GpuSolver {
     pub bg_dot_pair_tstt: wgpu::BindGroup,
     pub bg_scalars: wgpu::BindGroup,
     pub bg_empty: wgpu::BindGroup,
+    pub bg_dot_p_v: wgpu::BindGroup,
+    pub bg_dot_r_r: wgpu::BindGroup, // For CG r.r
 
     pub pipeline_gradient: wgpu::ComputePipeline,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
@@ -115,6 +119,11 @@ pub struct GpuSolver {
     pub pipeline_bicgstab_update_x_r: wgpu::ComputePipeline,
     pub pipeline_bicgstab_update_p: wgpu::ComputePipeline,
     pub pipeline_bicgstab_update_s: wgpu::ComputePipeline,
+    pub pipeline_cg_update_x_r: wgpu::ComputePipeline,
+    pub pipeline_cg_update_p: wgpu::ComputePipeline,
+    pub pipeline_update_cg_alpha: wgpu::ComputePipeline,
+    pub pipeline_update_cg_beta: wgpu::ComputePipeline,
+    pub pipeline_update_rho_old: wgpu::ComputePipeline,
 
     // Scalar Pipelines
     pub pipeline_init_scalars: wgpu::ComputePipeline,
@@ -129,6 +138,7 @@ pub struct GpuSolver {
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_velocity_correction: wgpu::ComputePipeline,
     pub pipeline_update_u_component: wgpu::ComputePipeline,
+    pub pipeline_init_cg_scalars: wgpu::ComputePipeline,
 
     pub num_cells: u32,
     pub num_faces: u32,

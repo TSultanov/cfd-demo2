@@ -153,3 +153,48 @@ fn bicgstab_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
     x[idx] += alpha * p[idx] + omega * s[idx];
     r[idx] = s[idx] - omega * t[idx];
 }
+
+// CG Update X and R: x = x + alpha * p, r = r - alpha * v
+@compute @workgroup_size(64)
+fn cg_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+
+    var alpha = 0.0;
+    if (abs(scalars.r0_v) >= 1e-20) {
+        alpha = scalars.rho_old / scalars.r0_v; // r0_v holds p.v
+    }
+
+    if (global_id.x == 0u) {
+        scalars.alpha = alpha;
+    }
+
+    if (idx >= params.n) {
+        return;
+    }
+
+    x[idx] += alpha * p[idx];
+    r[idx] -= alpha * v[idx];
+}
+
+// CG Update P: p = r + beta * p
+@compute @workgroup_size(64)
+fn cg_update_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+
+    var beta = 0.0;
+    if (abs(scalars.rho_old) >= 1e-20) {
+        beta = scalars.rho_new / scalars.rho_old;
+    }
+
+    if (global_id.x == 0u) {
+        scalars.beta = beta;
+        // Update rho_old for next iteration
+        scalars.rho_old = scalars.rho_new;
+    }
+
+    if (idx >= params.n) {
+        return;
+    }
+
+    p[idx] = r[idx] + beta * p[idx];
+}

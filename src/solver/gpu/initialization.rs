@@ -258,6 +258,14 @@ impl GpuSolver {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let b_p_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("P Old Buffer"),
+            contents: bytemuck::cast_slice(&zero_scalars),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        });
+
         let b_d_p = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("D_P Buffer"),
             contents: bytemuck::cast_slice(&zero_scalars),
@@ -1070,25 +1078,25 @@ impl GpuSolver {
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
                         visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let bg_mesh = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Mesh Bind Group"),
@@ -1330,7 +1338,7 @@ impl GpuSolver {
         });
 
         let bg_dot_r0_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Dot Product R0 V Bind Group"),
+            label: Some("Dot R0 V Bind Group"),
             layout: &bgl_dot_inputs,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -1344,6 +1352,44 @@ impl GpuSolver {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: b_v.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_dot_p_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Dot P V Bind Group"),
+            layout: &bgl_dot_inputs,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_dot_result.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_p.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_v.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_dot_r_r = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Dot R R Bind Group"),
+            layout: &bgl_dot_inputs,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_dot_result.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_r.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_r.as_entire_binding(),
                 },
             ],
         });
@@ -1545,6 +1591,22 @@ impl GpuSolver {
                 entry_point: "bicgstab_update_s",
             });
 
+        let pipeline_cg_update_x_r =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("CG Update X R Pipeline"),
+                layout: Some(&pl_linear),
+                module: &shader_linear,
+                entry_point: "cg_update_x_r",
+            });
+
+        let pipeline_cg_update_p =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("CG Update P Pipeline"),
+                layout: Some(&pl_linear),
+                module: &shader_linear,
+                entry_point: "cg_update_p",
+            });
+
         let shader_flux = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flux Shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/flux.wgsl"))),
@@ -1740,6 +1802,14 @@ impl GpuSolver {
                 entry_point: "init_scalars",
             });
 
+        let pipeline_init_cg_scalars =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Init CG Scalars Pipeline"),
+                layout: Some(&pl_scalars),
+                module: &shader_scalars,
+                entry_point: "init_cg_scalars",
+            });
+
         let pipeline_reduce_rho_new_r_r =
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some("Reduce Rho New R R Pipeline"),
@@ -1762,6 +1832,30 @@ impl GpuSolver {
                 layout: Some(&pl_scalars),
                 module: &shader_scalars,
                 entry_point: "reduce_t_s_t_t",
+            });
+
+        let pipeline_update_cg_alpha =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Update CG Alpha Pipeline"),
+                layout: Some(&pl_scalars),
+                module: &shader_scalars,
+                entry_point: "update_cg_alpha",
+            });
+
+        let pipeline_update_cg_beta =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Update CG Beta Pipeline"),
+                layout: Some(&pl_scalars),
+                module: &shader_scalars,
+                entry_point: "update_cg_beta",
+            });
+
+        let pipeline_update_rho_old =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Update Rho Old Pipeline"),
+                layout: Some(&pl_scalars),
+                module: &shader_scalars,
+                entry_point: "update_rho_old",
             });
 
         Self {
@@ -1801,6 +1895,7 @@ impl GpuSolver {
             b_u_old,
             b_u_old_old,
             b_p,
+            b_p_old,
             b_d_p,
             b_fluxes,
             b_grad_p,
@@ -1814,6 +1909,8 @@ impl GpuSolver {
             bg_linear_state_ro,
             bg_dot_params,
             bg_dot_r0_v,
+            bg_dot_p_v,
+            bg_dot_r_r,
             bg_dot_pair_r0r_rr,
             bg_dot_pair_tstt,
             bg_scalars,
@@ -1826,7 +1923,13 @@ impl GpuSolver {
             pipeline_bicgstab_update_x_r,
             pipeline_bicgstab_update_p,
             pipeline_bicgstab_update_s,
+            pipeline_cg_update_x_r,
+            pipeline_cg_update_p,
             pipeline_init_scalars,
+            pipeline_init_cg_scalars,
+            pipeline_update_cg_alpha,
+            pipeline_update_cg_beta,
+            pipeline_update_rho_old,
             pipeline_reduce_rho_new_r_r,
             pipeline_reduce_r0_v,
             pipeline_reduce_t_s_t_t,

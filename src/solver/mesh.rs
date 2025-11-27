@@ -349,19 +349,6 @@ pub fn generate_cut_cell_mesh(
                                 if n1.dot(&n2) < 0.7 {
                                     if let Some(p_corner) = intersect_lines(p_curr, n1, p_next, n2)
                                     {
-                                        // Check if corner is within cell bounds (with tolerance)
-                                        // and "behind" the cut (SDF < 0, but we know it should be inside geometry, so SDF < 0)
-                                        // Actually, if we are cutting a concave corner, the corner is in the fluid?
-                                        // No, if it's a concave corner of the FLUID (convex corner of solid), then the fluid wraps around it.
-                                        // Wait, the chamfer is on "concave edges" of the mesh, which corresponds to "convex corners" of the fluid?
-                                        // The user image shows a red region (solid?) and blue (fluid).
-                                        // The chamfer cuts the red region. So the fluid is invading the solid?
-                                        // Or the red is fluid and blue is solid?
-                                        // "Chamfers on concave edges" usually means the mesh (fluid domain) has a chamfer where it should be a sharp corner.
-                                        // If the fluid has a 270 degree corner (concave), the solid has a 90 degree corner (convex).
-                                        // The cut cell algorithm connects the two intersection points, cutting off the fluid corner.
-                                        // So the corner point should be INSIDE the cell.
-
                                         let tol = 1e-5;
                                         if p_corner.x >= min.x - tol
                                             && p_corner.x <= max.x + tol

@@ -179,7 +179,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             // Boundary Conditions
             if (boundary_type == 1u) { // Inlet
-                let u_bc_x = 1.0;
+                let ramp = min(constants.time / 0.1, 1.0);
+                let u_bc_x = 1.0 * ramp;
                 let u_bc_y = 0.0;
                 let val_bc = select(u_bc_x, u_bc_y, constants.component == 1u);
                 

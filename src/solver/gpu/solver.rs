@@ -322,6 +322,10 @@ impl GpuSolver {
                 for (before, after) in u_before.iter().zip(u_after.iter()) {
                     let diff_x = (after.0 - before.0).abs();
                     let diff_y = (after.1 - before.1).abs();
+                    if diff_x.is_nan() || diff_y.is_nan() {
+                        max_diff_u = f64::NAN;
+                        break;
+                    }
                     max_diff_u = max_diff_u.max(diff_x).max(diff_y);
                 }
 
@@ -329,6 +333,10 @@ impl GpuSolver {
                 let mut max_diff_p = 0.0f64;
                 for (before, after) in p_before.iter().zip(p_after.iter()) {
                     let diff = (after - before).abs();
+                    if diff.is_nan() {
+                        max_diff_p = f64::NAN;
+                        break;
+                    }
                     max_diff_p = max_diff_p.max(diff);
                 }
 

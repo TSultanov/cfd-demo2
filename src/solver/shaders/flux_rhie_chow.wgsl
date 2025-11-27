@@ -109,8 +109,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else {
         // Boundary
         if (boundary_type == 1u) { // Inlet
-             // Fixed U
-             let u_bc = Vector2(1.0, 0.0);
+             // Fixed U with Ramp
+             let ramp = min(constants.time / 0.1, 1.0);
+             let u_bc = Vector2(1.0 * ramp, 0.0);
              fluxes[idx] = constants.density * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
         } else if (boundary_type == 3u) { // Wall
              fluxes[idx] = 0.0;

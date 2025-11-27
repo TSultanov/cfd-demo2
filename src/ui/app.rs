@@ -133,7 +133,7 @@ impl CFDApp {
             actual_min_cell_size: 0.01,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
-            timestep: 0.01,
+            timestep: 0.001,
             selected_geometry: GeometryType::BackwardsStep,
             plot_field: PlotField::VelocityMag,
             is_running: false,
@@ -181,14 +181,14 @@ impl CFDApp {
         self.cached_u = initial_u;
         self.cached_p = initial_p;
         self.cached_cells = Self::cache_cells(&mesh);
-        
+
         // Compute actual min cell size
         self.actual_min_cell_size = mesh
             .cell_vol
             .iter()
             .map(|&v| v.sqrt())
             .fold(f64::INFINITY, f64::min);
-            
+
         self.mesh = Some(mesh);
 
         self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
@@ -256,18 +256,18 @@ impl CFDApp {
 
     fn build_initial_velocity(&self, mesh: &Mesh) -> Vec<(f64, f64)> {
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
-        for (i, vel) in u.iter_mut().enumerate() {
+        for (i, _vel) in u.iter_mut().enumerate() {
             let cx = mesh.cell_cx[i];
             let cy = mesh.cell_cy[i];
             if cx < self.max_cell_size {
                 match self.selected_geometry {
                     GeometryType::BackwardsStep => {
                         if cy > 0.5 {
-                            *vel = (1.0, 0.0);
+                            // *vel = (1.0, 0.0); // Removed to match shader ramp
                         }
                     }
                     GeometryType::ChannelObstacle => {
-                        *vel = (1.0, 0.0);
+                        // *vel = (1.0, 0.0);
                     }
                 }
             }
@@ -607,9 +607,16 @@ impl eframe::App for CFDApp {
                                         }
 
                                         if max_vel > 1e-6 {
-                                            let next_dt = (target_cfl_clone * min_cell_size_clone
-                                                / max_vel)
-                                                .clamp(1e-9, 0.1);
+                                            let current_dt = solver.constants.dt as f64;
+                                            let mut next_dt =
+                                                target_cfl_clone * min_cell_size_clone / max_vel;
+
+                                            // Limit increase to 1.2x to prevent shock
+                                            if next_dt > current_dt * 1.2 {
+                                                next_dt = current_dt * 1.2;
+                                            }
+
+                                            next_dt = next_dt.clamp(1e-9, 0.1);
                                             solver.set_dt(next_dt as f32);
                                         }
                                     }

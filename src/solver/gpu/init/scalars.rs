@@ -22,7 +22,7 @@ pub fn init_scalars(
     // Scalar Pipelines
     let shader_scalars = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Scalars Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../shaders/scalars.wgsl"))),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/scalars.wgsl"))),
     });
 
     let bgl_scalars = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

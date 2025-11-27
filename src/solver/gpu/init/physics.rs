@@ -22,7 +22,7 @@ pub fn init_physics_pipelines(
     let shader_gradient = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Gradient Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/gradient.wgsl"
+            "../shaders/gradient.wgsl"
         ))),
     });
 
@@ -53,7 +53,7 @@ pub fn init_physics_pipelines(
 
     let shader_flux = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Flux Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../shaders/flux.wgsl"))),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/flux.wgsl"))),
     });
 
     let pipeline_flux = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -66,7 +66,7 @@ pub fn init_physics_pipelines(
     let shader_momentum = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Momentum Assembly Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/momentum_assembly_v2.wgsl"
+            "../shaders/momentum_assembly_v2.wgsl"
         ))),
     });
 
@@ -81,7 +81,7 @@ pub fn init_physics_pipelines(
     let shader_pressure = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Pressure Assembly Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/pressure_assembly.wgsl"
+            "../shaders/pressure_assembly.wgsl"
         ))),
     });
 
@@ -97,7 +97,7 @@ pub fn init_physics_pipelines(
     let shader_pressure_with_grad = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Pressure Assembly With Grad Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/pressure_assembly_with_grad.wgsl"
+            "../shaders/pressure_assembly_with_grad.wgsl"
         ))),
     });
 
@@ -112,7 +112,7 @@ pub fn init_physics_pipelines(
     let shader_flux_rhie_chow = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Flux Rhie-Chow Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/flux_rhie_chow.wgsl"
+            "../shaders/flux_rhie_chow.wgsl"
         ))),
     });
 
@@ -127,7 +127,7 @@ pub fn init_physics_pipelines(
     let shader_velocity_correction = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Velocity Correction Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/velocity_correction.wgsl"
+            "../shaders/velocity_correction.wgsl"
         ))),
     });
 
@@ -142,7 +142,7 @@ pub fn init_physics_pipelines(
     let shader_update_u = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Update U Component Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/update_u_component.wgsl"
+            "../shaders/update_u_component.wgsl"
         ))),
     });
 

@@ -694,7 +694,7 @@ pub fn init_pipelines(
     let shader_linear = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Linear Solver Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../../shaders/linear_solver.wgsl"
+            "../../shaders/linear_solver.wgsl"
         ))),
     });
 
@@ -733,7 +733,7 @@ pub fn init_pipelines(
     let shader_dot = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Dot Product Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../../shaders/dot_product.wgsl"
+            "../../shaders/dot_product.wgsl"
         ))),
     });
 
@@ -747,7 +747,7 @@ pub fn init_pipelines(
     let shader_dot_pair = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Dot Pair Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../../shaders/dot_product_pair.wgsl"
+            "../../shaders/dot_product_pair.wgsl"
         ))),
     });
 

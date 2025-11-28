@@ -1,4 +1,4 @@
-use super::structs::{GpuSolver, LinearSolverStats};
+use super::structs::{GpuSolver, LinearSolverStats, SolverType};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +83,9 @@ pub struct MultigridSolver {
     pub pipeline_mis_update: wgpu::ComputePipeline,
     pub pipeline_count_c_points: wgpu::ComputePipeline,
     pub pipeline_assign_coarse_indices: wgpu::ComputePipeline,
+    pub pipeline_extract_pressure: wgpu::ComputePipeline,
+    pub pipeline_extract_vector: wgpu::ComputePipeline,
+    pub pipeline_insert_vector: wgpu::ComputePipeline,
 }
 
 impl MultigridSolver {
@@ -331,7 +334,7 @@ impl MultigridSolver {
                         },
                         count: None,
                     },
-                    // random_values (f32)
+                    // random: f32
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -342,7 +345,7 @@ impl MultigridSolver {
                         },
                         count: None,
                     },
-                    // fine_to_coarse (i32) - Only used in assign_coarse_indices
+                    // fine_to_coarse: i32 - Only used in assign_coarse_indices
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -454,6 +457,117 @@ impl MultigridSolver {
                 entry_point: "assign_coarse_indices",
             });
 
+        let bgl_extract = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("AMG Extract Pressure BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let shader_extract = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("AMG Extract Pressure Shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/extract_pressure_matrix.wgsl").into(),
+            ),
+        });
+
+        let pipeline_extract_pressure =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("AMG Extract Pressure Pipeline"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("AMG Extract Pressure Layout"),
+                        bind_group_layouts: &[&bgl_extract],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_extract,
+                entry_point: "main",
+            });
+
+        let bgl_vector_ops = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("AMG Vector Ops BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_extract_vector =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("AMG Extract Vector Pipeline"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("AMG Extract Vector Layout"),
+                        bind_group_layouts: &[&bgl_vector_ops],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_extract,
+                entry_point: "extract_vector",
+            });
+
+        let pipeline_insert_vector =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("AMG Insert Vector Pipeline"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("AMG Insert Vector Layout"),
+                        bind_group_layouts: &[&bgl_vector_ops],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_extract,
+                entry_point: "insert_vector",
+            });
+
         Self {
             levels: Vec::new(),
             cycle_type_ux,
@@ -475,6 +589,9 @@ impl MultigridSolver {
             pipeline_mis_update,
             pipeline_count_c_points,
             pipeline_assign_coarse_indices,
+            pipeline_extract_pressure,
+            pipeline_extract_vector,
+            pipeline_insert_vector,
         }
     }
 
@@ -601,35 +718,140 @@ impl MultigridSolver {
         let num_cells = solver.num_cells as u32;
 
         // 1. Create Level 0 (Fine)
+
+        // Always use scalar connectivity for AMG
+        let src_row_offsets = &solver.b_row_offsets;
+        let src_col_indices = &solver.b_col_indices;
+
+        let src_matrix_values = if solver.solver_type == SolverType::Coupled {
+            &solver
+                .coupled_resources
+                .as_ref()
+                .expect("Coupled resources missing")
+                .b_matrix_values
+        } else {
+            &solver.b_matrix_values
+        };
+
         // Copy matrix data from solver
         let b_row_offsets = self.create_buffer_copy(
             device,
             &solver.context.queue,
-            &solver.b_row_offsets,
+            src_row_offsets,
             (num_cells as u64 + 1) * 4,
             "L0 Row Offsets",
         );
         let b_col_indices = self.create_buffer_copy(
             device,
             &solver.context.queue,
-            &solver.b_col_indices,
-            solver.b_col_indices.size(),
+            src_col_indices,
+            src_col_indices.size(),
             "L0 Col Indices",
         );
-        let b_matrix_values = self.create_buffer_copy(
-            device,
-            &solver.context.queue,
-            &solver.b_matrix_values,
-            solver.b_matrix_values.size(),
-            "L0 Matrix Values",
-        );
+
+        let b_matrix_values = if solver.solver_type == SolverType::Coupled {
+            let size = src_col_indices.size(); // Scalar size
+            let b_values = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("L0 Matrix Values (Extracted)"),
+                size,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let bgl_extract = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("AMG Extract Pressure BGL Temp"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+            let bg_extract = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("AMG Extract Pressure BG"),
+                layout: &bgl_extract,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: src_row_offsets.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: src_matrix_values.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: b_values.as_entire_binding(),
+                    },
+                ],
+            });
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("AMG Extract Pressure Encoder"),
+            });
+
+            let workgroup_size = 64;
+            let num_groups = (num_cells + workgroup_size - 1) / workgroup_size;
+
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("AMG Extract Pressure Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_extract_pressure);
+                cpass.set_bind_group(0, &bg_extract, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+
+            queue.submit(Some(encoder.finish()));
+
+            b_values
+        } else {
+            self.create_buffer_copy(
+                device,
+                &solver.context.queue,
+                src_matrix_values,
+                src_matrix_values.size(),
+                "L0 Matrix Values",
+            )
+        };
+
         let b_inv_diagonal =
             self.create_buffer_init(device, (num_cells as u64) * 4, "L0 Inv Diagonal");
 
         // Compute inv_diagonal for Level 0 on CPU
-        let l0_row_offsets: Vec<u32> = self.read_buffer(device, queue, &solver.b_row_offsets);
-        let l0_col_indices: Vec<u32> = self.read_buffer(device, queue, &solver.b_col_indices);
-        let l0_values: Vec<f32> = self.read_buffer(device, queue, &solver.b_matrix_values);
+        let l0_row_offsets: Vec<u32> = self.read_buffer(device, queue, &b_row_offsets);
+        let l0_col_indices: Vec<u32> = self.read_buffer(device, queue, &b_col_indices);
+        let l0_values: Vec<f32> = self.read_buffer(device, queue, &b_matrix_values);
 
         let mut l0_inv_diag = vec![0.0f32; num_cells as usize];
         for i in 0..num_cells as usize {
@@ -1748,6 +1970,101 @@ impl MultigridSolver {
         let data: Vec<f32> =
             self.read_buffer(&solver.context.device, &solver.context.queue, buffer);
         data.iter().map(|&x| x * x).sum::<f32>().sqrt()
+    }
+
+    pub fn solve_coupled_pressure(
+        &mut self,
+        solver: &GpuSolver,
+        coupled_rhs: &wgpu::Buffer,
+        coupled_solution: &wgpu::Buffer,
+    ) {
+        if self.levels.is_empty() {
+            return;
+        }
+
+        let device = &solver.context.device;
+        let queue = &solver.context.queue;
+        let level0 = &self.levels[0];
+        let num_cells = level0.num_cells;
+
+        // 1. Extract RHS: coupled_rhs -> level0.b_b
+        // We need a temporary bind group
+        let bgl_vector_ops = self.pipeline_extract_vector.get_bind_group_layout(0);
+        let bg_extract = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("AMG Extract Vector BG"),
+            layout: &bgl_vector_ops,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: coupled_rhs.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: level0.b_b.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("AMG Extract Vector Encoder"),
+        });
+
+        let workgroup_size = 64;
+        let num_groups = (num_cells + workgroup_size - 1) / workgroup_size;
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("AMG Extract Vector Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_extract_vector);
+            cpass.set_bind_group(0, &bg_extract, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
+        }
+
+        // Zero initial guess
+        encoder.clear_buffer(&level0.b_x, 0, None);
+
+        queue.submit(Some(encoder.finish()));
+
+        // 2. Run AMG Cycles
+        // Use V-Cycle for pressure
+        let max_cycles = 1; // Just 1 cycle for preconditioner
+        for _ in 0..max_cycles {
+            self.v_cycle(solver, 0);
+        }
+
+        // 3. Insert Solution: level0.b_x -> coupled_solution
+        let bg_insert = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("AMG Insert Vector BG"),
+            layout: &bgl_vector_ops,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: level0.b_x.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: coupled_solution.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("AMG Insert Vector Encoder"),
+        });
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("AMG Insert Vector Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_insert_vector);
+            cpass.set_bind_group(0, &bg_insert, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
+        }
+
+        queue.submit(Some(encoder.finish()));
     }
 }
 

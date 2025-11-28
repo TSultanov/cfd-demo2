@@ -76,14 +76,18 @@ pub fn init_state(device: &wgpu::Device, num_cells: u32) -> StateResources {
     let b_s = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("S Buffer"),
         size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
     let b_t = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("T Buffer"),
         size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -120,7 +124,7 @@ pub fn init_state(device: &wgpu::Device, num_cells: u32) -> StateResources {
 
     let b_staging_scalar = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Staging Buffer Scalar"),
-        size: 4,
+        size: 64,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });

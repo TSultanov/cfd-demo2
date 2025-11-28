@@ -43,6 +43,7 @@ impl GpuSolver {
             &fields_res.bgl_fields,
             &linear_res.bgl_solver,
             &linear_res.bgl_linear_state_ro,
+            &linear_res.coupled_resources.bgl_coupled_solver,
         );
 
         // Misc
@@ -156,6 +157,8 @@ impl GpuSolver {
             pipeline_flux_rhie_chow: physics_res.pipeline_flux_rhie_chow,
             pipeline_velocity_correction: physics_res.pipeline_velocity_correction,
             pipeline_update_u_component: physics_res.pipeline_update_u_component,
+            pipeline_coupled_assembly: physics_res.pipeline_coupled_assembly,
+            pipeline_update_from_coupled: physics_res.pipeline_update_from_coupled,
 
             // Misc
             bg_empty,
@@ -173,6 +176,8 @@ impl GpuSolver {
             outer_iterations: Mutex::new(0),
             amg_solver,
             n_outer_correctors: 100,
+            solver_type: super::structs::SolverType::default(),
+            coupled_resources: Some(linear_res.coupled_resources),
         }
     }
 }

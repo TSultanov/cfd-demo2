@@ -1,6 +1,6 @@
 use crate::solver::gpu::multigrid_solver::CycleType;
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::gpu::GpuSolver;
+use crate::solver::gpu::{GpuSolver, SolverType};
 use crate::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh};
 use crate::solver::scheme::Scheme;
 use eframe::egui;
@@ -136,6 +136,7 @@ pub struct CFDApp {
     amg_cycle_ux: CycleType,
     amg_cycle_uy: CycleType,
     amg_cycle_p: CycleType,
+    solver_type: SolverType,
 }
 
 impl CFDApp {
@@ -169,6 +170,7 @@ impl CFDApp {
             amg_cycle_ux: CycleType::VCycle,
             amg_cycle_uy: CycleType::VCycle,
             amg_cycle_p: CycleType::WCycle,
+            solver_type: SolverType::Piso,
         }
     }
 
@@ -203,6 +205,7 @@ impl CFDApp {
         gpu_solver.set_amg_cycle("Ux", self.amg_cycle_ux);
         gpu_solver.set_amg_cycle("Uy", self.amg_cycle_uy);
         gpu_solver.set_amg_cycle("p", self.amg_cycle_p);
+        gpu_solver.set_solver_type(self.solver_type);
         gpu_solver.set_u(&initial_u);
         gpu_solver.set_p(&initial_p);
         gpu_solver.initialize_history();
@@ -341,6 +344,10 @@ impl CFDApp {
 
     fn update_gpu_amg_p(&self) {
         self.with_gpu_solver(|solver| solver.set_amg_cycle("p", self.amg_cycle_p));
+    }
+
+    fn update_gpu_solver_type(&self) {
+        self.with_gpu_solver(|solver| solver.set_solver_type(self.solver_type));
     }
 
     /// Render the CFD mesh using egui's batched mesh for maximum performance
@@ -739,6 +746,25 @@ impl eframe::App for CFDApp {
                     }
                 });
 
+            ui.separator();
+            ui.label("Pressure-Velocity Coupling");
+            egui::ComboBox::from_label("Solver Type")
+                .selected_text(format!("{:?}", self.solver_type))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_value(&mut self.solver_type, SolverType::Piso, "PISO")
+                        .clicked()
+                    {
+                        self.update_gpu_solver_type();
+                    }
+                    if ui
+                        .selectable_value(&mut self.solver_type, SolverType::Coupled, "Coupled")
+                        .clicked()
+                    {
+                        self.update_gpu_solver_type();
+                    }
+                });
+
             if ui.button("Initialize / Reset").clicked() {
                 self.init_solver();
             }
@@ -830,9 +856,16 @@ impl eframe::App for CFDApp {
                 let stats = &self.cached_gpu_stats;
                 ui.label(format!("Time: {:.3}", stats.time));
                 ui.label(format!("dt: {:.2e}", stats.dt));
+                let solver_name = match self.solver_type {
+                    SolverType::Piso => "PIMPLE",
+                    SolverType::Coupled => "Coupled",
+                };
                 ui.label(format!(
-                    "PIMPLE: {} iters, U:{:.2e} P:{:.2e}",
-                    stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p
+                    "{}: {} iters, U:{:.2e} P:{:.2e}",
+                    solver_name,
+                    stats.outer_iterations,
+                    stats.outer_residual_u,
+                    stats.outer_residual_p
                 ));
             }
         });

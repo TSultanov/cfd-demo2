@@ -1,9 +1,15 @@
 // Force recompile 2
 use std::sync::atomic::Ordering;
 
-use super::structs::GpuSolver;
+use super::structs::{GpuSolver, SolverType};
 
 impl GpuSolver {
+    /// Set the solver type (PISO or Coupled)
+    pub fn set_solver_type(&mut self, solver_type: SolverType) {
+        self.solver_type = solver_type;
+        println!("Solver type set to: {:?}", solver_type);
+    }
+
     pub fn set_u(&self, u: &[(f64, f64)]) {
         let u_f32: Vec<[f32; 2]> = u.iter().map(|&(x, y)| [x as f32, y as f32]).collect();
         self.context
@@ -225,7 +231,26 @@ impl GpuSolver {
         result
     }
 
+    pub(crate) async fn read_buffer_f32(&self, buffer: &wgpu::Buffer, count: u32) -> Vec<f32> {
+        let data = self.read_buffer(buffer, (count as u64) * 4).await;
+        bytemuck::cast_slice(&data).to_vec()
+    }
+
+    pub(crate) async fn read_buffer_u32(&self, buffer: &wgpu::Buffer, count: u32) -> Vec<u32> {
+        let data = self.read_buffer(buffer, (count as u64) * 4).await;
+        bytemuck::cast_slice(&data).to_vec()
+    }
+
+    /// Perform a single timestep using the currently selected solver type
     pub fn step(&mut self) {
+        match self.solver_type {
+            SolverType::Piso => self.step_piso(),
+            SolverType::Coupled => self.step_coupled(),
+        }
+    }
+
+    /// PISO (Pressure Implicit with Splitting of Operators) algorithm
+    pub fn step_piso(&mut self) {
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
         let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
@@ -285,9 +310,13 @@ impl GpuSolver {
                 self.solve_momentum(1, num_groups_cells);
 
                 // 2. Pressure Corrector (PISO inner loop)
-                let need_extra_piso = prev_residual_u > outer_tol_u * 0.5
-                    || prev_residual_p > outer_tol_p * 0.5;
-                let num_piso_iters = if outer_iter == 0 || need_extra_piso { 2 } else { 1 };
+                let need_extra_piso =
+                    prev_residual_u > outer_tol_u * 0.5 || prev_residual_p > outer_tol_p * 0.5;
+                let num_piso_iters = if outer_iter == 0 || need_extra_piso {
+                    2
+                } else {
+                    1
+                };
 
                 for piso_iter in 0..num_piso_iters {
                     // Set component to 2 for Pressure Gradient calculation
@@ -471,7 +500,7 @@ impl GpuSolver {
     }
 
     /// Copy current velocity to u_old buffer for under-relaxation
-    fn copy_u_to_u_old(&self) {
+    pub(crate) fn copy_u_to_u_old(&self) {
         let mut encoder =
             self.context
                 .device
@@ -500,7 +529,7 @@ impl GpuSolver {
 
     /// Initialize d_p values before PISO loop by running momentum assembly
     /// This ensures d_p is non-zero even at the first timestep
-    fn initialize_d_p(&mut self, num_groups: u32) {
+    pub fn initialize_d_p(&mut self, num_groups: u32) {
         // Run momentum assembly for component 0 just to compute d_p
         // We don't solve the system, just assemble to get the diagonal coefficients
         self.constants.component = 0;
@@ -733,7 +762,7 @@ impl GpuSolver {
         self.context.device.poll(wgpu::Maintain::Wait);
     }
 
-    fn copy_p_to_p_old(&self) {
+    pub(crate) fn copy_p_to_p_old(&self) {
         let mut encoder =
             self.context
                 .device

@@ -26,6 +26,10 @@ pub struct PipelineResources {
     pub pipeline_bicgstab_update_s: wgpu::ComputePipeline,
     pub pipeline_cg_update_x_r: wgpu::ComputePipeline,
     pub pipeline_cg_update_p: wgpu::ComputePipeline,
+
+    pub bgl_dot_params: wgpu::BindGroupLayout,
+    pub bgl_dot_inputs: wgpu::BindGroupLayout,
+    pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
 }
 
 pub fn init_pipelines(
@@ -820,5 +824,8 @@ pub fn init_pipelines(
         pipeline_bicgstab_update_s,
         pipeline_cg_update_x_r,
         pipeline_cg_update_p,
+        bgl_dot_params,
+        bgl_dot_inputs,
+        bgl_dot_pair_inputs,
     }
 }

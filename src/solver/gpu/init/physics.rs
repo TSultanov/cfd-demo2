@@ -9,6 +9,8 @@ pub struct PhysicsPipelines {
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_velocity_correction: wgpu::ComputePipeline,
     pub pipeline_update_u_component: wgpu::ComputePipeline,
+    pub pipeline_coupled_assembly: wgpu::ComputePipeline,
+    pub pipeline_update_from_coupled: wgpu::ComputePipeline,
 }
 
 pub fn init_physics_pipelines(
@@ -17,6 +19,7 @@ pub fn init_physics_pipelines(
     bgl_fields: &wgpu::BindGroupLayout,
     bgl_solver: &wgpu::BindGroupLayout,
     bgl_linear_state_ro: &wgpu::BindGroupLayout,
+    bgl_coupled_solver: &wgpu::BindGroupLayout,
 ) -> PhysicsPipelines {
     // Shaders
     let shader_gradient = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -152,6 +155,62 @@ pub fn init_physics_pipelines(
             entry_point: "main",
         });
 
+    let pl_coupled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Coupled Assembly Pipeline Layout"),
+        bind_group_layouts: &[bgl_mesh, bgl_fields, bgl_coupled_solver],
+        push_constant_ranges: &[],
+    });
+
+    let shader_coupled = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Coupled Assembly Shader"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+            "../shaders/coupled_assembly.wgsl"
+        ))),
+    });
+
+    let pipeline_coupled_assembly =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Coupled Assembly Pipeline"),
+            layout: Some(&pl_coupled),
+            module: &shader_coupled,
+            entry_point: "main",
+        });
+
+    let shader_update_coupled = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Update From Coupled Shader"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+            "../shaders/update_fields_from_coupled.wgsl"
+        ))),
+    });
+
+    let bgl_coupled_solution = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Coupled Solution Layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+
+    let pl_update_coupled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Update From Coupled Pipeline Layout"),
+        bind_group_layouts: &[bgl_mesh, bgl_fields, &bgl_coupled_solution],
+        push_constant_ranges: &[],
+    });
+
+    let pipeline_update_from_coupled =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Update From Coupled Pipeline"),
+            layout: Some(&pl_update_coupled),
+            module: &shader_update_coupled,
+            entry_point: "main",
+        });
+
     PhysicsPipelines {
         pipeline_gradient,
         pipeline_flux,
@@ -161,5 +220,7 @@ pub fn init_physics_pipelines(
         pipeline_flux_rhie_chow,
         pipeline_velocity_correction,
         pipeline_update_u_component,
+        pipeline_coupled_assembly,
+        pipeline_update_from_coupled,
     }
 }

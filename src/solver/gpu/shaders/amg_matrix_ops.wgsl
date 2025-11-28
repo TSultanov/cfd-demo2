@@ -6,10 +6,11 @@
 @group(0) @binding(2) var<storage, read> matrix_values: array<f32>;
 @group(0) @binding(3) var<storage, read> inv_diagonal: array<f32>; // For smoother
 
-// Group 1: State (x, b, r)
+// Group 1: State (x, b, r, x_aux)
 @group(1) @binding(0) var<storage, read_write> x: array<f32>;
 @group(1) @binding(1) var<storage, read_write> b: array<f32>;
 @group(1) @binding(2) var<storage, read_write> r: array<f32>;
+@group(1) @binding(3) var<storage, read_write> x_aux: array<f32>;
 
 // Group 2: Params
 struct Params {
@@ -65,7 +66,8 @@ fn smooth_jacobi(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     
     let resid = b[row] - sum;
-    x[row] += params.omega * inv_diagonal[row] * resid;
+    let updated = x[row] + params.omega * inv_diagonal[row] * resid;
+    x_aux[row] = updated;
 }
 
 // Restriction: r_c = R * r

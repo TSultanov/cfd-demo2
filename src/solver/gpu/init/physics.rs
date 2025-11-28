@@ -21,9 +21,7 @@ pub fn init_physics_pipelines(
     // Shaders
     let shader_gradient = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Gradient Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../shaders/gradient.wgsl"
-        ))),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/gradient.wgsl"))),
     });
 
     let pl_gradient = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

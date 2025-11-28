@@ -346,7 +346,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     if (constants.component == 0u) {
         if (abs(diag_coeff) > 1e-20) {
-            d_p[idx] = constants.alpha_u * vol / diag_coeff;
+            d_p[idx] = vol / diag_coeff;
         } else {
             d_p[idx] = 0.0;
         }

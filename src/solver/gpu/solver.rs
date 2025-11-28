@@ -262,6 +262,10 @@ impl GpuSolver {
 
             for outer_iter in 0..max_outer_iters {
                 println!("PIMPLE Outer Iter: {}", outer_iter + 1);
+                if outer_iter > 0 {
+                    // Refresh Rhie-Chow fluxes so each predictor uses latest velocity field
+                    self.compute_fluxes();
+                }
                 // 1. Momentum Predictor
 
                 // Save velocity and pressure before solve for convergence check
@@ -282,9 +286,6 @@ impl GpuSolver {
 
                 // 2. Pressure Corrector (PISO inner loop)
                 let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
-
-                // Zero grad_p_prime at the start of PISO loop (since p' is initially 0)
-                self.zero_buffer(&self.b_grad_p_prime, (self.num_cells as u64) * 8);
 
                 for piso_iter in 0..num_piso_iters {
                     // Set component to 2 for Pressure Gradient calculation

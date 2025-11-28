@@ -285,7 +285,9 @@ impl GpuSolver {
                 self.solve_momentum(1, num_groups_cells);
 
                 // 2. Pressure Corrector (PISO inner loop)
-                let num_piso_iters = if outer_iter == 0 { 2 } else { 1 };
+                let need_extra_piso = prev_residual_u > outer_tol_u * 0.5
+                    || prev_residual_p > outer_tol_p * 0.5;
+                let num_piso_iters = if outer_iter == 0 || need_extra_piso { 2 } else { 1 };
 
                 for piso_iter in 0..num_piso_iters {
                     // Set component to 2 for Pressure Gradient calculation

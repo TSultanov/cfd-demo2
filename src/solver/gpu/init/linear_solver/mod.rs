@@ -3,8 +3,8 @@ pub mod pipelines;
 pub mod state;
 
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
-use wgpu::util::DeviceExt;
 use crate::solver::mesh::Mesh;
+use wgpu::util::DeviceExt;
 
 pub struct LinearSolverResources {
     pub b_row_offsets: wgpu::Buffer,
@@ -38,6 +38,8 @@ pub struct LinearSolverResources {
     pub bgl_linear_matrix: wgpu::BindGroupLayout,
     pub bgl_linear_state: wgpu::BindGroupLayout,
     pub bgl_linear_state_ro: wgpu::BindGroupLayout,
+    pub bgl_dot_inputs: wgpu::BindGroupLayout,
+    pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
     pub pipeline_spmv_s_t: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,
@@ -175,6 +177,8 @@ pub fn init_linear_solver(
         bgl_linear_matrix: pipeline_res.bgl_linear_matrix,
         bgl_linear_state: pipeline_res.bgl_linear_state,
         bgl_linear_state_ro: pipeline_res.bgl_linear_state_ro,
+        bgl_dot_inputs: pipeline_res.bgl_dot_inputs,
+        bgl_dot_pair_inputs: pipeline_res.bgl_dot_pair_inputs,
 
         pipeline_spmv_p_v: pipeline_res.pipeline_spmv_p_v,
         pipeline_spmv_s_t: pipeline_res.pipeline_spmv_s_t,

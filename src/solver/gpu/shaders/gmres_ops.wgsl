@@ -6,6 +6,7 @@
 // 3. AXPY: y = alpha*x + y
 // 4. Scale: x = alpha*x
 // 5. Block preconditioner application (Jacobi smoothing)
+// 6. Extract diagonal scaling from matrix
 
 struct GmresParams {
     n: u32,              // Problem size (3 * num_cells)
@@ -25,9 +26,9 @@ struct GmresParams {
 @group(1) @binding(2) var<storage, read> matrix_values: array<f32>;
 
 // Group 2: Preconditioner data
-@group(2) @binding(0) var<storage, read> diag_u: array<f32>;
-@group(2) @binding(1) var<storage, read> diag_v: array<f32>;
-@group(2) @binding(2) var<storage, read> diag_p: array<f32>;
+@group(2) @binding(0) var<storage, read_write> diag_u: array<f32>;
+@group(2) @binding(1) var<storage, read_write> diag_v: array<f32>;
+@group(2) @binding(2) var<storage, read_write> diag_p: array<f32>;
 
 // Group 3: Parameters and scalars
 @group(3) @binding(0) var<uniform> params: GmresParams;
@@ -91,6 +92,18 @@ fn scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
     vec_y[idx] = alpha * vec_x[idx];
 }
 
+// Scale in place: y = alpha * y
+@compute @workgroup_size(64)
+fn scale_in_place(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    if (idx >= params.n) {
+        return;
+    }
+
+    let alpha = scalars[0];
+    vec_y[idx] = alpha * vec_y[idx];
+}
+
 // Copy: y = x
 @compute @workgroup_size(64)
 fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -136,6 +149,34 @@ fn block_jacobi_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
     } else {
         vec_z[base + 2u] = 0.0;
     }
+}
+
+fn read_diagonal(row: u32) -> f32 {
+    let start = row_offsets[row];
+    let end = row_offsets[row + 1u];
+    for (var k = start; k < end; k++) {
+        if (col_indices[k] == row) {
+            return matrix_values[k];
+        }
+    }
+    return 0.0;
+}
+
+@compute @workgroup_size(64)
+fn extract_block_diagonal(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let cell = global_id.x;
+    if (cell >= params.num_cells) {
+        return;
+    }
+
+    let base = cell * 3u;
+    let row_u = base;
+    let row_v = base + 1u;
+    let row_p = base + 2u;
+
+    diag_u[cell] = read_diagonal(row_u);
+    diag_v[cell] = read_diagonal(row_v);
+    diag_p[cell] = read_diagonal(row_p);
 }
 
 // Compute squared norm (partial reduction per workgroup)

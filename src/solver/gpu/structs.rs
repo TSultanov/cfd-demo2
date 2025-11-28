@@ -1,4 +1,5 @@
 use super::context::GpuContext;
+use super::coupled_solver_fgmres::FgmresResources;
 use bytemuck::{Pod, Zeroable};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
@@ -192,6 +193,8 @@ pub struct GpuSolver {
     pub bg_empty: wgpu::BindGroup,
     pub bg_dot_p_v: wgpu::BindGroup,
     pub bg_dot_r_r: wgpu::BindGroup, // For CG r.r
+    pub bgl_dot_inputs: wgpu::BindGroupLayout,
+    pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
 
     pub pipeline_gradient: wgpu::ComputePipeline,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
@@ -246,6 +249,7 @@ pub struct GpuSolver {
     // Multigrid
     // Multigrid
     pub amg_solver: Option<super::multigrid_solver::MultigridSolver>,
+    pub fgmres_resources: Option<FgmresResources>,
 
     pub n_outer_correctors: u32,
 

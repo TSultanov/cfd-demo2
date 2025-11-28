@@ -1,6 +1,7 @@
 pub mod buffers;
 pub mod context;
 pub mod coupled_solver;
+pub mod coupled_solver_fgmres;
 pub mod init;
 pub mod linear_solver;
 pub mod multigrid_solver;

@@ -217,8 +217,13 @@ impl GpuSolver {
                 self.context.queue.submit(Some(encoder.finish()));
             }
 
-            // 2. Solve Coupled System using FGMRES with Schur complement preconditioning
-            let stats = self.solve_coupled_fgmres();
+            // 2. Solve Coupled System entirely on the GPU via BiCGStab + Schur preconditioner
+            let stats = self.solve_coupled_system();
+            *self.stats_p.lock().unwrap() = stats;
+            println!(
+                "Coupled linear solve: {} iterations, residual {:.2e}, converged={}",
+                stats.iterations, stats.residual, stats.converged
+            );
 
             // 3. Update Fields
             {
@@ -327,7 +332,7 @@ impl GpuSolver {
         self.context.device.poll(wgpu::Maintain::Wait);
     }
 
-    async fn solve_coupled_system(&mut self) -> LinearSolverStats {
+    fn solve_coupled_system(&mut self) -> LinearSolverStats {
         // Take AMG solver out to satisfy borrow checker
         let mut amg_solver = self.amg_solver.take();
 

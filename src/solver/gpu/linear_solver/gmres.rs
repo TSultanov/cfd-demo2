@@ -93,7 +93,7 @@ impl GmresState {
     /// Apply Givens rotation to eliminate H[i+1, i]
     pub fn apply_givens(&mut self, i: usize) {
         let m = self.max_restart;
-        
+
         // Get H[i,i] and H[i+1,i]
         let h_ii = self.h_matrix[i * (m + 1) + i];
         let h_i1i = self.h_matrix[i * (m + 1) + i + 1];
@@ -167,7 +167,10 @@ impl GpuSolver {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self.context.device.create_command_encoder(&Default::default());
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
         self.context.queue.submit(Some(encoder.finish()));
 
@@ -205,7 +208,9 @@ impl GpuSolver {
         // (For production, use a GPU kernel)
         let data = pollster::block_on(self.read_buffer_f32_async(v, n));
         let scaled: Vec<f32> = data.iter().map(|x| x * alpha).collect();
-        self.context.queue.write_buffer(v, 0, bytemuck::cast_slice(&scaled));
+        self.context
+            .queue
+            .write_buffer(v, 0, bytemuck::cast_slice(&scaled));
     }
 
     /// AXPY: y = alpha * x + y
@@ -215,12 +220,17 @@ impl GpuSolver {
         for i in 0..n as usize {
             y_data[i] += alpha * x_data[i];
         }
-        self.context.queue.write_buffer(y, 0, bytemuck::cast_slice(&y_data));
+        self.context
+            .queue
+            .write_buffer(y, 0, bytemuck::cast_slice(&y_data));
     }
 
     /// Copy buffer
     pub fn copy_buffer(&self, src: &wgpu::Buffer, dst: &wgpu::Buffer, size: u64) {
-        let mut encoder = self.context.device.create_command_encoder(&Default::default());
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
         self.context.queue.submit(Some(encoder.finish()));
     }

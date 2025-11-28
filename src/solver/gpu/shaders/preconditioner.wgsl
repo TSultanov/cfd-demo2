@@ -38,6 +38,45 @@ struct SolverParams {
 @group(2) @binding(0) var<storage, read_write> block_inv: array<f32>;
 @group(2) @binding(1) var<storage, read_write> p_hat: array<f32>;  // M^{-1} * p
 @group(2) @binding(2) var<storage, read_write> s_hat: array<f32>;  // M^{-1} * s
+@group(2) @binding(3) var<storage, read_write> precond_rhs: array<f32>;
+
+struct PrecondParams {
+    mode: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+@group(2) @binding(4) var<uniform> precond_params: PrecondParams;
+
+fn use_s_mode() -> bool {
+    return precond_params.mode == 1u;
+}
+
+fn read_search_vector(idx: u32) -> f32 {
+    if (use_s_mode()) {
+        return s[idx];
+    }
+    return p[idx];
+}
+
+fn write_hat(idx: u32, value: f32) {
+    if (use_s_mode()) {
+        s_hat[idx] = value;
+    } else {
+        p_hat[idx] = value;
+    }
+}
+
+fn read_hat(idx: u32) -> f32 {
+    if (use_s_mode()) {
+        return s_hat[idx];
+    }
+    return p_hat[idx];
+}
+
+fn write_rhs(idx: u32, value: f32) {
+    precond_rhs[idx] = value;
+}
 
 fn get_matrix_value(row: u32, col: u32) -> f32 {
     let start = row_offsets[row];
@@ -116,9 +155,9 @@ fn extract_diagonal(@builtin(global_invocation_id) global_id: vec3<u32>) {
     block_inv[offset + 8u] = inv_diag_p;
 }
 
-// Apply block-Jacobi preconditioner: p_hat = M^{-1} * p
+// Stage 1: approximate A^{-1} action on velocity components using stored block inverses
 @compute @workgroup_size(64)
-fn apply_precond_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn precond_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let total_unknowns = params.n;
     if (total_unknowns < 3u) {
         return;
@@ -130,23 +169,21 @@ fn apply_precond_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let base = cell * 3u;
-    let src0 = p[base + 0u];
-    let src1 = p[base + 1u];
-    let src2 = p[base + 2u];
-
     let offset = cell * 9u;
-    let dst0 = block_inv[offset + 0u] * src0 + block_inv[offset + 1u] * src1 + block_inv[offset + 2u] * src2;
-    let dst1 = block_inv[offset + 3u] * src0 + block_inv[offset + 4u] * src1 + block_inv[offset + 5u] * src2;
-    let dst2 = block_inv[offset + 6u] * src0 + block_inv[offset + 7u] * src1 + block_inv[offset + 8u] * src2;
+    let src0 = read_search_vector(base + 0u);
+    let src1 = read_search_vector(base + 1u);
 
-    p_hat[base + 0u] = dst0;
-    p_hat[base + 1u] = dst1;
-    p_hat[base + 2u] = dst2;
+    let dst0 = block_inv[offset + 0u] * src0;
+    let dst1 = block_inv[offset + 4u] * src1;
+
+    write_hat(base + 0u, dst0);
+    write_hat(base + 1u, dst1);
+    write_hat(base + 2u, 0.0);
 }
 
-// Apply block-Jacobi preconditioner: s_hat = M^{-1} * s
+// Stage 2: build Schur RHS g' = g - D * y_u for current mode
 @compute @workgroup_size(64)
-fn apply_precond_s(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let total_unknowns = params.n;
     if (total_unknowns < 3u) {
         return;
@@ -158,18 +195,68 @@ fn apply_precond_s(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let base = cell * 3u;
-    let src0 = s[base + 0u];
-    let src1 = s[base + 1u];
-    let src2 = s[base + 2u];
+    let row = base + 2u;
+    var rhs = read_search_vector(row);
 
+    let start = row_offsets[row];
+    let end = row_offsets[row + 1u];
+    for (var k = start; k < end; k++) {
+        let col = col_indices[k];
+        if (col % 3u != 2u) {
+            rhs -= matrix_values[k] * read_hat(col);
+        }
+    }
+
+    write_rhs(base + 0u, 0.0);
+    write_rhs(base + 1u, 0.0);
+    write_rhs(base + 2u, rhs);
+}
+
+// Stage 3: apply velocity correction y_u - A^{-1} * G * y_p after AMG solve
+@compute @workgroup_size(64)
+fn finalize_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let total_unknowns = params.n;
+    if (total_unknowns < 3u) {
+        return;
+    }
+    let num_cells = total_unknowns / 3u;
+    let cell = global_id.x;
+    if (cell >= num_cells) {
+        return;
+    }
+
+    let base = cell * 3u;
     let offset = cell * 9u;
-    let dst0 = block_inv[offset + 0u] * src0 + block_inv[offset + 1u] * src1 + block_inv[offset + 2u] * src2;
-    let dst1 = block_inv[offset + 3u] * src0 + block_inv[offset + 4u] * src1 + block_inv[offset + 5u] * src2;
-    let dst2 = block_inv[offset + 6u] * src0 + block_inv[offset + 7u] * src1 + block_inv[offset + 8u] * src2;
 
-    s_hat[base + 0u] = dst0;
-    s_hat[base + 1u] = dst1;
-    s_hat[base + 2u] = dst2;
+    let row_u = base + 0u;
+    let row_v = base + 1u;
+
+    var vel_u = read_hat(row_u);
+    var vel_v = read_hat(row_v);
+
+    let inv_u = block_inv[offset + 0u];
+    let inv_v = block_inv[offset + 4u];
+
+    let start_u = row_offsets[row_u];
+    let end_u = row_offsets[row_u + 1u];
+    for (var k = start_u; k < end_u; k++) {
+        let col = col_indices[k];
+        if (col % 3u == 2u) {
+            vel_u -= inv_u * matrix_values[k] * read_hat(col);
+        }
+    }
+
+    let start_v = row_offsets[row_v];
+    let end_v = row_offsets[row_v + 1u];
+    for (var k = start_v; k < end_v; k++) {
+        let col = col_indices[k];
+        if (col % 3u == 2u) {
+            vel_v -= inv_v * matrix_values[k] * read_hat(col);
+        }
+    }
+
+    write_hat(row_u, vel_u);
+    write_hat(row_v, vel_v);
 }
 
 // Preconditioned SpMV: v = A * p_hat (where p_hat = M^{-1} * p)

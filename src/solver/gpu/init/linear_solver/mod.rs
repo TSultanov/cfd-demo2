@@ -2,7 +2,8 @@ pub mod matrix;
 pub mod pipelines;
 pub mod state;
 
-use crate::solver::gpu::structs::CoupledSolverResources;
+use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
+use wgpu::util::DeviceExt;
 use crate::solver::mesh::Mesh;
 
 pub struct LinearSolverResources {
@@ -647,6 +648,22 @@ fn init_coupled_resources(
         mapped_at_creation: false,
     });
 
+    let b_precond_rhs = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Precond RHS"),
+        size: (num_coupled_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let precond_params = PreconditionerParams::default();
+    let b_precond_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Preconditioner Params"),
+        contents: bytemuck::bytes_of(&precond_params),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
     // Preconditioner bind group layout
     let bgl_precond = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Preconditioner Bind Group Layout"),
@@ -681,6 +698,26 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -699,6 +736,14 @@ fn init_coupled_resources(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: b_s_hat.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: b_precond_rhs.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: b_precond_params.as_entire_binding(),
             },
         ],
     });
@@ -729,20 +774,28 @@ fn init_coupled_resources(
             entry_point: "extract_diagonal",
         });
 
-    let pipeline_apply_precond_p =
+    let pipeline_precond_velocity =
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Apply Precond P Pipeline"),
+            label: Some("Preconditioner Velocity Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "apply_precond_p",
+            entry_point: "precond_velocity",
         });
 
-    let pipeline_apply_precond_s =
+    let pipeline_build_schur_rhs =
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Apply Precond S Pipeline"),
+            label: Some("Build Schur RHS Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "apply_precond_s",
+            entry_point: "build_schur_rhs",
+        });
+
+    let pipeline_finalize_precond =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Finalize Preconditioner Pipeline"),
+            layout: Some(&pl_precond),
+            module: &shader_precond,
+            entry_point: "finalize_precond",
         });
 
     let pipeline_spmv_phat_v = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -785,6 +838,8 @@ fn init_coupled_resources(
         b_diag_inv,
         b_p_hat,
         b_s_hat,
+        b_precond_rhs,
+        b_precond_params,
         bg_solver,
         bg_linear_matrix,
         bg_linear_state,
@@ -801,8 +856,9 @@ fn init_coupled_resources(
         bgl_coupled_solver,
         bgl_precond,
         pipeline_extract_diagonal,
-        pipeline_apply_precond_p,
-        pipeline_apply_precond_s,
+        pipeline_precond_velocity,
+        pipeline_build_schur_rhs,
+        pipeline_finalize_precond,
         pipeline_spmv_phat_v,
         pipeline_spmv_shat_t,
         pipeline_bicgstab_precond_update_x_r,

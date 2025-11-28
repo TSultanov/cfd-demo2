@@ -48,6 +48,8 @@ pub struct CoupledSolverResources {
     pub b_diag_inv: wgpu::Buffer, // 3x3 block inverse for block-Jacobi preconditioner
     pub b_p_hat: wgpu::Buffer,    // M^{-1} * p
     pub b_s_hat: wgpu::Buffer,    // M^{-1} * s
+    pub b_precond_rhs: wgpu::Buffer, // Schur RHS per DOF
+    pub b_precond_params: wgpu::Buffer,
 
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
@@ -68,8 +70,9 @@ pub struct CoupledSolverResources {
 
     // Preconditioner pipelines
     pub pipeline_extract_diagonal: wgpu::ComputePipeline,
-    pub pipeline_apply_precond_p: wgpu::ComputePipeline,
-    pub pipeline_apply_precond_s: wgpu::ComputePipeline,
+    pub pipeline_precond_velocity: wgpu::ComputePipeline,
+    pub pipeline_build_schur_rhs: wgpu::ComputePipeline,
+    pub pipeline_finalize_precond: wgpu::ComputePipeline,
     pub pipeline_spmv_phat_v: wgpu::ComputePipeline,
     pub pipeline_spmv_shat_t: wgpu::ComputePipeline,
     pub pipeline_bicgstab_precond_update_x_r: wgpu::ComputePipeline,
@@ -97,6 +100,22 @@ pub struct SolverParams {
     pub n: u32,
     pub num_groups: u32,
     pub padding: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct PreconditionerParams {
+    pub mode: u32,
+    pub _pad: [u32; 3],
+}
+
+impl Default for PreconditionerParams {
+    fn default() -> Self {
+        Self {
+            mode: 0,
+            _pad: [0; 3],
+        }
+    }
 }
 
 pub struct GpuSolver {

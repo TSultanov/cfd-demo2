@@ -15,9 +15,27 @@
 // - p is the pressure field
 // - b_u is the momentum source term
 
-use super::structs::{GpuSolver, LinearSolverStats};
+use super::structs::{GpuSolver, LinearSolverStats, PreconditionerParams};
+
+#[repr(u32)]
+enum PrecondMode {
+    P = 0,
+    S = 1,
+}
 
 impl GpuSolver {
+    fn update_precond_mode(&self, mode: PrecondMode) {
+        if let Some(res) = &self.coupled_resources {
+            let params = PreconditionerParams {
+                mode: mode as u32,
+                ..Default::default()
+            };
+            self.context
+                .queue
+                .write_buffer(&res.b_precond_params, 0, bytemuck::bytes_of(&params));
+        }
+    }
+
     /// Performs a single timestep using the coupled solver approach.
     ///
     /// Unlike PISO which iterates between momentum prediction and pressure correction,
@@ -460,45 +478,69 @@ impl GpuSolver {
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
 
-            // 2.5. Apply preconditioner: p_hat = M^{-1} * p
+            // 2.5. Apply preconditioner in three GPU stages
+            self.update_precond_mode(PrecondMode::P);
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Apply Precond P"),
+                    label: Some("Precond Velocity P"),
                     timestamp_writes: None,
                 });
-                cpass.set_pipeline(&res.pipeline_apply_precond_p);
+                cpass.set_pipeline(&res.pipeline_precond_velocity);
                 cpass.set_bind_group(0, &res.bg_linear_state, &[]);
                 cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
                 cpass.set_bind_group(2, &res.bg_precond, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
 
-            // Submit current encoder to ensure Jacobi is done before AMG
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Build Schur RHS P"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&res.pipeline_build_schur_rhs);
+                cpass.set_bind_group(0, &res.bg_linear_state, &[]);
+                cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
+                cpass.set_bind_group(2, &res.bg_precond, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+
+            // Submit velocity + RHS stages before AMG
             self.context.queue.submit(Some(encoder.finish()));
 
-            if check_vector_for_nan(
-                self,
-                &res.b_p_hat,
-                num_coupled_cells,
-                "p_hat after block preconditioner",
-                iter,
-            ) {
-                final_resid = f32::NAN;
-                final_iter = iter + 1;
-                break;
-            }
-
-            // AMG Preconditioner for Pressure
+            // AMG Preconditioner for Pressure using GPU-built RHS
             if let Some(amg) = &mut amg_solver {
                 let res = self.coupled_resources.as_ref().unwrap();
-                amg.solve_coupled_pressure(self, &res.b_p_solver, &res.b_p_hat);
+                amg.solve_coupled_pressure(self, &res.b_precond_rhs, &res.b_p_hat);
+            }
+
+            // Finalize velocity correction after AMG
+            self.update_precond_mode(PrecondMode::P);
+            {
+                let mut encoder =
+                    self.context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Finalize Precond P Encoder"),
+                        });
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Finalize Precond P"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&res.pipeline_finalize_precond);
+                    cpass.set_bind_group(0, &res.bg_linear_state, &[]);
+                    cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
+                    cpass.set_bind_group(2, &res.bg_precond, &[]);
+                    cpass.dispatch_workgroups(num_groups, 1, 1);
+                }
+                self.context.queue.submit(Some(encoder.finish()));
             }
 
             if check_vector_for_nan(
                 self,
                 &res.b_p_hat,
                 num_coupled_cells,
-                "p_hat after AMG",
+                "p_hat after Schur preconditioner",
                 iter,
             ) {
                 final_resid = f32::NAN;
@@ -564,45 +606,66 @@ impl GpuSolver {
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
 
-            // 5.5. Apply preconditioner: s_hat = M^{-1} * s
+            // 5.5. Apply preconditioner for s in three GPU stages
+            self.update_precond_mode(PrecondMode::S);
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Apply Precond S"),
+                    label: Some("Precond Velocity S"),
                     timestamp_writes: None,
                 });
-                cpass.set_pipeline(&res.pipeline_apply_precond_s);
+                cpass.set_pipeline(&res.pipeline_precond_velocity);
                 cpass.set_bind_group(0, &res.bg_linear_state, &[]);
                 cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
                 cpass.set_bind_group(2, &res.bg_precond, &[]);
                 cpass.dispatch_workgroups(num_groups, 1, 1);
             }
 
-            // Submit current encoder to ensure Jacobi is done before AMG
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Build Schur RHS S"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&res.pipeline_build_schur_rhs);
+                cpass.set_bind_group(0, &res.bg_linear_state, &[]);
+                cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
+                cpass.set_bind_group(2, &res.bg_precond, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+
             self.context.queue.submit(Some(encoder.finish()));
 
-            if check_vector_for_nan(
-                self,
-                &res.b_s_hat,
-                num_coupled_cells,
-                "s_hat after block preconditioner",
-                iter,
-            ) {
-                final_resid = f32::NAN;
-                final_iter = iter + 1;
-                break;
-            }
-
-            // AMG Preconditioner for Pressure
             if let Some(amg) = &mut amg_solver {
                 let res = self.coupled_resources.as_ref().unwrap();
-                amg.solve_coupled_pressure(self, &res.b_s, &res.b_s_hat);
+                amg.solve_coupled_pressure(self, &res.b_precond_rhs, &res.b_s_hat);
+            }
+
+            self.update_precond_mode(PrecondMode::S);
+            {
+                let mut encoder =
+                    self.context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Finalize Precond S Encoder"),
+                        });
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Finalize Precond S"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&res.pipeline_finalize_precond);
+                    cpass.set_bind_group(0, &res.bg_linear_state, &[]);
+                    cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
+                    cpass.set_bind_group(2, &res.bg_precond, &[]);
+                    cpass.dispatch_workgroups(num_groups, 1, 1);
+                }
+                self.context.queue.submit(Some(encoder.finish()));
             }
 
             if check_vector_for_nan(
                 self,
                 &res.b_s_hat,
                 num_coupled_cells,
-                "s_hat after AMG",
+                "s_hat after Schur preconditioner",
                 iter,
             ) {
                 final_resid = f32::NAN;
@@ -713,14 +776,10 @@ impl GpuSolver {
 
                 let p_vals =
                     pollster::block_on(self.read_buffer_f32(&res.b_p_solver, num_coupled_cells));
-                let v_vals =
-                    pollster::block_on(self.read_buffer_f32(&res.b_v, num_coupled_cells));
-                let s_vals =
-                    pollster::block_on(self.read_buffer_f32(&res.b_s, num_coupled_cells));
-                let t_vals =
-                    pollster::block_on(self.read_buffer_f32(&res.b_t, num_coupled_cells));
-                let scalars_snapshot =
-                    pollster::block_on(self.read_buffer_f32(&res.b_scalars, 16));
+                let v_vals = pollster::block_on(self.read_buffer_f32(&res.b_v, num_coupled_cells));
+                let s_vals = pollster::block_on(self.read_buffer_f32(&res.b_s, num_coupled_cells));
+                let t_vals = pollster::block_on(self.read_buffer_f32(&res.b_t, num_coupled_cells));
+                let scalars_snapshot = pollster::block_on(self.read_buffer_f32(&res.b_scalars, 16));
 
                 sample(&r_vals, "r");
                 sample(&p_vals, "p");
@@ -769,7 +828,7 @@ impl GpuSolver {
 
                     final_resid = resid;
                     min_resid = min_resid.min(resid);
-                    
+
                     // Only print every 20 iterations to reduce noise
                     if iter % 20 == 0 {
                         println!("Coupled Solver Iter: {}, Residual: {:.2e}", iter, resid);
@@ -778,7 +837,10 @@ impl GpuSolver {
                     if resid < abs_tol || (init_resid > 0.0 && resid / init_resid < rel_tol) {
                         converged = true;
                         final_iter = iter + 1;
-                        println!("Coupled Solver converged at iter {}, Residual: {:.2e}", iter, resid);
+                        println!(
+                            "Coupled Solver converged at iter {}, Residual: {:.2e}",
+                            iter, resid
+                        );
                         break;
                     }
 
@@ -789,10 +851,13 @@ impl GpuSolver {
                         final_iter = iter + 1;
                         break;
                     }
-                    
+
                     // Also exit if residual is extremely large
                     if resid > 1e6 {
-                        println!("Coupled Solver residual too large ({:.2e}), stopping", resid);
+                        println!(
+                            "Coupled Solver residual too large ({:.2e}), stopping",
+                            resid
+                        );
                         final_iter = iter + 1;
                         break;
                     }

@@ -95,6 +95,7 @@ impl TimeScheme {
 }
 
 // Cached GPU solver stats for UI display (avoids lock contention)
+#[allow(dead_code)]
 #[derive(Default, Clone)]
 struct CachedGpuStats {
     time: f32,
@@ -660,7 +661,7 @@ impl eframe::App for CFDApp {
 
                 ui.horizontal(|ui| {
                     ui.label("Uy:");
-                    egui::ComboBox::from_id_source("amg_uy")
+                    egui::ComboBox::from_id_salt("amg_uy")
                         .selected_text(format!("{:?}", self.amg_cycle_uy))
                         .show_ui(ui, |ui| {
                             if ui
@@ -694,7 +695,7 @@ impl eframe::App for CFDApp {
 
                 ui.horizontal(|ui| {
                     ui.label("P: ");
-                    egui::ComboBox::from_id_source("amg_p")
+                    egui::ComboBox::from_id_salt("amg_p")
                         .selected_text(format!("{:?}", self.amg_cycle_p))
                         .show_ui(ui, |ui| {
                             if ui

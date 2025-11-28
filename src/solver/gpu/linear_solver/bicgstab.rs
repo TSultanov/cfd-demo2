@@ -54,7 +54,6 @@ impl GpuSolver {
                 });
         let mut pending_commands = false;
         let mut init_resid = 0.0;
-        let mut final_resid = f32::INFINITY;
         let mut converged = false;
         let mut final_iter = max_iter;
         let mut prev_res = f32::MAX;
@@ -166,7 +165,7 @@ impl GpuSolver {
         }
 
         // Refresh residual using the latest r to avoid reporting stale values.
-        {
+        let final_resid = {
             let mut encoder =
                 self.context
                     .device
@@ -178,8 +177,8 @@ impl GpuSolver {
             self.context.queue.submit(Some(encoder.finish()));
 
             let r_r = self.read_scalar_r_r().await;
-            final_resid = r_r.sqrt();
-        }
+            r_r.sqrt()
+        };
 
         // Check for divergence
         let diverged = !converged

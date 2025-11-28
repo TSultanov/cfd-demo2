@@ -1,8 +1,8 @@
 use cfd2::solver::gpu::multigrid_solver::CycleType;
 use cfd2::solver::gpu::structs::SolverType;
 use cfd2::solver::gpu::GpuSolver;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Geometry};
-use nalgebra::{Point2, Vector2};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use nalgebra::Vector2;
 
 #[test]
 fn test_solver_comparison() {

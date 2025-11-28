@@ -26,11 +26,6 @@ impl GpuSolver {
     pub fn step_coupled(&mut self) {
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
-        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
-
-        let max_groups_x = 65535;
-        let dispatch_faces_x = num_groups_faces.min(max_groups_x);
-        let dispatch_faces_y = num_groups_faces.div_ceil(max_groups_x);
 
         // Save old velocity for under-relaxation and time derivative
         self.copy_u_to_u_old();
@@ -352,7 +347,6 @@ impl GpuSolver {
         let num_coupled_cells = self.num_cells * 3;
         let workgroup_size = 64;
         let num_groups = num_coupled_cells.div_ceil(workgroup_size);
-        let num_groups_block = self.num_cells.div_ceil(workgroup_size);
 
         // Initialize r = b - Ax. Since x=0 (we zeroed it), r = b.
         let size = (num_coupled_cells as u64) * 4;
@@ -384,7 +378,6 @@ impl GpuSolver {
         let mut converged = false;
         let mut final_iter = max_iter;
         let mut min_resid = f32::INFINITY; // Track minimum residual
-        let mut nan_detected_at: Option<usize> = None;
 
         fn check_vector_for_nan(
             solver: &GpuSolver,
@@ -483,19 +476,16 @@ impl GpuSolver {
             // Submit current encoder to ensure Jacobi is done before AMG
             self.context.queue.submit(Some(encoder.finish()));
 
-            if nan_detected_at.is_none() {
-                if check_vector_for_nan(
-                    self,
-                    &res.b_p_hat,
-                    num_coupled_cells,
-                    "p_hat after block preconditioner",
-                    iter,
-                ) {
-                    nan_detected_at = Some(iter);
-                    final_resid = f32::NAN;
-                    final_iter = iter + 1;
-                    break;
-                }
+            if check_vector_for_nan(
+                self,
+                &res.b_p_hat,
+                num_coupled_cells,
+                "p_hat after block preconditioner",
+                iter,
+            ) {
+                final_resid = f32::NAN;
+                final_iter = iter + 1;
+                break;
             }
 
             // AMG Preconditioner for Pressure
@@ -504,19 +494,16 @@ impl GpuSolver {
                 amg.solve_coupled_pressure(self, &res.b_p_solver, &res.b_p_hat);
             }
 
-            if nan_detected_at.is_none() {
-                if check_vector_for_nan(
-                    self,
-                    &res.b_p_hat,
-                    num_coupled_cells,
-                    "p_hat after AMG",
-                    iter,
-                ) {
-                    nan_detected_at = Some(iter);
-                    final_resid = f32::NAN;
-                    final_iter = iter + 1;
-                    break;
-                }
+            if check_vector_for_nan(
+                self,
+                &res.b_p_hat,
+                num_coupled_cells,
+                "p_hat after AMG",
+                iter,
+            ) {
+                final_resid = f32::NAN;
+                final_iter = iter + 1;
+                break;
             }
 
             // Start new encoder
@@ -593,19 +580,16 @@ impl GpuSolver {
             // Submit current encoder to ensure Jacobi is done before AMG
             self.context.queue.submit(Some(encoder.finish()));
 
-            if nan_detected_at.is_none() {
-                if check_vector_for_nan(
-                    self,
-                    &res.b_s_hat,
-                    num_coupled_cells,
-                    "s_hat after block preconditioner",
-                    iter,
-                ) {
-                    nan_detected_at = Some(iter);
-                    final_resid = f32::NAN;
-                    final_iter = iter + 1;
-                    break;
-                }
+            if check_vector_for_nan(
+                self,
+                &res.b_s_hat,
+                num_coupled_cells,
+                "s_hat after block preconditioner",
+                iter,
+            ) {
+                final_resid = f32::NAN;
+                final_iter = iter + 1;
+                break;
             }
 
             // AMG Preconditioner for Pressure
@@ -614,19 +598,16 @@ impl GpuSolver {
                 amg.solve_coupled_pressure(self, &res.b_s, &res.b_s_hat);
             }
 
-            if nan_detected_at.is_none() {
-                if check_vector_for_nan(
-                    self,
-                    &res.b_s_hat,
-                    num_coupled_cells,
-                    "s_hat after AMG",
-                    iter,
-                ) {
-                    nan_detected_at = Some(iter);
-                    final_resid = f32::NAN;
-                    final_iter = iter + 1;
-                    break;
-                }
+            if check_vector_for_nan(
+                self,
+                &res.b_s_hat,
+                num_coupled_cells,
+                "s_hat after AMG",
+                iter,
+            ) {
+                final_resid = f32::NAN;
+                final_iter = iter + 1;
+                break;
             }
 
             // Start new encoder
@@ -701,61 +682,57 @@ impl GpuSolver {
 
             self.context.queue.submit(Some(encoder.finish()));
 
-            if nan_detected_at.is_none() {
-                self.context.device.poll(wgpu::Maintain::Wait);
-                let r_vals = pollster::block_on(self.read_buffer_f32(&res.b_r, num_coupled_cells));
-                if let Some(idx) = r_vals.iter().position(|v| v.is_nan()) {
-                    let cell = idx / 3;
-                    let component = idx % 3;
+            self.context.device.poll(wgpu::Maintain::Wait);
+            let r_vals = pollster::block_on(self.read_buffer_f32(&res.b_r, num_coupled_cells));
+            if let Some(idx) = r_vals.iter().position(|v| v.is_nan()) {
+                let cell = idx / 3;
+                let component = idx % 3;
+                println!(
+                    "Detected NaN in residual at iter {} (cell {}, component {})",
+                    iter, cell, component
+                );
+
+                let sample = |data: &[f32], name: &str| {
+                    let num_cells = self.num_cells as usize;
+                    let cell = cell.min(num_cells.saturating_sub(1));
+                    let start_cell = cell.saturating_sub(1);
+                    let end_cell = (cell + 2).min(num_cells);
+                    let start_idx = start_cell * 3;
+                    let end_idx = end_cell * 3;
+                    let has_nan = data.iter().any(|v| v.is_nan());
+                    let slice = &data[start_idx..end_idx];
                     println!(
-                        "Detected NaN in residual at iter {} (cell {}, component {})",
-                        iter, cell, component
+                        "{} sample (cells {}-{}): {:?}",
+                        name,
+                        start_cell,
+                        end_cell - 1,
+                        slice
                     );
+                    println!("{} has NaN: {}", name, has_nan);
+                };
 
-                    let sample = |data: &[f32], name: &str| {
-                        let num_cells = self.num_cells as usize;
-                        let cell = cell.min(num_cells.saturating_sub(1));
-                        let start_cell = cell.saturating_sub(1);
-                        let end_cell = (cell + 2).min(num_cells);
-                        let start_idx = start_cell * 3;
-                        let end_idx = end_cell * 3;
-                        let has_nan = data.iter().any(|v| v.is_nan());
-                        let slice = &data[start_idx..end_idx];
-                        println!(
-                            "{} sample (cells {}-{}): {:?}",
-                            name,
-                            start_cell,
-                            end_cell - 1,
-                            slice
-                        );
-                        println!("{} has NaN: {}", name, has_nan);
-                    };
+                let p_vals =
+                    pollster::block_on(self.read_buffer_f32(&res.b_p_solver, num_coupled_cells));
+                let v_vals =
+                    pollster::block_on(self.read_buffer_f32(&res.b_v, num_coupled_cells));
+                let s_vals =
+                    pollster::block_on(self.read_buffer_f32(&res.b_s, num_coupled_cells));
+                let t_vals =
+                    pollster::block_on(self.read_buffer_f32(&res.b_t, num_coupled_cells));
+                let scalars_snapshot =
+                    pollster::block_on(self.read_buffer_f32(&res.b_scalars, 16));
 
-                    let p_vals = pollster::block_on(
-                        self.read_buffer_f32(&res.b_p_solver, num_coupled_cells),
-                    );
-                    let v_vals =
-                        pollster::block_on(self.read_buffer_f32(&res.b_v, num_coupled_cells));
-                    let s_vals =
-                        pollster::block_on(self.read_buffer_f32(&res.b_s, num_coupled_cells));
-                    let t_vals =
-                        pollster::block_on(self.read_buffer_f32(&res.b_t, num_coupled_cells));
-                    let scalars_snapshot =
-                        pollster::block_on(self.read_buffer_f32(&res.b_scalars, 16));
+                sample(&r_vals, "r");
+                sample(&p_vals, "p");
+                sample(&v_vals, "v");
+                sample(&s_vals, "s");
+                sample(&t_vals, "t");
+                let scalar_len = scalars_snapshot.len().min(9);
+                println!("Scalars snapshot: {:?}", &scalars_snapshot[..scalar_len]);
 
-                    sample(&r_vals, "r");
-                    sample(&p_vals, "p");
-                    sample(&v_vals, "v");
-                    sample(&s_vals, "s");
-                    sample(&t_vals, "t");
-                    let scalar_len = scalars_snapshot.len().min(9);
-                    println!("Scalars snapshot: {:?}", &scalars_snapshot[..scalar_len]);
-
-                    nan_detected_at = Some(iter);
-                    final_resid = f32::NAN;
-                    final_iter = iter + 1;
-                    break;
-                }
+                final_resid = f32::NAN;
+                final_iter = iter + 1;
+                break;
             }
 
             // Check convergence every 10 iterations

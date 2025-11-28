@@ -1146,20 +1146,7 @@ impl MultigridSolver {
 
             solver.context.queue.submit(Some(encoder.finish()));
 
-            // Read back counter
-            let b_counter_read = self.create_buffer_copy(
-                device,
-                &solver.context.queue,
-                &b_counter,
-                4,
-                "Read Counter",
-            );
-
-            // We need to map and read. This is async.
-            // For simplicity in this "build" phase, we can block or use a staging buffer.
-            // `create_buffer_copy` creates a STORAGE | COPY_SRC buffer.
-            // We need a MAP_READ buffer.
-
+            // Read back counter by copying into a staging buffer
             let b_staging = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Staging Counter"),
                 size: 4,

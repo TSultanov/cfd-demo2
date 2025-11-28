@@ -175,7 +175,7 @@ impl GpuSolver {
             outer_residual_p: Mutex::new(0.0),
             outer_iterations: Mutex::new(0),
             amg_solver,
-            n_outer_correctors: 100,
+            n_outer_correctors: 20,
             solver_type: super::structs::SolverType::default(),
             coupled_resources: Some(linear_res.coupled_resources),
         }

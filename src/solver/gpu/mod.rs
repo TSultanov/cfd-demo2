@@ -2,6 +2,7 @@ pub mod buffers;
 pub mod context;
 pub mod init;
 pub mod linear_solver;
+pub mod multigrid_solver;
 pub mod solver;
 pub mod structs;
 

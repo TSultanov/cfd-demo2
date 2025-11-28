@@ -158,4 +158,10 @@ pub struct GpuSolver {
     pub outer_residual_u: Mutex<f32>,
     pub outer_residual_p: Mutex<f32>,
     pub outer_iterations: Mutex<u32>,
+
+    // Multigrid
+    // Multigrid
+    pub amg_solver: Option<super::multigrid_solver::MultigridSolver>,
+
+    pub n_outer_correctors: u32,
 }

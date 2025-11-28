@@ -1,3 +1,4 @@
+use crate::solver::gpu::multigrid_solver::CycleType;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuSolver;
 use crate::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh};
@@ -132,6 +133,9 @@ pub struct CFDApp {
     alpha_u: f64,
     alpha_p: f64,
     time_scheme: TimeScheme,
+    amg_cycle_ux: CycleType,
+    amg_cycle_uy: CycleType,
+    amg_cycle_p: CycleType,
 }
 
 impl CFDApp {
@@ -162,6 +166,9 @@ impl CFDApp {
             alpha_u: 0.7,
             alpha_p: 0.3,
             time_scheme: TimeScheme::Euler,
+            amg_cycle_ux: CycleType::VCycle,
+            amg_cycle_uy: CycleType::VCycle,
+            amg_cycle_p: CycleType::WCycle,
         }
     }
 
@@ -193,6 +200,9 @@ impl CFDApp {
         gpu_solver.set_alpha_u(self.alpha_u as f32);
         gpu_solver.set_alpha_p(self.alpha_p as f32);
         gpu_solver.set_time_scheme(self.time_scheme.gpu_id());
+        gpu_solver.set_amg_cycle("Ux", self.amg_cycle_ux);
+        gpu_solver.set_amg_cycle("Uy", self.amg_cycle_uy);
+        gpu_solver.set_amg_cycle("p", self.amg_cycle_p);
         gpu_solver.set_u(&initial_u);
         gpu_solver.set_p(&initial_p);
         gpu_solver.initialize_history();
@@ -319,6 +329,18 @@ impl CFDApp {
 
     fn update_gpu_time_scheme(&self) {
         self.with_gpu_solver(|solver| solver.set_time_scheme(self.time_scheme.gpu_id()));
+    }
+
+    fn update_gpu_amg_ux(&self) {
+        self.with_gpu_solver(|solver| solver.set_amg_cycle("Ux", self.amg_cycle_ux));
+    }
+
+    fn update_gpu_amg_uy(&self) {
+        self.with_gpu_solver(|solver| solver.set_amg_cycle("Uy", self.amg_cycle_uy));
+    }
+
+    fn update_gpu_amg_p(&self) {
+        self.with_gpu_solver(|solver| solver.set_amg_cycle("p", self.amg_cycle_p));
     }
 
     /// Render the CFD mesh using egui's batched mesh for maximum performance
@@ -592,6 +614,113 @@ impl eframe::App for CFDApp {
             });
 
             ui.separator();
+            ui.group(|ui| {
+                ui.label("AMG Settings");
+
+                ui.horizontal(|ui| {
+                    ui.label("Ux:");
+                    egui::ComboBox::from_id_salt("amg_ux")
+                        .selected_text(format!("{:?}", self.amg_cycle_ux))
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(&mut self.amg_cycle_ux, CycleType::None, "None")
+                                .clicked()
+                            {
+                                self.update_gpu_amg_ux();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.amg_cycle_ux,
+                                    CycleType::VCycle,
+                                    "V-Cycle",
+                                )
+                                .clicked()
+                            {
+                                self.update_gpu_amg_ux();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.amg_cycle_ux,
+                                    CycleType::WCycle,
+                                    "W-Cycle",
+                                )
+                                .clicked()
+                            {
+                                self.update_gpu_amg_ux();
+                            }
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Uy:");
+                    egui::ComboBox::from_id_source("amg_uy")
+                        .selected_text(format!("{:?}", self.amg_cycle_uy))
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(&mut self.amg_cycle_uy, CycleType::None, "None")
+                                .clicked()
+                            {
+                                self.update_gpu_amg_uy();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.amg_cycle_uy,
+                                    CycleType::VCycle,
+                                    "V-Cycle",
+                                )
+                                .clicked()
+                            {
+                                self.update_gpu_amg_uy();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.amg_cycle_uy,
+                                    CycleType::WCycle,
+                                    "W-Cycle",
+                                )
+                                .clicked()
+                            {
+                                self.update_gpu_amg_uy();
+                            }
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("P: ");
+                    egui::ComboBox::from_id_source("amg_p")
+                        .selected_text(format!("{:?}", self.amg_cycle_p))
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(&mut self.amg_cycle_p, CycleType::None, "None")
+                                .clicked()
+                            {
+                                self.update_gpu_amg_p();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.amg_cycle_p,
+                                    CycleType::VCycle,
+                                    "V-Cycle",
+                                )
+                                .clicked()
+                            {
+                                self.update_gpu_amg_p();
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.amg_cycle_p,
+                                    CycleType::WCycle,
+                                    "W-Cycle",
+                                )
+                                .clicked()
+                            {
+                                self.update_gpu_amg_p();
+                            }
+                        });
+                });
+            });
+
+            ui.separator();
             ui.label("Time Stepping Scheme");
             egui::ComboBox::from_label("Time Scheme")
                 .selected_text(format!("{:?}", self.time_scheme))
@@ -701,19 +830,6 @@ impl eframe::App for CFDApp {
                 let stats = &self.cached_gpu_stats;
                 ui.label(format!("Time: {:.3}", stats.time));
                 ui.label(format!("dt: {:.2e}", stats.dt));
-                ui.label("GPU Solver Stats:");
-                ui.label(format!(
-                    "Ux: {} iters, res {:.2e}, {:.2?}",
-                    stats.stats_ux.iterations, stats.stats_ux.residual, stats.stats_ux.time
-                ));
-                ui.label(format!(
-                    "Uy: {} iters, res {:.2e}, {:.2?}",
-                    stats.stats_uy.iterations, stats.stats_uy.residual, stats.stats_uy.time
-                ));
-                ui.label(format!(
-                    "P:  {} iters, res {:.2e}, {:.2?}",
-                    stats.stats_p.iterations, stats.stats_p.residual, stats.stats_p.time
-                ));
                 ui.label(format!(
                     "PIMPLE: {} iters, U:{:.2e} P:{:.2e}",
                     stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p

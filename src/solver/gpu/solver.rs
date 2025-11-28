@@ -65,7 +65,32 @@ impl GpuSolver {
         self.update_constants();
     }
 
-    fn update_constants(&self) {
+    pub fn set_amg_cycle(
+        &mut self,
+        field: &str,
+        cycle_type: crate::solver::gpu::multigrid_solver::CycleType,
+    ) {
+        if let Some(amg) = &mut self.amg_solver {
+            match field {
+                "Ux" => amg.cycle_type_ux = cycle_type,
+                "Uy" => amg.cycle_type_uy = cycle_type,
+                "p" => amg.cycle_type_p = cycle_type,
+                _ => println!("Unknown field for AMG cycle: {}", field),
+            }
+            println!("Set AMG cycle for {}: {:?}", field, cycle_type);
+        } else {
+            println!("AMG solver is None, cannot set cycle type");
+        }
+    }
+
+    pub fn set_uniform_u(&self, ux: f64, uy: f64) {
+        let u_data = vec![[ux as f32, uy as f32]; self.num_cells as usize];
+        self.context
+            .queue
+            .write_buffer(&self.b_u, 0, bytemuck::cast_slice(&u_data));
+    }
+
+    pub fn update_constants(&self) {
         self.context
             .queue
             .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
@@ -223,7 +248,7 @@ impl GpuSolver {
         self.initialize_d_p(num_groups_cells);
 
         // PIMPLE Loop (outer iterations with convergence control)
-        let max_outer_iters = 100;
+        let max_outer_iters = self.n_outer_correctors;
         let outer_tol_u = 1e-3;
         let outer_tol_p = 1e-3;
         let stagnation_tolerance = 1e-2;
@@ -309,9 +334,9 @@ impl GpuSolver {
                     self.zero_buffer(&self.b_x, (self.num_cells as u64) * 4);
 
                     let stats = if use_cg_for_p {
-                        pollster::block_on(self.solve_cg("P"))
+                        pollster::block_on(self.solve_cg("p"))
                     } else {
-                        pollster::block_on(self.solve("P"))
+                        pollster::block_on(self.solve("p"))
                     };
 
                     if stats.diverged {

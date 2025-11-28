@@ -59,6 +59,13 @@ impl GpuSolver {
                 entries: &[],
             });
 
+        let amg_solver = Some(super::multigrid_solver::MultigridSolver::new(
+            &context.device,
+            super::multigrid_solver::CycleType::None,
+            super::multigrid_solver::CycleType::None,
+            super::multigrid_solver::CycleType::None,
+        ));
+
         Self {
             context,
             // Mesh
@@ -164,6 +171,8 @@ impl GpuSolver {
             outer_residual_u: Mutex::new(0.0),
             outer_residual_p: Mutex::new(0.0),
             outer_iterations: Mutex::new(0),
+            amg_solver,
+            n_outer_correctors: 100,
         }
     }
 }

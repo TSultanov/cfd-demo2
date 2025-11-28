@@ -252,7 +252,7 @@ impl GpuSolver {
         let outer_tol_u = 1e-3;
         let outer_tol_p = 1e-3;
         let stagnation_tolerance = 1e-2;
-        let stagnation_factor = 1e-2;
+        let stagnation_factor = 1e-2; // relative change threshold
 
         let mut use_cg_for_p = false;
 
@@ -425,9 +425,19 @@ impl GpuSolver {
                         break;
                     }
 
-                    // Stagnation check: if residuals aren't decreasing, stop iterating
-                    let u_stagnated = (max_diff_u - prev_residual_u).abs() < stagnation_factor;
-                    let p_stagnated = (max_diff_p - prev_residual_p).abs() < stagnation_factor;
+                    // Stagnation check: stop if relative residual change drops below threshold
+                    let rel_u = if prev_residual_u.is_finite() && prev_residual_u.abs() > 1e-14 {
+                        ((max_diff_u - prev_residual_u) / prev_residual_u).abs()
+                    } else {
+                        f64::INFINITY
+                    };
+                    let rel_p = if prev_residual_p.is_finite() && prev_residual_p.abs() > 1e-14 {
+                        ((max_diff_p - prev_residual_p) / prev_residual_p).abs()
+                    } else {
+                        f64::INFINITY
+                    };
+                    let u_stagnated = rel_u < stagnation_factor;
+                    let p_stagnated = rel_p < stagnation_factor;
                     if u_stagnated
                         && p_stagnated
                         && outer_iter > 2

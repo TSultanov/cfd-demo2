@@ -22,7 +22,7 @@ impl GpuSolver {
         let abs_tol = 1e-6;
         let rel_tol = 1e-4;
         let stagnation_tolerance = 1e-3;
-        let stagnation_factor = 1e-4;
+        let stagnation_factor = 1e-4; // relative change threshold
         let n = self.num_cells;
         let workgroup_size = 64;
         let num_groups = n.div_ceil(workgroup_size);
@@ -103,13 +103,17 @@ impl GpuSolver {
                     break;
                 }
 
-                // Stagnation check
-                if iter > 0
-                    && (res - prev_res).abs() < stagnation_factor
-                    && res < stagnation_tolerance
-                {
-                    final_iter = iter + 1;
-                    break;
+                // Stagnation check (relative)
+                if iter > 0 {
+                    let rel_change = if prev_res.is_finite() && prev_res > 1e-20 {
+                        ((res - prev_res) / prev_res).abs()
+                    } else {
+                        f32::INFINITY
+                    };
+                    if rel_change < stagnation_factor && res < stagnation_tolerance {
+                        final_iter = iter + 1;
+                        break;
+                    }
                 }
                 prev_res = res;
             }

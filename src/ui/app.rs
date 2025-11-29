@@ -489,428 +489,482 @@ impl CFDApp {
 impl eframe::App for CFDApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::left("controls").show(ctx, |ui| {
-            ui.heading("CFD Controls");
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.heading("CFD Controls");
 
-            ui.group(|ui| {
-                ui.label("Geometry");
-                ui.radio_value(
-                    &mut self.selected_geometry,
-                    GeometryType::BackwardsStep,
-                    "Backwards Step",
-                );
-                ui.radio_value(
-                    &mut self.selected_geometry,
-                    GeometryType::ChannelObstacle,
-                    "Channel w/ Obstacle",
-                );
-            });
+                    ui.group(|ui| {
+                        ui.label("Geometry");
+                        ui.radio_value(
+                            &mut self.selected_geometry,
+                            GeometryType::BackwardsStep,
+                            "Backwards Step",
+                        );
+                        ui.radio_value(
+                            &mut self.selected_geometry,
+                            GeometryType::ChannelObstacle,
+                            "Channel w/ Obstacle",
+                        );
+                    });
 
-            ui.group(|ui| {
-                ui.label("Mesh Parameters");
-                ui.add(
-                    egui::Slider::new(&mut self.min_cell_size, 0.001..=self.max_cell_size)
-                        .text("Min Cell Size"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.max_cell_size, self.min_cell_size..=0.5)
-                        .text("Max Cell Size"),
-                );
-            });
+                    ui.group(|ui| {
+                        ui.label("Mesh Parameters");
+                        ui.add(
+                            egui::Slider::new(&mut self.min_cell_size, 0.001..=self.max_cell_size)
+                                .text("Min Cell Size"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut self.max_cell_size, self.min_cell_size..=0.5)
+                                .text("Max Cell Size"),
+                        );
+                    });
 
-            ui.group(|ui| {
-                ui.label("Fluid Properties");
-                egui::ComboBox::from_label("Preset")
-                    .selected_text(&self.current_fluid.name)
-                    .show_ui(ui, |ui| {
-                        for fluid in Fluid::presets() {
-                            if ui
-                                .selectable_value(
-                                    &mut self.current_fluid,
-                                    fluid.clone(),
-                                    &fluid.name,
-                                )
-                                .clicked()
-                            {
-                                self.update_gpu_fluid();
-                            }
+                    ui.group(|ui| {
+                        ui.label("Fluid Properties");
+                        egui::ComboBox::from_label("Preset")
+                            .selected_text(&self.current_fluid.name)
+                            .show_ui(ui, |ui| {
+                                for fluid in Fluid::presets() {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.current_fluid,
+                                            fluid.clone(),
+                                            &fluid.name,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.update_gpu_fluid();
+                                    }
+                                }
+                            });
+
+                        let mut density = self.current_fluid.density;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut density, 0.1..=20000.0)
+                                    .text("Density (kg/m³)"),
+                            )
+                            .changed()
+                        {
+                            self.current_fluid.density = density;
+                            self.current_fluid.name = "Custom".to_string();
+                            self.update_gpu_fluid();
+                        }
+
+                        let mut viscosity = self.current_fluid.viscosity;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut viscosity, 1e-6..=0.1)
+                                    .logarithmic(true)
+                                    .text("Viscosity (Pa·s)"),
+                            )
+                            .changed()
+                        {
+                            self.current_fluid.viscosity = viscosity;
+                            self.current_fluid.name = "Custom".to_string();
+                            self.update_gpu_fluid();
                         }
                     });
 
-                let mut density = self.current_fluid.density;
-                if ui
-                    .add(egui::Slider::new(&mut density, 0.1..=20000.0).text("Density (kg/m³)"))
-                    .changed()
-                {
-                    self.current_fluid.density = density;
-                    self.current_fluid.name = "Custom".to_string();
-                    self.update_gpu_fluid();
-                }
+                    ui.group(|ui| {
+                        ui.label("Inlet Conditions");
 
-                let mut viscosity = self.current_fluid.viscosity;
-                if ui
-                    .add(
-                        egui::Slider::new(&mut viscosity, 1e-6..=0.1)
-                            .logarithmic(true)
-                            .text("Viscosity (Pa·s)"),
-                    )
-                    .changed()
-                {
-                    self.current_fluid.viscosity = viscosity;
-                    self.current_fluid.name = "Custom".to_string();
-                    self.update_gpu_fluid();
-                }
-            });
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.inlet_velocity, 0.0..=10.0)
+                                    .text("Inlet Velocity (m/s)"),
+                            )
+                            .changed()
+                        {
+                            self.update_gpu_inlet_velocity();
+                        }
 
-            ui.group(|ui| {
-                ui.label("Inlet Conditions");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.ramp_time, 0.0..=5.0)
+                                    .text("Ramp Time (s)"),
+                            )
+                            .changed()
+                        {
+                            self.update_gpu_ramp_time();
+                        }
 
-                if ui
-                    .add(
-                        egui::Slider::new(&mut self.inlet_velocity, 0.0..=10.0)
-                            .text("Inlet Velocity (m/s)"),
-                    )
-                    .changed()
-                {
-                    self.update_gpu_inlet_velocity();
-                }
+                        // Reynolds Number Estimation
+                        let char_length = 1.0; // Characteristic length (channel height)
+                        let re = self.current_fluid.density
+                            * self.inlet_velocity.abs() as f64
+                            * char_length
+                            / self.current_fluid.viscosity;
+                        ui.label(format!("Est. Reynolds Number: {:.0}", re));
+                    });
 
-                if ui
-                    .add(egui::Slider::new(&mut self.ramp_time, 0.0..=5.0).text("Ramp Time (s)"))
-                    .changed()
-                {
-                    self.update_gpu_ramp_time();
-                }
+                    ui.group(|ui| {
+                        ui.label("Solver Parameters");
 
-                // Reynolds Number Estimation
-                let char_length = 1.0; // Characteristic length (channel height)
-                let re =
-                    self.current_fluid.density * self.inlet_velocity.abs() as f64 * char_length
-                        / self.current_fluid.viscosity;
-                ui.label(format!("Est. Reynolds Number: {:.0}", re));
-            });
+                        let recommended_dt = 0.5 * self.min_cell_size;
+                        let cfl = self.timestep / self.min_cell_size;
 
-            ui.group(|ui| {
-                ui.label("Solver Parameters");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.timestep, 0.0001..=0.1)
+                                    .text("Timestep"),
+                            )
+                            .changed()
+                        {
+                            self.update_gpu_dt();
+                        }
 
-                let recommended_dt = 0.5 * self.min_cell_size;
-                let cfl = self.timestep / self.min_cell_size;
+                        ui.checkbox(&mut self.adaptive_dt, "Adaptive Timestep");
+                        if self.adaptive_dt {
+                            ui.add(
+                                egui::Slider::new(&mut self.target_cfl, 0.1..=1.0)
+                                    .text("Target CFL"),
+                            );
+                        }
 
-                if ui
-                    .add(egui::Slider::new(&mut self.timestep, 0.0001..=0.1).text("Timestep"))
-                    .changed()
-                {
-                    self.update_gpu_dt();
-                }
+                        if cfl > 1.0 {
+                            ui.colored_label(
+                                egui::Color32::RED,
+                                format!("⚠ CFL≈{:.1} (>1, may be unstable!)", cfl),
+                            );
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!("Recommended dt ≤ {:.4}", recommended_dt),
+                            );
+                        } else if cfl > 0.5 {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!("CFL≈{:.2} (moderate)", cfl),
+                            );
+                        }
 
-                ui.checkbox(&mut self.adaptive_dt, "Adaptive Timestep");
-                if self.adaptive_dt {
-                    ui.add(egui::Slider::new(&mut self.target_cfl, 0.1..=1.0).text("Target CFL"));
-                }
+                        ui.separator();
+                        ui.label("Discretization Scheme");
+                        if ui
+                            .radio(matches!(self.selected_scheme, Scheme::Upwind), "Upwind")
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::Upwind;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(
+                                matches!(self.selected_scheme, Scheme::SecondOrderUpwind),
+                                "Second Order Upwind",
+                            )
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::SecondOrderUpwind;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(matches!(self.selected_scheme, Scheme::QUICK), "QUICK")
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::QUICK;
+                            self.update_gpu_scheme();
+                        }
 
-                if cfl > 1.0 {
-                    ui.colored_label(
-                        egui::Color32::RED,
-                        format!("⚠ CFL≈{:.1} (>1, may be unstable!)", cfl),
-                    );
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        format!("Recommended dt ≤ {:.4}", recommended_dt),
-                    );
-                } else if cfl > 0.5 {
-                    ui.colored_label(egui::Color32::YELLOW, format!("CFL≈{:.2} (moderate)", cfl));
-                }
+                        ui.separator();
+                        ui.label("Under-Relaxation Factors");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.alpha_u, 0.1..=1.0)
+                                    .text("α_U (Velocity)"),
+                            )
+                            .changed()
+                        {
+                            self.update_gpu_alpha_u();
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.alpha_p, 0.1..=1.0)
+                                    .text("α_P (Pressure)"),
+                            )
+                            .changed()
+                        {
+                            self.update_gpu_alpha_p();
+                        }
+                    });
 
-                ui.separator();
-                ui.label("Discretization Scheme");
-                if ui
-                    .radio(matches!(self.selected_scheme, Scheme::Upwind), "Upwind")
-                    .clicked()
-                {
-                    self.selected_scheme = Scheme::Upwind;
-                    self.update_gpu_scheme();
-                }
-                if ui
-                    .radio(
-                        matches!(self.selected_scheme, Scheme::SecondOrderUpwind),
-                        "Second Order Upwind",
-                    )
-                    .clicked()
-                {
-                    self.selected_scheme = Scheme::SecondOrderUpwind;
-                    self.update_gpu_scheme();
-                }
-                if ui
-                    .radio(matches!(self.selected_scheme, Scheme::QUICK), "QUICK")
-                    .clicked()
-                {
-                    self.selected_scheme = Scheme::QUICK;
-                    self.update_gpu_scheme();
-                }
+                    if matches!(self.solver_type, SolverType::Piso) {
+                        ui.separator();
+                        ui.group(|ui| {
+                            ui.label("AMG Settings");
 
-                ui.separator();
-                ui.label("Under-Relaxation Factors");
-                if ui
-                    .add(egui::Slider::new(&mut self.alpha_u, 0.1..=1.0).text("α_U (Velocity)"))
-                    .changed()
-                {
-                    self.update_gpu_alpha_u();
-                }
-                if ui
-                    .add(egui::Slider::new(&mut self.alpha_p, 0.1..=1.0).text("α_P (Pressure)"))
-                    .changed()
-                {
-                    self.update_gpu_alpha_p();
-                }
-            });
+                            ui.horizontal(|ui| {
+                                ui.label("Ux:");
+                                egui::ComboBox::from_id_salt("amg_ux")
+                                    .selected_text(format!("{:?}", self.amg_cycle_ux))
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_ux,
+                                                CycleType::None,
+                                                "None",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_ux();
+                                        }
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_ux,
+                                                CycleType::VCycle,
+                                                "V-Cycle",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_ux();
+                                        }
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_ux,
+                                                CycleType::WCycle,
+                                                "W-Cycle",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_ux();
+                                        }
+                                    });
+                            });
 
-            ui.separator();
-            ui.group(|ui| {
-                ui.label("AMG Settings");
+                            ui.horizontal(|ui| {
+                                ui.label("Uy:");
+                                egui::ComboBox::from_id_salt("amg_uy")
+                                    .selected_text(format!("{:?}", self.amg_cycle_uy))
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_uy,
+                                                CycleType::None,
+                                                "None",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_uy();
+                                        }
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_uy,
+                                                CycleType::VCycle,
+                                                "V-Cycle",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_uy();
+                                        }
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_uy,
+                                                CycleType::WCycle,
+                                                "W-Cycle",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_uy();
+                                        }
+                                    });
+                            });
 
-                ui.horizontal(|ui| {
-                    ui.label("Ux:");
-                    egui::ComboBox::from_id_salt("amg_ux")
-                        .selected_text(format!("{:?}", self.amg_cycle_ux))
+                            ui.horizontal(|ui| {
+                                ui.label("P: ");
+                                egui::ComboBox::from_id_salt("amg_p")
+                                    .selected_text(format!("{:?}", self.amg_cycle_p))
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_p,
+                                                CycleType::None,
+                                                "None",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_p();
+                                        }
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_p,
+                                                CycleType::VCycle,
+                                                "V-Cycle",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_p();
+                                        }
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.amg_cycle_p,
+                                                CycleType::WCycle,
+                                                "W-Cycle",
+                                            )
+                                            .clicked()
+                                        {
+                                            self.update_gpu_amg_p();
+                                        }
+                                    });
+                            });
+                        });
+                    }
+
+                    ui.separator();
+                    ui.label("Time Stepping Scheme");
+                    egui::ComboBox::from_label("Time Scheme")
+                        .selected_text(format!("{:?}", self.time_scheme))
                         .show_ui(ui, |ui| {
                             if ui
-                                .selectable_value(&mut self.amg_cycle_ux, CycleType::None, "None")
+                                .selectable_value(&mut self.time_scheme, TimeScheme::Euler, "Euler")
                                 .clicked()
                             {
-                                self.update_gpu_amg_ux();
+                                self.update_gpu_time_scheme();
                             }
                             if ui
-                                .selectable_value(
-                                    &mut self.amg_cycle_ux,
-                                    CycleType::VCycle,
-                                    "V-Cycle",
-                                )
+                                .selectable_value(&mut self.time_scheme, TimeScheme::BDF2, "BDF2")
                                 .clicked()
                             {
-                                self.update_gpu_amg_ux();
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut self.amg_cycle_ux,
-                                    CycleType::WCycle,
-                                    "W-Cycle",
-                                )
-                                .clicked()
-                            {
-                                self.update_gpu_amg_ux();
+                                self.update_gpu_time_scheme();
                             }
                         });
-                });
 
-                ui.horizontal(|ui| {
-                    ui.label("Uy:");
-                    egui::ComboBox::from_id_salt("amg_uy")
-                        .selected_text(format!("{:?}", self.amg_cycle_uy))
+                    ui.separator();
+                    ui.label("Pressure-Velocity Coupling");
+                    egui::ComboBox::from_label("Solver Type")
+                        .selected_text(format!("{:?}", self.solver_type))
                         .show_ui(ui, |ui| {
                             if ui
-                                .selectable_value(&mut self.amg_cycle_uy, CycleType::None, "None")
+                                .selectable_value(&mut self.solver_type, SolverType::Piso, "PISO")
                                 .clicked()
                             {
-                                self.update_gpu_amg_uy();
+                                self.update_gpu_solver_type();
                             }
                             if ui
                                 .selectable_value(
-                                    &mut self.amg_cycle_uy,
-                                    CycleType::VCycle,
-                                    "V-Cycle",
+                                    &mut self.solver_type,
+                                    SolverType::Coupled,
+                                    "Coupled",
                                 )
                                 .clicked()
                             {
-                                self.update_gpu_amg_uy();
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut self.amg_cycle_uy,
-                                    CycleType::WCycle,
-                                    "W-Cycle",
-                                )
-                                .clicked()
-                            {
-                                self.update_gpu_amg_uy();
+                                self.update_gpu_solver_type();
                             }
                         });
-                });
 
-                ui.horizontal(|ui| {
-                    ui.label("P: ");
-                    egui::ComboBox::from_id_salt("amg_p")
-                        .selected_text(format!("{:?}", self.amg_cycle_p))
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_value(&mut self.amg_cycle_p, CycleType::None, "None")
-                                .clicked()
-                            {
-                                self.update_gpu_amg_p();
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut self.amg_cycle_p,
-                                    CycleType::VCycle,
-                                    "V-Cycle",
-                                )
-                                .clicked()
-                            {
-                                self.update_gpu_amg_p();
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut self.amg_cycle_p,
-                                    CycleType::WCycle,
-                                    "W-Cycle",
-                                )
-                                .clicked()
-                            {
-                                self.update_gpu_amg_p();
-                            }
-                        });
-                });
-            });
-
-            ui.separator();
-            ui.label("Time Stepping Scheme");
-            egui::ComboBox::from_label("Time Scheme")
-                .selected_text(format!("{:?}", self.time_scheme))
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(&mut self.time_scheme, TimeScheme::Euler, "Euler")
-                        .clicked()
-                    {
-                        self.update_gpu_time_scheme();
+                    if ui.button("Initialize / Reset").clicked() {
+                        self.init_solver();
                     }
-                    if ui
-                        .selectable_value(&mut self.time_scheme, TimeScheme::BDF2, "BDF2")
-                        .clicked()
+
+                    if self.gpu_solver.is_some()
+                        && ui
+                            .button(if self.is_running { "Pause" } else { "Run" })
+                            .clicked()
                     {
-                        self.update_gpu_time_scheme();
-                    }
-                });
+                        self.is_running = !self.is_running;
 
-            ui.separator();
-            ui.label("Pressure-Velocity Coupling");
-            egui::ComboBox::from_label("Solver Type")
-                .selected_text(format!("{:?}", self.solver_type))
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(&mut self.solver_type, SolverType::Piso, "PISO")
-                        .clicked()
-                    {
-                        self.update_gpu_solver_type();
-                    }
-                    if ui
-                        .selectable_value(&mut self.solver_type, SolverType::Coupled, "Coupled")
-                        .clicked()
-                    {
-                        self.update_gpu_solver_type();
-                    }
-                });
+                        if let Some(gpu_solver) = &self.gpu_solver {
+                            if self.is_running {
+                                self.gpu_solver_running.store(true, Ordering::Relaxed);
+                                let solver_arc = gpu_solver.clone();
+                                let running_flag = self.gpu_solver_running.clone();
+                                let shared_results = self.shared_results.clone();
+                                let shared_gpu_stats = self.shared_gpu_stats.clone();
+                                let ctx_clone = ctx.clone();
+                                let adaptive_dt_clone = self.adaptive_dt;
+                                let target_cfl_clone = self.target_cfl;
+                                let min_cell_size_clone = self.actual_min_cell_size;
+                                thread::spawn(move || {
+                                    while running_flag.load(Ordering::Relaxed) {
+                                        if let Ok(mut solver) = solver_arc.lock() {
+                                            solver.step();
+                                            let u = pollster::block_on(solver.get_u());
+                                            let p = pollster::block_on(solver.get_p());
 
-            if ui.button("Initialize / Reset").clicked() {
-                self.init_solver();
-            }
+                                            if adaptive_dt_clone {
+                                                let mut max_vel = 0.0f64;
+                                                for (vx, vy) in &u {
+                                                    let v = (vx.powi(2) + vy.powi(2)).sqrt();
+                                                    if v > max_vel {
+                                                        max_vel = v;
+                                                    }
+                                                }
 
-            if self.gpu_solver.is_some()
-                && ui
-                    .button(if self.is_running { "Pause" } else { "Run" })
-                    .clicked()
-            {
-                self.is_running = !self.is_running;
+                                                if max_vel > 1e-6 {
+                                                    let current_dt = solver.constants.dt as f64;
+                                                    let mut next_dt = target_cfl_clone
+                                                        * min_cell_size_clone
+                                                        / max_vel;
 
-                if let Some(gpu_solver) = &self.gpu_solver {
-                    if self.is_running {
-                        self.gpu_solver_running.store(true, Ordering::Relaxed);
-                        let solver_arc = gpu_solver.clone();
-                        let running_flag = self.gpu_solver_running.clone();
-                        let shared_results = self.shared_results.clone();
-                        let shared_gpu_stats = self.shared_gpu_stats.clone();
-                        let ctx_clone = ctx.clone();
-                        let adaptive_dt_clone = self.adaptive_dt;
-                        let target_cfl_clone = self.target_cfl;
-                        let min_cell_size_clone = self.actual_min_cell_size;
-                        thread::spawn(move || {
-                            while running_flag.load(Ordering::Relaxed) {
-                                if let Ok(mut solver) = solver_arc.lock() {
-                                    solver.step();
-                                    let u = pollster::block_on(solver.get_u());
-                                    let p = pollster::block_on(solver.get_p());
+                                                    // Limit increase to 1.2x to prevent shock
+                                                    if next_dt > current_dt * 1.2 {
+                                                        next_dt = current_dt * 1.2;
+                                                    }
 
-                                    if adaptive_dt_clone {
-                                        let mut max_vel = 0.0f64;
-                                        for (vx, vy) in &u {
-                                            let v = (vx.powi(2) + vy.powi(2)).sqrt();
-                                            if v > max_vel {
-                                                max_vel = v;
+                                                    next_dt = next_dt.clamp(1e-9, 0.1);
+                                                    solver.set_dt(next_dt as f32);
+                                                }
+                                            }
+
+                                            let stats = CachedGpuStats {
+                                                time: solver.constants.time,
+                                                dt: solver.constants.dt,
+                                                stats_ux: *solver.stats_ux.lock().unwrap(),
+                                                stats_uy: *solver.stats_uy.lock().unwrap(),
+                                                stats_p: *solver.stats_p.lock().unwrap(),
+                                                outer_residual_u: *solver
+                                                    .outer_residual_u
+                                                    .lock()
+                                                    .unwrap(),
+                                                outer_residual_p: *solver
+                                                    .outer_residual_p
+                                                    .lock()
+                                                    .unwrap(),
+                                                outer_iterations: *solver
+                                                    .outer_iterations
+                                                    .lock()
+                                                    .unwrap(),
+                                            };
+
+                                            if let Ok(mut results) = shared_results.lock() {
+                                                *results = Some((u, p));
+                                            }
+                                            if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
+                                                *gpu_stats = stats;
                                             }
                                         }
-
-                                        if max_vel > 1e-6 {
-                                            let current_dt = solver.constants.dt as f64;
-                                            let mut next_dt =
-                                                target_cfl_clone * min_cell_size_clone / max_vel;
-
-                                            // Limit increase to 1.2x to prevent shock
-                                            if next_dt > current_dt * 1.2 {
-                                                next_dt = current_dt * 1.2;
-                                            }
-
-                                            next_dt = next_dt.clamp(1e-9, 0.1);
-                                            solver.set_dt(next_dt as f32);
-                                        }
+                                        ctx_clone.request_repaint();
+                                        thread::sleep(std::time::Duration::from_millis(1));
                                     }
-
-                                    let stats = CachedGpuStats {
-                                        time: solver.constants.time,
-                                        dt: solver.constants.dt,
-                                        stats_ux: *solver.stats_ux.lock().unwrap(),
-                                        stats_uy: *solver.stats_uy.lock().unwrap(),
-                                        stats_p: *solver.stats_p.lock().unwrap(),
-                                        outer_residual_u: *solver.outer_residual_u.lock().unwrap(),
-                                        outer_residual_p: *solver.outer_residual_p.lock().unwrap(),
-                                        outer_iterations: *solver.outer_iterations.lock().unwrap(),
-                                    };
-
-                                    if let Ok(mut results) = shared_results.lock() {
-                                        *results = Some((u, p));
-                                    }
-                                    if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
-                                        *gpu_stats = stats;
-                                    }
-                                }
-                                ctx_clone.request_repaint();
-                                thread::sleep(std::time::Duration::from_millis(1));
+                                });
+                            } else {
+                                self.gpu_solver_running.store(false, Ordering::Relaxed);
                             }
-                        });
-                    } else {
-                        self.gpu_solver_running.store(false, Ordering::Relaxed);
+                        }
                     }
-                }
-            }
 
-            ui.separator();
+                    ui.separator();
 
-            if self.gpu_solver.is_some() {
-                if let Ok(stats) = self.shared_gpu_stats.try_lock() {
-                    self.cached_gpu_stats = stats.clone();
-                }
+                    if self.gpu_solver.is_some() {
+                        if let Ok(stats) = self.shared_gpu_stats.try_lock() {
+                            self.cached_gpu_stats = stats.clone();
+                        }
 
-                let stats = &self.cached_gpu_stats;
-                ui.label(format!("Time: {:.3}", stats.time));
-                ui.label(format!("dt: {:.2e}", stats.dt));
-                let solver_name = match self.solver_type {
-                    SolverType::Piso => "PIMPLE",
-                    SolverType::Coupled => "Coupled",
-                };
-                ui.label(format!(
-                    "{}: {} iters, U:{:.2e} P:{:.2e}",
-                    solver_name,
-                    stats.outer_iterations,
-                    stats.outer_residual_u,
-                    stats.outer_residual_p
-                ));
-            }
+                        let stats = &self.cached_gpu_stats;
+                        ui.label(format!("Time: {:.3}", stats.time));
+                        ui.label(format!("dt: {:.2e}", stats.dt));
+                        let solver_name = match self.solver_type {
+                            SolverType::Piso => "PIMPLE",
+                            SolverType::Coupled => "Coupled",
+                        };
+                        ui.label(format!(
+                            "{}: {} iters, U:{:.2e} P:{:.2e}",
+                            solver_name,
+                            stats.outer_iterations,
+                            stats.outer_residual_u,
+                            stats.outer_residual_p
+                        ));
+                    }
+                });
         });
 
         let (min_val, max_val, values) = if self.gpu_solver.is_some() {

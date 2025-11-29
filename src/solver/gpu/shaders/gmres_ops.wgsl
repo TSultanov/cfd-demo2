@@ -260,3 +260,45 @@ fn orthogonalize(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // vec_y is w (to be modified), vec_x is v (orthogonal vector)
     vec_y[idx] = vec_y[idx] - h * vec_x[idx];
 }
+
+struct IterParams {
+    current_idx: u32, // Target index in Hessenberg matrix
+    max_restart: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+@group(3) @binding(2) var<uniform> iter_params: IterParams;
+@group(3) @binding(3) var<storage, read_write> hessenberg: array<f32>;
+
+// Final reduction: sums partial results from workgroups and writes to H and scalars
+@compute @workgroup_size(1)
+fn reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // Sum up all partial sums
+    // We assume the number of workgroups is small enough (e.g. < 1024) 
+    // that a single thread can sum them up efficiently.
+    // The partial_sums buffer is reused here as input (bound as vec_x or similar, 
+    // but actually we need to bind the partial sums buffer specifically).
+    
+    // Wait, we need to bind the partial sums buffer. 
+    // In the Rust code, we will bind `b_dot_partial` to binding 0 (vec_x) of Group 0.
+    // So we can read from `vec_x`.
+    
+    // We need to know how many partial sums there are.
+    // This can be passed in `params.n` (reused) or `iter_params`.
+    // Let's assume `params.n` holds the number of workgroups for this dispatch.
+    
+    var total_sum = 0.0;
+    let num_partials = params.n; // Hack: we set n to num_dot_groups for this dispatch
+    
+    for (var i = 0u; i < num_partials; i++) {
+        total_sum += vec_x[i];
+    }
+    
+    // Write to scalars[0] for orthogonalize
+    scalars[0] = total_sum;
+    
+    // Write to Hessenberg matrix
+    // iter_params.current_idx is the flat index in H
+    hessenberg[iter_params.current_idx] = total_sum;
+}

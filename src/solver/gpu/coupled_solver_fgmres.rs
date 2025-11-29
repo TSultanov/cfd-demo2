@@ -90,6 +90,24 @@ pub struct FgmresResources {
     pub pipeline_form_schur: wgpu::ComputePipeline,
     pub pipeline_relax_pressure: wgpu::ComputePipeline,
     pub pipeline_correct_vel: wgpu::ComputePipeline,
+
+    // New resources for GPU-only logic
+    pub b_hessenberg: wgpu::Buffer,
+    pub b_givens: wgpu::Buffer,
+    pub b_g: wgpu::Buffer,
+    pub b_y: wgpu::Buffer,
+    pub b_iter_params: wgpu::Buffer,
+
+    pub bgl_logic: wgpu::BindGroupLayout,
+    pub bgl_logic_params: wgpu::BindGroupLayout,
+    pub bg_logic: wgpu::BindGroup,
+    pub bg_logic_params: wgpu::BindGroup,
+
+    pub pipeline_reduce_final: wgpu::ComputePipeline,
+    pub pipeline_update_hessenberg: wgpu::ComputePipeline,
+    pub pipeline_solve_triangular: wgpu::ComputePipeline,
+    pub pipeline_copy_scalar: wgpu::ComputePipeline,
+    pub pipeline_finish_norm: wgpu::ComputePipeline,
 }
 
 #[repr(C)]
@@ -99,6 +117,15 @@ struct RawFgmresParams {
     num_cells: u32,
     num_iters: u32,
     omega: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct IterParams {
+    current_idx: u32,
+    max_restart: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 impl GpuSolver {
@@ -228,6 +255,45 @@ impl GpuSolver {
             omega: 1.0,
         };
         queue.write_buffer(&b_params, 0, bytes_of(&params));
+
+        let b_hessenberg = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES Hessenberg"),
+            size: ((max_restart + 1) * max_restart * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let b_givens = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES Givens"),
+            size: (max_restart * 2 * 4) as u64, // vec2<f32> per restart
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let b_g = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES RHS g"),
+            size: ((max_restart + 1) * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let b_y = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES Solution y"),
+            size: (max_restart * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_iter_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES Iter Params"),
+            size: std::mem::size_of::<IterParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         // Create Pressure Matrix Bind Group Layout
         let bgl_pressure_matrix =
@@ -389,6 +455,7 @@ impl GpuSolver {
             ],
         });
 
+        // Update bgl_params to include iter_params and hessenberg
         let bgl_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("FGMRES Params BGL"),
             entries: &[
@@ -412,74 +479,29 @@ impl GpuSolver {
                     },
                     count: None,
                 },
+                // New bindings
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
-
-        let pipeline_layout_gmres =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("FGMRES GMRES Pipeline Layout"),
-                bind_group_layouts: &[&bgl_vectors, &bgl_matrix, &bgl_precond, &bgl_params],
-                push_constant_ranges: &[],
-            });
-
-        let pipeline_layout_schur =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("FGMRES Schur Pipeline Layout"),
-                bind_group_layouts: &[
-                    &bgl_vectors,
-                    &bgl_matrix,
-                    &bgl_precond,
-                    &bgl_pressure_matrix,
-                ],
-                push_constant_ranges: &[],
-            });
-
-        let shader_ops = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("FGMRES Ops Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_ops.wgsl").into()),
-        });
-
-        let shader_schur = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Schur Precond Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/schur_precond.wgsl").into()),
-        });
-
-        let make_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_gmres),
-                module: &shader_ops,
-                entry_point: entry,
-            })
-        };
-
-        let make_schur_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_schur),
-                module: &shader_schur,
-                entry_point: entry,
-            })
-        };
-
-        let pipeline_spmv = make_pipeline("FGMRES SpMV", "spmv");
-        let pipeline_axpy = make_pipeline("FGMRES AXPY", "axpy");
-        let pipeline_axpby = make_pipeline("FGMRES AXPBY", "axpby");
-        let pipeline_scale = make_pipeline("FGMRES Scale", "scale");
-        let pipeline_scale_in_place = make_pipeline("FGMRES Scale In Place", "scale_in_place");
-        let pipeline_copy = make_pipeline("FGMRES Copy", "copy");
-        // let pipeline_precond = make_pipeline("FGMRES Precond", "block_jacobi_precond"); // Replaced by Schur
-        let pipeline_precond = make_schur_pipeline("Schur Predict", "predict_velocity"); // Placeholder for struct
-
-        let pipeline_dot_partial = make_pipeline("FGMRES Dot Partial", "dot_product_partial");
-        let pipeline_norm_sq = make_pipeline("FGMRES Norm Partial", "norm_sq_partial");
-        let pipeline_orthogonalize = make_pipeline("FGMRES Orthogonalize", "orthogonalize");
-
-        let pipeline_predict_vel = make_schur_pipeline("Schur Predict", "predict_velocity");
-        let pipeline_form_schur = make_schur_pipeline("Schur Form RHS", "form_schur_rhs");
-        let pipeline_relax_pressure = make_schur_pipeline("Schur Relax P", "relax_pressure");
-        let pipeline_correct_vel = make_schur_pipeline("Schur Correct Vel", "correct_velocity");
-        let pipeline_extract_diag = make_schur_pipeline("Schur Extract Diag", "extract_diagonals");
 
         let bg_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("FGMRES Matrix BG"),
@@ -535,6 +557,14 @@ impl GpuSolver {
                     binding: 1,
                     resource: b_scalars.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_iter_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
             ],
         });
 
@@ -556,6 +586,219 @@ impl GpuSolver {
                 },
             ],
         });
+
+        // New Logic BGL
+        let bgl_logic = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("FGMRES Logic BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Logic Params BGL (Group 1 for logic shader)
+        // It needs iter_params (Uniform) and scalars (Storage)
+        // We can reuse bgl_params if we are careful, but bgl_params has 4 bindings now.
+        // The logic shader expects Group 1 to have 2 bindings.
+        // So we need a separate layout or modify the shader to match bgl_params.
+        // Let's create a separate small layout for logic params to match gmres_logic.wgsl
+
+        let bgl_logic_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("FGMRES Logic Params BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg_logic = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("FGMRES Logic BG"),
+            layout: &bgl_logic,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_givens.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_g.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_y.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_logic_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("FGMRES Logic Params BG"),
+            layout: &bgl_logic_params,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_iter_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+            ],
+        });
+
+        let pipeline_layout_gmres =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("FGMRES GMRES Pipeline Layout"),
+                bind_group_layouts: &[&bgl_vectors, &bgl_matrix, &bgl_precond, &bgl_params],
+                push_constant_ranges: &[],
+            });
+
+        let pipeline_layout_logic =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("FGMRES Logic Pipeline Layout"),
+                bind_group_layouts: &[&bgl_logic, &bgl_logic_params],
+                push_constant_ranges: &[],
+            });
+
+        let pipeline_layout_schur =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("FGMRES Schur Pipeline Layout"),
+                bind_group_layouts: &[
+                    &bgl_vectors,
+                    &bgl_matrix,
+                    &bgl_precond,
+                    &bgl_pressure_matrix,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let shader_ops = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("FGMRES Ops Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_ops.wgsl").into()),
+        });
+
+        let shader_schur = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Schur Precond Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/schur_precond.wgsl").into()),
+        });
+
+        let shader_logic = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("FGMRES Logic Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_logic.wgsl").into()),
+        });
+
+        let make_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_gmres),
+                module: &shader_ops,
+                entry_point: entry,
+            })
+        };
+
+        let make_schur_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_schur),
+                module: &shader_schur,
+                entry_point: entry,
+            })
+        };
+
+        let make_logic_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_logic),
+                module: &shader_logic,
+                entry_point: entry,
+            })
+        };
+
+        let pipeline_spmv = make_pipeline("FGMRES SpMV", "spmv");
+        let pipeline_axpy = make_pipeline("FGMRES AXPY", "axpy");
+        let pipeline_axpby = make_pipeline("FGMRES AXPBY", "axpby");
+        let pipeline_scale = make_pipeline("FGMRES Scale", "scale");
+        let pipeline_scale_in_place = make_pipeline("FGMRES Scale In Place", "scale_in_place");
+        let pipeline_copy = make_pipeline("FGMRES Copy", "copy");
+        // let pipeline_precond = make_pipeline("FGMRES Precond", "block_jacobi_precond"); // Replaced by Schur
+        let pipeline_precond = make_schur_pipeline("Schur Predict", "predict_velocity"); // Placeholder for struct
+
+        let pipeline_dot_partial = make_pipeline("FGMRES Dot Partial", "dot_product_partial");
+        let pipeline_norm_sq = make_pipeline("FGMRES Norm Partial", "norm_sq_partial");
+        let pipeline_orthogonalize = make_pipeline("FGMRES Orthogonalize", "orthogonalize");
+
+        let pipeline_predict_vel = make_schur_pipeline("Schur Predict", "predict_velocity");
+        let pipeline_form_schur = make_schur_pipeline("Schur Form RHS", "form_schur_rhs");
+        let pipeline_relax_pressure = make_schur_pipeline("Schur Relax P", "relax_pressure");
+        let pipeline_correct_vel = make_schur_pipeline("Schur Correct Vel", "correct_velocity");
+        let pipeline_extract_diag = make_schur_pipeline("Schur Extract Diag", "extract_diagonals");
+
+        let pipeline_reduce_final = make_pipeline("FGMRES Reduce Final", "reduce_final");
+        let pipeline_update_hessenberg =
+            make_logic_pipeline("FGMRES Update Hessenberg", "update_hessenberg_givens");
+        let pipeline_solve_triangular =
+            make_logic_pipeline("FGMRES Solve Triangular", "solve_triangular");
+        let pipeline_copy_scalar = make_logic_pipeline("FGMRES Copy Scalar", "copy_scalar");
+        let pipeline_finish_norm = make_logic_pipeline("FGMRES Finish Norm", "finish_norm");
 
         FgmresResources {
             basis_vectors,
@@ -595,6 +838,21 @@ impl GpuSolver {
             pipeline_form_schur,
             pipeline_relax_pressure,
             pipeline_correct_vel,
+            // New
+            b_hessenberg,
+            b_givens,
+            b_g,
+            b_y,
+            b_iter_params,
+            bgl_logic,
+            bgl_logic_params,
+            bg_logic,
+            bg_logic_params,
+            pipeline_reduce_final,
+            pipeline_update_hessenberg,
+            pipeline_solve_triangular,
+            pipeline_copy_scalar,
+            pipeline_finish_norm,
         }
     }
 
@@ -779,6 +1037,33 @@ impl GpuSolver {
     }
 
     /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
+    fn dispatch_logic_pipeline(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        fgmres: &FgmresResources,
+        workgroups: u32,
+        label: &str,
+    ) {
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(label),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &fgmres.bg_logic, &[]);
+            pass.set_bind_group(1, &fgmres.bg_logic_params, &[]);
+            pass.dispatch_workgroups(workgroups, 1, 1);
+        }
+
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
     pub fn solve_coupled_fgmres(&mut self) -> LinearSolverStats {
         let start_time = Instant::now();
         if self.coupled_resources.is_none() {
@@ -795,21 +1080,30 @@ impl GpuSolver {
 
         self.ensure_fgmres_resources(max_restart);
         let Some(res) = &self.coupled_resources else {
-            println!("Coupled resources not initialized!");
             return LinearSolverStats::default();
         };
         let Some(fgmres) = &self.fgmres_resources else {
-            println!("FGMRES resources not initialized!");
             return LinearSolverStats::default();
         };
 
         let workgroups_dofs = self.workgroups_for_size(n);
         let workgroups_cells = self.workgroups_for_size(num_cells);
 
+        // Initialize IterParams
+        let mut iter_params = IterParams {
+            current_idx: 0,
+            max_restart: max_restart as u32,
+            _pad1: 0,
+            _pad2: 0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+
         let precond_params = PreconditionerParams {
-            n: 0, // Updated per iteration if needed, but Schur doesn't use n for now
+            n: 0,
             num_cells: self.num_cells,
-            omega: 0.7, // Pressure relaxation factor
+            omega: 0.7,
             _pad: 0,
         };
         self.context.queue.write_buffer(
@@ -818,7 +1112,7 @@ impl GpuSolver {
             bytemuck::bytes_of(&precond_params),
         );
 
-        // Refresh block diagonals for the current coupled matrix
+        // Refresh block diagonals
         let diag_bg = self.create_vector_bind_group(
             fgmres,
             &res.b_rhs,
@@ -837,7 +1131,6 @@ impl GpuSolver {
 
         let rhs_norm = self.gpu_norm(fgmres, &res.b_rhs, n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
-            // println!("FGMRES: RHS norm is {:.2e} - nothing to solve", rhs_norm);
             return LinearSolverStats {
                 iterations: 0,
                 residual: rhs_norm,
@@ -846,13 +1139,6 @@ impl GpuSolver {
                 time: start_time.elapsed(),
             };
         }
-
-        // Storage for Hessenberg matrix and Givens rotations (column-major H)
-        let mut h = vec![0.0f32; (max_restart + 1) * max_restart];
-        let mut cs = vec![0.0f32; max_restart];
-        let mut sn = vec![0.0f32; max_restart];
-        let mut g = vec![0.0f32; max_restart + 1];
-        let mut y = vec![0.0f32; max_restart];
 
         let h_idx = |row: usize, col: usize| -> usize { col * (max_restart + 1) + row };
 
@@ -885,8 +1171,13 @@ impl GpuSolver {
             "FGMRES Normalize V0",
         );
 
-        g.fill(0.0);
-        g[0] = residual_norm;
+        // Initialize g on GPU
+        let mut g_initial = vec![0.0f32; max_restart + 1];
+        g_initial[0] = residual_norm;
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_g, 0, cast_slice(&g_initial));
+
         let mut total_iters = 0u32;
         let mut final_resid = residual_norm;
         let mut converged = false;
@@ -903,14 +1194,12 @@ impl GpuSolver {
                 basis_size = j + 1;
                 total_iters += 1;
 
-                // Schur Complement Preconditioner Steps
-
-                // 1. Predict Velocity: z_u = D_u^{-1} r_u
+                // 1. Predict Velocity
                 let precond_bg = self.create_vector_bind_group(
                     fgmres,
-                    &fgmres.basis_vectors[j], // Binding 0: r_in
-                    &fgmres.z_vectors[j],     // Binding 1: z_out
-                    &fgmres.b_temp_p,         // Binding 2: temp_p
+                    &fgmres.basis_vectors[j],
+                    &fgmres.z_vectors[j],
+                    &fgmres.b_temp_p,
                     "FGMRES Preconditioner BG",
                 );
 
@@ -922,7 +1211,7 @@ impl GpuSolver {
                     workgroups_cells,
                     "Schur Predict",
                 );
-                // 2. Form Schur RHS: r_p' = r_p - D z_u
+                // 2. Form Schur RHS
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_form_schur,
                     fgmres,
@@ -932,8 +1221,7 @@ impl GpuSolver {
                     "Schur Form RHS",
                 );
 
-                // 3. Relax Pressure: Solve S z_p = r_p'
-                // Run a few iterations of Jacobi
+                // 3. Relax Pressure
                 let p_iters = 20;
                 for _ in 0..p_iters {
                     self.dispatch_vector_pipeline(
@@ -946,7 +1234,7 @@ impl GpuSolver {
                     );
                 }
 
-                // 4. Correct Velocity: z_u = z_u - D_u^{-1} G z_p
+                // 4. Correct Velocity
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_correct_vel,
                     fgmres,
@@ -955,6 +1243,7 @@ impl GpuSolver {
                     workgroups_cells,
                     "Schur Correct Vel",
                 );
+
                 // w = A * z_j
                 let spmv_bg = self.create_vector_bind_group(
                     fgmres,
@@ -972,12 +1261,73 @@ impl GpuSolver {
                     "FGMRES SpMV",
                 );
 
-                // Modified Gram-Schmidt
+                // Modified Gram-Schmidt on GPU
                 for i in 0..=j {
-                    let hij = self.gpu_dot(fgmres, &fgmres.b_w, &fgmres.basis_vectors[i], n);
-                    h[h_idx(i, j)] = hij;
+                    // Update iter_params for i
+                    iter_params.current_idx = h_idx(i, j) as u32;
+                    self.context.queue.write_buffer(
+                        &fgmres.b_iter_params,
+                        0,
+                        bytes_of(&iter_params),
+                    );
 
-                    self.write_scalars(fgmres, &[hij]);
+                    // 1. Dot product partial
+                    let dot_bg = self.create_vector_bind_group(
+                        fgmres,
+                        &fgmres.b_w,
+                        &fgmres.basis_vectors[i],
+                        &fgmres.b_dot_partial,
+                        "FGMRES Dot Partial BG",
+                    );
+                    self.dispatch_vector_pipeline(
+                        &fgmres.pipeline_dot_partial,
+                        fgmres,
+                        &dot_bg,
+                        &fgmres.bg_params,
+                        fgmres.num_dot_groups,
+                        "FGMRES Dot Partial",
+                    );
+
+                    // 2. Reduce Final (sums partials, writes to H[i,j] and scalars[0])
+                    let reduce_bg = self.create_vector_bind_group(
+                        fgmres,
+                        &fgmres.b_dot_partial,
+                        &fgmres.b_temp,
+                        &fgmres.b_temp,
+                        "FGMRES Reduce BG",
+                    );
+
+                    let reduce_params = RawFgmresParams {
+                        n: fgmres.num_dot_groups,
+                        num_cells: 0,
+                        num_iters: 0,
+                        omega: 0.0,
+                    };
+                    self.context
+                        .queue
+                        .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+
+                    self.dispatch_vector_pipeline(
+                        &fgmres.pipeline_reduce_final,
+                        fgmres,
+                        &reduce_bg,
+                        &fgmres.bg_params,
+                        1,
+                        "FGMRES Reduce Final",
+                    );
+
+                    // Restore params.n
+                    let restore_params = RawFgmresParams {
+                        n,
+                        num_cells: self.num_cells,
+                        num_iters: 2,
+                        omega: 1.0,
+                    };
+                    self.context
+                        .queue
+                        .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
+
+                    // 3. Orthogonalize
                     let ortho_bg = self.create_vector_bind_group(
                         fgmres,
                         &fgmres.basis_vectors[i],
@@ -995,17 +1345,77 @@ impl GpuSolver {
                     );
                 }
 
-                let w_norm = self.gpu_norm(fgmres, &fgmres.b_w, n);
-                h[h_idx(j + 1, j)] = w_norm;
+                // Compute norm of w (H[j+1, j])
+                iter_params.current_idx = h_idx(j + 1, j) as u32;
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
 
-                if w_norm < 1e-12 {
-                    println!("FGMRES: Happy breakdown at iter {}", total_iters);
-                    basis_size = j + 1;
-                    break;
-                }
+                // Norm squared partial
+                let norm_bg = self.create_vector_bind_group(
+                    fgmres,
+                    &fgmres.b_w,
+                    &fgmres.b_temp,
+                    &fgmres.b_dot_partial,
+                    "FGMRES Norm BG",
+                );
+                self.dispatch_vector_pipeline(
+                    &fgmres.pipeline_norm_sq,
+                    fgmres,
+                    &norm_bg,
+                    &fgmres.bg_params,
+                    fgmres.num_dot_groups,
+                    "FGMRES Norm Partial",
+                );
 
-                // Normalize w and store as next basis vector
-                self.write_scalars(fgmres, &[1.0 / w_norm]);
+                // Reduce Final (writes to scalars[0])
+                let reduce_params = RawFgmresParams {
+                    n: fgmres.num_dot_groups,
+                    num_cells: 0,
+                    num_iters: 0,
+                    omega: 0.0,
+                };
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+
+                let reduce_bg = self.create_vector_bind_group(
+                    fgmres,
+                    &fgmres.b_dot_partial,
+                    &fgmres.b_temp,
+                    &fgmres.b_temp,
+                    "FGMRES Reduce BG",
+                );
+
+                self.dispatch_vector_pipeline(
+                    &fgmres.pipeline_reduce_final,
+                    fgmres,
+                    &reduce_bg,
+                    &fgmres.bg_params,
+                    1,
+                    "FGMRES Reduce Final",
+                );
+
+                // Finish Norm (sqrt, write to H, write 1/norm to scalars[0])
+                self.dispatch_logic_pipeline(
+                    &fgmres.pipeline_finish_norm,
+                    fgmres,
+                    1,
+                    "FGMRES Finish Norm",
+                );
+
+                // Restore params.n
+                let restore_params = RawFgmresParams {
+                    n,
+                    num_cells: self.num_cells,
+                    num_iters: 2,
+                    omega: 1.0,
+                };
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
+
+                // Normalize w (scale in place using scalars[0])
                 self.scale_vector_in_place(
                     fgmres,
                     &fgmres.b_w,
@@ -1029,34 +1439,23 @@ impl GpuSolver {
                     "FGMRES Copy w",
                 );
 
-                // Apply previous Givens rotations to new column
-                for i in 0..j {
-                    let h_ij = h[h_idx(i, j)];
-                    let h_i1j = h[h_idx(i + 1, j)];
-                    h[h_idx(i, j)] = cs[i] * h_ij + sn[i] * h_i1j;
-                    h[h_idx(i + 1, j)] = -sn[i] * h_ij + cs[i] * h_i1j;
-                }
+                // Update Hessenberg and Givens (GPU)
+                iter_params.current_idx = j as u32;
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
 
-                // Compute and apply new Givens rotation
-                let h_jj = h[h_idx(j, j)];
-                let h_j1j = h[h_idx(j + 1, j)];
-                let rho = (h_jj * h_jj + h_j1j * h_j1j).sqrt();
-                if rho.abs() < 1e-20 {
-                    cs[j] = 1.0;
-                    sn[j] = 0.0;
-                } else {
-                    cs[j] = h_jj / rho;
-                    sn[j] = h_j1j / rho;
-                }
-                h[h_idx(j, j)] = rho;
-                h[h_idx(j + 1, j)] = 0.0;
+                self.dispatch_logic_pipeline(
+                    &fgmres.pipeline_update_hessenberg,
+                    fgmres,
+                    1,
+                    "FGMRES Update Hessenberg",
+                );
 
-                let g_j = g[j];
-                let g_j1 = g[j + 1];
-                g[j] = cs[j] * g_j + sn[j] * g_j1;
-                g[j + 1] = -sn[j] * g_j + cs[j] * g_j1;
+                // Check convergence (read back scalars[0])
+                let resid_est_vec = pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
+                let resid_est = resid_est_vec[0];
 
-                let resid_est = g[j + 1].abs();
                 if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
                     println!(
                         "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
@@ -1072,23 +1471,34 @@ impl GpuSolver {
                 }
             }
 
-            // Solve upper triangular system H * y = g
-            for i in (0..basis_size).rev() {
-                let mut sum = g[i];
-                for j in (i + 1)..basis_size {
-                    sum -= h[h_idx(i, j)] * y[j];
-                }
-                let diag = h[h_idx(i, i)];
-                if diag.abs() > 1e-12 {
-                    y[i] = sum / diag;
-                } else {
-                    y[i] = 0.0;
-                }
-            }
+            // Solve upper triangular system (GPU)
+            iter_params.current_idx = basis_size as u32;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+
+            self.dispatch_logic_pipeline(
+                &fgmres.pipeline_solve_triangular,
+                fgmres,
+                1,
+                "FGMRES Solve Triangular",
+            );
 
             // Update solution x = x + sum_j y_j * z_j
             for i in 0..basis_size {
-                self.write_scalars(fgmres, &[y[i]]);
+                // Copy y[i] to scalars[0]
+                iter_params.current_idx = i as u32;
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+
+                self.dispatch_logic_pipeline(
+                    &fgmres.pipeline_copy_scalar,
+                    fgmres,
+                    1,
+                    "FGMRES Copy Scalar",
+                );
+
                 let axpy_bg = self.create_vector_bind_group(
                     fgmres,
                     &fgmres.z_vectors[i],
@@ -1135,11 +1545,12 @@ impl GpuSolver {
             }
 
             // Prepare for restart
-            g.fill(0.0);
-            g[0] = residual_norm;
-            cs.fill(0.0);
-            sn.fill(0.0);
-            y.fill(0.0);
+            // Reset g on GPU
+            let mut g_initial = vec![0.0f32; max_restart + 1];
+            g_initial[0] = residual_norm;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_g, 0, cast_slice(&g_initial));
 
             if residual_norm <= 0.0 {
                 println!("FGMRES: residual vanished at restart {}", outer_iter + 1);

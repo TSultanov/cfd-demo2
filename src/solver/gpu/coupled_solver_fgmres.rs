@@ -790,8 +790,8 @@ impl GpuSolver {
         let n = num_cells * 3;
         let max_restart = 50usize;
         let max_outer = 20usize;
-        let tol = 1e-6f32;
-        let abstol = 1e-8f32;
+        let tol = 1e-4f32;
+        let abstol = 1e-6f32;
 
         self.ensure_fgmres_resources(max_restart);
         let Some(res) = &self.coupled_resources else {

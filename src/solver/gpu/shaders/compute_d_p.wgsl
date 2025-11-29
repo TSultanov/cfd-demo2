@@ -37,7 +37,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let vol = cell_vols[idx];
     
     if (abs(a_p) > 1e-20) {
-        d_p[idx] = vol / (a_p * constants.density);
+        d_p[idx] = vol / a_p;
     } else {
         d_p[idx] = 0.0;
     }

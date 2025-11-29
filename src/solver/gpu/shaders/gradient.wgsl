@@ -127,7 +127,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             } else {
                 // Velocity Boundary
                 if (boundary_type == 1u) { // Inlet
-                    let u_bc_x = 1.0;
+                    let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
+                    let u_bc_x = constants.inlet_velocity * ramp;
                     let u_bc_y = 0.0;
                     val_f = select(u_bc_x, u_bc_y, constants.component == 1u);
                 } else if (boundary_type == 3u) { // Wall

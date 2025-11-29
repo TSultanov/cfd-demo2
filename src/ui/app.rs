@@ -6,9 +6,15 @@ use crate::solver::scheme::Scheme;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
+use rand::Rng;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+struct RuntimeParams {
+    target_cfl: f64,
+    adaptive_dt: bool,
+}
 
 /// Rendering mode for the mesh visualization
 #[derive(PartialEq, Clone, Copy)]
@@ -113,6 +119,7 @@ pub struct CFDApp {
     gpu_solver_running: Arc<AtomicBool>,
     shared_results: SharedResults,
     shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
+    shared_params: Arc<Mutex<RuntimeParams>>,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
     cached_gpu_stats: CachedGpuStats,
@@ -149,6 +156,10 @@ impl CFDApp {
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
             shared_results: Arc::new(Mutex::new(None)),
             shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
+            shared_params: Arc::new(Mutex::new(RuntimeParams {
+                target_cfl: 0.9,
+                adaptive_dt: true,
+            })),
             cached_u: Vec::new(),
             cached_p: Vec::new(),
             cached_gpu_stats: CachedGpuStats::default(),
@@ -233,6 +244,10 @@ impl CFDApp {
         self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
         self.shared_results = Arc::new(Mutex::new(None));
         self.shared_gpu_stats = Arc::new(Mutex::new(CachedGpuStats::default()));
+        self.shared_params = Arc::new(Mutex::new(RuntimeParams {
+            target_cfl: self.target_cfl,
+            adaptive_dt: self.adaptive_dt,
+        }));
         self.cached_gpu_stats = CachedGpuStats::default();
     }
 
@@ -262,7 +277,7 @@ impl CFDApp {
                 let geo = ChannelWithObstacle {
                     length,
                     height: 1.0,
-                    obstacle_center: Point2::new(1.0, 0.5),
+                    obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.2,
                 };
                 let mut mesh = generate_cut_cell_mesh(
@@ -295,9 +310,15 @@ impl CFDApp {
 
     fn build_initial_velocity(&self, mesh: &Mesh) -> Vec<(f64, f64)> {
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
-        for (i, _vel) in u.iter_mut().enumerate() {
+        let mut rng = rand::thread_rng();
+        for (i, vel) in u.iter_mut().enumerate() {
             let cx = mesh.cell_cx[i];
             let cy = mesh.cell_cy[i];
+
+            // // Add small perturbation to break symmetry
+            // let perturbation = (rng.gen::<f64>() - 0.5) * 0.01;
+            // vel.1 += perturbation;
+
             if cx < self.max_cell_size {
                 match self.selected_geometry {
                     GeometryType::BackwardsStep => {
@@ -615,12 +636,26 @@ impl eframe::App for CFDApp {
                             self.update_gpu_dt();
                         }
 
-                        ui.checkbox(&mut self.adaptive_dt, "Adaptive Timestep");
+                        if ui
+                            .checkbox(&mut self.adaptive_dt, "Adaptive Timestep")
+                            .changed()
+                        {
+                            if let Ok(mut params) = self.shared_params.lock() {
+                                params.adaptive_dt = self.adaptive_dt;
+                            }
+                        }
                         if self.adaptive_dt {
-                            ui.add(
-                                egui::Slider::new(&mut self.target_cfl, 0.1..=1.0)
-                                    .text("Target CFL"),
-                            );
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut self.target_cfl, 0.1..=1.0)
+                                        .text("Target CFL"),
+                                )
+                                .changed()
+                            {
+                                if let Ok(mut params) = self.shared_params.lock() {
+                                    params.target_cfl = self.target_cfl;
+                                }
+                            }
                         }
 
                         if cfl > 1.0 {
@@ -869,9 +904,8 @@ impl eframe::App for CFDApp {
                                 let running_flag = self.gpu_solver_running.clone();
                                 let shared_results = self.shared_results.clone();
                                 let shared_gpu_stats = self.shared_gpu_stats.clone();
+                                let shared_params = self.shared_params.clone();
                                 let ctx_clone = ctx.clone();
-                                let adaptive_dt_clone = self.adaptive_dt;
-                                let target_cfl_clone = self.target_cfl;
                                 let min_cell_size_clone = self.actual_min_cell_size;
                                 thread::spawn(move || {
                                     while running_flag.load(Ordering::Relaxed) {
@@ -880,7 +914,14 @@ impl eframe::App for CFDApp {
                                             let u = pollster::block_on(solver.get_u());
                                             let p = pollster::block_on(solver.get_p());
 
-                                            if adaptive_dt_clone {
+                                            let (adaptive_dt, target_cfl) =
+                                                if let Ok(params) = shared_params.lock() {
+                                                    (params.adaptive_dt, params.target_cfl)
+                                                } else {
+                                                    (false, 0.9)
+                                                };
+
+                                            if adaptive_dt {
                                                 let mut max_vel = 0.0f64;
                                                 for (vx, vy) in &u {
                                                     let v = (vx.powi(2) + vy.powi(2)).sqrt();
@@ -891,16 +932,15 @@ impl eframe::App for CFDApp {
 
                                                 if max_vel > 1e-6 {
                                                     let current_dt = solver.constants.dt as f64;
-                                                    let mut next_dt = target_cfl_clone
-                                                        * min_cell_size_clone
-                                                        / max_vel;
+                                                    let mut next_dt =
+                                                        target_cfl * min_cell_size_clone / max_vel;
 
                                                     // Limit increase to 1.2x to prevent shock
                                                     if next_dt > current_dt * 1.2 {
                                                         next_dt = current_dt * 1.2;
                                                     }
 
-                                                    next_dt = next_dt.clamp(1e-9, 0.1);
+                                                    next_dt = next_dt.clamp(1e-9, 100.0);
                                                     solver.set_dt(next_dt as f32);
                                                 }
                                             }

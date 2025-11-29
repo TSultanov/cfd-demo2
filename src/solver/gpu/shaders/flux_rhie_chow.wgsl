@@ -81,12 +81,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lambda = d_neigh / total_dist;
         }
         
-        // Linear interpolation to face (CPU uses: val_owner + f * (val_neigh - val_owner) where f = d_own/(d_own+d_neigh))
-        // Here lambda = d_neigh / total = weight for owner, so (1-lambda) = d_own/total = weight for neighbor
-        // u_face = lambda * u_own + (1-lambda) * u_neigh  
-        // This is equivalent to u_own + (1-lambda) * (u_neigh - u_own) = u_own + f * (u_neigh - u_own)
-        u_face.x = lambda * u_face.x + (1.0 - lambda) * u_neigh.x;
-        u_face.y = lambda * u_face.y + (1.0 - lambda) * u_neigh.y;
+        // Calculate Central Difference Velocity first to determine direction
+        var u_central = u_face;
+        u_central.x = lambda * u_face.x + (1.0 - lambda) * u_neigh.x;
+        u_central.y = lambda * u_face.y + (1.0 - lambda) * u_neigh.y;
+        
+        let normal_vel = u_central.x * normal.x + u_central.y * normal.y;
+        
+        // Upwind Interpolation for Stability
+        if (normal_vel > 0.0) {
+            // Flow from Owner to Neighbor
+            u_face = u[owner];
+        } else {
+            // Flow from Neighbor to Owner
+            u_face = u_neigh;
+        }
+        
+        // Note: We could use Second Order Upwind here if we had gradients,
+        // but Upwind is robust for the mass flux calculation.
+        // The momentum equation uses SOU/QUICK, so accuracy is preserved.
         
         // d_p interpolation: use distance weighting to match pressure assembly
         d_p_face = lambda * d_p_face + (1.0 - lambda) * d_p_neigh;

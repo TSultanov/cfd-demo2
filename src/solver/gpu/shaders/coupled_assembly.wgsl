@@ -103,11 +103,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     diag_v += coeff_time;
     rhs_u += rhs_time_u;
     rhs_v += rhs_time_v;
-    
-    // Strong pressure regularization
-    let p_regularization = 0.01 * coeff_time;
-    diag_p -= p_regularization;
-    
+
     // Loop over faces
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
@@ -194,16 +190,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             
             // Deferred Correction for Higher Order Schemes
             if (constants.scheme != 0u) {
-                // Get old values (from previous iteration/timestep)
-                let u_old_own = u_old[idx];
-                let u_old_neigh = u_old[other_idx];
+                // Get current values (from latest iteration) for deferred correction
+                let u_own = u[idx];
+                let u_neigh = u[other_idx];
                 
-                var phi_upwind_u = u_old_own.x;
-                var phi_upwind_v = u_old_own.y;
+                var phi_upwind_u = u_own.x;
+                var phi_upwind_v = u_own.y;
                 
                 if (flux < 0.0) {
-                    phi_upwind_u = u_old_neigh.x;
-                    phi_upwind_v = u_old_neigh.y;
+                    phi_upwind_u = u_neigh.x;
+                    phi_upwind_v = u_neigh.y;
                 }
                 
                 var phi_ho_u = phi_upwind_u;
@@ -215,15 +211,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         let grad_v_own = grad_v[idx];
                         let r_x = f_center.x - center.x;
                         let r_y = f_center.y - center.y;
-                        phi_ho_u = u_old_own.x + (grad_u_own.x * r_x + grad_u_own.y * r_y);
-                        phi_ho_v = u_old_own.y + (grad_v_own.x * r_x + grad_v_own.y * r_y);
+                        phi_ho_u = u_own.x + (grad_u_own.x * r_x + grad_u_own.y * r_y);
+                        phi_ho_v = u_own.y + (grad_v_own.x * r_x + grad_v_own.y * r_y);
                     } else {
                         let grad_u_neigh = grad_u[other_idx];
                         let grad_v_neigh = grad_v[other_idx];
                         let r_x = f_center.x - other_center.x;
                         let r_y = f_center.y - other_center.y;
-                        phi_ho_u = u_old_neigh.x + (grad_u_neigh.x * r_x + grad_u_neigh.y * r_y);
-                        phi_ho_v = u_old_neigh.y + (grad_v_neigh.x * r_x + grad_v_neigh.y * r_y);
+                        phi_ho_u = u_neigh.x + (grad_u_neigh.x * r_x + grad_u_neigh.y * r_y);
+                        phi_ho_v = u_neigh.y + (grad_v_neigh.x * r_x + grad_v_neigh.y * r_y);
                     }
                 } else if (constants.scheme == 2u) { // QUICK
                     if (flux > 0.0) {
@@ -235,8 +231,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         let grad_term_u = grad_u_own.x * d_cd_x + grad_u_own.y * d_cd_y;
                         let grad_term_v = grad_v_own.x * d_cd_x + grad_v_own.y * d_cd_y;
                         
-                        phi_ho_u = 0.625 * u_old_own.x + 0.375 * u_old_neigh.x + 0.125 * grad_term_u;
-                        phi_ho_v = 0.625 * u_old_own.y + 0.375 * u_old_neigh.y + 0.125 * grad_term_v;
+                        phi_ho_u = 0.625 * u_own.x + 0.375 * u_neigh.x + 0.125 * grad_term_u;
+                        phi_ho_v = 0.625 * u_own.y + 0.375 * u_neigh.y + 0.125 * grad_term_v;
                     } else {
                         let grad_u_neigh = grad_u[other_idx];
                         let grad_v_neigh = grad_v[other_idx];
@@ -246,10 +242,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         let grad_term_u = grad_u_neigh.x * d_cd_x + grad_u_neigh.y * d_cd_y;
                         let grad_term_v = grad_v_neigh.x * d_cd_x + grad_v_neigh.y * d_cd_y;
                         
-                        phi_ho_u = 0.625 * u_old_neigh.x + 0.375 * u_old_own.x + 0.125 * grad_term_u;
-                        phi_ho_v = 0.625 * u_old_neigh.y + 0.375 * u_old_own.y + 0.125 * grad_term_v;
+                        phi_ho_u = 0.625 * u_neigh.x + 0.375 * u_own.x + 0.125 * grad_term_u;
+                        phi_ho_v = 0.625 * u_neigh.y + 0.375 * u_own.y + 0.125 * grad_term_v;
                     }
                 }
+                
+                // Apply TVD Limiter (Clamping)
+                // Ensure phi_ho is bounded by u_own and u_neigh to prevent oscillations
+                let min_val_u = min(u_own.x, u_neigh.x);
+                let max_val_u = max(u_own.x, u_neigh.x);
+                let min_val_v = min(u_own.y, u_neigh.y);
+                let max_val_v = max(u_own.y, u_neigh.y);
+                
+                phi_ho_u = clamp(phi_ho_u, min_val_u, max_val_u);
+                phi_ho_v = clamp(phi_ho_v, min_val_v, max_val_v);
                 
                 let correction_u = flux * (phi_ho_u - phi_upwind_u);
                 let correction_v = flux * (phi_ho_v - phi_upwind_v);
@@ -259,48 +265,76 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             
             // Pressure Gradient (Cell to Face)
-            let pg_coeff_x = area * normal.x / dist;
-            let pg_coeff_y = area * normal.y / dist;
+            // Standard Gauss Theorem: sum(p_f * S_f)
+            // p_f = lambda * p_P + (1-lambda) * p_N
+            
+            let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+            let d_neigh = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+            let total_dist = d_own + d_neigh;
+            
+            var lambda = 0.5;
+            if (total_dist > 1e-6) {
+                lambda = d_neigh / total_dist;
+            }
+            
+            // Pressure gradient force components (Area * Normal)
+            // Note: No division by dist! That was the bug.
+            let pg_force_x = area * normal.x;
+            let pg_force_y = area * normal.y;
             
             // Off-diagonal U-P and V-P (Neighbor P)
-            matrix_values[idx_0_2] = -pg_coeff_x; // A_up
-            matrix_values[idx_1_2] = -pg_coeff_y; // A_vp
+            // Contribution: (1-lambda) * p_N * S_f
+            // Note: normal points OUT of owner, so force is -grad P
+            // Term in momentum eq: - grad P
+            // So we add + (1-lambda) * S_f to the matrix for p_N (moved to LHS)
+            matrix_values[idx_0_2] = (1.0 - lambda) * pg_force_x; // A_up
+            matrix_values[idx_1_2] = (1.0 - lambda) * pg_force_y; // A_vp
             
             // Diagonal U-P and V-P (Own P) - accumulated
+            // Contribution: lambda * p_P * S_f
+            // We add + lambda * S_f to the matrix for p_P
             let scalar_diag_idx = diagonal_indices[idx];
             let diag_rank = scalar_diag_idx - scalar_offset;
             
             let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
             let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
             
-            matrix_values[diag_0_2] += pg_coeff_x;
-            matrix_values[diag_1_2] += pg_coeff_y;
+            matrix_values[diag_0_2] += lambda * pg_force_x;
+            matrix_values[diag_1_2] += lambda * pg_force_y;
             
             // --- Continuity Equation ---
-            let div_coeff_x = 0.5 * normal.x * area;
-            let div_coeff_y = 0.5 * normal.y * area;
+            // div(U) = sum(U_f . S_f) = 0
+            // U_f = lambda * U_P + (1-lambda) * U_N + Rhie-Chow
+            // Here we assemble the U_P and U_N parts.
+            // Coeff for U_P (Diagonal block, off-diag element): lambda * S_f
+            // Coeff for U_N (Off-diagonal block): (1-lambda) * S_f
+            
+            let div_coeff_x = normal.x * area;
+            let div_coeff_y = normal.y * area;
             
             // Off-diagonal P-U and P-V (Neighbor U, V)
-            matrix_values[idx_2_0] = div_coeff_x; // A_pu
-            matrix_values[idx_2_1] = div_coeff_y; // A_pv
+            matrix_values[idx_2_0] = (1.0 - lambda) * div_coeff_x; // A_pu
+            matrix_values[idx_2_1] = (1.0 - lambda) * div_coeff_y; // A_pv
             
             // Diagonal P-U and P-V (Own U, V)
             let diag_2_0 = start_row_2 + 3u * diag_rank + 0u;
             let diag_2_1 = start_row_2 + 3u * diag_rank + 1u;
             
-            matrix_values[diag_2_0] += div_coeff_x;
-            matrix_values[diag_2_1] += div_coeff_y;
+            matrix_values[diag_2_0] += lambda * div_coeff_x;
+            matrix_values[diag_2_1] += lambda * div_coeff_y;
             
             // Rhie-Chow Pressure Laplacian
-            let dp_f = 0.5 * (d_p[idx] + d_p[other_idx]);
+            // This term stabilizes the checkerboarding
+            // Coeff = d_p_f * Area / dist
+            let dp_f = lambda * d_p[idx] + (1.0 - lambda) * d_p[other_idx];
             let lapl_coeff = dp_f * area / dist;
             
             // Off-diagonal P-P (Neighbor P)
-            matrix_values[idx_2_2] = lapl_coeff; // A_pp
+            matrix_values[idx_2_2] = -lapl_coeff; // A_pp (Negative for diffusion)
             
             // Diagonal P-P (Own P)
             let diag_2_2 = start_row_2 + 3u * diag_rank + 2u;
-            matrix_values[diag_2_2] -= lapl_coeff;
+            matrix_values[diag_2_2] += lapl_coeff; // Positive for diffusion
             
         } else {
             // Boundary Conditions
@@ -323,6 +357,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     rhs_v -= flux * u_bc_y;
                 }
                 
+                // Pressure Gradient: Zero Gradient (p_f = p_P)
+                // Force = - p_f * S_f = - p_P * S_f
+                // Add + S_f to A_up diagonal (LHS)
+                let pg_force_x = area * normal.x;
+                let pg_force_y = area * normal.y;
+                
+                let scalar_diag_idx = diagonal_indices[idx];
+                let diag_rank = scalar_diag_idx - scalar_offset;
+                let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
+                let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
+                
+                matrix_values[diag_0_2] += pg_force_x;
+                matrix_values[diag_1_2] += pg_force_y;
+                
                 // Continuity at inlet:
                 let flux_bc = (u_bc_x * normal.x + u_bc_y * normal.y) * area;
                 rhs_p -= flux_bc;
@@ -332,6 +380,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 diag_u += diff_coeff;
                 diag_v += diff_coeff;
                 
+                // Pressure Gradient: Zero Gradient (p_f = p_P)
+                // Force = - p_f * S_f = - p_P * S_f
+                let pg_force_x = area * normal.x;
+                let pg_force_y = area * normal.y;
+                
+                let scalar_diag_idx = diagonal_indices[idx];
+                let diag_rank = scalar_diag_idx - scalar_offset;
+                let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
+                let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
+                
+                matrix_values[diag_0_2] += pg_force_x;
+                matrix_values[diag_1_2] += pg_force_y;
+                
             } else if (boundary_type == 2u) { // Outlet
                 if (flux > 0.0) {
                     diag_u += flux;
@@ -339,20 +400,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
                 
                 // Fixed Pressure p = 0
-                let pg_coeff_x = area * normal.x / dist;
-                let pg_coeff_y = area * normal.y / dist;
+                // p_f = 0
+                // Force = - p_f * S_f = 0
+                // So NO contribution to A_up from pressure gradient.
+                
+                // However, the original code added terms here.
+                // If we want to support p_bc != 0, we would add to RHS.
+                // But for p_bc = 0, we do nothing.
+                
+                // Continuity:
+                // We need to express mass flux in terms of internal velocity.
+                // U_f = U_P (zero gradient extrapolation for velocity at outlet usually, or mass conserving)
+                // If we assume zero gradient U_f = U_P
+                let div_coeff_x = normal.x * area;
+                let div_coeff_y = normal.y * area;
                 
                 let scalar_diag_idx = diagonal_indices[idx];
                 let diag_rank = scalar_diag_idx - scalar_offset;
-                let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
-                let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
-                
-                matrix_values[diag_0_2] += pg_coeff_x;
-                matrix_values[diag_1_2] += pg_coeff_y;
-                
-                // Continuity:
-                let div_coeff_x = normal.x * area;
-                let div_coeff_y = normal.y * area;
                 
                 let diag_2_0 = start_row_2 + 3u * diag_rank + 0u;
                 let diag_2_1 = start_row_2 + 3u * diag_rank + 1u;
@@ -360,11 +424,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 matrix_values[diag_2_0] += div_coeff_x;
                 matrix_values[diag_2_1] += div_coeff_y;
                 
-                // Rhie-Chow at outlet (fixed p)
+                // Rhie-Chow at outlet
+                // If we fix pressure, we might still want some smoothing?
+                // Usually disabled at outlet to avoid constraining the flow too much
+                // But if we want to include it:
+                // flux = rho * (U_f . S + d_p * (grad P . S - (p_N - p_P)/d * S))
+                // At outlet, p_N is fixed.
+                
                 let dp_f = d_p[idx];
-                let lapl_coeff = dp_f * area / dist;
+                let lapl_coeff = dp_f * area / dist; // dist here is d_own
                 let diag_2_2 = start_row_2 + 3u * diag_rank + 2u;
-                matrix_values[diag_2_2] -= lapl_coeff;
+                matrix_values[diag_2_2] += lapl_coeff;
             }
         }
     }

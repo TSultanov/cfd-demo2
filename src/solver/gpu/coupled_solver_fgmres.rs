@@ -788,7 +788,7 @@ impl GpuSolver {
 
         let num_cells = self.num_cells;
         let n = num_cells * 3;
-        let max_restart = 50usize;
+        let max_restart = 20usize;
         let max_outer = 20usize;
         let tol = 1e-4f32;
 

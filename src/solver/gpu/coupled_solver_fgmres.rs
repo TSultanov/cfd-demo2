@@ -888,6 +888,9 @@ impl GpuSolver {
 
         println!("FGMRES: Initial residual = {:.2e}", residual_norm);
 
+        let mut stagnation_count = 0;
+        let mut prev_resid_norm = residual_norm;
+
         'outer: for outer_iter in 0..max_outer {
             let mut basis_size = 0usize;
 
@@ -1146,6 +1149,24 @@ impl GpuSolver {
                 workgroups_dofs,
                 "FGMRES Restart Normalize",
             );
+
+            // Stagnation detection
+            let improvement = (prev_resid_norm - residual_norm) / prev_resid_norm;
+            if improvement < 1e-3 {
+                stagnation_count += 1;
+                if stagnation_count >= 3 {
+                    println!(
+                        "FGMRES: Stagnation detected at restart {} (residual {:.2e})",
+                        outer_iter + 1,
+                        residual_norm
+                    );
+                    converged = true;
+                    break 'outer;
+                }
+            } else {
+                stagnation_count = 0;
+            }
+            prev_resid_norm = residual_norm;
 
             println!(
                 "FGMRES restart {}: residual = {:.2e} (target {:.2e})",

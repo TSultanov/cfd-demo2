@@ -162,7 +162,7 @@ impl CFDApp {
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
-            current_fluid: Fluid::presets()[0].clone(),
+            current_fluid: Fluid::presets()[1].clone(),
             show_mesh_lines: true,
             adaptive_dt: true,
             target_cfl: 0.9,

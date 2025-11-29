@@ -71,6 +71,16 @@ impl GpuSolver {
         self.update_constants();
     }
 
+    pub fn set_inlet_velocity(&mut self, velocity: f32) {
+        self.constants.inlet_velocity = velocity;
+        self.update_constants();
+    }
+
+    pub fn set_ramp_time(&mut self, time: f32) {
+        self.constants.ramp_time = time;
+        self.update_constants();
+    }
+
     pub fn set_amg_cycle(
         &mut self,
         field: &str,

@@ -1,5 +1,5 @@
 use cfd2::solver::gpu::GpuSolver;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Geometry};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Mesh};
 use nalgebra::Vector2;
 
 #[test]
@@ -48,7 +48,7 @@ fn test_reproduce_divergence() {
     let mut dt = 0.001; // Reduced initial dt
     solver.set_dt(dt);
 
-    let target_cfl = 0.5;
+    let _target_cfl = 0.9;
     let actual_min_cell_size = mesh
         .cell_vol
         .iter()

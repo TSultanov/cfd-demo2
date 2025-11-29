@@ -110,6 +110,8 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
         alpha_u: 0.7, // Default velocity under-relaxation
         stride_x: 65535 * 64,
         time_scheme: 0,
+        inlet_velocity: 1.0,
+        ramp_time: 0.1,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Constants Buffer"),

@@ -15,6 +15,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
 }
 
 // Group 0: Mesh
@@ -275,8 +277,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             // Boundary Conditions
             if (boundary_type == 1u) { // Inlet
-                let ramp = smoothstep(0.0, 0.1, constants.time);
-                let u_bc_x = 1.0 * ramp;
+                let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
+                let u_bc_x = constants.inlet_velocity * ramp;
                 let u_bc_y = 0.0;
                 
                 diag_u += diff_coeff;

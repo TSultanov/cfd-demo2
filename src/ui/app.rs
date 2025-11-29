@@ -138,6 +138,8 @@ pub struct CFDApp {
     amg_cycle_uy: CycleType,
     amg_cycle_p: CycleType,
     solver_type: SolverType,
+    inlet_velocity: f32,
+    ramp_time: f32,
 }
 
 impl CFDApp {
@@ -172,6 +174,8 @@ impl CFDApp {
             amg_cycle_uy: CycleType::VCycle,
             amg_cycle_p: CycleType::WCycle,
             solver_type: SolverType::Piso,
+            inlet_velocity: 1.0,
+            ramp_time: 0.1,
         }
     }
 
@@ -209,6 +213,8 @@ impl CFDApp {
         gpu_solver.set_solver_type(self.solver_type);
         gpu_solver.set_u(&initial_u);
         gpu_solver.set_p(&initial_p);
+        gpu_solver.set_inlet_velocity(self.inlet_velocity);
+        gpu_solver.set_ramp_time(self.ramp_time);
         gpu_solver.initialize_history();
 
         self.cached_u = initial_u;
@@ -349,6 +355,14 @@ impl CFDApp {
 
     fn update_gpu_solver_type(&self) {
         self.with_gpu_solver(|solver| solver.set_solver_type(self.solver_type));
+    }
+
+    fn update_gpu_inlet_velocity(&self) {
+        self.with_gpu_solver(|solver| solver.set_inlet_velocity(self.inlet_velocity));
+    }
+
+    fn update_gpu_ramp_time(&self) {
+        self.with_gpu_solver(|solver| solver.set_ramp_time(self.ramp_time));
     }
 
     /// Render the CFD mesh using egui's batched mesh for maximum performance
@@ -545,6 +559,34 @@ impl eframe::App for CFDApp {
                     self.current_fluid.name = "Custom".to_string();
                     self.update_gpu_fluid();
                 }
+            });
+
+            ui.group(|ui| {
+                ui.label("Inlet Conditions");
+
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.inlet_velocity, 0.0..=10.0)
+                            .text("Inlet Velocity (m/s)"),
+                    )
+                    .changed()
+                {
+                    self.update_gpu_inlet_velocity();
+                }
+
+                if ui
+                    .add(egui::Slider::new(&mut self.ramp_time, 0.0..=5.0).text("Ramp Time (s)"))
+                    .changed()
+                {
+                    self.update_gpu_ramp_time();
+                }
+
+                // Reynolds Number Estimation
+                let char_length = 1.0; // Characteristic length (channel height)
+                let re =
+                    self.current_fluid.density * self.inlet_velocity.abs() as f64 * char_length
+                        / self.current_fluid.viscosity;
+                ui.label(format!("Est. Reynolds Number: {:.0}", re));
             });
 
             ui.group(|ui| {

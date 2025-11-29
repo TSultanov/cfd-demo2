@@ -23,7 +23,9 @@ struct Constants {
     density: f32,
     component: u32, // 0: x, 1: y, 2: p
     alpha_p: f32,
-    scheme: u32,
+    time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
     alpha_u: f32,
     stride_x: u32,
     padding: u32,

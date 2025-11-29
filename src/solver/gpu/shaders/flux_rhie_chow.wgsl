@@ -14,7 +14,9 @@ struct Constants {
     scheme: u32,
     alpha_u: f32,
     stride_x: u32,
-    padding: u32,
+    time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
 }
 
 // Group 0: Mesh
@@ -111,8 +113,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Boundary
         if (boundary_type == 1u) { // Inlet
              // Fixed U with Ramp
-             let ramp = smoothstep(0.0, 0.1, constants.time);
-             let u_bc = Vector2(1.0 * ramp, 0.0);
+             let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
+             let u_bc = Vector2(constants.inlet_velocity * ramp, 0.0);
              fluxes[idx] = constants.density * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
         } else if (boundary_type == 3u) { // Wall
              fluxes[idx] = 0.0;

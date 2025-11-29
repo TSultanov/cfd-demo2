@@ -97,6 +97,8 @@ pub struct GpuConstants {
     pub alpha_u: f32,   // Velocity under-relaxation
     pub stride_x: u32,
     pub time_scheme: u32, // 0: Euler, 1: BDF2
+    pub inlet_velocity: f32,
+    pub ramp_time: f32,
 }
 
 #[repr(C)]

@@ -278,7 +278,7 @@ impl CFDApp {
                     length,
                     height: 1.0,
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
-                    obstacle_radius: 0.2,
+                    obstacle_radius: 0.1,
                 };
                 let mut mesh = generate_cut_cell_mesh(
                     &geo,

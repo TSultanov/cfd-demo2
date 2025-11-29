@@ -52,6 +52,10 @@ pub struct CoupledSolverResources {
     pub b_precond_rhs: wgpu::Buffer, // Schur RHS per DOF
     pub b_precond_params: wgpu::Buffer,
 
+    // Gradient buffers for higher order schemes
+    pub b_grad_u: wgpu::Buffer,
+    pub b_grad_v: wgpu::Buffer,
+
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,

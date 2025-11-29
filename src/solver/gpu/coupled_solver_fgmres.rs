@@ -790,7 +790,8 @@ impl GpuSolver {
         let n = num_cells * 3;
         let max_restart = 50usize;
         let max_outer = 20usize;
-        let tol = 1e-4f32;
+        let tol = 1e-6f32;
+        let abstol = 1e-8f32;
 
         self.ensure_fgmres_resources(max_restart);
         let Some(res) = &self.coupled_resources else {
@@ -798,6 +799,7 @@ impl GpuSolver {
             return LinearSolverStats::default();
         };
         let Some(fgmres) = &self.fgmres_resources else {
+            println!("FGMRES resources not initialized!");
             return LinearSolverStats::default();
         };
 
@@ -834,12 +836,12 @@ impl GpuSolver {
         );
 
         let rhs_norm = self.gpu_norm(fgmres, &res.b_rhs, n);
-        if rhs_norm < 1e-14 || !rhs_norm.is_finite() {
-            println!("FGMRES: RHS norm is {:.2e} - nothing to solve", rhs_norm);
+        if rhs_norm < abstol || !rhs_norm.is_finite() {
+            // println!("FGMRES: RHS norm is {:.2e} - nothing to solve", rhs_norm);
             return LinearSolverStats {
                 iterations: 0,
                 residual: rhs_norm,
-                converged: rhs_norm < 1e-14,
+                converged: rhs_norm < abstol,
                 diverged: !rhs_norm.is_finite(),
                 time: start_time.elapsed(),
             };
@@ -857,10 +859,13 @@ impl GpuSolver {
         // Initial residual r = b - A x stored in V_0
         let mut residual_norm =
             self.compute_residual_into(fgmres, res, &fgmres.basis_vectors[0], workgroups_dofs, n);
-        if residual_norm < tol * rhs_norm {
+
+        let target_resid = (tol * rhs_norm).max(abstol);
+
+        if residual_norm < target_resid {
             println!(
-                "FGMRES: Initial guess already converged (||r|| = {:.2e})",
-                residual_norm
+                "FGMRES: Initial guess already converged (||r|| = {:.2e} < {:.2e})",
+                residual_norm, target_resid
             );
             return LinearSolverStats {
                 iterations: 0,

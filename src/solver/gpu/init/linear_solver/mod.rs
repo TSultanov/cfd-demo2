@@ -245,6 +245,21 @@ fn init_coupled_resources(
     // 2. Init Matrix Buffers
     let matrix_res = matrix::init_matrix(device, &row_offsets, &col_indices);
 
+    // Init Gradient Buffers for Coupled Solver (for higher order schemes)
+    let b_grad_u = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Grad U"),
+        size: (num_cells as u64) * 8, // Vector2<f32>
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let b_grad_v = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Grad V"),
+        size: (num_cells as u64) * 8, // Vector2<f32>
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     // 3. Init State Buffers (size * 3)
     let state_res = state::init_state(device, num_coupled_cells);
 
@@ -288,6 +303,28 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
+            // 3: Grad U (Read)
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // 4: Grad V (Read)
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -306,6 +343,14 @@ fn init_coupled_resources(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: scalar_row_offsets_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: b_grad_u.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: b_grad_v.as_entire_binding(),
             },
         ],
     });
@@ -844,6 +889,8 @@ fn init_coupled_resources(
         b_s_hat,
         b_precond_rhs,
         b_precond_params,
+        b_grad_u,
+        b_grad_v,
         bg_solver,
         bg_linear_matrix,
         bg_linear_state,

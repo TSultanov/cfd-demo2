@@ -38,6 +38,70 @@ impl GpuSolver {
         // This is crucial for Rhie-Chow interpolation in the coupled solver
         self.initialize_d_p(num_groups_cells);
 
+        // Compute Gradients for Higher Order Schemes (2nd Order Upwind / QUICK)
+        // We need to compute grad U and grad V and store them in the coupled resources
+        if let Some(res) = self.coupled_resources.as_ref() {
+            // 1. Compute Grad U (Component 0)
+            self.constants.component = 0;
+            self.update_constants();
+
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Gradient U Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Gradient U Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_gradient);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+            }
+            // Copy from b_grad_component to res.b_grad_u
+            encoder.copy_buffer_to_buffer(
+                &self.b_grad_component,
+                0,
+                &res.b_grad_u,
+                0,
+                (self.num_cells as u64) * 8,
+            );
+            self.context.queue.submit(Some(encoder.finish()));
+
+            // 2. Compute Grad V (Component 1)
+            self.constants.component = 1;
+            self.update_constants();
+
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Gradient V Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Gradient V Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_gradient);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+            }
+            // Copy from b_grad_component to res.b_grad_v
+            encoder.copy_buffer_to_buffer(
+                &self.b_grad_component,
+                0,
+                &res.b_grad_v,
+                0,
+                (self.num_cells as u64) * 8,
+            );
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
         // Coupled iteration loop - use more iterations for robustness
         let max_coupled_iters = self.n_outer_correctors.max(10);
         let convergence_tol_u = 1e-5;

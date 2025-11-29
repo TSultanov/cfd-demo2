@@ -58,6 +58,11 @@ fn test_solver_comparison() {
             solver.set_u(&init_u);
             solver.set_p(&init_p);
             solver.constants.dt = 0.001;
+            // Match UI defaults
+            solver.set_density(1000.0);
+            solver.set_viscosity(0.001);
+            solver.set_alpha_u(0.9);
+            solver.set_alpha_p(0.9);
             solver.update_constants();
         }
 
@@ -67,10 +72,15 @@ fn test_solver_comparison() {
         // Set identical constants
         // UI uses 0.001 timestep, let's match it for stability
         solver_coupled.constants.dt = 0.001;
+        // Match UI defaults
+        solver_coupled.set_density(1000.0);
+        solver_coupled.set_viscosity(0.001);
+        solver_coupled.set_alpha_u(0.9);
+        solver_coupled.set_alpha_p(0.9);
         solver_coupled.update_constants();
 
         // March forward only a couple of full time steps to keep the test fast
-        const NUM_TIME_STEPS: usize = 2;
+        const NUM_TIME_STEPS: usize = 5;
         for step_idx in 0..NUM_TIME_STEPS {
             if let Some(solver) = solver_piso.as_mut() {
                 println!(

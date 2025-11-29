@@ -17,25 +17,7 @@
 
 use super::structs::{GpuSolver, LinearSolverStats, PreconditionerParams};
 
-#[repr(u32)]
-enum PrecondMode {
-    P = 0,
-    S = 1,
-}
-
 impl GpuSolver {
-    fn update_precond_mode(&self, mode: PrecondMode) {
-        if let Some(res) = &self.coupled_resources {
-            let params = PreconditionerParams {
-                mode: mode as u32,
-                ..Default::default()
-            };
-            self.context
-                .queue
-                .write_buffer(&res.b_precond_params, 0, bytemuck::bytes_of(&params));
-        }
-    }
-
     /// Performs a single timestep using the coupled solver approach.
     ///
     /// Unlike PISO which iterates between momentum prediction and pressure correction,
@@ -225,6 +207,30 @@ impl GpuSolver {
                     cpass.set_bind_group(0, &res.bg_linear_state, &[]);
                     cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
                     cpass.set_bind_group(2, &res.bg_precond, &[]);
+                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                }
+                self.context.queue.submit(Some(encoder.finish()));
+            }
+
+            // 1.8. Assemble Scalar Pressure Matrix (for Preconditioner)
+            // The Schur preconditioner uses the scalar pressure Laplacian matrix
+            // to approximate the Schur complement. We need to assemble it here.
+            {
+                let mut encoder =
+                    self.context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Scalar Pressure Assembly Encoder"),
+                        });
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Scalar Pressure Assembly Pass"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&self.pipeline_pressure_assembly);
+                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                    cpass.set_bind_group(1, &self.bg_fields, &[]);
+                    cpass.set_bind_group(2, &self.bg_solver, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
                 self.context.queue.submit(Some(encoder.finish()));

@@ -106,15 +106,19 @@ pub struct SolverParams {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct PreconditionerParams {
-    pub mode: u32,
-    pub _pad: [u32; 3],
+    pub n: u32,
+    pub num_cells: u32,
+    pub omega: f32,
+    pub _pad: u32,
 }
 
 impl Default for PreconditionerParams {
     fn default() -> Self {
         Self {
-            mode: 0,
-            _pad: [0; 3],
+            n: 0,
+            num_cells: 0,
+            omega: 1.0,
+            _pad: 0,
         }
     }
 }

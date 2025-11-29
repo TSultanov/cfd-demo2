@@ -85,7 +85,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Scale with momentum coefficient to balance the system
     // This is artificial compressibility approach
     let p_regularization = 0.01 * coeff_time;
-    diag_p += p_regularization;
+    diag_p -= p_regularization;
     
     // Loop over faces
     for (var k = start; k < end; k++) {
@@ -266,11 +266,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let lapl_coeff = dp_f * area / dist;
             
             // Off-diagonal P-P (Neighbor P)
-            matrix_values[idx_2_2] = -lapl_coeff; // A_pp
+            matrix_values[idx_2_2] = lapl_coeff; // A_pp
             
             // Diagonal P-P (Own P)
             let diag_2_2 = start_row_2 + 3u * diag_rank + 2u;
-            matrix_values[diag_2_2] += lapl_coeff;
+            matrix_values[diag_2_2] -= lapl_coeff;
             
         } else {
             // Boundary Conditions
@@ -352,7 +352,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let dp_f = d_p[idx];
                 let lapl_coeff = dp_f * area / dist;
                 let diag_2_2 = start_row_2 + 3u * diag_rank + 2u;
-                matrix_values[diag_2_2] += lapl_coeff;
+                matrix_values[diag_2_2] -= lapl_coeff;
             }
         }
     }

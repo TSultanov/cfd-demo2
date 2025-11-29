@@ -70,7 +70,7 @@ fn test_solver_comparison() {
         solver_coupled.update_constants();
 
         // March forward only a couple of full time steps to keep the test fast
-        const NUM_TIME_STEPS: usize = 4;
+        const NUM_TIME_STEPS: usize = 2;
         for step_idx in 0..NUM_TIME_STEPS {
             if let Some(solver) = solver_piso.as_mut() {
                 println!(

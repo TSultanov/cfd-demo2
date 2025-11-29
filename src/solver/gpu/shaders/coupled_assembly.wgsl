@@ -249,13 +249,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 
                 // Apply TVD Limiter (Clamping)
                 // Ensure phi_ho is bounded by u_own and u_neigh to prevent oscillations
-                let min_val_u = min(u_own.x, u_neigh.x);
-                let max_val_u = max(u_own.x, u_neigh.x);
-                let min_val_v = min(u_own.y, u_neigh.y);
-                let max_val_v = max(u_own.y, u_neigh.y);
+                // let min_val_u = min(u_own.x, u_neigh.x);
+                // let max_val_u = max(u_own.x, u_neigh.x);
+                // let min_val_v = min(u_own.y, u_neigh.y);
+                // let max_val_v = max(u_own.y, u_neigh.y);
                 
-                phi_ho_u = clamp(phi_ho_u, min_val_u, max_val_u);
-                phi_ho_v = clamp(phi_ho_v, min_val_v, max_val_v);
+                // phi_ho_u = clamp(phi_ho_u, min_val_u, max_val_u);
+                // phi_ho_v = clamp(phi_ho_v, min_val_v, max_val_v);
                 
                 let correction_u = flux * (phi_ho_u - phi_upwind_u);
                 let correction_v = flux * (phi_ho_v - phi_upwind_v);

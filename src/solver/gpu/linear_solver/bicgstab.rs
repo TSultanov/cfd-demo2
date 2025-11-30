@@ -57,8 +57,8 @@ impl GpuSolver {
 
             pending_commands = true;
 
-            // Check convergence every iterations
-            if iter % 1 == 0 {
+            // Check convergence every iteration
+            {
                 // Submit pending commands before reading back
                 if pending_commands {
                     let start = if self.profiling_enabled.load(Ordering::Relaxed) {

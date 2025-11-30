@@ -5,7 +5,6 @@ use crate::solver::scheme::Scheme;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
-use rand::Rng;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -297,8 +296,7 @@ impl CFDApp {
 
     fn build_initial_velocity(&self, mesh: &Mesh) -> Vec<(f64, f64)> {
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
-        let mut rng = rand::thread_rng();
-        for (i, vel) in u.iter_mut().enumerate() {
+        for (i, _vel) in u.iter_mut().enumerate() {
             let cx = mesh.cell_cx[i];
             let cy = mesh.cell_cy[i];
 

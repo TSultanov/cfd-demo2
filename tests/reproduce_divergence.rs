@@ -1,5 +1,5 @@
 use cfd2::solver::gpu::GpuSolver;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Mesh};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use nalgebra::Vector2;
 
 #[test]

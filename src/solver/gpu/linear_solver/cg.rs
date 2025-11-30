@@ -80,7 +80,7 @@ impl GpuSolver {
             pending_commands = true;
 
             // Check convergence
-            if iter % 1 == 0 {
+            {
                 if pending_commands {
                     self.context.queue.submit(Some(encoder.finish()));
                     encoder = self.context.device.create_command_encoder(

@@ -927,24 +927,6 @@ impl GpuSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
-    fn gpu_dot(&self, fgmres: &FgmresResources, x: &wgpu::Buffer, y: &wgpu::Buffer, n: u32) -> f32 {
-        let vector_bg =
-            self.create_vector_bind_group(fgmres, x, y, &fgmres.b_dot_partial, "FGMRES Dot BG");
-        let workgroups = self.workgroups_for_size(n);
-        self.dispatch_vector_pipeline(
-            &fgmres.pipeline_dot_partial,
-            fgmres,
-            &vector_bg,
-            &fgmres.bg_params,
-            workgroups,
-            "FGMRES Dot",
-        );
-
-        let partial =
-            pollster::block_on(self.read_buffer_f32(&fgmres.b_dot_partial, fgmres.num_dot_groups));
-        partial.iter().take(workgroups as usize).sum()
-    }
-
     fn gpu_norm(&self, fgmres: &FgmresResources, x: &wgpu::Buffer, n: u32) -> f32 {
         let vector_bg = self.create_vector_bind_group(
             fgmres,

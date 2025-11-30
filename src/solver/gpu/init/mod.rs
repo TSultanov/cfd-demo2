@@ -7,7 +7,9 @@ pub mod scalars;
 use crate::solver::mesh::Mesh;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
+use std::sync::Arc;
 
+use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
@@ -151,6 +153,7 @@ impl GpuSolver {
             fgmres_resources: None,
             n_outer_correctors: 20,
             coupled_resources: Some(linear_res.coupled_resources),
+            profiling_stats: Arc::new(ProfilingStats::new()),
         }
     }
 }

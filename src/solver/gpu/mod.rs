@@ -4,7 +4,9 @@ pub mod coupled_solver;
 pub mod coupled_solver_fgmres;
 pub mod init;
 pub mod linear_solver;
+pub mod profiling;
 pub mod solver;
 pub mod structs;
 
+pub use profiling::{ProfileCategory, ProfilingStats};
 pub use structs::GpuSolver;

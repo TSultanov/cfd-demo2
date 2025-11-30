@@ -15,7 +15,9 @@
 // - p is the pressure field
 // - b_u is the momentum source term
 
+use super::profiling::ProfileCategory;
 use super::structs::{GpuSolver, LinearSolverStats};
+use std::time::Instant;
 
 impl GpuSolver {
     /// Performs a single timestep using the coupled solver approach.
@@ -52,17 +54,13 @@ impl GpuSolver {
         }
 
         for iter in 0..max_coupled_iters {
+            self.profiling_stats.increment_iteration();
             println!("Coupled Iteration: {}", iter + 1);
 
-            // Save state for convergence check
-            let (u_before, p_before) = if iter > 0 {
-                (
-                    Some(pollster::block_on(self.get_u())),
-                    Some(pollster::block_on(self.get_p())),
-                )
-            } else {
-                (None, None)
-            };
+            // Snapshot U and P on GPU for convergence check (instead of reading to CPU)
+            if iter > 0 {
+                self.snapshot_fields_for_convergence();
+            }
 
             // Update fluxes with current velocity for advection terms
             if iter > 0 {
@@ -79,6 +77,7 @@ impl GpuSolver {
                 self.constants.component = 0;
                 self.update_constants();
 
+                let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
@@ -104,6 +103,12 @@ impl GpuSolver {
                     (self.num_cells as u64) * 8,
                 );
                 self.context.queue.submit(Some(encoder.finish()));
+                self.profiling_stats.record_location(
+                    "coupled:gradient_u",
+                    ProfileCategory::GpuDispatch,
+                    dispatch_start.elapsed(),
+                    0,
+                );
 
                 // 2. Compute Grad V (Component 1)
                 self.constants.component = 1;
@@ -136,9 +141,16 @@ impl GpuSolver {
                 self.context.queue.submit(Some(encoder.finish()));
             }
 
-            // Debug: Check d_p values on first iteration
+            // Debug: Check d_p values on first iteration - DEBUG READ
             if iter == 0 {
+                let read_start = Instant::now();
                 let d_p_vals = pollster::block_on(self.get_d_p());
+                self.profiling_stats.record_location(
+                    "coupled:debug_get_d_p",
+                    ProfileCategory::GpuRead,
+                    read_start.elapsed(),
+                    (self.num_cells as u64) * 4,
+                );
                 let min_dp = d_p_vals.iter().cloned().fold(f64::INFINITY, f64::min);
                 let max_dp = d_p_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                 let avg_dp: f64 = d_p_vals.iter().sum::<f64>() / d_p_vals.len() as f64;
@@ -156,6 +168,7 @@ impl GpuSolver {
                 self.zero_buffer(&res.b_rhs, (self.num_cells as u64) * 3 * 4);
 
                 // Dispatch Assembly
+                let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
@@ -174,26 +187,69 @@ impl GpuSolver {
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
                 self.context.queue.submit(Some(encoder.finish()));
+                self.profiling_stats.record_location(
+                    "coupled:assembly",
+                    ProfileCategory::GpuDispatch,
+                    dispatch_start.elapsed(),
+                    0,
+                );
             }
 
-            // Debug: Check matrix and RHS after assembly on first iteration
+            // Debug: Check matrix and RHS after assembly on first iteration - DEBUG READS
             if iter == 0 {
+                let sync_start = Instant::now();
                 self.context.device.poll(wgpu::Maintain::Wait);
+                self.profiling_stats.record_location(
+                    "coupled:debug_sync",
+                    ProfileCategory::GpuSync,
+                    sync_start.elapsed(),
+                    0,
+                );
                 let res = self.coupled_resources.as_ref().unwrap();
 
-                // Read diagonal entries (sample first few)
+                // Read diagonal entries (sample first few) - DEBUG READS
+                let read_start = Instant::now();
                 let matrix_vals = pollster::block_on(
                     self.read_buffer_f32(&res.b_matrix_values, res.num_nonzeros),
                 );
+                self.profiling_stats.record_location(
+                    "coupled:debug_read_matrix",
+                    ProfileCategory::GpuRead,
+                    read_start.elapsed(),
+                    (res.num_nonzeros as u64) * 4,
+                );
+
+                let read_start = Instant::now();
                 let rhs_vals =
                     pollster::block_on(self.read_buffer_f32(&res.b_rhs, self.num_cells * 3));
+                self.profiling_stats.record_location(
+                    "coupled:debug_read_rhs",
+                    ProfileCategory::GpuRead,
+                    read_start.elapsed(),
+                    (self.num_cells as u64) * 3 * 4,
+                );
+
+                let read_start = Instant::now();
                 let col_indices =
                     pollster::block_on(self.read_buffer_u32(&res.b_col_indices, res.num_nonzeros));
+                self.profiling_stats.record_location(
+                    "coupled:debug_read_col_indices",
+                    ProfileCategory::GpuRead,
+                    read_start.elapsed(),
+                    (res.num_nonzeros as u64) * 4,
+                );
 
                 // Find diagonal statistics
                 let num_cells = self.num_cells as usize;
+                let read_start = Instant::now();
                 let row_offsets = pollster::block_on(
                     self.read_buffer_u32(&res.b_row_offsets, self.num_cells * 3 + 1),
+                );
+                self.profiling_stats.record_location(
+                    "coupled:debug_read_row_offsets",
+                    ProfileCategory::GpuRead,
+                    read_start.elapsed(),
+                    ((self.num_cells * 3 + 1) as u64) * 4,
                 );
 
                 // Sample diagonal for each equation type - look for actual diagonal
@@ -311,6 +367,7 @@ impl GpuSolver {
             // 3. Update Fields
             {
                 let res = self.coupled_resources.as_ref().unwrap();
+                let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
@@ -329,35 +386,17 @@ impl GpuSolver {
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
                 self.context.queue.submit(Some(encoder.finish()));
+                self.profiling_stats.record_location(
+                    "coupled:update_fields",
+                    ProfileCategory::GpuDispatch,
+                    dispatch_start.elapsed(),
+                    0,
+                );
             }
 
-            // Check convergence
-            if let (Some(u_before), Some(p_before)) = (u_before, p_before) {
-                let u_after = pollster::block_on(self.get_u());
-                let p_after = pollster::block_on(self.get_p());
-
-                // Calculate velocity residual
-                let mut max_diff_u = 0.0f64;
-                for (before, after) in u_before.iter().zip(u_after.iter()) {
-                    let diff_x = (after.0 - before.0).abs();
-                    let diff_y = (after.1 - before.1).abs();
-                    if diff_x.is_nan() || diff_y.is_nan() {
-                        max_diff_u = f64::NAN;
-                        break;
-                    }
-                    max_diff_u = max_diff_u.max(diff_x).max(diff_y);
-                }
-
-                // Calculate pressure residual
-                let mut max_diff_p = 0.0f64;
-                for (before, after) in p_before.iter().zip(p_after.iter()) {
-                    let diff = (after - before).abs();
-                    if diff.is_nan() {
-                        max_diff_p = f64::NAN;
-                        break;
-                    }
-                    max_diff_p = max_diff_p.max(diff);
-                }
+            // Check convergence using GPU-computed max-diff
+            if iter > 0 {
+                let (max_diff_u, max_diff_p) = self.compute_max_diff_gpu();
 
                 // Store outer loop stats
                 *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
@@ -419,5 +458,282 @@ impl GpuSolver {
         // Use the FGMRES-based coupled solver implementation from
         // `coupled_solver_fgmres.rs` to solve the coupled block system.
         self.solve_coupled_fgmres()
+    }
+
+    /// Copy current U and P to snapshot buffers for GPU-based convergence check
+    fn snapshot_fields_for_convergence(&self) {
+        if let Some(res) = self.coupled_resources.as_ref() {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Snapshot Fields Encoder"),
+                    });
+            
+            // Copy U to snapshot
+            encoder.copy_buffer_to_buffer(
+                &self.b_u,
+                0,
+                &res.b_u_snapshot,
+                0,
+                (self.num_cells as u64) * 8,
+            );
+            
+            // Copy P to snapshot
+            encoder.copy_buffer_to_buffer(
+                &self.b_p,
+                0,
+                &res.b_p_snapshot,
+                0,
+                (self.num_cells as u64) * 4,
+            );
+            
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+    }
+
+    /// Compute max-diff on GPU and return (max_diff_u, max_diff_p)
+    fn compute_max_diff_gpu(&self) -> (f64, f64) {
+        let res = match self.coupled_resources.as_ref() {
+            Some(r) => r,
+            None => return (f64::MAX, f64::MAX),
+        };
+
+        let dispatch_start = Instant::now();
+        
+        // Create bind groups for max-diff (using current fields and snapshots)
+        let bg_max_diff_u = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Max Diff U Bind Group"),
+            layout: &res.bgl_max_diff,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.b_u.as_entire_binding(), // Current U
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: res.b_u_snapshot.as_entire_binding(), // Snapshot U
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: res.b_max_diff_partial.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_max_diff_p = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Max Diff P Bind Group"),
+            layout: &res.bgl_max_diff,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.b_p.as_entire_binding(), // Current P
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: res.b_p_snapshot.as_entire_binding(), // Snapshot P
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: res.b_max_diff_partial.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Write params for partial reduction (n = num_cells)
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct MaxDiffParams {
+            n: u32,
+            _pad1: u32,
+            _pad2: u32,
+            _pad3: u32,
+        }
+        
+        let params = MaxDiffParams {
+            n: self.num_cells,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
+        };
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            0,
+            bytemuck::bytes_of(&params),
+        );
+
+        let workgroup_size = 64u32;
+        let num_groups = self.num_cells.div_ceil(workgroup_size);
+
+        // Compute max-diff for U (vec2)
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Max Diff U Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Max Diff U Partial Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&res.pipeline_max_diff_u_partial);
+                cpass.set_bind_group(0, &bg_max_diff_u, &[]);
+                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
+        // Final reduction for U
+        let params_reduce_u = MaxDiffParams {
+            n: num_groups,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
+        };
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            0,
+            bytemuck::bytes_of(&params_reduce_u),
+        );
+
+        // Reuse a simpler bind group for reduce - only need partial results as read input
+        let bg_reduce = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Max Diff Reduce Bind Group"),
+            layout: &res.bgl_max_diff,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: res.b_max_diff_partial.as_entire_binding(), // Partial results as input
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: res.b_p_snapshot.as_entire_binding(), // Dummy, not used by reduce
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: res.b_u_snapshot.as_entire_binding(), // Dummy, not used by reduce
+                },
+            ],
+        });
+
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Max Diff U Reduce Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Max Diff U Reduce Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&res.pipeline_max_diff_reduce);
+                cpass.set_bind_group(0, &bg_reduce, &[]);
+                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+                cpass.dispatch_workgroups(1, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
+        // Read max_diff_u from result buffer
+        let read_start = Instant::now();
+        let max_diff_u_vec = pollster::block_on(self.read_buffer_f32(&res.b_max_diff_result, 1));
+        self.profiling_stats.record_location(
+            "coupled:gpu_max_diff_u_read",
+            ProfileCategory::GpuRead,
+            read_start.elapsed(),
+            4,
+        );
+        let max_diff_u = max_diff_u_vec[0] as f64;
+
+        // Compute max-diff for P (scalar)
+        let params_p = MaxDiffParams {
+            n: self.num_cells,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
+        };
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            0,
+            bytemuck::bytes_of(&params_p),
+        );
+
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Max Diff P Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Max Diff P Partial Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&res.pipeline_max_diff_p_partial);
+                cpass.set_bind_group(0, &bg_max_diff_p, &[]);
+                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+                cpass.dispatch_workgroups(num_groups, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
+        // Final reduction for P
+        let params_reduce_p = MaxDiffParams {
+            n: num_groups,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
+        };
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            0,
+            bytemuck::bytes_of(&params_reduce_p),
+        );
+
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Max Diff P Reduce Encoder"),
+                    });
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Max Diff P Reduce Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&res.pipeline_max_diff_reduce);
+                cpass.set_bind_group(0, &bg_reduce, &[]);
+                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+                cpass.dispatch_workgroups(1, 1, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+        }
+
+        // Read max_diff_p from result buffer
+        let read_start = Instant::now();
+        let max_diff_p_vec = pollster::block_on(self.read_buffer_f32(&res.b_max_diff_result, 1));
+        self.profiling_stats.record_location(
+            "coupled:gpu_max_diff_p_read",
+            ProfileCategory::GpuRead,
+            read_start.elapsed(),
+            4,
+        );
+        let max_diff_p = max_diff_p_vec[0] as f64;
+
+        self.profiling_stats.record_location(
+            "coupled:gpu_max_diff_dispatch",
+            ProfileCategory::GpuDispatch,
+            dispatch_start.elapsed(),
+            0,
+        );
+
+        (max_diff_u, max_diff_p)
     }
 }

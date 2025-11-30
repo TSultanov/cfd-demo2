@@ -1,6 +1,8 @@
 // Force recompile 2
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
+use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
@@ -307,6 +309,35 @@ impl GpuSolver {
         let spmv = *self.time_spmv.lock().unwrap();
         let dot = *self.time_dot.lock().unwrap();
         (dot, compute, spmv, std::time::Duration::new(0, 0))
+    }
+
+    /// Get a reference to the detailed profiling statistics
+    pub fn get_profiling_stats(&self) -> Arc<ProfilingStats> {
+        Arc::clone(&self.profiling_stats)
+    }
+
+    /// Enable detailed GPU-CPU communication profiling
+    pub fn enable_detailed_profiling(&self, enable: bool) {
+        if enable {
+            self.profiling_stats.enable();
+        } else {
+            self.profiling_stats.disable();
+        }
+    }
+
+    /// Start a profiling session
+    pub fn start_profiling_session(&self) {
+        self.profiling_stats.start_session();
+    }
+
+    /// End a profiling session and get the report
+    pub fn end_profiling_session(&self) {
+        self.profiling_stats.end_session();
+    }
+
+    /// Print the profiling report
+    pub fn print_profiling_report(&self) {
+        self.profiling_stats.print_report();
     }
 
     pub fn compute_fluxes(&mut self) {

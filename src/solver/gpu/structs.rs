@@ -1,8 +1,10 @@
 use super::context::GpuContext;
 use super::coupled_solver_fgmres::FgmresResources;
+use super::profiling::ProfilingStats;
 use bytemuck::{Pod, Zeroable};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
+use std::sync::Arc;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {
@@ -40,6 +42,13 @@ pub struct CoupledSolverResources {
     pub b_grad_u: wgpu::Buffer,
     pub b_grad_v: wgpu::Buffer,
 
+    // Convergence check buffers (GPU max-diff)
+    pub b_u_snapshot: wgpu::Buffer,    // Snapshot of U at start of iteration
+    pub b_p_snapshot: wgpu::Buffer,    // Snapshot of P at start of iteration
+    pub b_max_diff_partial: wgpu::Buffer, // Partial max values from workgroups
+    pub b_max_diff_result: wgpu::Buffer,  // Final max-diff result (2 floats: max_u, max_p)
+    pub num_max_diff_groups: u32,         // Number of workgroups for max-diff reduction
+
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,
@@ -56,6 +65,15 @@ pub struct CoupledSolverResources {
 
     pub bgl_coupled_solver: wgpu::BindGroupLayout,
     pub bgl_precond: wgpu::BindGroupLayout, // Preconditioner bind group layout
+
+    // Max-diff convergence check resources
+    pub bgl_max_diff: wgpu::BindGroupLayout,
+    pub bgl_max_diff_params: wgpu::BindGroupLayout,
+    pub b_max_diff_params: wgpu::Buffer,
+    pub bg_max_diff_params: wgpu::BindGroup,
+    pub pipeline_max_diff_u_partial: wgpu::ComputePipeline,
+    pub pipeline_max_diff_p_partial: wgpu::ComputePipeline,
+    pub pipeline_max_diff_reduce: wgpu::ComputePipeline,
 
     // Preconditioner pipelines
     pub pipeline_extract_diagonal: wgpu::ComputePipeline,
@@ -238,4 +256,7 @@ pub struct GpuSolver {
     pub n_outer_correctors: u32,
 
     pub coupled_resources: Option<CoupledSolverResources>,
+
+    /// Detailed profiling statistics for GPU-CPU communication analysis
+    pub profiling_stats: Arc<ProfilingStats>,
 }

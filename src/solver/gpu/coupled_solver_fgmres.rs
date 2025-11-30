@@ -15,7 +15,8 @@
 // This implementation runs FULLY ON THE GPU:
 // - All vectors remain on GPU
 // - Only scalar values (dot products, norms) are read to CPU
-// - Preconditioner sweepuse super::context::GpuContext;
+// - Preconditioner sweep
+use super::profiling::ProfileCategory;
 use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use std::time::Instant;
@@ -862,9 +863,17 @@ impl GpuSolver {
     }
 
     fn write_scalars(&self, fgmres: &FgmresResources, scalars: &[f32]) {
+        let start = Instant::now();
         self.context
             .queue
             .write_buffer(&fgmres.b_scalars, 0, cast_slice(scalars));
+        let bytes = (scalars.len() * 4) as u64;
+        self.profiling_stats.record_location(
+            "write_scalars",
+            ProfileCategory::GpuWrite,
+            start.elapsed(),
+            bytes,
+        );
     }
 
     fn create_vector_bind_group(
@@ -906,6 +915,7 @@ impl GpuSolver {
         workgroups: u32,
         label: &str,
     ) {
+        let start = Instant::now();
         let mut encoder = self
             .context
             .device
@@ -925,9 +935,17 @@ impl GpuSolver {
         }
 
         self.context.queue.submit(Some(encoder.finish()));
+        self.profiling_stats.record_location(
+            label,
+            ProfileCategory::GpuDispatch,
+            start.elapsed(),
+            0,
+        );
     }
 
+    /// Compute norm of a vector using GPU reduction and reading only 1 scalar
     fn gpu_norm(&self, fgmres: &FgmresResources, x: &wgpu::Buffer, n: u32) -> f32 {
+        let bg_start = Instant::now();
         let vector_bg = self.create_vector_bind_group(
             fgmres,
             x,
@@ -935,19 +953,74 @@ impl GpuSolver {
             &fgmres.b_dot_partial,
             "FGMRES Norm BG",
         );
+        self.profiling_stats.record_location(
+            "gpu_norm:bind_group",
+            ProfileCategory::GpuResourceCreation,
+            bg_start.elapsed(),
+            0,
+        );
+
         let workgroups = self.workgroups_for_size(n);
+        
+        // Step 1: Compute partial sums on GPU
         self.dispatch_vector_pipeline(
             &fgmres.pipeline_norm_sq,
             fgmres,
             &vector_bg,
             &fgmres.bg_params,
             workgroups,
-            "FGMRES Norm",
+            "FGMRES Norm Partial",
         );
 
-        let partial =
-            pollster::block_on(self.read_buffer_f32(&fgmres.b_dot_partial, fgmres.num_dot_groups));
-        partial.iter().take(workgroups as usize).sum::<f32>().sqrt()
+        // Step 2: Final reduction on GPU - sums partials and writes to scalars[0]
+        let reduce_params = RawFgmresParams {
+            n: fgmres.num_dot_groups,
+            num_cells: 0,
+            num_iters: 0,
+            omega: 0.0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+
+        let reduce_bg = self.create_vector_bind_group(
+            fgmres,
+            &fgmres.b_dot_partial,
+            &fgmres.b_temp,
+            &fgmres.b_temp,
+            "FGMRES Reduce BG",
+        );
+        self.dispatch_vector_pipeline(
+            &fgmres.pipeline_reduce_final,
+            fgmres,
+            &reduce_bg,
+            &fgmres.bg_params,
+            1,
+            "FGMRES Reduce Final",
+        );
+
+        // Restore params.n for future operations
+        let restore_params = RawFgmresParams {
+            n,
+            num_cells: self.num_cells,
+            num_iters: 2,
+            omega: 1.0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
+
+        // Step 3: Read single scalar from scalars[0] (norm^2), then sqrt on CPU
+        let read_start = Instant::now();
+        let norm_sq_vec = pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
+        self.profiling_stats.record_location(
+            "gpu_norm:read_scalar",
+            ProfileCategory::GpuRead,
+            read_start.elapsed(),
+            4, // Just 1 float
+        );
+        
+        norm_sq_vec[0].sqrt()
     }
 
     fn compute_residual_into(
@@ -1026,6 +1099,7 @@ impl GpuSolver {
         workgroups: u32,
         label: &str,
     ) {
+        let start = Instant::now();
         let mut encoder = self
             .context
             .device
@@ -1043,6 +1117,12 @@ impl GpuSolver {
         }
 
         self.context.queue.submit(Some(encoder.finish()));
+        self.profiling_stats.record_location(
+            label,
+            ProfileCategory::GpuDispatch,
+            start.elapsed(),
+            0,
+        );
     }
 
     /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
@@ -1423,9 +1503,16 @@ impl GpuSolver {
 
                 // Update Hessenberg and Givens (GPU)
                 iter_params.current_idx = j as u32;
+                let write_start = Instant::now();
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+                self.profiling_stats.record_location(
+                    "fgmres:write_iter_params",
+                    ProfileCategory::GpuWrite,
+                    write_start.elapsed(),
+                    std::mem::size_of::<IterParams>() as u64,
+                );
 
                 self.dispatch_logic_pipeline(
                     &fgmres.pipeline_update_hessenberg,
@@ -1434,22 +1521,37 @@ impl GpuSolver {
                     "FGMRES Update Hessenberg",
                 );
 
-                // Check convergence (read back scalars[0])
-                let resid_est_vec = pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
-                let resid_est = resid_est_vec[0];
-
-                if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
-                    println!(
-                        "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
-                        total_iters,
-                        resid_est,
-                        tol * rhs_norm
+                // Check convergence less frequently to reduce GPU->CPU reads
+                // Read every 5 iterations, or on last iteration of restart cycle
+                let check_interval = 5;
+                let is_last_in_restart = j == max_restart - 1;
+                let should_check = (j + 1) % check_interval == 0 || is_last_in_restart;
+                
+                if should_check {
+                    // Check convergence (read back scalars[0])
+                    let read_start = Instant::now();
+                    let resid_est_vec = pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
+                    self.profiling_stats.record_location(
+                        "fgmres:convergence_check_read",
+                        ProfileCategory::GpuRead,
+                        read_start.elapsed(),
+                        4, // 1 float
                     );
-                }
+                    let resid_est = resid_est_vec[0];
 
-                if resid_est < tol * rhs_norm {
-                    converged = true;
-                    break;
+                    if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
+                        println!(
+                            "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
+                            total_iters,
+                            resid_est,
+                            tol * rhs_norm
+                        );
+                    }
+
+                    if resid_est < tol * rhs_norm {
+                        converged = true;
+                        break;
+                    }
                 }
             }
 

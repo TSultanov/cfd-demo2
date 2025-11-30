@@ -42,31 +42,10 @@ impl GpuSolver {
             &mesh_res.bgl_mesh,
             &fields_res.bgl_fields,
             &linear_res.bgl_solver,
-            &linear_res.bgl_linear_state_ro,
             &linear_res.coupled_resources.bgl_coupled_solver,
         );
 
         // Misc
-        let bg_empty = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Empty Bind Group"),
-                layout: &context.device.create_bind_group_layout(
-                    &wgpu::BindGroupLayoutDescriptor {
-                        label: Some("Empty Bind Group Layout"),
-                        entries: &[],
-                    },
-                ),
-                entries: &[],
-            });
-
-        let amg_solver = Some(super::multigrid_solver::MultigridSolver::new(
-            &context.device,
-            super::multigrid_solver::CycleType::None,
-            super::multigrid_solver::CycleType::None,
-            super::multigrid_solver::CycleType::None,
-        ));
-
         Self {
             context,
             // Mesh
@@ -89,12 +68,10 @@ impl GpuSolver {
             b_u_old: fields_res.b_u_old,
             b_u_old_old: fields_res.b_u_old_old,
             b_p: fields_res.b_p,
-            b_p_old: fields_res.b_p_old,
             b_d_p: fields_res.b_d_p,
             b_fluxes: fields_res.b_fluxes,
             b_grad_p: fields_res.b_grad_p,
             b_grad_component: fields_res.b_grad_component,
-            b_grad_p_prime: fields_res.b_grad_p_prime,
             b_constants: fields_res.b_constants,
             bg_fields: fields_res.bg_fields,
             constants: fields_res.constants,
@@ -152,18 +129,13 @@ impl GpuSolver {
 
             // Physics
             pipeline_gradient: physics_res.pipeline_gradient,
-            pipeline_flux: physics_res.pipeline_flux,
             pipeline_momentum_assembly: physics_res.pipeline_momentum_assembly,
             pipeline_pressure_assembly: physics_res.pipeline_pressure_assembly,
-            pipeline_pressure_assembly_with_grad: physics_res.pipeline_pressure_assembly_with_grad,
             pipeline_flux_rhie_chow: physics_res.pipeline_flux_rhie_chow,
-            pipeline_velocity_correction: physics_res.pipeline_velocity_correction,
-            pipeline_update_u_component: physics_res.pipeline_update_u_component,
             pipeline_coupled_assembly: physics_res.pipeline_coupled_assembly,
             pipeline_update_from_coupled: physics_res.pipeline_update_from_coupled,
 
             // Misc
-            bg_empty,
             num_cells,
             num_faces,
             profiling_enabled: AtomicBool::new(false),
@@ -176,10 +148,8 @@ impl GpuSolver {
             outer_residual_u: Mutex::new(0.0),
             outer_residual_p: Mutex::new(0.0),
             outer_iterations: Mutex::new(0),
-            amg_solver,
             fgmres_resources: None,
             n_outer_correctors: 20,
-            solver_type: super::structs::SolverType::default(),
             coupled_resources: Some(linear_res.coupled_resources),
         }
     }

@@ -6,12 +6,10 @@ pub struct FieldResources {
     pub b_u_old: wgpu::Buffer,
     pub b_u_old_old: wgpu::Buffer,
     pub b_p: wgpu::Buffer,
-    pub b_p_old: wgpu::Buffer,
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_p: wgpu::Buffer,
     pub b_grad_component: wgpu::Buffer,
-    pub b_grad_p_prime: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
     pub bg_fields: wgpu::BindGroup,
     pub bgl_fields: wgpu::BindGroupLayout,
@@ -54,14 +52,6 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
             | wgpu::BufferUsages::COPY_SRC,
     });
 
-    let b_p_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("P Old Buffer"),
-        contents: bytemuck::cast_slice(&zero_scalars),
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-    });
-
     let b_d_p = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("D_P Buffer"),
         contents: bytemuck::cast_slice(&zero_scalars),
@@ -89,13 +79,6 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
         label: Some("Grad Component Buffer"),
         contents: bytemuck::cast_slice(&zero_vecs),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-    });
-
-    let b_grad_p_prime = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Grad P Prime Buffer"),
-        size: (num_cells as u64 * std::mem::size_of::<[f32; 2]>() as u64),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
     });
 
     let constants = GpuConstants {
@@ -211,20 +194,9 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
                 },
                 count: None,
             },
-            // 8: Grad P Prime
+            // 8: U Old Old
             wgpu::BindGroupLayoutEntry {
                 binding: 8,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 9: U Old Old
-            wgpu::BindGroupLayoutEntry {
-                binding: 9,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -274,10 +246,6 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
             },
             wgpu::BindGroupEntry {
                 binding: 8,
-                resource: b_grad_p_prime.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 9,
                 resource: b_u_old_old.as_entire_binding(),
             },
         ],
@@ -288,12 +256,10 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
         b_u_old,
         b_u_old_old,
         b_p,
-        b_p_old,
         b_d_p,
         b_fluxes,
         b_grad_p,
         b_grad_component,
-        b_grad_p_prime,
         b_constants,
         bg_fields,
         bgl_fields,

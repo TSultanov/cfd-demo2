@@ -1,7 +1,7 @@
 // Coupled Solver for CFD
 //
 // This solver solves the momentum and continuity equations simultaneously
-// in a block-coupled manner, as opposed to the segregated PISO approach.
+// in a block-coupled manner, as opposed to segregated predictor-corrector approaches.
 //
 // The coupled approach forms a larger block system:
 // | A_u  G  | | u |   | b_u |
@@ -15,12 +15,12 @@
 // - p is the pressure field
 // - b_u is the momentum source term
 
-use super::structs::{GpuSolver, LinearSolverStats, PreconditionerParams};
+use super::structs::{GpuSolver, LinearSolverStats};
 
 impl GpuSolver {
     /// Performs a single timestep using the coupled solver approach.
     ///
-    /// Unlike PISO which iterates between momentum prediction and pressure correction,
+    /// Unlike segregated predictors that iterate between momentum and pressure solves,
     /// the coupled solver assembles and solves the full block system in one go,
     /// with outer iterations for non-linearity.
     pub fn step_coupled(&mut self) {
@@ -29,7 +29,6 @@ impl GpuSolver {
 
         // Save old velocity for under-relaxation and time derivative
         self.copy_u_to_u_old();
-        self.copy_p_to_p_old();
 
         // Initialize fluxes based on current U
         self.compute_fluxes();

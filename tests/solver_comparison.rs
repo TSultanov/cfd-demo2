@@ -1,12 +1,11 @@
 use cfd2::solver::gpu::multigrid_solver::CycleType;
-use cfd2::solver::gpu::structs::SolverType;
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use nalgebra::Vector2;
 
 #[test]
-fn test_solver_comparison() {
-    // Create the Backwards Step mesh (same as UI default)
+fn test_coupled_solver_comparison() {
+    // Use the default Backwards Step geometry from the UI
     let length = 3.5;
     let domain_size = Vector2::new(length, 1.0);
     let geo = BackwardsStep {
@@ -15,14 +14,6 @@ fn test_solver_comparison() {
         height_outlet: 1.0,
         step_x: 0.5,
     };
-    // Use slightly coarser mesh for test speed, but keep geometry same
-    // UI uses 0.025, we'll use 0.05 to keep test fast (approx 1400 cells)
-    // Or should I use exact same? User said "same geometry", usually implies shape.
-    // But "same geometry as the default ... in the UI" might imply resolution too.
-    // Let's try 0.05 first, if it's too coarse for stability we can refine.
-    // Actually, let's use 0.05. 0.025 might be too slow for a quick test.
-    // Wait, user said "Change the comparison test to use the same geometry as the default backwards step in the UI".
-    // I will use the exact parameters from UI to be safe.
     let min_cell_size = 0.025;
     let max_cell_size = 0.025;
 
@@ -32,108 +23,73 @@ fn test_solver_comparison() {
     println!("Mesh created with {} cells", mesh.num_cells());
 
     pollster::block_on(async {
-        const RUN_PISO: bool = false;
+        // Baseline coupled solver (no AMG)
+        let mut solver_baseline = GpuSolver::new(&mesh).await;
 
-        // 1. Initialize PISO Solver (optional while focusing on coupled solver)
-        let mut solver_piso = if RUN_PISO {
-            let mut solver = GpuSolver::new(&mesh).await;
-            solver.solver_type = SolverType::Piso;
-            solver.set_amg_cycle("Ux", CycleType::VCycle);
-            solver.set_amg_cycle("Uy", CycleType::VCycle);
-            solver.set_amg_cycle("p", CycleType::WCycle);
-            Some(solver)
-        } else {
-            None
-        };
+        // Coupled solver with AMG cycles enabled for reference comparison
+        let mut solver_amg = GpuSolver::new(&mesh).await;
+        solver_amg.set_amg_cycle("Ux", CycleType::VCycle);
+        solver_amg.set_amg_cycle("Uy", CycleType::VCycle);
+        solver_amg.set_amg_cycle("p", CycleType::WCycle);
 
-        // 2. Initialize Coupled Solver
-        let mut solver_coupled = GpuSolver::new(&mesh).await;
-        solver_coupled.solver_type = SolverType::Coupled;
-
-        // Set identical initial conditions
         let init_u: Vec<(f64, f64)> = (0..mesh.num_cells()).map(|_| (0.1, 0.0)).collect();
-        let init_p: Vec<f64> = (0..mesh.num_cells()).map(|_| 0.0).collect();
+        let init_p: Vec<f64> = vec![0.0; mesh.num_cells()];
 
-        if let Some(solver) = solver_piso.as_mut() {
+        for solver in [&mut solver_baseline, &mut solver_amg] {
             solver.set_u(&init_u);
             solver.set_p(&init_p);
-            solver.constants.dt = 0.001;
-            // Note: We use stable parameters (Re=50) for the test instead of UI defaults (Re=500,000)
-            // because the default UI parameters (Density=1000, Viscosity=0.001) are unstable
-            // for the laminar solver on this mesh.
             solver.set_density(1.0);
             solver.set_viscosity(0.01);
             solver.set_alpha_u(0.9);
             solver.set_alpha_p(0.9);
+            solver.set_dt(0.001);
             solver.update_constants();
         }
 
-        solver_coupled.set_u(&init_u);
-        solver_coupled.set_p(&init_p);
-
-        // Set identical constants
-        // UI uses 0.001 timestep, let's match it for stability
-        solver_coupled.constants.dt = 0.001;
-        // Note: We use stable parameters (Re=50) for the test instead of UI defaults (Re=500,000)
-        solver_coupled.set_density(1.0);
-        solver_coupled.set_viscosity(0.01);
-        solver_coupled.set_alpha_u(0.9);
-        solver_coupled.set_alpha_p(0.9);
-        solver_coupled.update_constants();
-
-        // March forward only a couple of full time steps to keep the test fast
         const NUM_TIME_STEPS: usize = 5;
         for step_idx in 0..NUM_TIME_STEPS {
-            if let Some(solver) = solver_piso.as_mut() {
-                println!(
-                    "Running time step {} / {} (PISO)",
-                    step_idx + 1,
-                    NUM_TIME_STEPS
-                );
-                solver.step();
-            }
-
             println!(
-                "Running time step {} / {} (Coupled)",
+                "Running time step {} / {} (baseline)",
                 step_idx + 1,
                 NUM_TIME_STEPS
             );
-            solver_coupled.step();
+            solver_baseline.step();
+
+            println!(
+                "Running time step {} / {} (AMG)",
+                step_idx + 1,
+                NUM_TIME_STEPS
+            );
+            solver_amg.step();
         }
 
-        // Compare results
-        let u_coupled = solver_coupled.get_u().await;
-        let p_coupled = solver_coupled.get_p().await;
+        let u_baseline = solver_baseline.get_u().await;
+        let p_baseline = solver_baseline.get_p().await;
+        let u_amg = solver_amg.get_u().await;
+        let p_amg = solver_amg.get_p().await;
 
-        if let Some(solver) = solver_piso.as_mut() {
-            let u_piso = solver.get_u().await;
-            let p_piso = solver.get_p().await;
+        let mut max_diff_u = 0.0f64;
+        let mut max_diff_p = 0.0f64;
 
-            // Calculate differences
-            let mut max_diff_u: f64 = 0.0;
-            let mut max_diff_p: f64 = 0.0;
-
-            for i in 0..mesh.num_cells() {
-                let diff_ux = (u_piso[i].0 - u_coupled[i].0).abs();
-                let diff_uy = (u_piso[i].1 - u_coupled[i].1).abs();
-                let diff_p = (p_piso[i] - p_coupled[i]).abs();
-
-                max_diff_u = max_diff_u.max(diff_ux).max(diff_uy);
-                max_diff_p = max_diff_p.max(diff_p);
-            }
-
-            println!("Max Diff U: {:.2e}", max_diff_u);
-            println!("Max Diff P: {:.2e}", max_diff_p);
-
-            assert!(max_diff_u.is_finite());
-            assert!(max_diff_p.is_finite());
-        }
-
-        // Check that fields are not NaN
         for i in 0..mesh.num_cells() {
-            assert!(u_coupled[i].0.is_finite(), "Coupled Ux at {} is NaN", i);
-            assert!(u_coupled[i].1.is_finite(), "Coupled Uy at {} is NaN", i);
-            assert!(p_coupled[i].is_finite(), "Coupled P at {} is NaN", i);
+            let diff_ux = (u_baseline[i].0 - u_amg[i].0).abs();
+            let diff_uy = (u_baseline[i].1 - u_amg[i].1).abs();
+            let diff_p = (p_baseline[i] - p_amg[i]).abs();
+            max_diff_u = max_diff_u.max(diff_ux).max(diff_uy);
+            max_diff_p = max_diff_p.max(diff_p);
+
+            assert!(u_baseline[i].0.is_finite());
+            assert!(u_baseline[i].1.is_finite());
+            assert!(u_amg[i].0.is_finite());
+            assert!(u_amg[i].1.is_finite());
+            assert!(p_baseline[i].is_finite());
+            assert!(p_amg[i].is_finite());
         }
+
+        println!("Max Coupled ΔU: {:.2e}", max_diff_u);
+        println!("Max Coupled ΔP: {:.2e}", max_diff_p);
+
+        assert!(max_diff_u.is_finite());
+        assert!(max_diff_p.is_finite());
     });
 }

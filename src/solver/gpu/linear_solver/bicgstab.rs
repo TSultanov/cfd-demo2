@@ -6,17 +6,6 @@ impl GpuSolver {
         &mut self,
         field_name: &str,
     ) -> crate::solver::gpu::structs::LinearSolverStats {
-        // Try AMG Solver first
-        let amg_solver = self.amg_solver.take();
-        if let Some(mut amg) = amg_solver {
-            let result = amg.solve(self, field_name).await;
-            self.amg_solver = Some(amg);
-            if let Some(stats) = result {
-                return stats;
-            }
-        }
-        println!("AMG solver failed for {}, Using BICGSTAB", field_name);
-
         let start_time = std::time::Instant::now();
         let max_iter = 1000;
         let abs_tol = 1e-6;
@@ -205,39 +194,5 @@ impl GpuSolver {
             diverged,
             time: start_time.elapsed(),
         }
-    }
-
-    /// Solve the linear system and write result directly to velocity field with under-relaxation.
-    /// This avoids a separate kernel dispatch for update_u_component.
-    pub async fn solve_and_update_u(
-        &mut self,
-        field_name: &str,
-    ) -> crate::solver::gpu::structs::LinearSolverStats {
-        let stats = self.solve(field_name).await;
-
-        // Run update_u_component as part of this method instead of separate dispatch
-        let workgroup_size = 64;
-        let num_groups = self.num_cells.div_ceil(workgroup_size);
-
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Update U Encoder"),
-                });
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Update U Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&self.pipeline_update_u_component);
-            cpass.set_bind_group(0, &self.bg_mesh, &[]);
-            cpass.set_bind_group(1, &self.bg_fields, &[]);
-            cpass.set_bind_group(2, &self.bg_linear_state_ro, &[]);
-            cpass.dispatch_workgroups(num_groups, 1, 1);
-        }
-        self.context.queue.submit(Some(encoder.finish()));
-
-        stats
     }
 }

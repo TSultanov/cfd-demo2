@@ -1,9 +1,9 @@
-# 2D CFD Solver (PISO + CutCell)
+# 2D CFD Solver (CutCell)
 
 This is a 2D CFD solver for incompressible laminar flow implemented in Rust.
 
 ## Features
-- **Algorithm**: PISO (Pressure-Implicit with Splitting of Operators)
+- **Algorithm**: Block-coupled pressure-velocity solver
 - **Discretization**: Finite Volume Method (FVM)
 - **Grid**: Colocated grid with CutCell method for arbitrary geometries
 - **Geometries**: Backwards Step, Channel with Obstacle
@@ -27,5 +27,5 @@ This is a 2D CFD solver for incompressible laminar flow implemented in Rust.
 
 ## Implementation Details
 - **Mesh**: Quadtree-based CutCell generation using Signed Distance Functions (SDF).
-- **Solver**: Custom implementation of PISO algorithm with BiCGStab linear solver for sparse matrices.
+- **Solver**: Block-coupled momentum/continuity system with GPU-accelerated Krylov solvers and AMG preconditioning.
 - **Visualization**: Real-time plotting using `egui_plot`.

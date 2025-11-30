@@ -1,4 +1,3 @@
-use cfd2::solver::gpu::structs::SolverType;
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use nalgebra::Vector2;
@@ -27,7 +26,6 @@ async fn run_coupled_solver(
 
     // Initialize Solver
     let mut solver = GpuSolver::new(&mesh).await;
-    solver.solver_type = SolverType::Coupled;
 
     // Initial Conditions
     let init_u: Vec<(f64, f64)> = (0..mesh.num_cells()).map(|_| (0.1, 0.0)).collect();

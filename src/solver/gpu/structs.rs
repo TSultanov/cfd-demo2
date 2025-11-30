@@ -4,22 +4,6 @@ use bytemuck::{Pod, Zeroable};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-/// Solver type selection for the pressure-velocity coupling algorithm
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SolverType {
-    /// PISO (Pressure Implicit with Splitting of Operators) algorithm
-    /// - Segregated approach with multiple pressure corrector steps
-    /// - More stable for transient flows
-    /// - Default choice for most applications
-    #[default]
-    Piso,
-    /// Coupled solver approach
-    /// - Solves momentum and pressure together in outer iterations
-    /// - Can be faster for steady-state problems
-    /// - May require more memory
-    Coupled,
-}
-
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {
     pub iterations: u32,
@@ -153,12 +137,10 @@ pub struct GpuSolver {
     pub b_u_old: wgpu::Buffer,     // For velocity under-relaxation
     pub b_u_old_old: wgpu::Buffer, // For 2nd order time stepping
     pub b_p: wgpu::Buffer,
-    pub b_p_old: wgpu::Buffer, // For restarting PIMPLE loop
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_p: wgpu::Buffer,
     pub b_grad_component: wgpu::Buffer,
-    pub b_grad_p_prime: wgpu::Buffer,
 
     // Matrix Structure (CSR)
     pub b_row_offsets: wgpu::Buffer,
@@ -200,7 +182,6 @@ pub struct GpuSolver {
     pub bg_dot_pair_r0r_rr: wgpu::BindGroup,
     pub bg_dot_pair_tstt: wgpu::BindGroup,
     pub bg_scalars: wgpu::BindGroup,
-    pub bg_empty: wgpu::BindGroup,
     pub bg_dot_p_v: wgpu::BindGroup,
     pub bg_dot_r_r: wgpu::BindGroup, // For CG r.r
     pub bgl_dot_inputs: wgpu::BindGroupLayout,
@@ -226,13 +207,9 @@ pub struct GpuSolver {
     pub pipeline_reduce_r0_v: wgpu::ComputePipeline,
     pub pipeline_reduce_t_s_t_t: wgpu::ComputePipeline,
 
-    pub pipeline_flux: wgpu::ComputePipeline,
     pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
-    pub pipeline_pressure_assembly_with_grad: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
-    pub pipeline_velocity_correction: wgpu::ComputePipeline,
-    pub pipeline_update_u_component: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
     pub pipeline_init_cg_scalars: wgpu::ComputePipeline,
@@ -256,15 +233,9 @@ pub struct GpuSolver {
     pub outer_residual_p: Mutex<f32>,
     pub outer_iterations: Mutex<u32>,
 
-    // Multigrid
-    // Multigrid
-    pub amg_solver: Option<super::multigrid_solver::MultigridSolver>,
     pub fgmres_resources: Option<FgmresResources>,
 
     pub n_outer_correctors: u32,
-
-    /// The solver type to use for pressure-velocity coupling
-    pub solver_type: SolverType,
 
     pub coupled_resources: Option<CoupledSolverResources>,
 }

@@ -7,7 +7,7 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
     eframe::run_native(
-        "2D CFD Solver (PISO + CutCell)",
+        "2D CFD Solver (CutCell)",
         options,
         Box::new(|cc| Ok(Box::new(CFDApp::new(cc)))),
     )

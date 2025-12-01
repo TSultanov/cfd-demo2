@@ -13,6 +13,21 @@ struct GmresParams {
     num_cells: u32,      // Number of cells
     num_iters: u32,      // Jacobi iterations for preconditioner
     omega: f32,          // Relaxation factor
+    dispatch_x: u32,     // Width of 2D dispatch (in threads, i.e. workgroups * 64)
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
+}
+
+// Compute linear index from potentially 2D dispatch
+fn get_global_index(global_id: vec3<u32>) -> u32 {
+    return global_id.x + global_id.y * params.dispatch_x;
+}
+
+// Compute linear workgroup ID from potentially 2D dispatch
+fn get_workgroup_index(wg_id: vec3<u32>) -> u32 {
+    let dispatch_wg_x = params.dispatch_x / 64u;
+    return wg_id.x + wg_id.y * dispatch_wg_x;
 }
 
 // Group 0: Vectors (for AXPY, scale, copy operations)
@@ -37,7 +52,7 @@ struct GmresParams {
 // SpMV: y = A * x
 @compute @workgroup_size(64)
 fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = global_id.x;
+    let row = get_global_index(global_id);
     if (row >= params.n) {
         return;
     }
@@ -58,7 +73,7 @@ fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // AXPY: y = alpha*x + y
 @compute @workgroup_size(64)
 fn axpy(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     if (idx >= params.n) {
         return;
     }
@@ -70,7 +85,7 @@ fn axpy(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // AXPBY: z = alpha*x + beta*y
 @compute @workgroup_size(64)
 fn axpby(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     if (idx >= params.n) {
         return;
     }
@@ -83,7 +98,7 @@ fn axpby(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Scale: y = alpha*x (copy with scaling)
 @compute @workgroup_size(64)
 fn scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     if (idx >= params.n) {
         return;
     }
@@ -95,7 +110,7 @@ fn scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Scale in place: y = alpha * y
 @compute @workgroup_size(64)
 fn scale_in_place(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     if (idx >= params.n) {
         return;
     }
@@ -107,7 +122,7 @@ fn scale_in_place(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Copy: y = x
 @compute @workgroup_size(64)
 fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     if (idx >= params.n) {
         return;
     }
@@ -119,7 +134,7 @@ fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Uses diagonal Jacobi for each block (u, v, p)
 @compute @workgroup_size(64)
 fn block_jacobi_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+    let cell = get_global_index(global_id);
     if (cell >= params.num_cells) {
         return;
     }
@@ -164,7 +179,7 @@ fn read_diagonal(row: u32) -> f32 {
 
 @compute @workgroup_size(64)
 fn extract_block_diagonal(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+    let cell = get_global_index(global_id);
     if (cell >= params.num_cells) {
         return;
     }
@@ -186,8 +201,9 @@ var<workgroup> partial_sums: array<f32, 64>;
 fn dot_product_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
                        @builtin(local_invocation_id) local_id: vec3<u32>,
                        @builtin(workgroup_id) wg_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     let lid = local_id.x;
+    let wg_idx = get_workgroup_index(wg_id);
     
     // Each thread computes its contribution
     var local_sum = 0.0;
@@ -211,7 +227,7 @@ fn dot_product_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
         // Atomic add to global result (stored in scalars[0])
         // Note: WGSL doesn't have atomicAdd for f32 directly, need to use atomicAdd with i32
         // For simplicity, write to per-workgroup output and do final reduction on CPU
-        vec_z[wg_id.x] = partial_sums[0];
+        vec_z[wg_idx] = partial_sums[0];
     }
 }
 
@@ -220,8 +236,9 @@ fn dot_product_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
 fn norm_sq_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
                    @builtin(local_invocation_id) local_id: vec3<u32>,
                    @builtin(workgroup_id) wg_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     let lid = local_id.x;
+    let wg_idx = get_workgroup_index(wg_id);
     
     var local_sum = 0.0;
     if (idx < params.n) {
@@ -242,7 +259,7 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
     
     // First thread writes workgroup result
     if (lid == 0u) {
-        vec_z[wg_id.x] = partial_sums[0];
+        vec_z[wg_idx] = partial_sums[0];
     }
 }
 
@@ -250,7 +267,7 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
 // where h = <w, v> (computed separately)
 @compute @workgroup_size(64) 
 fn orthogonalize(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = get_global_index(global_id);
     if (idx >= params.n) {
         return;
     }

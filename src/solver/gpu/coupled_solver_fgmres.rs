@@ -118,6 +118,10 @@ struct RawFgmresParams {
     num_cells: u32,
     num_iters: u32,
     omega: f32,
+    dispatch_x: u32,  // Width of 2D dispatch (in workgroups * 64)
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
 }
 
 #[repr(C)]
@@ -249,11 +253,17 @@ impl GpuSolver {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let workgroups = self.workgroups_for_size(n);
+        let dispatch_x = self.dispatch_x_threads(workgroups);
         let params = RawFgmresParams {
             n,
             num_cells: self.num_cells,
             num_iters: 2,
             omega: 1.0,
+            dispatch_x,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         };
         queue.write_buffer(&b_params, 0, bytes_of(&params));
 
@@ -857,9 +867,30 @@ impl GpuSolver {
         }
     }
 
+    const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
+    const WORKGROUP_SIZE: u32 = 64;
+
     fn workgroups_for_size(&self, n: u32) -> u32 {
-        let workgroup_size = 64u32;
-        n.div_ceil(workgroup_size)
+        n.div_ceil(Self::WORKGROUP_SIZE)
+    }
+
+    /// Compute 2D dispatch dimensions for large workgroup counts.
+    /// Returns (dispatch_x, dispatch_y) where total workgroups = dispatch_x * dispatch_y
+    fn dispatch_2d(&self, workgroups: u32) -> (u32, u32) {
+        if workgroups <= Self::MAX_WORKGROUPS_PER_DIMENSION {
+            (workgroups, 1)
+        } else {
+            // Split into 2D grid: use square-ish dimensions
+            let dispatch_y = workgroups.div_ceil(Self::MAX_WORKGROUPS_PER_DIMENSION);
+            let dispatch_x = workgroups.div_ceil(dispatch_y);
+            (dispatch_x, dispatch_y)
+        }
+    }
+
+    /// Compute the dispatch_x value (in threads, not workgroups) for params
+    fn dispatch_x_threads(&self, workgroups: u32) -> u32 {
+        let (dispatch_x, _) = self.dispatch_2d(workgroups);
+        dispatch_x * Self::WORKGROUP_SIZE
     }
 
     fn write_scalars(&self, fgmres: &FgmresResources, scalars: &[f32]) {
@@ -921,6 +952,8 @@ impl GpuSolver {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
 
+        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
+
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(label),
@@ -931,7 +964,7 @@ impl GpuSolver {
             pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
             pass.set_bind_group(2, &fgmres.bg_precond, &[]);
             pass.set_bind_group(3, group3_bg, &[]);
-            pass.dispatch_workgroups(workgroups, 1, 1);
+            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
 
         self.context.queue.submit(Some(encoder.finish()));
@@ -978,6 +1011,10 @@ impl GpuSolver {
             num_cells: 0,
             num_iters: 0,
             omega: 0.0,
+            dispatch_x: Self::WORKGROUP_SIZE,  // Single workgroup dispatch
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         };
         self.context
             .queue
@@ -1000,11 +1037,16 @@ impl GpuSolver {
         );
 
         // Restore params.n for future operations
+        let workgroups = self.workgroups_for_size(n);
         let restore_params = RawFgmresParams {
             n,
             num_cells: self.num_cells,
             num_iters: 2,
             omega: 1.0,
+            dispatch_x: self.dispatch_x_threads(workgroups),
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
         };
         self.context
             .queue
@@ -1364,6 +1406,10 @@ impl GpuSolver {
                         num_cells: 0,
                         num_iters: 0,
                         omega: 0.0,
+                        dispatch_x: Self::WORKGROUP_SIZE,  // Single workgroup dispatch
+                        _pad1: 0,
+                        _pad2: 0,
+                        _pad3: 0,
                     };
                     self.context
                         .queue
@@ -1384,6 +1430,10 @@ impl GpuSolver {
                         num_cells: self.num_cells,
                         num_iters: 2,
                         omega: 1.0,
+                        dispatch_x: self.dispatch_x_threads(workgroups_dofs),
+                        _pad1: 0,
+                        _pad2: 0,
+                        _pad3: 0,
                     };
                     self.context
                         .queue
@@ -1436,6 +1486,10 @@ impl GpuSolver {
                     num_cells: 0,
                     num_iters: 0,
                     omega: 0.0,
+                    dispatch_x: Self::WORKGROUP_SIZE,  // Single workgroup dispatch
+                    _pad1: 0,
+                    _pad2: 0,
+                    _pad3: 0,
                 };
                 self.context
                     .queue
@@ -1472,6 +1526,10 @@ impl GpuSolver {
                     num_cells: self.num_cells,
                     num_iters: 2,
                     omega: 1.0,
+                    dispatch_x: self.dispatch_x_threads(workgroups_dofs),
+                    _pad1: 0,
+                    _pad2: 0,
+                    _pad3: 0,
                 };
                 self.context
                     .queue

@@ -19,6 +19,9 @@ impl GpuContext {
             .await
             .unwrap();
 
+        // Get the adapter's supported limits to allow larger buffers for fine meshes
+        let adapter_limits = adapter.limits();
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -26,6 +29,9 @@ impl GpuContext {
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits {
                         max_storage_buffers_per_shader_stage: 31,
+                        // Use adapter's max buffer size to support large meshes
+                        max_buffer_size: adapter_limits.max_buffer_size,
+                        max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
                         ..wgpu::Limits::downlevel_defaults()
                     },
                 },

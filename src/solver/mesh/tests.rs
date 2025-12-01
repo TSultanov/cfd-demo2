@@ -1,6 +1,7 @@
 use super::*;
 use nalgebra::{Point2, Vector2};
 
+#[allow(dead_code)]
 struct CircleObstacle {
     center: Point2<f64>,
     radius: f64,
@@ -212,5 +213,41 @@ fn test_delaunay_backwards_step() {
                         i, v_idx, indices, p, dist_sq, r_sq, r_sq - dist_sq);
             }
         }
+    }
+}
+
+#[test]
+fn test_voronoi_generation() {
+    let domain_size = Vector2::new(1.0, 1.0);
+    let geo = CircleObstacle {
+        center: Point2::new(0.5, 0.5),
+        radius: 0.1,
+        domain_min: Point2::new(0.0, 0.0),
+        domain_max: Point2::new(domain_size.x, domain_size.y),
+    };
+
+    let mesh = generate_voronoi_mesh(&geo, 0.1, 0.2, 1.2, domain_size);
+
+    println!("Generated Voronoi mesh with {} cells", mesh.num_cells());
+
+    assert!(mesh.num_cells() > 0);
+    assert_eq!(mesh.cell_cx.len(), mesh.num_cells());
+    assert_eq!(mesh.cell_vol.len(), mesh.num_cells());
+
+    let total_vol: f64 = mesh.cell_vol.iter().sum();
+    let domain_area = domain_size.x * domain_size.y;
+    let circle_area = std::f64::consts::PI * 0.1 * 0.1;
+    let expected_area = domain_area - circle_area;
+
+    println!("Total volume: {}, Expected: {}", total_vol, expected_area);
+
+    assert!((total_vol - expected_area).abs() < 0.05);
+
+    for i in 0..mesh.num_cells() {
+        let start = mesh.cell_face_offsets[i];
+        let end = mesh.cell_face_offsets[i + 1];
+        let faces = &mesh.cell_faces[start..end];
+
+        assert!(faces.len() >= 3, "Cell {} has fewer than 3 faces", i);
     }
 }

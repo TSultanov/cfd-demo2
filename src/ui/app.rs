@@ -1,7 +1,8 @@
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuSolver;
 use crate::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, BackwardsStep, ChannelWithObstacle, Mesh,
+    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
+    ChannelWithObstacle, Mesh,
 };
 use crate::solver::scheme::Scheme;
 use eframe::egui;
@@ -35,6 +36,7 @@ enum GeometryType {
 enum MeshType {
     CutCell,
     Delaunay,
+    Voronoi,
 }
 
 #[derive(PartialEq)]
@@ -275,6 +277,13 @@ impl CFDApp {
                         self.growth_rate,
                         domain_size,
                     ),
+                    MeshType::Voronoi => generate_voronoi_mesh(
+                        &geo,
+                        self.min_cell_size,
+                        self.max_cell_size,
+                        self.growth_rate,
+                        domain_size,
+                    ),
                 };
                 mesh.smooth(&geo, 0.3, 50);
                 mesh
@@ -308,6 +317,19 @@ impl CFDApp {
                             self.growth_rate,
                             domain_size,
                         );
+                        mesh.smooth(&geo, 0.3, 50);
+                        mesh
+                    }
+                    MeshType::Voronoi => {
+                        let mut mesh = generate_voronoi_mesh(
+                            &geo,
+                            self.min_cell_size,
+                            self.max_cell_size,
+                            self.growth_rate,
+                            domain_size,
+                        );
+                        // Voronoi meshes are usually good quality, but we can smooth them too if needed.
+                        // For now, let's just return it.
                         mesh.smooth(&geo, 0.3, 50);
                         mesh
                     }
@@ -555,6 +577,7 @@ impl eframe::App for CFDApp {
                         ui.label("Mesh Type");
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
+                        ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
                     });
 
                     ui.group(|ui| {

@@ -6,13 +6,13 @@ use super::quadtree::generate_base_polygons;
 use super::structs::{BoundaryType, Mesh};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Edge {
-    v1: usize,
-    v2: usize,
+pub struct Edge {
+    pub v1: usize,
+    pub v2: usize,
 }
 
 impl Edge {
-    fn new(v1: usize, v2: usize) -> Self {
+    pub fn new(v1: usize, v2: usize) -> Self {
         if v1 < v2 {
             Self { v1, v2 }
         } else {
@@ -72,7 +72,7 @@ impl Triangle {
         (center, r_sq)
     }
 
-    fn in_circumcircle(&self, p: Point2<f64>) -> bool {
+    pub fn in_circumcircle(&self, p: Point2<f64>) -> bool {
         // Use determinant method for robustness
         // | ax ay ax^2+ay^2 1 |
         // | bx by ...       1 |
@@ -94,17 +94,13 @@ impl Triangle {
     }
 }
 
-pub fn generate_delaunay_mesh(
+pub fn triangulate(
     geo: &(impl Geometry + Sync),
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
     domain_size: Vector2<f64>,
-) -> Mesh {
-    let mut mesh = Mesh::new();
-    mesh.cell_face_offsets.push(0);
-    mesh.cell_vertex_offsets.push(0);
-
+) -> (Vec<Point2<f64>>, Vec<Triangle>, Vec<bool>) {
     // 1. Generate Points using robust polygon generation
     let all_polys =
         generate_base_polygons(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
@@ -258,6 +254,23 @@ pub fn generate_delaunay_mesh(
         let centroid = Point2::new((p1.x + p2.x + p3.x) / 3.0, (p1.y + p2.y + p3.y) / 3.0);
         geo.is_inside(&centroid)
     });
+
+    (points, triangles, fixed_nodes)
+}
+
+pub fn generate_delaunay_mesh(
+    geo: &(impl Geometry + Sync),
+    min_cell_size: f64,
+    max_cell_size: f64,
+    growth_rate: f64,
+    domain_size: Vector2<f64>,
+) -> Mesh {
+    let mut mesh = Mesh::new();
+    mesh.cell_face_offsets.push(0);
+    mesh.cell_vertex_offsets.push(0);
+
+    let (points, triangles, fixed_nodes) =
+        triangulate(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
     // 3. Convert to Mesh
     mesh.vx = points.iter().map(|p| p.x).collect();

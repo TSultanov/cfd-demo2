@@ -21,7 +21,7 @@ async fn run_coupled_solver(
     let min_cell_size = 0.05; // Coarse mesh for speed
     let max_cell_size = 0.05;
 
-    let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
     // Initialize Solver

@@ -13,7 +13,7 @@ fn test_gpu_profile() {
         height_outlet: 1.0,
         step_x: 0.5,
     };
-    let mut mesh = generate_cut_cell_mesh(&geo, 0.05, 0.05, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.02, 0.02, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
     pollster::block_on(async {

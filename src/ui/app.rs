@@ -1,6 +1,8 @@
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuSolver;
-use crate::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh};
+use crate::solver::mesh::{
+    generate_cut_cell_mesh, generate_delaunay_mesh, BackwardsStep, ChannelWithObstacle, Mesh,
+};
 use crate::solver::scheme::Scheme;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
@@ -27,6 +29,12 @@ enum RenderMode {
 enum GeometryType {
     BackwardsStep,
     ChannelObstacle,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum MeshType {
+    CutCell,
+    Delaunay,
 }
 
 #[derive(PartialEq)]
@@ -126,8 +134,10 @@ pub struct CFDApp {
     actual_min_cell_size: f64,
     min_cell_size: f64,
     max_cell_size: f64,
+    growth_rate: f64,
     timestep: f64,
     selected_geometry: GeometryType,
+    mesh_type: MeshType,
     plot_field: PlotField,
     is_running: bool,
     selected_scheme: Scheme,
@@ -162,8 +172,10 @@ impl CFDApp {
             actual_min_cell_size: 0.01,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
+            growth_rate: 1.2,
             timestep: 0.001,
             selected_geometry: GeometryType::BackwardsStep,
+            mesh_type: MeshType::CutCell,
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
@@ -248,12 +260,22 @@ impl CFDApp {
                     height_outlet: 1.0,
                     step_x: 0.5,
                 };
-                let mut mesh = generate_cut_cell_mesh(
-                    &geo,
-                    self.min_cell_size,
-                    self.max_cell_size,
-                    domain_size,
-                );
+                let mut mesh = match self.mesh_type {
+                    MeshType::CutCell => generate_cut_cell_mesh(
+                        &geo,
+                        self.min_cell_size,
+                        self.max_cell_size,
+                        self.growth_rate,
+                        domain_size,
+                    ),
+                    MeshType::Delaunay => generate_delaunay_mesh(
+                        &geo,
+                        self.min_cell_size,
+                        self.max_cell_size,
+                        self.growth_rate,
+                        domain_size,
+                    ),
+                };
                 mesh.smooth(&geo, 0.3, 50);
                 mesh
             }
@@ -266,12 +288,22 @@ impl CFDApp {
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.1,
                 };
-                let mut mesh = generate_cut_cell_mesh(
-                    &geo,
-                    self.min_cell_size,
-                    self.max_cell_size,
-                    domain_size,
-                );
+                let mut mesh = match self.mesh_type {
+                    MeshType::CutCell => generate_cut_cell_mesh(
+                        &geo,
+                        self.min_cell_size,
+                        self.max_cell_size,
+                        self.growth_rate,
+                        domain_size,
+                    ),
+                    MeshType::Delaunay => generate_delaunay_mesh(
+                        &geo,
+                        self.min_cell_size,
+                        self.max_cell_size,
+                        self.growth_rate,
+                        domain_size,
+                    ),
+                };
                 mesh.smooth(&geo, 0.3, 50);
                 mesh
             }
@@ -508,6 +540,13 @@ impl eframe::App for CFDApp {
                             egui::Slider::new(&mut self.max_cell_size, self.min_cell_size..=0.5)
                                 .text("Max Cell Size"),
                         );
+                        ui.add(
+                            egui::Slider::new(&mut self.growth_rate, 1.0..=2.0).text("Growth Rate"),
+                        );
+                        ui.separator();
+                        ui.label("Mesh Type");
+                        ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
+                        ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
                     });
 
                     ui.group(|ui| {

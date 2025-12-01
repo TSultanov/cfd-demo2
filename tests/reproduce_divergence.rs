@@ -18,7 +18,7 @@ fn test_reproduce_divergence() {
     // Mesh: 0.025 min/max cell size
     let min_cell_size = 0.025;
     let max_cell_size = 0.025;
-    let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
     println!("Mesh generated with {} cells", mesh.num_cells());

@@ -20,6 +20,7 @@ fn mesh_generation_benchmark(c: &mut Criterion) {
                 black_box(&geo),
                 black_box(min_cell_size),
                 black_box(max_cell_size),
+                black_box(1.2), // growth_rate
                 black_box(domain_size),
             )
         })

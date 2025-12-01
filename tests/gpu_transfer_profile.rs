@@ -8,7 +8,6 @@
 /// - CPU-side computation that could be offloaded to GPU
 ///
 /// The goal is to identify bottlenecks and opportunities for GPU offloading.
-
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use nalgebra::Vector2;
@@ -33,7 +32,7 @@ fn test_gpu_transfer_profile() {
 
     // Use a medium-sized mesh to get meaningful timings
     let cell_size = 0.025; // ~5600 cells
-    let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
     println!("\nMesh Statistics:");
@@ -87,7 +86,10 @@ fn test_gpu_transfer_profile() {
         println!("{}", "-".repeat(40));
         let total_step_time: std::time::Duration = step_times.iter().sum();
         let avg_step_time = total_step_time / num_steps as u32;
-        println!("  Total time for {} steps: {:?}", num_steps, total_step_time);
+        println!(
+            "  Total time for {} steps: {:?}",
+            num_steps, total_step_time
+        );
         println!("  Average time per step: {:?}", avg_step_time);
 
         // Print detailed profiling report
@@ -160,7 +162,10 @@ fn test_gpu_transfer_profile() {
             );
             println!("   The norm computation reads partial sums from GPU and reduces on CPU.");
             println!("   RECOMMENDATION: Add a GPU shader for final reduction to avoid readback.");
-            println!("   Expected improvement: Eliminate {} GPU->CPU transfers.", total_norm_calls);
+            println!(
+                "   Expected improvement: Eliminate {} GPU->CPU transfers.",
+                total_norm_calls
+            );
         }
 
         // Check for convergence check reads
@@ -171,10 +176,7 @@ fn test_gpu_transfer_profile() {
         if !convergence_reads.is_empty() {
             let total_conv_time: std::time::Duration =
                 convergence_reads.iter().map(|(_, s)| s.total_time).sum();
-            println!(
-                "\n2. CONVERGENCE CHECKS: {:?} total",
-                total_conv_time
-            );
+            println!("\n2. CONVERGENCE CHECKS: {:?} total", total_conv_time);
             println!("   Full field reads (U, P) for convergence checking.");
             println!("   RECOMMENDATION: Compute max-diff on GPU and read single scalar.");
             println!("   This could reduce transfer size from O(n) to O(1).");
@@ -203,8 +205,12 @@ fn test_gpu_transfer_profile() {
         println!("{}", "=".repeat(80));
 
         let all_stats = stats.get_all_stats();
-        let gpu_read_stats = all_stats.iter().find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::GpuRead);
-        let cpu_compute_stats = all_stats.iter().find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::CpuCompute);
+        let gpu_read_stats = all_stats
+            .iter()
+            .find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::GpuRead);
+        let cpu_compute_stats = all_stats
+            .iter()
+            .find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::CpuCompute);
 
         if let Some((_, read_stats)) = gpu_read_stats {
             println!(
@@ -223,8 +229,12 @@ fn test_gpu_transfer_profile() {
         }
 
         let session_total = stats.get_session_total();
-        let gpu_read_time = gpu_read_stats.map(|(_, s)| s.total_time).unwrap_or_default();
-        let cpu_time = cpu_compute_stats.map(|(_, s)| s.total_time).unwrap_or_default();
+        let gpu_read_time = gpu_read_stats
+            .map(|(_, s)| s.total_time)
+            .unwrap_or_default();
+        let cpu_time = cpu_compute_stats
+            .map(|(_, s)| s.total_time)
+            .unwrap_or_default();
         let overhead = gpu_read_time + cpu_time;
         let overhead_pct = if session_total.as_nanos() > 0 {
             (overhead.as_nanos() as f64 / session_total.as_nanos() as f64) * 100.0
@@ -236,7 +246,10 @@ fn test_gpu_transfer_profile() {
             "\nGPU-CPU overhead (transfers + CPU compute): {:?} ({:.1}% of total)",
             overhead, overhead_pct
         );
-        println!("\nOptimizing these areas could improve performance by up to {:.1}%", overhead_pct);
+        println!(
+            "\nOptimizing these areas could improve performance by up to {:.1}%",
+            overhead_pct
+        );
     });
 }
 
@@ -259,16 +272,19 @@ fn test_gpu_transfer_profile_scaling() {
 
     // Test with different mesh sizes
     let cell_sizes = [0.1, 0.05, 0.025];
-    
+
     for cell_size in cell_sizes {
-        let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, domain_size);
+        let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, 1.2, domain_size);
         mesh.smooth(&geo, 0.3, 50);
 
         let num_cells = mesh.num_cells();
         let num_faces = mesh.face_owner.len();
 
         println!("\n{}", "-".repeat(60));
-        println!("Mesh: {} cells, {} faces (cell_size = {})", num_cells, num_faces, cell_size);
+        println!(
+            "Mesh: {} cells, {} faces (cell_size = {})",
+            num_cells, num_faces, cell_size
+        );
         println!("{}", "-".repeat(60));
 
         pollster::block_on(async {
@@ -308,7 +324,9 @@ fn test_gpu_transfer_profile_scaling() {
             for (category, cat_stats) in &all_stats {
                 if cat_stats.call_count > 0 {
                     let pct = if stats.get_session_total().as_nanos() > 0 {
-                        (cat_stats.total_time.as_nanos() as f64 / stats.get_session_total().as_nanos() as f64) * 100.0
+                        (cat_stats.total_time.as_nanos() as f64
+                            / stats.get_session_total().as_nanos() as f64)
+                            * 100.0
                     } else {
                         0.0
                     };
@@ -322,12 +340,18 @@ fn test_gpu_transfer_profile_scaling() {
             }
 
             // Calculate time per cell for GPU reads
-            let gpu_read_stats = all_stats.iter().find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::GpuRead);
+            let gpu_read_stats = all_stats
+                .iter()
+                .find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::GpuRead);
             if let Some((_, read_stats)) = gpu_read_stats {
                 if read_stats.call_count > 0 {
-                    let time_per_byte = read_stats.total_time.as_nanos() as f64 / read_stats.total_bytes as f64;
+                    let time_per_byte =
+                        read_stats.total_time.as_nanos() as f64 / read_stats.total_bytes as f64;
                     println!("\n  GPU Read efficiency: {:.2} ns/byte", time_per_byte);
-                    println!("  Throughput: {:.1} MB/s", read_stats.throughput_mb_per_sec());
+                    println!(
+                        "  Throughput: {:.1} MB/s",
+                        read_stats.throughput_mb_per_sec()
+                    );
                 }
             }
         });

@@ -24,7 +24,7 @@ fn test_reproduce_chamfer() {
     let p01 = Point2::new(0.5, 0.6);
     println!("SDF at (0.5, 0.6): {}", geo.sdf(&p01));
 
-    let mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, 1.2, domain_size);
 
     println!("Generated mesh with {} cells", mesh.num_cells());
 

@@ -381,27 +381,76 @@ pub fn generate_cut_cell_mesh(
         generate_base_polygons(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
     // 2. Imprint Hanging Nodes
-    // Collect all unique vertices and their fixed status
-    let mut unique_verts_map: HashMap<(i64, i64), (Point2<f64>, bool)> = HashMap::new();
+    // Robustly merge vertices to fix holes
+    let mut points: Vec<(Point2<f64>, bool)> = Vec::new();
+    let mut poly_point_indices: Vec<Vec<usize>> = Vec::with_capacity(all_polys.len());
+
+    for poly in &all_polys {
+        let mut indices = Vec::with_capacity(poly.len());
+        for (p, fixed) in poly {
+            indices.push(points.len());
+            points.push((*p, *fixed));
+        }
+        poly_point_indices.push(indices);
+    }
+
+    // Merge points using spatial hashing
+    let mut unique_verts: Vec<(Point2<f64>, bool)> = Vec::new();
+    let mut point_remap = vec![0; points.len()];
+    let merge_tol = 1e-5;
+    let grid_cell = merge_tol * 2.0;
+    let mut merge_grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+
+    for (i, (p, fixed)) in points.iter().enumerate() {
+        let gx = (p.x / grid_cell).floor() as i64;
+        let gy = (p.y / grid_cell).floor() as i64;
+
+        let mut found = None;
+
+        // Check 3x3 neighbors
+        'search: for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(candidates) = merge_grid.get(&(gx + dx, gy + dy)) {
+                    for &idx in candidates {
+                        let (u_p, u_fixed) = unique_verts[idx];
+                        let diff: Vector2<f64> = *p - u_p;
+                        if diff.norm_squared() < merge_tol * merge_tol {
+                            // Found match
+                            if *fixed && !u_fixed {
+                                unique_verts[idx].1 = true;
+                            }
+                            found = Some(idx);
+                            break 'search;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(idx) = found {
+            point_remap[i] = idx;
+        } else {
+            let idx = unique_verts.len();
+            unique_verts.push((*p, *fixed));
+            point_remap[i] = idx;
+            merge_grid.entry((gx, gy)).or_default().push(idx);
+        }
+    }
+
+    // Update polygons with merged vertices
+    for (i, poly) in all_polys.iter_mut().enumerate() {
+        for (j, item) in poly.iter_mut().enumerate() {
+            let old_idx = poly_point_indices[i][j];
+            let new_idx = point_remap[old_idx];
+            *item = unique_verts[new_idx];
+        }
+    }
 
     let quantize = |v: f64| (v * 100000.0).round() as i64;
 
     // Map (v_min, v_max) -> face_index
     let mut face_map: HashMap<(usize, usize), usize> = HashMap::new();
     let mut vertex_map: HashMap<(i64, i64), usize> = HashMap::new();
-
-    for poly in &all_polys {
-        for (p, fixed) in poly {
-            let key = (quantize(p.x), quantize(p.y));
-            let entry = unique_verts_map.entry(key).or_insert((*p, false));
-            if *fixed {
-                entry.1 = true;
-            }
-        }
-    }
-
-    // Flatten unique vertices for processing
-    let unique_verts: Vec<(Point2<f64>, bool)> = unique_verts_map.values().cloned().collect();
 
     // Spatial Grid with SoA layout for SIMD
     let grid_size = max_cell_size;
@@ -480,7 +529,7 @@ pub fn generate_cut_cell_mesh(
             let seg_vec_x = f64x4::splat(seg_vec.x);
             let seg_vec_y = f64x4::splat(seg_vec.y);
             let seg_len_sq_simd = f64x4::splat(seg_len_sq);
-            let epsilon = f64x4::splat(1e-12);
+            let epsilon = f64x4::splat(1e-10); // Increased tolerance
             let t_min = f64x4::splat(1e-6);
             let t_max = f64x4::splat(1.0 - 1e-6);
 
@@ -579,7 +628,7 @@ pub fn generate_cut_cell_mesh(
                         let d_curr = (v - p_curr).norm_squared();
                         let d_next = (v - p_next).norm_squared();
 
-                        if d_curr < 1e-12 || d_next < 1e-12 {
+                        if d_curr < 1e-10 || d_next < 1e-10 {
                             continue;
                         }
 
@@ -588,7 +637,7 @@ pub fn generate_cut_cell_mesh(
 
                         if t > 1e-6 && t < 1.0 - 1e-6 {
                             let proj = p_curr + seg_vec * t;
-                            if (v - proj).norm_squared() < 1e-12 {
+                            if (v - proj).norm_squared() < 1e-10 {
                                 on_segment.push((t, v, is_fixed));
                             }
                         }
@@ -606,11 +655,16 @@ pub fn generate_cut_cell_mesh(
         *poly = new_poly;
     });
     // 3. Create Mesh from Polygons
-    let n_polys = all_polys.len();
-    mesh.vx.reserve(n_polys * 2);
-    mesh.vy.reserve(n_polys * 2);
-    mesh.v_fixed.reserve(n_polys * 2);
+    // Populate mesh vertices from unique_verts
+    for (i, (p, fixed)) in unique_verts.iter().enumerate() {
+        mesh.vx.push(p.x);
+        mesh.vy.push(p.y);
+        mesh.v_fixed.push(*fixed);
+        let key = (quantize(p.x), quantize(p.y));
+        vertex_map.insert(key, i);
+    }
 
+    let n_polys = all_polys.len();
     mesh.cell_cx.reserve(n_polys);
     mesh.cell_cy.reserve(n_polys);
     mesh.cell_vol.reserve(n_polys);
@@ -627,18 +681,18 @@ pub fn generate_cut_cell_mesh(
         let mut cell_v_indices = Vec::new();
         for (p, _) in &poly_verts {
             let key = (quantize(p.x), quantize(p.y));
-            let idx = if let Some(&idx) = vertex_map.get(&key) {
-                idx
+            // Vertices should already exist in the map
+            if let Some(&idx) = vertex_map.get(&key) {
+                cell_v_indices.push(idx);
             } else {
+                // Fallback (should not happen if merging is correct)
                 let idx = mesh.vx.len();
-                let is_fixed = unique_verts_map.get(&key).map(|(_, f)| *f).unwrap_or(false);
                 mesh.vx.push(p.x);
                 mesh.vy.push(p.y);
-                mesh.v_fixed.push(is_fixed);
+                mesh.v_fixed.push(false);
                 vertex_map.insert(key, idx);
-                idx
-            };
-            cell_v_indices.push(idx);
+                cell_v_indices.push(idx);
+            }
         }
 
         // Polygon area and centroid

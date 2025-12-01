@@ -263,7 +263,7 @@ fn init_coupled_resources(
     // Init Max-Diff Convergence Check Buffers
     let workgroup_size = 64u32;
     let num_max_diff_groups = num_cells.div_ceil(workgroup_size);
-    
+
     let b_u_snapshot = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("U Snapshot"),
         size: (num_cells as u64) * 8, // vec2<f32> per cell

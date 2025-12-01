@@ -118,7 +118,7 @@ struct RawFgmresParams {
     num_cells: u32,
     num_iters: u32,
     omega: f32,
-    dispatch_x: u32,  // Width of 2D dispatch (in workgroups * 64)
+    dispatch_x: u32, // Width of 2D dispatch (in workgroups * 64)
     _pad1: u32,
     _pad2: u32,
     _pad3: u32,
@@ -994,7 +994,7 @@ impl GpuSolver {
         );
 
         let workgroups = self.workgroups_for_size(n);
-        
+
         // Step 1: Compute partial sums on GPU
         self.dispatch_vector_pipeline(
             &fgmres.pipeline_norm_sq,
@@ -1011,7 +1011,7 @@ impl GpuSolver {
             num_cells: 0,
             num_iters: 0,
             omega: 0.0,
-            dispatch_x: Self::WORKGROUP_SIZE,  // Single workgroup dispatch
+            dispatch_x: Self::WORKGROUP_SIZE, // Single workgroup dispatch
             _pad1: 0,
             _pad2: 0,
             _pad3: 0,
@@ -1061,7 +1061,7 @@ impl GpuSolver {
             read_start.elapsed(),
             4, // Just 1 float
         );
-        
+
         norm_sq_vec[0].sqrt()
     }
 
@@ -1406,7 +1406,7 @@ impl GpuSolver {
                         num_cells: 0,
                         num_iters: 0,
                         omega: 0.0,
-                        dispatch_x: Self::WORKGROUP_SIZE,  // Single workgroup dispatch
+                        dispatch_x: Self::WORKGROUP_SIZE, // Single workgroup dispatch
                         _pad1: 0,
                         _pad2: 0,
                         _pad3: 0,
@@ -1486,7 +1486,7 @@ impl GpuSolver {
                     num_cells: 0,
                     num_iters: 0,
                     omega: 0.0,
-                    dispatch_x: Self::WORKGROUP_SIZE,  // Single workgroup dispatch
+                    dispatch_x: Self::WORKGROUP_SIZE, // Single workgroup dispatch
                     _pad1: 0,
                     _pad2: 0,
                     _pad3: 0,
@@ -1584,11 +1584,12 @@ impl GpuSolver {
                 let check_interval = 5;
                 let is_last_in_restart = j == max_restart - 1;
                 let should_check = (j + 1) % check_interval == 0 || is_last_in_restart;
-                
+
                 if should_check {
                     // Check convergence (read back scalars[0])
                     let read_start = Instant::now();
-                    let resid_est_vec = pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
+                    let resid_est_vec =
+                        pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
                     self.profiling_stats.record_location(
                         "fgmres:convergence_check_read",
                         ProfileCategory::GpuRead,

@@ -469,7 +469,7 @@ impl GpuSolver {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Snapshot Fields Encoder"),
                     });
-            
+
             // Copy U to snapshot
             encoder.copy_buffer_to_buffer(
                 &self.b_u,
@@ -478,7 +478,7 @@ impl GpuSolver {
                 0,
                 (self.num_cells as u64) * 8,
             );
-            
+
             // Copy P to snapshot
             encoder.copy_buffer_to_buffer(
                 &self.b_p,
@@ -487,7 +487,7 @@ impl GpuSolver {
                 0,
                 (self.num_cells as u64) * 4,
             );
-            
+
             self.context.queue.submit(Some(encoder.finish()));
         }
     }
@@ -500,45 +500,51 @@ impl GpuSolver {
         };
 
         let dispatch_start = Instant::now();
-        
-        // Create bind groups for max-diff (using current fields and snapshots)
-        let bg_max_diff_u = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Max Diff U Bind Group"),
-            layout: &res.bgl_max_diff,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.b_u.as_entire_binding(), // Current U
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: res.b_u_snapshot.as_entire_binding(), // Snapshot U
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: res.b_max_diff_partial.as_entire_binding(),
-                },
-            ],
-        });
 
-        let bg_max_diff_p = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Max Diff P Bind Group"),
-            layout: &res.bgl_max_diff,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.b_p.as_entire_binding(), // Current P
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: res.b_p_snapshot.as_entire_binding(), // Snapshot P
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: res.b_max_diff_partial.as_entire_binding(),
-                },
-            ],
-        });
+        // Create bind groups for max-diff (using current fields and snapshots)
+        let bg_max_diff_u = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Max Diff U Bind Group"),
+                layout: &res.bgl_max_diff,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.b_u.as_entire_binding(), // Current U
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: res.b_u_snapshot.as_entire_binding(), // Snapshot U
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: res.b_max_diff_partial.as_entire_binding(),
+                    },
+                ],
+            });
+
+        let bg_max_diff_p = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Max Diff P Bind Group"),
+                layout: &res.bgl_max_diff,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.b_p.as_entire_binding(), // Current P
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: res.b_p_snapshot.as_entire_binding(), // Snapshot P
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: res.b_max_diff_partial.as_entire_binding(),
+                    },
+                ],
+            });
 
         // Write params for partial reduction (n = num_cells)
         #[repr(C)]
@@ -549,18 +555,16 @@ impl GpuSolver {
             _pad2: u32,
             _pad3: u32,
         }
-        
+
         let params = MaxDiffParams {
             n: self.num_cells,
             _pad1: 0,
             _pad2: 0,
             _pad3: 0,
         };
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            0,
-            bytemuck::bytes_of(&params),
-        );
+        self.context
+            .queue
+            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params));
 
         let workgroup_size = 64u32;
         let num_groups = self.num_cells.div_ceil(workgroup_size);
@@ -600,24 +604,27 @@ impl GpuSolver {
         );
 
         // Reuse a simpler bind group for reduce - only need partial results as read input
-        let bg_reduce = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Max Diff Reduce Bind Group"),
-            layout: &res.bgl_max_diff,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: res.b_max_diff_partial.as_entire_binding(), // Partial results as input
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: res.b_p_snapshot.as_entire_binding(), // Dummy, not used by reduce
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: res.b_u_snapshot.as_entire_binding(), // Dummy, not used by reduce
-                },
-            ],
-        });
+        let bg_reduce = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Max Diff Reduce Bind Group"),
+                layout: &res.bgl_max_diff,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: res.b_max_diff_partial.as_entire_binding(), // Partial results as input
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: res.b_p_snapshot.as_entire_binding(), // Dummy, not used by reduce
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: res.b_u_snapshot.as_entire_binding(), // Dummy, not used by reduce
+                    },
+                ],
+            });
 
         {
             let mut encoder =
@@ -657,11 +664,9 @@ impl GpuSolver {
             _pad2: 0,
             _pad3: 0,
         };
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            0,
-            bytemuck::bytes_of(&params_p),
-        );
+        self.context
+            .queue
+            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params_p));
 
         {
             let mut encoder =

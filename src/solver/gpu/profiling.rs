@@ -283,8 +283,7 @@ impl ProfilingStats {
         // Unaccounted time
         if session_total > total_profiled {
             let unaccounted = session_total - total_profiled;
-            let pct =
-                (unaccounted.as_nanos() as f64 / session_total.as_nanos() as f64) * 100.0;
+            let pct = (unaccounted.as_nanos() as f64 / session_total.as_nanos() as f64) * 100.0;
             println!(
                 "{:<25} {:>12?} {:>10} {:>12} {:>11.1}% {:>12}",
                 "Unaccounted", unaccounted, "-", "-", pct, "-"

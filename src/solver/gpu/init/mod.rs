@@ -6,8 +6,8 @@ pub mod scalars;
 
 use crate::solver::mesh::Mesh;
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;

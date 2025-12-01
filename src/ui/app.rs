@@ -288,23 +288,31 @@ impl CFDApp {
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.1,
                 };
-                let mut mesh = match self.mesh_type {
-                    MeshType::CutCell => generate_cut_cell_mesh(
-                        &geo,
-                        self.min_cell_size,
-                        self.max_cell_size,
-                        self.growth_rate,
-                        domain_size,
-                    ),
-                    MeshType::Delaunay => generate_delaunay_mesh(
-                        &geo,
-                        self.min_cell_size,
-                        self.max_cell_size,
-                        self.growth_rate,
-                        domain_size,
-                    ),
+                let mesh = match self.mesh_type {
+                    MeshType::CutCell => {
+                        let mut mesh = generate_cut_cell_mesh(
+                            &geo,
+                            self.min_cell_size,
+                            self.max_cell_size,
+                            self.growth_rate,
+                            domain_size,
+                        );
+                        mesh.smooth(&geo, 0.3, 100);
+                        mesh
+                    }
+                    MeshType::Delaunay => {
+                        let mut mesh = generate_delaunay_mesh(
+                            &geo,
+                            self.min_cell_size,
+                            self.max_cell_size,
+                            self.growth_rate,
+                            domain_size,
+                        );
+                        mesh.smooth(&geo, 0.3, 50);
+                        mesh
+                    }
                 };
-                mesh.smooth(&geo, 0.3, 50);
+
                 mesh
             }
         }

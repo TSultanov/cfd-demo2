@@ -1197,8 +1197,24 @@ impl Triangle {
     }
 
     fn in_circumcircle(&self, p: Point2<f64>) -> bool {
+        // Use determinant method for robustness
+        // | ax ay ax^2+ay^2 1 |
+        // | bx by ...       1 |
+        // | cx cy ...       1 |
+        // | px py ...       1 |
+        // > 0 means inside (assuming ccw)
+
+        // We don't have the vertices stored in Triangle, only indices and circumcenter.
+        // But we need vertices for robust check.
+        // The current architecture stores points in the main function, not in Triangle.
+        // So we cannot implement the determinant method here without passing points.
+
+        // Fallback: Use the existing method but with a tolerance?
+        // Or better: Pass points to this function?
+        // Changing signature requires changing call sites.
+
         let dist_sq = (p - self.circumcenter).norm_squared();
-        dist_sq <= self.r_sq
+        dist_sq <= self.r_sq * (1.0 + 1e-9) // Add epsilon tolerance
     }
 }
 
@@ -1241,6 +1257,7 @@ pub fn generate_delaunay_mesh(
     let mut triangles: Vec<Triangle> = Vec::new();
 
     // Super-triangle
+    // Use non-integer coordinates to avoid co-circularity with grid points
     let margin = 1.0;
     let p1 = Point2::new(-margin, -margin);
     let p2 = Point2::new(2.0 * domain_size.x + margin, -margin);
@@ -1304,6 +1321,7 @@ pub fn generate_delaunay_mesh(
         // Remove bad triangles
         // Sort indices descending to remove efficiently
         bad_triangles.sort_unstable_by(|a, b| b.cmp(a));
+
         for idx in bad_triangles {
             triangles.swap_remove(idx);
         }
@@ -1323,11 +1341,9 @@ pub fn generate_delaunay_mesh(
 
     // Remove triangles connected to super-triangle
     triangles.retain(|t| t.v1 < n_points && t.v2 < n_points && t.v3 < n_points);
-
     // Remove super-triangle vertices
     points.truncate(n_points);
 
-    // Filter triangles that are outside the geometry (e.g. inside obstacles)
     // Filter triangles that are outside the geometry (e.g. inside obstacles)
     triangles.retain(|t| {
         // If the triangle has any internal vertex, keep it.

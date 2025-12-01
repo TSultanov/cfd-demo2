@@ -1307,12 +1307,35 @@ pub fn generate_delaunay_mesh(
         }
     }
 
+    // Jitter internal points to improve mesh quality (avoid right-angled triangles from grid)
+    // and break cocircularity degeneracies.
+    let jitter_scale = 0.25 * min_cell_size;
+    for (i, p) in points.iter_mut().enumerate() {
+        if !fixed_nodes[i] {
+            // Simple pseudo-random based on position
+            let s = (p.x * 12.9898 + p.y * 78.233).sin() * 43758.5453;
+            let noise_x = s.fract();
+            let s2 = (p.x * 39.7867 + p.y * 27.123).sin() * 23412.1234;
+            let noise_y = s2.fract();
+            
+            let dx = (noise_x - 0.5) * jitter_scale;
+            let dy = (noise_y - 0.5) * jitter_scale;
+            
+            let p_new = Point2::new(p.x + dx, p.y + dy);
+            
+            // Only apply if still inside geometry
+            if geo.is_inside(&p_new) {
+                *p = p_new;
+            }
+        }
+    }
+
     // 2. Delaunay Triangulation (Bowyer-Watson)
     let mut triangles: Vec<Triangle> = Vec::new();
 
     // Super-triangle
     // Use non-integer coordinates to avoid co-circularity with grid points
-    let margin = 1.0;
+    let margin = 1.2345;
     let p1 = Point2::new(-margin, -margin);
     let p2 = Point2::new(2.0 * domain_size.x + margin, -margin);
     let p3 = Point2::new(-margin, 2.0 * domain_size.y + margin);
@@ -1628,5 +1651,109 @@ mod tests {
 
         // Sharp corners increase skewness compared to chamfered corners, so we relax the check.
         assert!(final_skew < 0.6);
+    }
+
+    #[test]
+    fn test_delaunay_property() {
+        let domain_size = Vector2::new(1.0, 1.0);
+        let geo = CircleObstacle {
+            center: Point2::new(0.5, 0.5),
+            radius: 0.1,
+            domain_min: Point2::new(0.0, 0.0),
+            domain_max: Point2::new(domain_size.x, domain_size.y),
+        };
+
+        // Use generate_delaunay_mesh
+        let mesh = generate_delaunay_mesh(&geo, 0.1, 0.2, 1.2, domain_size);
+
+        println!("Generated Delaunay mesh with {} cells", mesh.num_cells());
+
+        // Check Delaunay property for each cell
+        for i in 0..mesh.num_cells() {
+            let start = mesh.cell_vertex_offsets[i];
+            let end = mesh.cell_vertex_offsets[i+1];
+            let indices = &mesh.cell_vertices[start..end];
+            
+            // Delaunay mesh should consist of triangles
+            assert_eq!(indices.len(), 3, "Cell {} is not a triangle", i);
+
+            let p1 = Point2::new(mesh.vx[indices[0]], mesh.vy[indices[0]]);
+            let p2 = Point2::new(mesh.vx[indices[1]], mesh.vy[indices[1]]);
+            let p3 = Point2::new(mesh.vx[indices[2]], mesh.vy[indices[2]]);
+
+            let (center, r_sq) = Triangle::calculate_circumcircle(p1, p2, p3);
+
+            // Check all other vertices
+            for v_idx in 0..mesh.vx.len() {
+                // Skip vertices of the triangle itself
+                if indices.contains(&v_idx) {
+                    continue;
+                }
+
+                let p = Point2::new(mesh.vx[v_idx], mesh.vy[v_idx]);
+                let dist_sq = (p - center).norm_squared();
+
+                // Allow for small epsilon error
+                // If dist_sq < r_sq, the point is inside the circumcircle -> Violation
+                if dist_sq < r_sq - 1e-5 {
+                     panic!("Delaunay property violated! Cell {} circumcircle contains vertex {}. \
+                            Cell vertices: {:?}, Offending vertex: {:?}, dist_sq: {}, r_sq: {}",
+                            i, v_idx, indices, p, dist_sq, r_sq);
+                }
+                
+                // Log if point is on boundary (cocircular)
+                if (dist_sq - r_sq).abs() < 1e-5 {
+                    // This is expected for regular grids (cocircular points)
+                    // Uncomment to see how many: 
+                    // println!("Point {} is on circumcircle of cell {}", v_idx, i);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_delaunay_backwards_step() {
+        let geo = BackwardsStep {
+            length: 2.0,
+            height_inlet: 0.501,
+            height_outlet: 1.0,
+            step_x: 0.501,
+        };
+
+        let domain_size = Vector2::new(2.0, 1.0);
+        let mesh = generate_delaunay_mesh(&geo, 0.1, 0.2, 1.2, domain_size);
+
+        println!("Generated Delaunay mesh with {} cells", mesh.num_cells());
+
+        for i in 0..mesh.num_cells() {
+            let start = mesh.cell_vertex_offsets[i];
+            let end = mesh.cell_vertex_offsets[i+1];
+            let indices = &mesh.cell_vertices[start..end];
+            
+            assert_eq!(indices.len(), 3, "Cell {} is not a triangle", i);
+
+            let p1 = Point2::new(mesh.vx[indices[0]], mesh.vy[indices[0]]);
+            let p2 = Point2::new(mesh.vx[indices[1]], mesh.vy[indices[1]]);
+            let p3 = Point2::new(mesh.vx[indices[2]], mesh.vy[indices[2]]);
+
+            let (center, r_sq) = Triangle::calculate_circumcircle(p1, p2, p3);
+
+            for v_idx in 0..mesh.vx.len() {
+                if indices.contains(&v_idx) {
+                    continue;
+                }
+
+                let p = Point2::new(mesh.vx[v_idx], mesh.vy[v_idx]);
+                let dist_sq = (p - center).norm_squared();
+
+                // Strict check with relative epsilon
+                let epsilon = r_sq.max(1.0) * 1e-8;
+                if dist_sq < r_sq - epsilon {
+                     panic!("Delaunay property violated! Cell {} circumcircle contains vertex {}. \
+                            Cell vertices: {:?}, Offending vertex: {:?}, dist_sq: {}, r_sq: {}, diff: {}",
+                            i, v_idx, indices, p, dist_sq, r_sq, r_sq - dist_sq);
+                }
+            }
+        }
     }
 }

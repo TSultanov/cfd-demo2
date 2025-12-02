@@ -71,27 +71,41 @@ impl Triangle {
         (center, r_sq)
     }
 
-    pub fn in_circumcircle(&self, p: Point2<f64>) -> bool {
-        // Use determinant method for robustness
-        // | ax ay ax^2+ay^2 1 |
-        // | bx by ...       1 |
-        // | cx cy ...       1 |
-        // | px py ...       1 |
-        // > 0 means inside (assuming ccw)
+    pub fn in_circumcircle(&self, p: Point2<f64>, points: &[Point2<f64>]) -> bool {
+        // Robust check using determinant
+        // We use the points array to get coordinates
+        let a = points[self.v1];
+        let b = points[self.v2];
+        let c = points[self.v3];
 
-        // We don't have the vertices stored in Triangle, only indices and circumcenter.
-        // But we need vertices for robust check.
-        // The current architecture stores points in the main function, not in Triangle.
-        // So we cannot implement the determinant method here without passing points.
+        // Check orientation of a, b, c
+        let det_abc = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        
+        // If det_abc is negative, points are clockwise. Swap b and c to make them CCW for the check.
+        // Note: we don't change self.v2/v3, just local variables.
+        let (b, c) = if det_abc < 0.0 { (c, b) } else { (b, c) };
 
-        // Fallback: Use the existing method but with a tolerance?
-        // Or better: Pass points to this function?
-        // Changing signature requires changing call sites.
+        // Using relative coordinates to p improves precision
+        let adx = a.x - p.x;
+        let ady = a.y - p.y;
+        let bdx = b.x - p.x;
+        let bdy = b.y - p.y;
+        let cdx = c.x - p.x;
+        let cdy = c.y - p.y;
 
-        let dist_sq = (p - self.circumcenter).norm_squared();
-        dist_sq <= self.r_sq * (1.0 + 1e-9) // Add epsilon tolerance
+        let alift = adx * adx + ady * ady;
+        let blift = bdx * bdx + bdy * bdy;
+        let clift = cdx * cdx + cdy * cdy;
+
+        let det = adx * (bdy * clift - cdy * blift)
+                - ady * (bdx * clift - cdx * blift)
+                + alift * (bdx * cdy - cdx * bdy);
+
+        det > 1e-10 // Positive means inside
     }
 }
+
+
 
 use rand::Rng;
 
@@ -142,13 +156,21 @@ pub fn triangulate(
 
     // 3. Smooth Generators (Laplacian Smoothing)
     // This helps to smooth out the sharp steps
-    let smoothing_iters = 50;
+    let smoothing_iters = 20;
     println!(
         "Starting generator smoothing for {} iterations...",
         smoothing_iters
     );
     for iter in 0..smoothing_iters {
-        let (new_points, max_disp) = smooth_generators(&points, &triangles, &fixed_nodes, geo);
+        let (new_points, max_disp) = smooth_generators(
+            &points,
+            &triangles,
+            &fixed_nodes,
+            geo,
+            min_cell_size,
+            max_cell_size,
+            growth_rate,
+        );
         points = new_points;
         if iter % 10 == 0 {
             println!("  Gen Smooth iter {}: max disp = {:.6}", iter, max_disp);
@@ -300,6 +322,9 @@ fn smooth_generators(
     triangles: &[Triangle],
     fixed_nodes: &[bool],
     geo: &(impl Geometry + Sync),
+    min_cell_size: f64,
+    max_cell_size: f64,
+    growth_rate: f64,
 ) -> (Vec<Point2<f64>>, f64) {
     let n = points.len();
     let mut new_points = points.to_vec();
@@ -316,6 +341,13 @@ fn smooth_generators(
 
     let mut max_disp = 0.0;
 
+    // Sizing function (same as in generate_poisson_points)
+    let get_radius = |p: Point2<f64>| -> f64 {
+        let dist = geo.sdf(&p).abs();
+        let r = min_cell_size + (growth_rate - 1.0).max(0.0) * dist;
+        r.min(max_cell_size)
+    };
+
     for i in 0..n {
         if fixed_nodes[i] {
             continue;
@@ -328,15 +360,23 @@ fn smooth_generators(
 
         let mut sum_x = 0.0;
         let mut sum_y = 0.0;
+        let mut sum_w = 0.0;
+
         for &neigh in neighbors {
-            sum_x += points[neigh].x;
-            sum_y += points[neigh].y;
+            // Weight by inverse of desired size at neighbor
+            // This pulls points towards denser regions (smaller r)
+            let r = get_radius(points[neigh]);
+            let w = 1.0 / r.max(1e-6);
+
+            sum_x += points[neigh].x * w;
+            sum_y += points[neigh].y * w;
+            sum_w += w;
         }
-        let avg_x = sum_x / neighbors.len() as f64;
-        let avg_y = sum_y / neighbors.len() as f64;
+        let avg_x = sum_x / sum_w;
+        let avg_y = sum_y / sum_w;
 
         // Relaxation factor
-        let alpha = 0.8;
+        let alpha = 0.1;
         let p_new = Point2::new(
             points[i].x + (avg_x - points[i].x) * alpha,
             points[i].y + (avg_y - points[i].y) * alpha,
@@ -387,7 +427,7 @@ fn compute_triangulation(
     for (i, &p) in points.iter().enumerate() {
         let mut bad_triangles = Vec::new();
         for (t_idx, t) in triangles.iter().enumerate() {
-            if t.in_circumcircle(p) {
+            if t.in_circumcircle(p, &working_points) {
                 bad_triangles.push(t_idx);
             }
         }

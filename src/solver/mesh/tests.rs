@@ -206,15 +206,17 @@ fn test_delaunay_property() {
 
 #[test]
 fn test_delaunay_backwards_step() {
+    let length = 3.5;
+    let domain_size = Vector2::new(length, 1.0);
     let geo = BackwardsStep {
-        length: 2.0,
-        height_inlet: 0.501,
+        length,
+        height_inlet: 0.5,
         height_outlet: 1.0,
-        step_x: 0.501,
+        step_x: 0.5,
     };
 
-    let domain_size = Vector2::new(2.0, 1.0);
-    let mesh = generate_delaunay_mesh(&geo, 0.1, 0.2, 1.2, domain_size);
+    // GUI defaults: min=0.025, max=0.025, growth=1.2
+    let mesh = generate_delaunay_mesh(&geo, 0.025, 0.025, 1.2, domain_size);
 
     println!("Generated Delaunay mesh with {} cells", mesh.num_cells());
 

@@ -339,7 +339,7 @@ pub fn generate_voronoi_mesh(
     // 4. Fix Concave Cells
     // Some boundary cells might be concave due to the way we handle boundary edges.
     // We split them into triangles to ensure convexity.
-    // mesh = fix_concave_cells(mesh, &points);
+    mesh = fix_concave_cells(mesh, &points);
 
     mesh
 }
@@ -367,49 +367,142 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
         if is_concave(&old_mesh, i) {
             // Split
             let gen = generators[i];
-            let center_idx = new_mesh.vx.len();
-            new_mesh.vx.push(gen.x);
-            new_mesh.vy.push(gen.y);
-            // Internal node for splitting, treat as not fixed
-            new_mesh.v_fixed.push(false);
-
             let start = old_mesh.cell_vertex_offsets[i];
             let end = old_mesh.cell_vertex_offsets[i + 1];
             let n = end - start;
 
-            let mut sub_cells = vec![0; n]; // Initialize with dummy values, will be filled
-            let mut k_iter = 0; // This iterator tracks the original edges (0 to n-1)
-            while k_iter < n {
-                let v1 = old_mesh.cell_vertices[start + k_iter];
-                let v2 = old_mesh.cell_vertices[start + (k_iter + 1) % n];
+            // Check if generator is a vertex
+            let mut match_idx = None;
+            for k in 0..n {
+                let v_idx = old_mesh.cell_vertices[start + k];
+                let p_v = Point2::new(new_mesh.vx[v_idx], new_mesh.vy[v_idx]);
+                if (p_v - gen).norm() < 1e-6 {
+                    match_idx = Some(k);
+                    break;
+                }
+            }
 
-                // Potential Quad?
-                // Try to merge with next triangle (Center, v2, v3)
-                // Quad would be (Center, v1, v2, v3) -> vertices: Center, v1, v2, v3
-                // Wait, if we merge (Center, v1, v2) and (Center, v2, v3)
-                // The shared edge is (Center, v2).
-                // The quad vertices are Center, v1, v2, v3.
-                // Is this correct?
-                // Triangle 1: C, v1, v2
-                // Triangle 2: C, v2, v3
-                // Merged: C, v1, v2, v3.
-                // We need to check if this polygon is convex.
+            let mut sub_cells = vec![0; n];
+            let center_idx;
 
-                let mut merged = false;
-                // Check if there's a next edge to potentially merge with
-                if k_iter + 1 < n {
-                    let v3 = old_mesh.cell_vertices[start + (k_iter + 2) % n];
+            if let Some(root_k) = match_idx {
+                // Fan from vertex logic
+                center_idx = old_mesh.cell_vertices[start + root_k];
+                
+                let mut k_iter = 1;
+                while k_iter <= n - 2 {
+                    let u0 = old_mesh.cell_vertices[start + root_k];
+                    let uk = old_mesh.cell_vertices[start + (root_k + k_iter) % n];
+                    let uk1 = old_mesh.cell_vertices[start + (root_k + k_iter + 1) % n];
+                    
+                    let mut merged = false;
+                    if k_iter + 1 <= n - 2 {
+                        let uk2 = old_mesh.cell_vertices[start + (root_k + k_iter + 2) % n];
+                        
+                        // Check convexity of Quad (u0, uk, uk1, uk2)
+                        let p0 = Point2::new(new_mesh.vx[u0], new_mesh.vy[u0]);
+                        let pk = Point2::new(new_mesh.vx[uk], new_mesh.vy[uk]);
+                        let pk1 = Point2::new(new_mesh.vx[uk1], new_mesh.vy[uk1]);
+                        let pk2 = Point2::new(new_mesh.vx[uk2], new_mesh.vy[uk2]);
+                        
+                        if is_poly_convex(&[p0, pk, pk1, pk2]) {
+                            // Create Quad
+                            let new_cell_idx = new_mesh.num_cells();
+                            new_mesh.cell_cx.push(0.0);
+                            new_mesh.cell_cy.push(0.0);
+                            new_mesh.cell_vol.push(0.0);
+                            
+                            new_mesh.cell_vertices.push(u0);
+                            new_mesh.cell_vertices.push(uk);
+                            new_mesh.cell_vertices.push(uk1);
+                            new_mesh.cell_vertices.push(uk2);
+                            new_mesh.cell_vertex_offsets.push(new_mesh.cell_vertices.len());
+                            
+                            // Assign edges
+                            sub_cells[(root_k + k_iter) % n] = new_cell_idx;
+                            sub_cells[(root_k + k_iter + 1) % n] = new_cell_idx;
+                            
+                            if k_iter == 1 {
+                                sub_cells[root_k] = new_cell_idx;
+                            }
+                            if k_iter + 1 == n - 2 {
+                                sub_cells[(root_k + n - 1) % n] = new_cell_idx;
+                            }
+                            
+                            k_iter += 2;
+                            merged = true;
+                        }
+                    }
+                    
+                    if !merged {
+                        // Create Triangle
+                        let new_cell_idx = new_mesh.num_cells();
+                        new_mesh.cell_cx.push(0.0);
+                        new_mesh.cell_cy.push(0.0);
+                        new_mesh.cell_vol.push(0.0);
+                        
+                        new_mesh.cell_vertices.push(u0);
+                        new_mesh.cell_vertices.push(uk);
+                        new_mesh.cell_vertices.push(uk1);
+                        new_mesh.cell_vertex_offsets.push(new_mesh.cell_vertices.len());
+                        
+                        sub_cells[(root_k + k_iter) % n] = new_cell_idx;
+                        
+                        if k_iter == 1 {
+                            sub_cells[root_k] = new_cell_idx;
+                        }
+                        if k_iter == n - 2 {
+                            sub_cells[(root_k + n - 1) % n] = new_cell_idx;
+                        }
+                        
+                        k_iter += 1;
+                    }
+                }
+            } else {
+                // Fan from center logic
+                center_idx = new_mesh.vx.len();
+                new_mesh.vx.push(gen.x);
+                new_mesh.vy.push(gen.y);
+                new_mesh.v_fixed.push(false);
 
-                    // Check convexity of Quad (Center, v1, v2, v3)
-                    let p_c = Point2::new(new_mesh.vx[center_idx], new_mesh.vy[center_idx]);
-                    let p_v1 = Point2::new(new_mesh.vx[v1], new_mesh.vy[v1]);
-                    let p_v2 = Point2::new(new_mesh.vx[v2], new_mesh.vy[v2]);
-                    let p_v3 = Point2::new(new_mesh.vx[v3], new_mesh.vy[v3]);
+                let mut k_iter = 0; 
+                while k_iter < n {
+                    let v1 = old_mesh.cell_vertices[start + k_iter];
+                    let v2 = old_mesh.cell_vertices[start + (k_iter + 1) % n];
 
-                    // Vertices must be in order for is_poly_convex
-                    let quad_verts = vec![p_c, p_v1, p_v2, p_v3];
-                    if is_poly_convex(&quad_verts) {
-                        // Create Quad
+                    let mut merged = false;
+                    if k_iter + 1 < n {
+                        let v3 = old_mesh.cell_vertices[start + (k_iter + 2) % n];
+
+                        let p_c = Point2::new(new_mesh.vx[center_idx], new_mesh.vy[center_idx]);
+                        let p_v1 = Point2::new(new_mesh.vx[v1], new_mesh.vy[v1]);
+                        let p_v2 = Point2::new(new_mesh.vx[v2], new_mesh.vy[v2]);
+                        let p_v3 = Point2::new(new_mesh.vx[v3], new_mesh.vy[v3]);
+
+                        let quad_verts = vec![p_c, p_v1, p_v2, p_v3];
+                        if is_poly_convex(&quad_verts) {
+                            let new_cell_idx = new_mesh.num_cells();
+                            new_mesh.cell_cx.push(0.0);
+                            new_mesh.cell_cy.push(0.0);
+                            new_mesh.cell_vol.push(0.0);
+
+                            new_mesh.cell_vertices.push(center_idx);
+                            new_mesh.cell_vertices.push(v1);
+                            new_mesh.cell_vertices.push(v2);
+                            new_mesh.cell_vertices.push(v3);
+                            new_mesh
+                                .cell_vertex_offsets
+                                .push(new_mesh.cell_vertices.len());
+
+                            sub_cells[k_iter] = new_cell_idx;
+                            sub_cells[k_iter + 1] = new_cell_idx;
+
+                            k_iter += 2;
+                            merged = true;
+                        }
+                    }
+
+                    if !merged {
                         let new_cell_idx = new_mesh.num_cells();
                         new_mesh.cell_cx.push(0.0);
                         new_mesh.cell_cy.push(0.0);
@@ -418,37 +511,13 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
                         new_mesh.cell_vertices.push(center_idx);
                         new_mesh.cell_vertices.push(v1);
                         new_mesh.cell_vertices.push(v2);
-                        new_mesh.cell_vertices.push(v3);
                         new_mesh
                             .cell_vertex_offsets
                             .push(new_mesh.cell_vertices.len());
 
-                        // Assign this new cell to both original edges k_iter and k_iter+1
                         sub_cells[k_iter] = new_cell_idx;
-                        sub_cells[k_iter + 1] = new_cell_idx;
-
-                        k_iter += 2; // Advance iterator by 2 as two edges were consumed
-                        merged = true;
+                        k_iter += 1;
                     }
-                }
-
-                if !merged {
-                    // Create Triangle
-                    let new_cell_idx = new_mesh.num_cells();
-                    new_mesh.cell_cx.push(0.0);
-                    new_mesh.cell_cy.push(0.0);
-                    new_mesh.cell_vol.push(0.0);
-
-                    new_mesh.cell_vertices.push(center_idx);
-                    new_mesh.cell_vertices.push(v1);
-                    new_mesh.cell_vertices.push(v2);
-                    new_mesh
-                        .cell_vertex_offsets
-                        .push(new_mesh.cell_vertices.len());
-
-                    // Assign this new cell to the original edge k_iter
-                    sub_cells[k_iter] = new_cell_idx;
-                    k_iter += 1; // Advance iterator by 1
                 }
             }
 
@@ -547,6 +616,11 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
             for k in 0..n {
                 let v_curr = old_mesh.cell_vertices[start + k];
 
+                // Skip if degenerate (center is one of the vertices)
+                if v_curr == center {
+                    continue;
+                }
+
                 // Face between sub_cell[k] and sub_cell[prev]
                 // Shared edge is (Center, v_curr)
                 let idx_k = k;
@@ -554,6 +628,11 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
 
                 let cell_k = info.new_cell_indices[idx_k];
                 let cell_prev = info.new_cell_indices[idx_prev];
+
+                // Skip if same cell (e.g. internal edge of a Quad, or boundary edge in vertex fan)
+                if cell_k == cell_prev {
+                    continue;
+                }
 
                 let new_f_idx = new_mesh.num_faces();
                 new_mesh.face_v1.push(center);

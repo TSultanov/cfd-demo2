@@ -10,8 +10,8 @@ fn delaunay_benchmark(c: &mut Criterion) {
         step_x: 0.5,
     };
     let domain_size = Vector2::new(3.5, 1.0);
-    let min_cell_size = 0.04;
-    let max_cell_size = 0.04;
+    let min_cell_size = 0.01;
+    let max_cell_size = 0.01;
     let growth_rate = 1.2;
 
     c.bench_function("generate_delaunay_mesh_0.01", |b| {
@@ -35,8 +35,8 @@ fn voronoi_benchmark(c: &mut Criterion) {
         step_x: 0.5,
     };
     let domain_size = Vector2::new(3.5, 1.0);
-    let min_cell_size = 0.04;
-    let max_cell_size = 0.04;
+    let min_cell_size = 0.01;
+    let max_cell_size = 0.01;
     let growth_rate = 1.2;
 
     c.bench_function("generate_voronoi_mesh_0.01", |b| {

@@ -122,6 +122,8 @@ impl Triangle {
 
 
 use rand::Rng;
+use rayon::prelude::*;
+use wide::f64x4;
 
 pub fn triangulate(
     geo: &(impl Geometry + Sync),
@@ -353,8 +355,6 @@ fn smooth_generators(
         adj[t.v3].push(t.v2);
     }
 
-    let mut max_disp = 0.0;
-
     // Sizing function (same as in generate_poisson_points)
     let get_radius = |p: Point2<f64>| -> f64 {
         let dist = geo.sdf(&p).abs();
@@ -362,23 +362,51 @@ fn smooth_generators(
         r.min(max_cell_size)
     };
 
-    for i in 0..n {
+    let compute_new_pos = |i: usize| -> (Point2<f64>, f64) {
         if fixed_nodes[i] {
-            continue;
+            return (points[i], 0.0);
         }
-
         let neighbors = &adj[i];
         if neighbors.is_empty() {
-            continue;
+            return (points[i], 0.0);
         }
 
         let mut sum_x = 0.0;
         let mut sum_y = 0.0;
         let mut sum_w = 0.0;
 
-        for &neigh in neighbors {
-            // Weight by inverse of desired size at neighbor
-            // This pulls points towards denser regions (smaller r)
+        let mut chunks = neighbors.chunks_exact(4);
+        for chunk in chunks.by_ref() {
+            let n0 = chunk[0];
+            let n1 = chunk[1];
+            let n2 = chunk[2];
+            let n3 = chunk[3];
+
+            let px = f64x4::new([points[n0].x, points[n1].x, points[n2].x, points[n3].x]);
+            let py = f64x4::new([points[n0].y, points[n1].y, points[n2].y, points[n3].y]);
+
+            let dist = geo.sdf_batch(px, py).abs();
+            
+            let min_sz = f64x4::splat(min_cell_size);
+            let max_sz = f64x4::splat(max_cell_size);
+            let gr = f64x4::splat((growth_rate - 1.0).max(0.0));
+            
+            let r = (min_sz + gr * dist).min(max_sz);
+            let w = f64x4::splat(1.0) / r.max(f64x4::splat(1e-6));
+            
+            let wx = px * w;
+            let wy = py * w;
+            
+            let arr_wx: [f64; 4] = wx.into();
+            let arr_wy: [f64; 4] = wy.into();
+            let arr_w: [f64; 4] = w.into();
+            
+            sum_x += arr_wx[0] + arr_wx[1] + arr_wx[2] + arr_wx[3];
+            sum_y += arr_wy[0] + arr_wy[1] + arr_wy[2] + arr_wy[3];
+            sum_w += arr_w[0] + arr_w[1] + arr_w[2] + arr_w[3];
+        }
+
+        for &neigh in chunks.remainder() {
             let r = get_radius(points[neigh]);
             let w = 1.0 / r.max(1e-6);
 
@@ -389,7 +417,6 @@ fn smooth_generators(
         let avg_x = sum_x / sum_w;
         let avg_y = sum_y / sum_w;
 
-        // Relaxation factor
         let alpha = 0.1;
         let p_new = Point2::new(
             points[i].x + (avg_x - points[i].x) * alpha,
@@ -398,11 +425,33 @@ fn smooth_generators(
 
         if geo.is_inside(&p_new) {
             let disp = (p_new - points[i]).norm();
-            if disp > max_disp {
-                max_disp = disp;
+            (p_new, disp)
+        } else {
+            (points[i], 0.0)
+        }
+    };
+
+    let max_disp;
+    if n < 5000 {
+        let mut m_disp = 0.0;
+        for i in 0..n {
+            let (p_new, disp) = compute_new_pos(i);
+            if disp > m_disp {
+                m_disp = disp;
             }
             new_points[i] = p_new;
         }
+        max_disp = m_disp;
+    } else {
+        max_disp = new_points
+            .par_iter_mut()
+            .enumerate()
+            .map(|(i, p_out)| {
+                let (p_new, disp) = compute_new_pos(i);
+                *p_out = p_new;
+                disp
+            })
+            .reduce(|| 0.0, |a, b| a.max(b));
     }
 
     (new_points, max_disp)

@@ -2,7 +2,23 @@ use super::delaunay::{triangulate, Edge};
 use super::geometry::Geometry;
 use super::structs::{BoundaryType, Mesh};
 use nalgebra::{Point2, Vector2};
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+
+struct FaceResult {
+    v1: usize,
+    v2: usize,
+    cx: f64,
+    cy: f64,
+    nx: f64,
+    ny: f64,
+    area: f64,
+    owner: usize,
+    neighbor: Option<usize>,
+    boundary: Option<BoundaryType>,
+    cell_1: usize,
+    cell_2: Option<usize>,
+}
 
 pub fn generate_voronoi_mesh(
     geo: &(impl Geometry + Sync),
@@ -42,138 +58,112 @@ pub fn generate_voronoi_mesh(
     }
 
     // 2. Construct Voronoi Cells (one per Delaunay vertex)
-    // We use an edge-based approach to build faces first, then assemble cells.
-
-    // We need to map Delaunay vertices to Voronoi cells.
-    // cell_idx = delaunay_vertex_idx
-    // So we can pre-allocate.
     for p in &points {
         mesh.cell_cx.push(p.x);
         mesh.cell_cy.push(p.y);
-        // Vol will be calc later
         mesh.cell_vol.push(0.0);
     }
 
-    // We need to store which faces belong to which cell.
     let mut cell_faces: Vec<Vec<usize>> = vec![Vec::new(); points.len()];
 
     // 3. Identify all unique Voronoi vertices.
-    //    - Circumcenters of all triangles.
-    //    - Midpoints of all boundary edges.
-    //    - Original vertices (only for domain corners/boundary handling).
-
     let mut voronoi_points: Vec<Point2<f64>> = Vec::new();
-    let mut voronoi_point_map: HashMap<String, usize> = HashMap::new(); // Key: "C_tidx" or "M_eidx" or "V_vidx"
-
-    // Helper to add point
-    let mut add_point = |p: Point2<f64>, key: String| -> usize {
-        if let Some(&idx) = voronoi_point_map.get(&key) {
-            idx
-        } else {
-            let idx = voronoi_points.len();
-            voronoi_points.push(p);
-            voronoi_point_map.insert(key, idx);
-            idx
-        }
-    };
+    
+    // Direct mappings
+    let mut circumcenter_indices: Vec<usize> = Vec::with_capacity(triangles.len());
+    let mut vertex_indices: Vec<Option<usize>> = vec![None; points.len()];
+    let mut midpoint_indices: HashMap<Edge, usize> = HashMap::new();
 
     // Add circumcenters
-    for (i, t) in triangles.iter().enumerate() {
-        add_point(t.circumcenter, format!("C_{}", i));
+    for t in triangles.iter() {
+        circumcenter_indices.push(voronoi_points.len());
+        voronoi_points.push(t.circumcenter);
     }
 
-    // Add midpoints for boundary edges
-    // And add original vertices for boundary cells
+    // Add midpoints and original vertices
     for (edge, tris) in &edge_to_triangles {
         if tris.len() == 1 {
             let p1 = points[edge.v1];
             let p2 = points[edge.v2];
             let mid = Point2::new((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0);
-            add_point(mid, format!("M_{}_{}", edge.v1, edge.v2));
+            
+            midpoint_indices.insert(*edge, voronoi_points.len());
+            voronoi_points.push(mid);
 
-            // Also ensure the original vertices are added if they are part of the boundary cell
-            add_point(p1, format!("V_{}", edge.v1));
-            add_point(p2, format!("V_{}", edge.v2));
+            if vertex_indices[edge.v1].is_none() {
+                vertex_indices[edge.v1] = Some(voronoi_points.len());
+                voronoi_points.push(p1);
+            }
+            if vertex_indices[edge.v2].is_none() {
+                vertex_indices[edge.v2] = Some(voronoi_points.len());
+                voronoi_points.push(p2);
+            }
         }
     }
 
-    // Now create faces
-    for (edge, tris) in &edge_to_triangles {
+    // Sort edges for deterministic parallel execution
+    let mut edges: Vec<Edge> = edge_to_triangles.keys().cloned().collect();
+    edges.sort_by(|a, b| a.v1.cmp(&b.v1).then(a.v2.cmp(&b.v2)));
+
+    // Parallel Face Generation
+    let process_edge = |edge: &Edge| -> Vec<FaceResult> {
+        let tris = &edge_to_triangles[edge];
+        let mut results = Vec::new();
         let v1 = edge.v1;
         let v2 = edge.v2;
 
+        // 1. Main Face
         let idx_a;
         let idx_b;
 
         if tris.len() == 2 {
-            idx_a = *voronoi_point_map.get(&format!("C_{}", tris[0])).unwrap();
-            idx_b = *voronoi_point_map.get(&format!("C_{}", tris[1])).unwrap();
+            idx_a = circumcenter_indices[tris[0]];
+            idx_b = circumcenter_indices[tris[1]];
         } else {
-            idx_a = *voronoi_point_map.get(&format!("C_{}", tris[0])).unwrap();
-            idx_b = *voronoi_point_map.get(&format!("M_{}_{}", v1, v2)).unwrap();
+            idx_a = circumcenter_indices[tris[0]];
+            idx_b = *midpoint_indices.get(edge).unwrap();
         }
 
         let pa = voronoi_points[idx_a];
         let pb = voronoi_points[idx_b];
-
         let f_center = Point2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
         let f_len = (pa - pb).norm();
 
-        // Normal should point from v1 to v2 (or vice versa).
-        // The Delaunay edge (v1 -> v2) is normal to the Voronoi face.
         let p_v1 = points[v1];
         let p_v2 = points[v2];
         let del_edge_vec = p_v2 - p_v1;
         let normal = del_edge_vec.normalize();
 
-        let face_idx = mesh.face_cx.len();
+        results.push(FaceResult {
+            v1: idx_a,
+            v2: idx_b,
+            cx: f_center.x,
+            cy: f_center.y,
+            nx: normal.x,
+            ny: normal.y,
+            area: f_len,
+            owner: v1,
+            neighbor: Some(v2),
+            boundary: None,
+            cell_1: v1,
+            cell_2: Some(v2),
+        });
 
-        mesh.face_v1.push(idx_a);
-        mesh.face_v2.push(idx_b);
-        mesh.face_cx.push(f_center.x);
-        mesh.face_cy.push(f_center.y);
-        mesh.face_nx.push(normal.x);
-        mesh.face_ny.push(normal.y);
-        mesh.face_area.push(f_len);
-
-        // Owner/Neighbor are the Delaunay vertices v1 and v2
-        mesh.face_owner.push(v1);
-        mesh.face_neighbor.push(Some(v2));
-
-        mesh.face_boundary.push(None); // Internal face
-
-        cell_faces[v1].push(face_idx);
-        cell_faces[v2].push(face_idx);
-    }
-
-    // Add Boundary Faces (segments along the domain boundary)
-    // Iterate over boundary edges of Delaunay
-    for (edge, tris) in &edge_to_triangles {
+        // 2. Boundary Faces
         if tris.len() == 1 {
-            let v1 = edge.v1;
-            let v2 = edge.v2;
-
-            let idx_mid = *voronoi_point_map.get(&format!("M_{}_{}", v1, v2)).unwrap();
-            let idx_v1 = *voronoi_point_map.get(&format!("V_{}", v1)).unwrap();
-            let idx_v2 = *voronoi_point_map.get(&format!("V_{}", v2)).unwrap();
+            let idx_mid = *midpoint_indices.get(edge).unwrap();
+            let idx_v1 = vertex_indices[v1].unwrap();
+            let idx_v2 = vertex_indices[v2].unwrap();
 
             let p_mid = voronoi_points[idx_mid];
-            let p_v1 = voronoi_points[idx_v1];
-            let p_v2 = voronoi_points[idx_v2];
+            let p_v1_vor = voronoi_points[idx_v1];
+            let p_v2_vor = voronoi_points[idx_v2];
 
             // Face 1: Midpoint - V1
-            let face_idx_1 = mesh.face_cx.len();
-            mesh.face_v1.push(idx_mid);
-            mesh.face_v2.push(idx_v1);
-            let f1_center = Point2::new((p_mid.x + p_v1.x) / 2.0, (p_mid.y + p_v1.y) / 2.0);
-            mesh.face_cx.push(f1_center.x);
-            mesh.face_cy.push(f1_center.y);
-            mesh.face_area.push((p_mid - p_v1).norm());
-
+            let f1_center = Point2::new((p_mid.x + p_v1_vor.x) / 2.0, (p_mid.y + p_v1_vor.y) / 2.0);
             let tangent = p_v2 - p_v1;
             let mut normal = Vector2::new(tangent.y, -tangent.x).normalize();
 
-            // Check against triangle centroid to ensure it points out
             let t = triangles[tris[0]];
             let t_center = (points[t.v1].coords + points[t.v2].coords + points[t.v3].coords) / 3.0;
             let edge_center = (p_v1.coords + p_v2.coords) / 2.0;
@@ -181,13 +171,6 @@ pub fn generate_voronoi_mesh(
                 normal = -normal;
             }
 
-            mesh.face_nx.push(normal.x);
-            mesh.face_ny.push(normal.y);
-
-            mesh.face_owner.push(v1);
-            mesh.face_neighbor.push(None); // Boundary
-
-            // Determine Boundary Type
             let boundary_type = if f1_center.x < 1e-6 {
                 Some(BoundaryType::Inlet)
             } else if (f1_center.x - domain_size.x).abs() < 1e-6 {
@@ -195,25 +178,24 @@ pub fn generate_voronoi_mesh(
             } else {
                 Some(BoundaryType::Wall)
             };
-            mesh.face_boundary.push(boundary_type);
 
-            cell_faces[v1].push(face_idx_1);
+            results.push(FaceResult {
+                v1: idx_mid,
+                v2: idx_v1,
+                cx: f1_center.x,
+                cy: f1_center.y,
+                nx: normal.x,
+                ny: normal.y,
+                area: (p_mid - p_v1_vor).norm(),
+                owner: v1,
+                neighbor: None,
+                boundary: boundary_type,
+                cell_1: v1,
+                cell_2: None,
+            });
 
             // Face 2: Midpoint - V2
-            let face_idx_2 = mesh.face_cx.len();
-            mesh.face_v1.push(idx_mid);
-            mesh.face_v2.push(idx_v2);
-            let f2_center = Point2::new((p_mid.x + p_v2.x) / 2.0, (p_mid.y + p_v2.y) / 2.0);
-            mesh.face_cx.push(f2_center.x);
-            mesh.face_cy.push(f2_center.y);
-            mesh.face_area.push((p_mid - p_v2).norm());
-
-            mesh.face_nx.push(normal.x);
-            mesh.face_ny.push(normal.y);
-
-            mesh.face_owner.push(v2);
-            mesh.face_neighbor.push(None);
-
+            let f2_center = Point2::new((p_mid.x + p_v2_vor.x) / 2.0, (p_mid.y + p_v2_vor.y) / 2.0);
             let boundary_type_2 = if f2_center.x < 1e-6 {
                 Some(BoundaryType::Inlet)
             } else if (f2_center.x - domain_size.x).abs() < 1e-6 {
@@ -221,9 +203,50 @@ pub fn generate_voronoi_mesh(
             } else {
                 Some(BoundaryType::Wall)
             };
-            mesh.face_boundary.push(boundary_type_2);
 
-            cell_faces[v2].push(face_idx_2);
+            results.push(FaceResult {
+                v1: idx_mid,
+                v2: idx_v2,
+                cx: f2_center.x,
+                cy: f2_center.y,
+                nx: normal.x,
+                ny: normal.y,
+                area: (p_mid - p_v2_vor).norm(),
+                owner: v2,
+                neighbor: None,
+                boundary: boundary_type_2,
+                cell_1: v2,
+                cell_2: None,
+            });
+        }
+
+        results
+    };
+
+    let all_faces: Vec<FaceResult>;
+    if edges.len() < 5000 {
+        all_faces = edges.iter().flat_map(|edge| process_edge(edge)).collect();
+    } else {
+        all_faces = edges.par_iter().flat_map(|edge| process_edge(edge)).collect();
+    }
+
+    // Push faces to mesh
+    for f in all_faces {
+        let f_idx = mesh.face_cx.len();
+        mesh.face_v1.push(f.v1);
+        mesh.face_v2.push(f.v2);
+        mesh.face_cx.push(f.cx);
+        mesh.face_cy.push(f.cy);
+        mesh.face_nx.push(f.nx);
+        mesh.face_ny.push(f.ny);
+        mesh.face_area.push(f.area);
+        mesh.face_owner.push(f.owner);
+        mesh.face_neighbor.push(f.neighbor);
+        mesh.face_boundary.push(f.boundary);
+
+        cell_faces[f.cell_1].push(f_idx);
+        if let Some(c2) = f.cell_2 {
+            cell_faces[c2].push(f_idx);
         }
     }
 
@@ -233,10 +256,11 @@ pub fn generate_voronoi_mesh(
 
     // Mark boundary vertices as fixed
     mesh.v_fixed = vec![false; mesh.vx.len()];
-    for (key, &idx) in &voronoi_point_map {
-        if key.starts_with("M_") || key.starts_with("V_") {
-            mesh.v_fixed[idx] = true;
-        }
+    for idx in midpoint_indices.values() {
+        mesh.v_fixed[*idx] = true;
+    }
+    for idx in vertex_indices.iter().flatten() {
+        mesh.v_fixed[*idx] = true;
     }
 
     // Fill cell_faces and calculate volumes
@@ -259,7 +283,7 @@ pub fn generate_voronoi_mesh(
         // If boundary cell, start at V (the cell center vertex).
         // If internal cell, pick any vertex.
 
-        let start_node = if let Some(&idx) = voronoi_point_map.get(&format!("V_{}", i)) {
+        let start_node = if let Some(idx) = vertex_indices[i] {
             idx
         } else {
             // Internal cell. Pick any vertex.

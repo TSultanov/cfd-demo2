@@ -98,7 +98,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         let dx = c_neigh.x - c_owner.x;
         let dy = c_neigh.y - c_owner.y;
-        let dist = sqrt(dx*dx + dy*dy);
+        
+        // Use projected distance for consistency with coupled solver
+        let dist_proj = abs(dx * normal.x + dy * normal.y);
+        let dist = max(dist_proj, 1e-6);
         
         let p_own = p[owner];
         let p_neigh = p[neigh_idx];

@@ -142,7 +142,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         let d_vec_x = other_center.x - center.x;
         let d_vec_y = other_center.y - center.y;
-        let dist = sqrt(d_vec_x*d_vec_x + d_vec_y*d_vec_y);
+        
+        // Use projected distance for diffusion to handle non-orthogonality
+        // dist_proj = |d . n|
+        let dist_proj = abs(d_vec_x * normal.x + d_vec_y * normal.y);
+        let dist = max(dist_proj, 1e-6); // Avoid division by zero
         
         // Diffusion: mu * A / dist
         let mu = constants.viscosity;

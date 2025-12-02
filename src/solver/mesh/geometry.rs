@@ -41,13 +41,15 @@ impl Geometry for ChannelWithObstacle {
         let nx = (self.length / spacing).ceil() as usize;
         let ny = (self.height / spacing).ceil() as usize;
 
-        for i in 0..nx {
-            points.push(Point2::new(i as f64 * spacing, 0.0));
-            points.push(Point2::new(i as f64 * spacing, self.height));
+        for i in 0..=nx {
+            let x = (i as f64 * spacing).min(self.length);
+            points.push(Point2::new(x, 0.0));
+            points.push(Point2::new(x, self.height));
         }
-        for i in 0..ny {
-            points.push(Point2::new(0.0, i as f64 * spacing));
-            points.push(Point2::new(self.length, i as f64 * spacing));
+        for i in 0..=ny {
+            let y = (i as f64 * spacing).min(self.height);
+            points.push(Point2::new(0.0, y));
+            points.push(Point2::new(self.length, y));
         }
 
         // Obstacle
@@ -159,13 +161,15 @@ impl Geometry for RectangularChannel {
         let nx = (self.length / spacing).ceil() as usize;
         let ny = (self.height / spacing).ceil() as usize;
 
-        for i in 0..nx {
-            points.push(Point2::new(i as f64 * spacing, 0.0));
-            points.push(Point2::new(i as f64 * spacing, self.height));
+        for i in 0..=nx {
+            let x = (i as f64 * spacing).min(self.length);
+            points.push(Point2::new(x, 0.0));
+            points.push(Point2::new(x, self.height));
         }
-        for i in 0..ny {
-            points.push(Point2::new(0.0, i as f64 * spacing));
-            points.push(Point2::new(self.length, i as f64 * spacing));
+        for i in 0..=ny {
+            let y = (i as f64 * spacing).min(self.height);
+            points.push(Point2::new(0.0, y));
+            points.push(Point2::new(self.length, y));
         }
         points
     }

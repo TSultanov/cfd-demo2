@@ -1,5 +1,5 @@
 use nalgebra::{Point2, Vector2};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::geometry::Geometry;
 use super::structs::{BoundaryType, Mesh};
@@ -27,6 +27,11 @@ pub struct Triangle {
     pub v3: usize,
     pub circumcenter: Point2<f64>,
     pub r_sq: f64,
+    // Neighbors opposite to edges:
+    // 0: edge (v1, v2)
+    // 1: edge (v2, v3)
+    // 2: edge (v3, v1)
+    pub neighbors: [Option<usize>; 3],
 }
 
 impl Triangle {
@@ -38,6 +43,14 @@ impl Triangle {
         p2: Point2<f64>,
         p3: Point2<f64>,
     ) -> Self {
+        // Enforce CCW
+        let det = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+        let (v1, v2, v3, p1, p2, p3) = if det < 0.0 {
+            (v1, v3, v2, p1, p3, p2)
+        } else {
+            (v1, v2, v3, p1, p2, p3)
+        };
+
         let (circumcenter, r_sq) = Self::calculate_circumcircle(p1, p2, p3);
         Self {
             v1,
@@ -45,6 +58,7 @@ impl Triangle {
             v3,
             circumcenter,
             r_sq,
+            neighbors: [None; 3],
         }
     }
 
@@ -394,111 +408,246 @@ fn smooth_generators(
     (new_points, max_disp)
 }
 
+struct DelaunayTriangulation {
+    triangles: Vec<Triangle>,
+    active: Vec<bool>,
+}
+
+impl DelaunayTriangulation {
+    fn new(capacity: usize) -> Self {
+        Self {
+            triangles: Vec::with_capacity(capacity),
+            active: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn add_triangle(&mut self, t: Triangle) -> usize {
+        let idx = self.triangles.len();
+        self.triangles.push(t);
+        self.active.push(true);
+        idx
+    }
+
+    fn deactivate(&mut self, idx: usize) {
+        self.active[idx] = false;
+    }
+}
+
 fn compute_triangulation(
     points: &[Point2<f64>],
     domain_size: Vector2<f64>,
     fixed_nodes: &[bool],
     geo: &(impl Geometry + Sync),
 ) -> Vec<Triangle> {
-    let mut triangles: Vec<Triangle> = Vec::new();
+    let n_points = points.len();
+    let mut dt = DelaunayTriangulation::new(n_points * 3);
 
     // Super-triangle
-    let margin = 1.2345;
+    let margin = 10.0 * domain_size.norm();
     let p1 = Point2::new(-margin, -margin);
-    let p2 = Point2::new(2.0 * domain_size.x + margin, -margin);
-    let p3 = Point2::new(-margin, 2.0 * domain_size.y + margin);
+    let p2 = Point2::new(2.0 * margin + domain_size.x, -margin);
+    let p3 = Point2::new(-margin, 2.0 * margin + domain_size.y);
 
-    // We work with a temporary list of points that includes the super-triangle
-    let n_points = points.len();
     let mut working_points = points.to_vec();
     working_points.push(p1);
     working_points.push(p2);
     working_points.push(p3);
 
-    triangles.push(Triangle::new(
-        n_points,
-        n_points + 1,
-        n_points + 2,
-        p1,
-        p2,
-        p3,
-    ));
+    let st_v1 = n_points;
+    let st_v2 = n_points + 1;
+    let st_v3 = n_points + 2;
+
+    let t_super = Triangle::new(st_v1, st_v2, st_v3, p1, p2, p3);
+    dt.add_triangle(t_super);
+
+    let mut last_tri_idx = 0;
 
     for (i, &p) in points.iter().enumerate() {
+        let mut curr = last_tri_idx;
+        
+        // Walk to find triangle containing p
+        let mut iter = 0;
+        let max_iter = dt.triangles.len(); // Safety break
+        loop {
+            if iter > max_iter {
+                // Fallback to linear search if walk fails
+                if let Some(idx) = dt.active.iter().position(|&x| x) {
+                    curr = idx;
+                }
+                break;
+            }
+            iter += 1;
+
+            if !dt.active[curr] {
+                 if let Some(idx) = dt.active.iter().position(|&x| x) {
+                    curr = idx;
+                 } else {
+                     break; 
+                 }
+            }
+            
+            let t = dt.triangles[curr];
+            let p_a = working_points[t.v1];
+            let p_b = working_points[t.v2];
+            let p_c = working_points[t.v3];
+
+            let cross = |a: Point2<f64>, b: Point2<f64>, p: Point2<f64>| {
+                (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+            };
+
+            if cross(p_a, p_b, p) < -1e-10 {
+                if let Some(n) = t.neighbors[0] {
+                    curr = n;
+                    continue;
+                }
+            }
+            if cross(p_b, p_c, p) < -1e-10 {
+                if let Some(n) = t.neighbors[1] {
+                    curr = n;
+                    continue;
+                }
+            }
+            if cross(p_c, p_a, p) < -1e-10 {
+                if let Some(n) = t.neighbors[2] {
+                    curr = n;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        let start_bad = curr;
+        
         let mut bad_triangles = Vec::new();
-        for (t_idx, t) in triangles.iter().enumerate() {
+        let mut queue = Vec::new();
+        let mut visited = HashSet::new();
+
+        if dt.triangles[start_bad].in_circumcircle(p, &working_points) {
+            queue.push(start_bad);
+            visited.insert(start_bad);
+        }
+
+        while let Some(t_idx) = queue.pop() {
+            let t = dt.triangles[t_idx];
             if t.in_circumcircle(p, &working_points) {
                 bad_triangles.push(t_idx);
+                for &n_opt in &t.neighbors {
+                    if let Some(n) = n_opt {
+                        if !visited.contains(&n) && dt.active[n] {
+                            visited.insert(n);
+                            queue.push(n);
+                        }
+                    }
+                }
             }
         }
 
-        let mut polygon = Vec::new();
-        for &t_idx in &bad_triangles {
-            let t = triangles[t_idx];
-            let edges = [
-                Edge::new(t.v1, t.v2),
-                Edge::new(t.v2, t.v3),
-                Edge::new(t.v3, t.v1),
-            ];
+        if bad_triangles.is_empty() {
+            continue;
+        }
 
-            for &edge in &edges {
-                let mut shared = false;
-                for &other_t_idx in &bad_triangles {
-                    if t_idx == other_t_idx {
-                        continue;
-                    }
-                    let other_t = triangles[other_t_idx];
-                    let other_edges = [
-                        Edge::new(other_t.v1, other_t.v2),
-                        Edge::new(other_t.v2, other_t.v3),
-                        Edge::new(other_t.v3, other_t.v1),
-                    ];
-                    if other_edges.contains(&edge) {
-                        shared = true;
+        let mut boundary_edges = Vec::new(); 
+
+        for &t_idx in &bad_triangles {
+            let t = dt.triangles[t_idx];
+            let edges = [(t.v1, t.v2, 0), (t.v2, t.v3, 1), (t.v3, t.v1, 2)];
+            
+            for (v_start, v_end, neigh_idx) in edges {
+                let neighbor = t.neighbors[neigh_idx];
+                let is_boundary_edge = match neighbor {
+                    Some(n) => !bad_triangles.contains(&n),
+                    None => true,
+                };
+
+                if is_boundary_edge {
+                    boundary_edges.push((v_start, v_end, neighbor));
+                }
+            }
+        }
+
+        for &t_idx in &bad_triangles {
+            dt.deactivate(t_idx);
+        }
+
+        let mut new_tri_indices = Vec::new();
+        
+        for &(u, v, neighbor) in &boundary_edges {
+            let new_t = Triangle::new(u, v, i, working_points[u], working_points[v], working_points[i]);
+            let idx = dt.add_triangle(new_t);
+            new_tri_indices.push(idx);
+            
+            // Assign neighbor for the boundary edge
+            let t = &mut dt.triangles[idx];
+            if t.v1 == u && t.v2 == v { t.neighbors[0] = neighbor; }
+            else if t.v2 == u && t.v3 == v { t.neighbors[1] = neighbor; }
+            else if t.v3 == u && t.v1 == v { t.neighbors[2] = neighbor; }
+            // Handle swapped cases if any (though u,v should match edge direction)
+            else if t.v1 == v && t.v2 == u { t.neighbors[0] = neighbor; }
+            else if t.v2 == v && t.v3 == u { t.neighbors[1] = neighbor; }
+            else if t.v3 == v && t.v1 == u { t.neighbors[2] = neighbor; }
+            
+            if let Some(n_idx) = neighbor {
+                let n_tri = &mut dt.triangles[n_idx];
+                if n_tri.v1 == v && n_tri.v2 == u { n_tri.neighbors[0] = Some(idx); }
+                else if n_tri.v2 == v && n_tri.v3 == u { n_tri.neighbors[1] = Some(idx); }
+                else if n_tri.v3 == v && n_tri.v1 == u { n_tri.neighbors[2] = Some(idx); }
+            }
+        }
+        
+        let n_new = new_tri_indices.len();
+        for k in 0..n_new {
+            let t_idx = new_tri_indices[k];
+            let t = dt.triangles[t_idx];
+            
+            for edge_idx in 0..3 {
+                if dt.triangles[t_idx].neighbors[edge_idx].is_some() {
+                    continue;
+                }
+                
+                let (ea, eb) = match edge_idx {
+                    0 => (t.v1, t.v2),
+                    1 => (t.v2, t.v3),
+                    2 => (t.v3, t.v1),
+                    _ => unreachable!(),
+                };
+                
+                for m in 0..n_new {
+                    if k == m { continue; }
+                    let other_idx = new_tri_indices[m];
+                    let other = dt.triangles[other_idx];
+                    
+                    if (other.v1 == eb && other.v2 == ea) || 
+                       (other.v2 == eb && other.v3 == ea) || 
+                       (other.v3 == eb && other.v1 == ea) {
+                        dt.triangles[t_idx].neighbors[edge_idx] = Some(other_idx);
                         break;
                     }
                 }
-                if !shared {
-                    polygon.push(edge);
-                }
             }
         }
-
-        // Remove bad triangles
-        bad_triangles.sort_unstable_by(|a, b| b.cmp(a));
-        for idx in bad_triangles {
-            triangles.swap_remove(idx);
-        }
-
-        // Re-triangulate
-        for edge in polygon {
-            triangles.push(Triangle::new(
-                edge.v1,
-                edge.v2,
-                i,
-                working_points[edge.v1],
-                working_points[edge.v2],
-                working_points[i],
-            ));
+        
+        if !new_tri_indices.is_empty() {
+            last_tri_idx = new_tri_indices[0];
         }
     }
 
-    // Remove triangles connected to super-triangle
-    triangles.retain(|t| t.v1 < n_points && t.v2 < n_points && t.v3 < n_points);
-
-    // Filter triangles that are outside the geometry
-    triangles.retain(|t| {
+    dt.triangles.into_iter().enumerate().filter_map(|(i, t)| {
+        if !dt.active[i] { return None; }
+        if t.v1 >= n_points || t.v2 >= n_points || t.v3 >= n_points { return None; }
+        
         if !fixed_nodes[t.v1] || !fixed_nodes[t.v2] || !fixed_nodes[t.v3] {
-            return true;
+             return Some(t);
         }
         let p1 = points[t.v1];
         let p2 = points[t.v2];
         let p3 = points[t.v3];
         let centroid = Point2::new((p1.x + p2.x + p3.x) / 3.0, (p1.y + p2.y + p3.y) / 3.0);
-        geo.is_inside(&centroid)
-    });
-
-    triangles
+        if geo.is_inside(&centroid) {
+            Some(t)
+        } else {
+            None
+        }
+    }).collect()
 }
 
 pub fn generate_delaunay_mesh(

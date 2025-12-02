@@ -25,6 +25,40 @@ impl Geometry for CircleObstacle {
 
         box_dist.max(-circle_dist)
     }
+
+    fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>> {
+        let mut points = Vec::new();
+
+        // Domain boundary
+        let min = self.domain_min;
+        let max = self.domain_max;
+        let width = max.x - min.x;
+        let height = max.y - min.y;
+
+        let nx = (width / spacing).ceil() as usize;
+        let ny = (height / spacing).ceil() as usize;
+
+        for i in 0..nx {
+            points.push(Point2::new(min.x + i as f64 * spacing, min.y));
+            points.push(Point2::new(min.x + i as f64 * spacing, max.y));
+        }
+        for i in 0..ny {
+            points.push(Point2::new(min.x, min.y + i as f64 * spacing));
+            points.push(Point2::new(max.x, min.y + i as f64 * spacing));
+        }
+
+        // Obstacle boundary
+        let circumference = 2.0 * std::f64::consts::PI * self.radius;
+        let n_obs = (circumference / spacing).ceil() as usize;
+        for i in 0..n_obs {
+            let theta = 2.0 * std::f64::consts::PI * i as f64 / n_obs as f64;
+            let x = self.center.x + self.radius * theta.cos();
+            let y = self.center.y + self.radius * theta.sin();
+            points.push(Point2::new(x, y));
+        }
+
+        points
+    }
 }
 
 #[test]

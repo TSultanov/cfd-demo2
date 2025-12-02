@@ -5,6 +5,8 @@ pub trait Geometry {
     fn is_inside(&self, p: &Point2<f64>) -> bool;
     // Returns distance to surface. Negative inside.
     fn sdf(&self, p: &Point2<f64>) -> f64;
+    // Returns boundary points with given spacing
+    fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>>;
 }
 
 pub struct ChannelWithObstacle {
@@ -29,6 +31,36 @@ impl Geometry for ChannelWithObstacle {
         // Fluid is inside box AND outside circle.
         // Outside circle SDF: -circle_dist
         box_dist.max(-circle_dist)
+    }
+
+    fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>> {
+        let mut points = Vec::new();
+
+        // Outer box
+        // Bottom
+        let nx = (self.length / spacing).ceil() as usize;
+        let ny = (self.height / spacing).ceil() as usize;
+
+        for i in 0..nx {
+            points.push(Point2::new(i as f64 * spacing, 0.0));
+            points.push(Point2::new(i as f64 * spacing, self.height));
+        }
+        for i in 0..ny {
+            points.push(Point2::new(0.0, i as f64 * spacing));
+            points.push(Point2::new(self.length, i as f64 * spacing));
+        }
+
+        // Obstacle
+        let circumference = 2.0 * std::f64::consts::PI * self.obstacle_radius;
+        let n_obs = (circumference / spacing).ceil() as usize;
+        for i in 0..n_obs {
+            let theta = 2.0 * std::f64::consts::PI * i as f64 / n_obs as f64;
+            let x = self.obstacle_center.x + self.obstacle_radius * theta.cos();
+            let y = self.obstacle_center.y + self.obstacle_radius * theta.sin();
+            points.push(Point2::new(x, y));
+        }
+
+        points
     }
 }
 
@@ -65,6 +97,45 @@ impl Geometry for BackwardsStep {
         // Fluid is inside outer_box AND outside block.
         outer_dist.max(-block_dist)
     }
+
+    fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>> {
+        let mut points = Vec::new();
+        // Simplified boundary generation: just walk the perimeter
+        // Vertices: (0, h_out), (L, h_out), (L, 0), (step_x, 0), (step_x, step_h), (0, step_h)
+
+        let step_h = self.height_outlet - self.height_inlet;
+
+        let segments = [
+            (
+                Point2::new(0.0, self.height_outlet),
+                Point2::new(self.length, self.height_outlet),
+            ), // Top
+            (
+                Point2::new(self.length, self.height_outlet),
+                Point2::new(self.length, 0.0),
+            ), // Right
+            (Point2::new(self.length, 0.0), Point2::new(self.step_x, 0.0)), // Bottom Right
+            (
+                Point2::new(self.step_x, 0.0),
+                Point2::new(self.step_x, step_h),
+            ), // Step Vertical
+            (Point2::new(self.step_x, step_h), Point2::new(0.0, step_h)), // Step Horizontal (Inlet bottom)
+            (
+                Point2::new(0.0, step_h),
+                Point2::new(0.0, self.height_outlet),
+            ), // Inlet Left
+        ];
+
+        for (p1, p2) in segments {
+            let dist = (p1 - p2).norm();
+            let n = (dist / spacing).ceil() as usize;
+            for i in 0..n {
+                let t = i as f64 / n as f64;
+                points.push(p1 + (p2 - p1) * t);
+            }
+        }
+        points
+    }
 }
 
 pub struct RectangularChannel {
@@ -81,5 +152,21 @@ impl Geometry for RectangularChannel {
         let dx = (p.x - self.length / 2.0).abs() - self.length / 2.0;
         let dy = (p.y - self.height / 2.0).abs() - self.height / 2.0;
         dx.max(dy).min(0.0) + Vector2::new(dx.max(0.0), dy.max(0.0)).norm()
+    }
+
+    fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>> {
+        let mut points = Vec::new();
+        let nx = (self.length / spacing).ceil() as usize;
+        let ny = (self.height / spacing).ceil() as usize;
+
+        for i in 0..nx {
+            points.push(Point2::new(i as f64 * spacing, 0.0));
+            points.push(Point2::new(i as f64 * spacing, self.height));
+        }
+        for i in 0..ny {
+            points.push(Point2::new(0.0, i as f64 * spacing));
+            points.push(Point2::new(self.length, i as f64 * spacing));
+        }
+        points
     }
 }

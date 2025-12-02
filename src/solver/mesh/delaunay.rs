@@ -2,7 +2,6 @@ use nalgebra::{Point2, Vector2};
 use std::collections::HashMap;
 
 use super::geometry::Geometry;
-use super::quadtree::generate_base_polygons;
 use super::structs::{BoundaryType, Mesh};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -94,6 +93,8 @@ impl Triangle {
     }
 }
 
+use rand::Rng;
+
 pub fn triangulate(
     geo: &(impl Geometry + Sync),
     min_cell_size: f64,
@@ -101,68 +102,278 @@ pub fn triangulate(
     growth_rate: f64,
     domain_size: Vector2<f64>,
 ) -> (Vec<Point2<f64>>, Vec<Triangle>, Vec<bool>) {
-    // 1. Generate Points using robust polygon generation
-    let all_polys =
-        generate_base_polygons(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
+    // 1. Generate Points
+    // Step 1a: Boundary Points
+    let boundary_points = geo.get_boundary_points(min_cell_size);
 
     let mut points = Vec::new();
     let mut fixed_nodes = Vec::new();
     let mut unique_map = HashMap::new();
     let quantize = |x: f64, y: f64| ((x * 100000.0).round() as i64, (y * 100000.0).round() as i64);
 
-    for poly in all_polys {
-        for (p, fixed) in poly {
-            let key = quantize(p.x, p.y);
-            if !unique_map.contains_key(&key) {
-                unique_map.insert(key, points.len());
-                points.push(p);
-                fixed_nodes.push(fixed);
-            } else if fixed {
-                // If we encounter the point again and it's fixed, ensure it's marked fixed
-                let idx = unique_map[&key];
-                fixed_nodes[idx] = true;
-            }
+    // Add boundary points
+    for p in boundary_points {
+        let key = quantize(p.x, p.y);
+        if !unique_map.contains_key(&key) {
+            unique_map.insert(key, points.len());
+            points.push(p);
+            fixed_nodes.push(true);
         }
     }
 
-    // Jitter internal points to improve mesh quality (avoid right-angled triangles from grid)
-    // and break cocircularity degeneracies.
-    let jitter_scale = 0.25 * min_cell_size;
-    for (i, p) in points.iter_mut().enumerate() {
-        if !fixed_nodes[i] {
-            // Simple pseudo-random based on position
-            let s = (p.x * 12.9898 + p.y * 78.233).sin() * 43758.5453;
-            let noise_x = s.fract();
-            let s2 = (p.x * 39.7867 + p.y * 27.123).sin() * 23412.1234;
-            let noise_y = s2.fract();
+    // Step 1b: Interior Points using Poisson Disk Sampling
+    let interior_points = generate_poisson_points(
+        &points,
+        geo,
+        min_cell_size,
+        max_cell_size,
+        growth_rate,
+        domain_size,
+    );
 
-            let dx = (noise_x - 0.5) * jitter_scale;
-            let dy = (noise_y - 0.5) * jitter_scale;
+    for p in interior_points {
+        // Interior points are not fixed
+        points.push(p);
+        fixed_nodes.push(false);
+    }
 
-            let p_new = Point2::new(p.x + dx, p.y + dy);
+    // 2. Initial Triangulation
+    let mut triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo);
 
-            // Only apply if still inside geometry
-            if geo.is_inside(&p_new) {
-                *p = p_new;
-            }
+    // 3. Smooth Generators (Laplacian Smoothing)
+    // This helps to smooth out the sharp steps
+    let smoothing_iters = 50;
+    println!(
+        "Starting generator smoothing for {} iterations...",
+        smoothing_iters
+    );
+    for iter in 0..smoothing_iters {
+        let (new_points, max_disp) = smooth_generators(&points, &triangles, &fixed_nodes, geo);
+        points = new_points;
+        if iter % 10 == 0 {
+            println!("  Gen Smooth iter {}: max disp = {:.6}", iter, max_disp);
+        }
+        triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo);
+    }
+
+    (points, triangles, fixed_nodes)
+}
+
+fn generate_poisson_points(
+    boundary_points: &[Point2<f64>],
+    geo: &(impl Geometry + Sync),
+    min_cell_size: f64,
+    max_cell_size: f64,
+    growth_rate: f64,
+    domain_size: Vector2<f64>,
+) -> Vec<Point2<f64>> {
+    let mut rng = rand::thread_rng();
+    let r_min = min_cell_size;
+    // Cell size for the background grid.
+    // We use r_min / sqrt(2) so that each grid cell can contain at most one point.
+    let cell_size = r_min / (2.0f64).sqrt();
+
+    let grid_w = (domain_size.x / cell_size).ceil() as usize;
+    let grid_h = (domain_size.y / cell_size).ceil() as usize;
+
+    // Grid stores index of point in the `points` list (which includes boundary + generated)
+    let mut grid: Vec<Option<usize>> = vec![None; grid_w * grid_h];
+
+    let mut points = Vec::new(); // Local list of all points (boundary + new)
+    let mut active_list = Vec::new(); // Indices into `points`
+
+    // Initialize with boundary points
+    for &p in boundary_points {
+        let idx = points.len();
+        points.push(p);
+        active_list.push(idx);
+
+        let gx = (p.x / cell_size).floor() as usize;
+        let gy = (p.y / cell_size).floor() as usize;
+
+        if gx < grid_w && gy < grid_h {
+            grid[gy * grid_w + gx] = Some(idx);
         }
     }
 
-    // 2. Delaunay Triangulation (Bowyer-Watson)
+    // Sizing function
+    let get_radius = |p: Point2<f64>| -> f64 {
+        let dist = geo.sdf(&p).abs();
+        // Growth: r = min_size + (growth_rate - 1) * dist
+        // But we want to cap at max_size
+        let r = min_cell_size + (growth_rate - 1.0).max(0.0) * dist;
+        r.min(max_cell_size)
+    };
+
+    let k = 30; // Max candidates per point
+
+    while !active_list.is_empty() {
+        // Pick a random point from active list
+        let active_idx = rng.gen_range(0..active_list.len());
+        let p_idx = active_list[active_idx];
+        let p = points[p_idx];
+        let r = get_radius(p);
+
+        let mut found = false;
+        for _ in 0..k {
+            // Random point in annulus [r, 2r]
+            let angle = rng.gen::<f64>() * 2.0 * std::f64::consts::PI;
+            let dist = rng.gen_range(r..2.0 * r);
+            let new_p = Point2::new(p.x + dist * angle.cos(), p.y + dist * angle.sin());
+
+            // Check bounds
+            if new_p.x < 0.0 || new_p.x > domain_size.x || new_p.y < 0.0 || new_p.y > domain_size.y
+            {
+                continue;
+            }
+
+            // Check geometry
+            if !geo.is_inside(&new_p) {
+                continue;
+            }
+
+            // Check neighbors
+            let r_new = get_radius(new_p);
+
+            let gx = (new_p.x / cell_size).floor() as isize;
+            let gy = (new_p.y / cell_size).floor() as isize;
+
+            let search_cells = (max_cell_size / cell_size).ceil() as isize;
+
+            let mut conflict = false;
+
+            'neighbor_check: for dy in -search_cells..=search_cells {
+                for dx in -search_cells..=search_cells {
+                    let nx = gx + dx;
+                    let ny = gy + dy;
+
+                    if nx >= 0 && nx < grid_w as isize && ny >= 0 && ny < grid_h as isize {
+                        if let Some(n_idx) = grid[(ny as usize) * grid_w + (nx as usize)] {
+                            let neighbor = points[n_idx];
+                            let d2 = (neighbor - new_p).norm_squared();
+
+                            // Check distance against radius of the NEW point (conservative)
+                            // or max(r_new, r_neighbor)?
+                            // Standard Bridson uses r (of the active point).
+                            // Variable radius usually uses r_new.
+                            let required_dist = r_new;
+
+                            if d2 < required_dist * required_dist {
+                                conflict = true;
+                                break 'neighbor_check;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !conflict {
+                // Add point
+                let idx = points.len();
+                points.push(new_p);
+                active_list.push(idx);
+
+                let gx = (new_p.x / cell_size).floor() as usize;
+                let gy = (new_p.y / cell_size).floor() as usize;
+
+                if gx < grid_w && gy < grid_h {
+                    grid[gy * grid_w + gx] = Some(idx);
+                }
+
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            active_list.swap_remove(active_idx);
+        }
+    }
+
+    // Return only the new points (exclude initial boundary points)
+    // boundary_points.len() is the count of initial points.
+    points.into_iter().skip(boundary_points.len()).collect()
+}
+
+fn smooth_generators(
+    points: &[Point2<f64>],
+    triangles: &[Triangle],
+    fixed_nodes: &[bool],
+    geo: &(impl Geometry + Sync),
+) -> (Vec<Point2<f64>>, f64) {
+    let n = points.len();
+    let mut new_points = points.to_vec();
+    let mut adj = vec![Vec::new(); n];
+
+    for t in triangles {
+        adj[t.v1].push(t.v2);
+        adj[t.v1].push(t.v3);
+        adj[t.v2].push(t.v1);
+        adj[t.v2].push(t.v3);
+        adj[t.v3].push(t.v1);
+        adj[t.v3].push(t.v2);
+    }
+
+    let mut max_disp = 0.0;
+
+    for i in 0..n {
+        if fixed_nodes[i] {
+            continue;
+        }
+
+        let neighbors = &adj[i];
+        if neighbors.is_empty() {
+            continue;
+        }
+
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        for &neigh in neighbors {
+            sum_x += points[neigh].x;
+            sum_y += points[neigh].y;
+        }
+        let avg_x = sum_x / neighbors.len() as f64;
+        let avg_y = sum_y / neighbors.len() as f64;
+
+        // Relaxation factor
+        let alpha = 0.8;
+        let p_new = Point2::new(
+            points[i].x + (avg_x - points[i].x) * alpha,
+            points[i].y + (avg_y - points[i].y) * alpha,
+        );
+
+        if geo.is_inside(&p_new) {
+            let disp = (p_new - points[i]).norm();
+            if disp > max_disp {
+                max_disp = disp;
+            }
+            new_points[i] = p_new;
+        }
+    }
+
+    (new_points, max_disp)
+}
+
+fn compute_triangulation(
+    points: &[Point2<f64>],
+    domain_size: Vector2<f64>,
+    fixed_nodes: &[bool],
+    geo: &(impl Geometry + Sync),
+) -> Vec<Triangle> {
     let mut triangles: Vec<Triangle> = Vec::new();
 
     // Super-triangle
-    // Use non-integer coordinates to avoid co-circularity with grid points
     let margin = 1.2345;
     let p1 = Point2::new(-margin, -margin);
     let p2 = Point2::new(2.0 * domain_size.x + margin, -margin);
     let p3 = Point2::new(-margin, 2.0 * domain_size.y + margin);
 
-    // Add super-triangle vertices to points list (temporarily)
+    // We work with a temporary list of points that includes the super-triangle
     let n_points = points.len();
-    points.push(p1);
-    points.push(p2);
-    points.push(p3);
+    let mut working_points = points.to_vec();
+    working_points.push(p1);
+    working_points.push(p2);
+    working_points.push(p3);
 
     triangles.push(Triangle::new(
         n_points,
@@ -173,7 +384,7 @@ pub fn triangulate(
         p3,
     ));
 
-    for (i, &p) in points.iter().enumerate().take(n_points) {
+    for (i, &p) in points.iter().enumerate() {
         let mut bad_triangles = Vec::new();
         for (t_idx, t) in triangles.iter().enumerate() {
             if t.in_circumcircle(p) {
@@ -214,9 +425,7 @@ pub fn triangulate(
         }
 
         // Remove bad triangles
-        // Sort indices descending to remove efficiently
         bad_triangles.sort_unstable_by(|a, b| b.cmp(a));
-
         for idx in bad_triangles {
             triangles.swap_remove(idx);
         }
@@ -227,27 +436,21 @@ pub fn triangulate(
                 edge.v1,
                 edge.v2,
                 i,
-                points[edge.v1],
-                points[edge.v2],
-                points[i],
+                working_points[edge.v1],
+                working_points[edge.v2],
+                working_points[i],
             ));
         }
     }
 
     // Remove triangles connected to super-triangle
     triangles.retain(|t| t.v1 < n_points && t.v2 < n_points && t.v3 < n_points);
-    // Remove super-triangle vertices
-    points.truncate(n_points);
 
-    // Filter triangles that are outside the geometry (e.g. inside obstacles)
+    // Filter triangles that are outside the geometry
     triangles.retain(|t| {
-        // If the triangle has any internal vertex, keep it.
-        // Internal vertices are generated inside the fluid, so triangles connecting them are valid.
-        // Only triangles formed purely by boundary vertices (chords) need to be checked via centroid.
         if !fixed_nodes[t.v1] || !fixed_nodes[t.v2] || !fixed_nodes[t.v3] {
             return true;
         }
-
         let p1 = points[t.v1];
         let p2 = points[t.v2];
         let p3 = points[t.v3];
@@ -255,7 +458,7 @@ pub fn triangulate(
         geo.is_inside(&centroid)
     });
 
-    (points, triangles, fixed_nodes)
+    triangles
 }
 
 pub fn generate_delaunay_mesh(

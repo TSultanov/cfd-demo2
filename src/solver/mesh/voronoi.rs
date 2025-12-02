@@ -336,5 +336,312 @@ pub fn generate_voronoi_mesh(
     // Recalculate geometry to ensure areas and centroids are correct
     mesh.recalculate_geometry();
 
+    // 4. Fix Concave Cells
+    // Some boundary cells might be concave due to the way we handle boundary edges.
+    // We split them into triangles to ensure convexity.
+    // mesh = fix_concave_cells(mesh, &points);
+
     mesh
+}
+
+struct SplitInfo {
+    is_split: bool,
+    new_cell_indices: Vec<usize>,
+    center_vert_idx: usize,
+}
+
+fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
+    let mut new_mesh = Mesh::new();
+    new_mesh.cell_face_offsets.push(0);
+    new_mesh.cell_vertex_offsets.push(0);
+
+    // 1. Copy Vertices
+    new_mesh.vx = old_mesh.vx.clone();
+    new_mesh.vy = old_mesh.vy.clone();
+    new_mesh.v_fixed = old_mesh.v_fixed.clone();
+
+    let mut cell_info = Vec::with_capacity(old_mesh.num_cells());
+
+    // 2. Process Cells
+    for i in 0..old_mesh.num_cells() {
+        if is_concave(&old_mesh, i) {
+            // Split
+            let gen = generators[i];
+            let center_idx = new_mesh.vx.len();
+            new_mesh.vx.push(gen.x);
+            new_mesh.vy.push(gen.y);
+            // Internal node for splitting, treat as not fixed
+            new_mesh.v_fixed.push(false);
+
+            let start = old_mesh.cell_vertex_offsets[i];
+            let end = old_mesh.cell_vertex_offsets[i + 1];
+            let n = end - start;
+
+            let mut sub_cells = vec![0; n]; // Initialize with dummy values, will be filled
+            let mut k_iter = 0; // This iterator tracks the original edges (0 to n-1)
+            while k_iter < n {
+                let v1 = old_mesh.cell_vertices[start + k_iter];
+                let v2 = old_mesh.cell_vertices[start + (k_iter + 1) % n];
+
+                // Potential Quad?
+                // Try to merge with next triangle (Center, v2, v3)
+                // Quad would be (Center, v1, v2, v3) -> vertices: Center, v1, v2, v3
+                // Wait, if we merge (Center, v1, v2) and (Center, v2, v3)
+                // The shared edge is (Center, v2).
+                // The quad vertices are Center, v1, v2, v3.
+                // Is this correct?
+                // Triangle 1: C, v1, v2
+                // Triangle 2: C, v2, v3
+                // Merged: C, v1, v2, v3.
+                // We need to check if this polygon is convex.
+
+                let mut merged = false;
+                // Check if there's a next edge to potentially merge with
+                if k_iter + 1 < n {
+                    let v3 = old_mesh.cell_vertices[start + (k_iter + 2) % n];
+
+                    // Check convexity of Quad (Center, v1, v2, v3)
+                    let p_c = Point2::new(new_mesh.vx[center_idx], new_mesh.vy[center_idx]);
+                    let p_v1 = Point2::new(new_mesh.vx[v1], new_mesh.vy[v1]);
+                    let p_v2 = Point2::new(new_mesh.vx[v2], new_mesh.vy[v2]);
+                    let p_v3 = Point2::new(new_mesh.vx[v3], new_mesh.vy[v3]);
+
+                    // Vertices must be in order for is_poly_convex
+                    let quad_verts = vec![p_c, p_v1, p_v2, p_v3];
+                    if is_poly_convex(&quad_verts) {
+                        // Create Quad
+                        let new_cell_idx = new_mesh.num_cells();
+                        new_mesh.cell_cx.push(0.0);
+                        new_mesh.cell_cy.push(0.0);
+                        new_mesh.cell_vol.push(0.0);
+
+                        new_mesh.cell_vertices.push(center_idx);
+                        new_mesh.cell_vertices.push(v1);
+                        new_mesh.cell_vertices.push(v2);
+                        new_mesh.cell_vertices.push(v3);
+                        new_mesh
+                            .cell_vertex_offsets
+                            .push(new_mesh.cell_vertices.len());
+
+                        // Assign this new cell to both original edges k_iter and k_iter+1
+                        sub_cells[k_iter] = new_cell_idx;
+                        sub_cells[k_iter + 1] = new_cell_idx;
+
+                        k_iter += 2; // Advance iterator by 2 as two edges were consumed
+                        merged = true;
+                    }
+                }
+
+                if !merged {
+                    // Create Triangle
+                    let new_cell_idx = new_mesh.num_cells();
+                    new_mesh.cell_cx.push(0.0);
+                    new_mesh.cell_cy.push(0.0);
+                    new_mesh.cell_vol.push(0.0);
+
+                    new_mesh.cell_vertices.push(center_idx);
+                    new_mesh.cell_vertices.push(v1);
+                    new_mesh.cell_vertices.push(v2);
+                    new_mesh
+                        .cell_vertex_offsets
+                        .push(new_mesh.cell_vertices.len());
+
+                    // Assign this new cell to the original edge k_iter
+                    sub_cells[k_iter] = new_cell_idx;
+                    k_iter += 1; // Advance iterator by 1
+                }
+            }
+
+            cell_info.push(SplitInfo {
+                is_split: true,
+                new_cell_indices: sub_cells,
+                center_vert_idx: center_idx,
+            });
+        } else {
+            // Keep
+            let new_cell_idx = new_mesh.num_cells();
+            new_mesh.cell_cx.push(old_mesh.cell_cx[i]);
+            new_mesh.cell_cy.push(old_mesh.cell_cy[i]);
+            new_mesh.cell_vol.push(old_mesh.cell_vol[i]);
+
+            let start = old_mesh.cell_vertex_offsets[i];
+            let end = old_mesh.cell_vertex_offsets[i + 1];
+            for k in start..end {
+                new_mesh.cell_vertices.push(old_mesh.cell_vertices[k]);
+            }
+            new_mesh
+                .cell_vertex_offsets
+                .push(new_mesh.cell_vertices.len());
+
+            cell_info.push(SplitInfo {
+                is_split: false,
+                new_cell_indices: vec![new_cell_idx],
+                center_vert_idx: 0,
+            });
+        }
+    }
+
+    // 3. Process Faces
+    let mut new_cell_faces_temp = vec![Vec::new(); new_mesh.num_cells()];
+
+    // Helper to find sub-cell
+    let get_sub_cell = |old_c_idx: usize, v1: usize, v2: usize| -> usize {
+        let info = &cell_info[old_c_idx];
+        if !info.is_split {
+            return info.new_cell_indices[0];
+        }
+        let start = old_mesh.cell_vertex_offsets[old_c_idx];
+        let end = old_mesh.cell_vertex_offsets[old_c_idx + 1];
+        let n = end - start;
+        for k in 0..n {
+            let va = old_mesh.cell_vertices[start + k];
+            let vb = old_mesh.cell_vertices[start + (k + 1) % n];
+            if (va == v1 && vb == v2) || (va == v2 && vb == v1) {
+                return info.new_cell_indices[k];
+            }
+        }
+        panic!("Edge not found in split cell");
+    };
+
+    // A. Old Faces
+    for f_idx in 0..old_mesh.num_faces() {
+        let v1 = old_mesh.face_v1[f_idx];
+        let v2 = old_mesh.face_v2[f_idx];
+        let old_owner = old_mesh.face_owner[f_idx];
+        let old_neighbor = old_mesh.face_neighbor[f_idx];
+
+        let new_owner = get_sub_cell(old_owner, v1, v2);
+        let new_neighbor = if let Some(n_idx) = old_neighbor {
+            Some(get_sub_cell(n_idx, v1, v2))
+        } else {
+            None
+        };
+
+        let new_f_idx = new_mesh.num_faces();
+        new_mesh.face_v1.push(v1);
+        new_mesh.face_v2.push(v2);
+        new_mesh.face_cx.push(old_mesh.face_cx[f_idx]);
+        new_mesh.face_cy.push(old_mesh.face_cy[f_idx]);
+        new_mesh.face_nx.push(old_mesh.face_nx[f_idx]);
+        new_mesh.face_ny.push(old_mesh.face_ny[f_idx]);
+        new_mesh.face_area.push(old_mesh.face_area[f_idx]);
+        new_mesh.face_boundary.push(old_mesh.face_boundary[f_idx]);
+        new_mesh.face_owner.push(new_owner);
+        new_mesh.face_neighbor.push(new_neighbor);
+
+        new_cell_faces_temp[new_owner].push(new_f_idx);
+        if let Some(n) = new_neighbor {
+            new_cell_faces_temp[n].push(new_f_idx);
+        }
+    }
+
+    // B. New Internal Faces
+    for i in 0..old_mesh.num_cells() {
+        if cell_info[i].is_split {
+            let info = &cell_info[i];
+            let center = info.center_vert_idx;
+            let start = old_mesh.cell_vertex_offsets[i];
+            let end = old_mesh.cell_vertex_offsets[i + 1];
+            let n = end - start;
+
+            for k in 0..n {
+                let v_curr = old_mesh.cell_vertices[start + k];
+
+                // Face between sub_cell[k] and sub_cell[prev]
+                // Shared edge is (Center, v_curr)
+                let idx_k = k;
+                let idx_prev = (k + n - 1) % n;
+
+                let cell_k = info.new_cell_indices[idx_k];
+                let cell_prev = info.new_cell_indices[idx_prev];
+
+                let new_f_idx = new_mesh.num_faces();
+                new_mesh.face_v1.push(center);
+                new_mesh.face_v2.push(v_curr);
+                // Placeholders
+                new_mesh.face_cx.push(0.0);
+                new_mesh.face_cy.push(0.0);
+                new_mesh.face_nx.push(0.0);
+                new_mesh.face_ny.push(0.0);
+                new_mesh.face_area.push(0.0);
+                new_mesh.face_boundary.push(None);
+
+                new_mesh.face_owner.push(cell_k);
+                new_mesh.face_neighbor.push(Some(cell_prev));
+
+                new_cell_faces_temp[cell_k].push(new_f_idx);
+                new_cell_faces_temp[cell_prev].push(new_f_idx);
+            }
+        }
+    }
+
+    // 4. Flatten cell_faces
+    for faces in new_cell_faces_temp {
+        new_mesh.cell_faces.extend(faces);
+        new_mesh.cell_face_offsets.push(new_mesh.cell_faces.len());
+    }
+
+    new_mesh.recalculate_geometry();
+    new_mesh
+}
+
+fn is_concave(mesh: &Mesh, cell_idx: usize) -> bool {
+    let start = mesh.cell_vertex_offsets[cell_idx];
+    let end = mesh.cell_vertex_offsets[cell_idx + 1];
+    let n = end - start;
+    if n < 4 {
+        return false;
+    }
+
+    let mut target_sign = 0.0;
+
+    for i in 0..n {
+        let idx_prev = mesh.cell_vertices[start + (i + n - 1) % n];
+        let idx_curr = mesh.cell_vertices[start + i];
+        let idx_next = mesh.cell_vertices[start + (i + 1) % n];
+
+        let p_prev = Point2::new(mesh.vx[idx_prev], mesh.vy[idx_prev]);
+        let p_curr = Point2::new(mesh.vx[idx_curr], mesh.vy[idx_curr]);
+        let p_next = Point2::new(mesh.vx[idx_next], mesh.vy[idx_next]);
+
+        let v1 = p_curr - p_prev;
+        let v2 = p_next - p_curr;
+
+        let cross = v1.x * v2.y - v1.y * v2.x;
+
+        if cross.abs() > 1e-12 {
+            if target_sign == 0.0 {
+                target_sign = cross.signum();
+            } else if cross.signum() != target_sign {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_poly_convex(verts: &[Point2<f64>]) -> bool {
+    let n = verts.len();
+    if n < 3 {
+        return true;
+    }
+    let mut target_sign = 0.0;
+    for i in 0..n {
+        let p_prev = verts[(i + n - 1) % n];
+        let p_curr = verts[i];
+        let p_next = verts[(i + 1) % n];
+
+        let v1 = p_curr - p_prev;
+        let v2 = p_next - p_curr;
+        let cross = v1.x * v2.y - v1.y * v2.x;
+
+        if cross.abs() > 1e-12 {
+            if target_sign == 0.0 {
+                target_sign = cross.signum();
+            } else if cross.signum() != target_sign {
+                return false;
+            }
+        }
+    }
+    true
 }

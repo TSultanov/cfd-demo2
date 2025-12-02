@@ -60,7 +60,6 @@ mod tests {
                             }
                         }
                     }
-                    _ => {}
                 }
             }
         }
@@ -262,5 +261,130 @@ mod tests {
             "Cell Types - Triangles: {}, Quads: {}, Polygons: {}",
             tri_count, quad_count, poly_count
         );
+    }
+
+    #[test]
+    fn test_growth_rate_effect() {
+        let geo = ChannelWithObstacle {
+            length: 1.0,
+            height: 1.0,
+            obstacle_center: Point2::new(0.5, 0.5),
+            obstacle_radius: 0.1,
+        };
+        let domain_size = Vector2::new(1.0, 1.0);
+        let min_size = 0.01;
+        let max_size = 0.1;
+
+        // Case 1: Low growth rate (should have more cells)
+        let mesh_low = generate_voronoi_mesh(&geo, min_size, max_size, 1.1, domain_size);
+        println!("Growth 1.1 -> Cells: {}", mesh_low.num_cells());
+
+        // Case 2: High growth rate (should have fewer cells)
+        let mesh_high = generate_voronoi_mesh(&geo, min_size, max_size, 1.5, domain_size);
+        println!("Growth 1.5 -> Cells: {}", mesh_high.num_cells());
+
+        assert!(
+            mesh_low.num_cells() > mesh_high.num_cells(),
+            "Lower growth rate should produce more cells"
+        );
+    }
+
+    #[test]
+    fn test_mesh_smoothness() {
+        let geo = ChannelWithObstacle {
+            length: 1.0,
+            height: 1.0,
+            obstacle_center: Point2::new(0.5, 0.5),
+            obstacle_radius: 0.1,
+        };
+        let domain_size = Vector2::new(1.0, 1.0);
+
+        // Use a small growth rate to expect smoothness
+        let mesh = generate_voronoi_mesh(&geo, 0.02, 0.1, 1.1, domain_size);
+
+        let mut max_ratio = 0.0;
+        let mut bad_transitions = 0;
+
+        let mut min_vol = f64::MAX;
+        let mut max_vol = f64::MIN;
+
+        for i in 0..mesh.num_cells() {
+            let vol = mesh.cell_vol[i];
+            if vol < min_vol {
+                min_vol = vol;
+            }
+            if vol > max_vol {
+                max_vol = vol;
+            }
+
+            if vol <= 1e-12 {
+                println!("Cell {} has near-zero volume: {}", i, vol);
+                let start = mesh.cell_vertex_offsets[i];
+                let end = mesh.cell_vertex_offsets[i + 1];
+                print!("  Vertices: ");
+                for k in start..end {
+                    let v_idx = mesh.cell_vertices[k];
+                    print!("({}, {}) ", mesh.vx[v_idx], mesh.vy[v_idx]);
+                }
+                println!();
+            }
+        }
+        println!("Min Vol: {}, Max Vol: {}", min_vol, max_vol);
+
+        for i in 0..mesh.num_cells() {
+            let vol_i = mesh.cell_vol[i];
+            // Approximate characteristic length
+            let h_i = vol_i.sqrt();
+
+            let start = mesh.cell_face_offsets[i];
+            let end = mesh.cell_face_offsets[i + 1];
+
+            for f_idx in start..end {
+                let face_idx = mesh.cell_faces[f_idx];
+                if let Some(neighbor) = mesh.face_neighbor[face_idx] {
+                    // If neighbor is the cell itself (should not happen in valid mesh but check)
+                    if neighbor == i {
+                        continue;
+                    }
+
+                    // Check if neighbor is actually the other side
+                    let other = if mesh.face_owner[face_idx] == i {
+                        mesh.face_neighbor[face_idx].unwrap() // We checked it's Some
+                    } else {
+                        mesh.face_owner[face_idx]
+                    };
+
+                    let vol_j = mesh.cell_vol[other];
+                    let h_j = vol_j.sqrt();
+
+                    let ratio = if h_i > h_j { h_i / h_j } else { h_j / h_i };
+
+                    if ratio > max_ratio {
+                        max_ratio = ratio;
+                    }
+
+                    // We expect ratio to be small, e.g. < 1.5 or 2.0
+                    // With Poisson sampling and smoothing, it should be quite good.
+                    if ratio > 2.0 {
+                        bad_transitions += 1;
+                        if bad_transitions <= 10 {
+                            println!("Bad transition: Cell {} (vol={:.6}) <-> Cell {} (vol={:.6}), Ratio={:.2}, Face at ({:.2}, {:.2})", 
+                                i, vol_i, other, vol_j, ratio, mesh.face_cx[face_idx], mesh.face_cy[face_idx]);
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("Max adjacent cell size ratio: {:.2}", max_ratio);
+        println!("Bad transitions (> 2.0): {}", bad_transitions);
+
+        // Assert that we don't have extreme jumps
+        assert!(min_vol > 1e-9, "Found zero volume cells!");
+        assert!(
+            bad_transitions < mesh.num_cells() / 20, // 5% tolerance
+            "Too many bad transitions!"
+        );
+        assert!(max_ratio < 3.0, "Max ratio too high!"); // 3.0 is safe upper bound
     }
 }

@@ -75,7 +75,10 @@ pub fn refine_node(node: &mut QuadNode, geo: &impl Geometry, min_size: f64, grow
         // Max allowed size = min_size + growth_rate * distance
         // Distance is approx min(|d|)
         let dist = d00.abs().min(d10.abs()).min(d11.abs()).min(d01.abs());
-        let max_allowed = min_size + growth_rate * dist;
+
+        // Interpret growth_rate as a ratio (e.g. 1.2), so slope is rate - 1.0
+        let slope = (growth_rate - 1.0).max(0.0);
+        let max_allowed = min_size + slope * dist;
         if size > max_allowed {
             should_split = true;
         }

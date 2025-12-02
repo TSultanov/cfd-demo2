@@ -353,6 +353,29 @@ pub fn generate_voronoi_mesh(
             }
         }
 
+        // Ensure CCW (counter-clockwise) ordering for consistent polygon rendering.
+        // The traversal above can produce either CW or CCW ordering depending on
+        // which neighbor was arbitrarily chosen first. We fix this by calculating
+        // the signed area (using the shoelace formula) and reversing if negative.
+        // CCW polygons have positive signed area; CW polygons have negative.
+        if c_verts.len() >= 3 {
+            let mut signed_area = 0.0;
+            let n = c_verts.len();
+            for k in 0..n {
+                let v_idx0 = c_verts[k];
+                let v_idx1 = c_verts[(k + 1) % n];
+                let p0_x = voronoi_points[v_idx0].x;
+                let p0_y = voronoi_points[v_idx0].y;
+                let p1_x = voronoi_points[v_idx1].x;
+                let p1_y = voronoi_points[v_idx1].y;
+                signed_area += p0_x * p1_y - p1_x * p0_y;
+            }
+            // If signed area is negative, vertices are CW - reverse to make CCW
+            if signed_area < 0.0 {
+                c_verts.reverse();
+            }
+        }
+
         mesh.cell_vertices.extend(&c_verts);
         mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
     }

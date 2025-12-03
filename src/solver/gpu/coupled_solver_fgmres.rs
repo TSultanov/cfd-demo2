@@ -769,7 +769,9 @@ impl GpuSolver {
                 label: Some(label),
                 layout: Some(&pipeline_layout_gmres),
                 module: &shader_ops,
-                entry_point: entry,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
             })
         };
 
@@ -778,7 +780,9 @@ impl GpuSolver {
                 label: Some(label),
                 layout: Some(&pipeline_layout_schur),
                 module: &shader_schur,
-                entry_point: entry,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
             })
         };
 
@@ -787,7 +791,9 @@ impl GpuSolver {
                 label: Some(label),
                 layout: Some(&pipeline_layout_logic),
                 module: &shader_logic,
-                entry_point: entry,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
             })
         };
 
@@ -1097,7 +1103,7 @@ impl GpuSolver {
         
         // Poll until ready - use Poll mode with a spin loop for lower latency
         loop {
-            self.context.device.poll(wgpu::Maintain::Poll);
+            let _ = self.context.device.poll(wgpu::PollType::Poll);
             match rx.try_recv() {
                 Ok(Ok(())) => break,
                 Ok(Err(e)) => panic!("Buffer mapping failed: {:?}", e),
@@ -1635,7 +1641,7 @@ impl GpuSolver {
 
                 // Async convergence checking - use non-blocking poll
                 // Poll the device without waiting (allows GPU work to continue)
-                self.context.device.poll(wgpu::Maintain::Poll);
+                let _ = self.context.device.poll(wgpu::PollType::Poll);
                 
                 // Check convergence less frequently to reduce overhead
                 let check_interval = 10;

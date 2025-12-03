@@ -32,7 +32,9 @@ pub fn init_physics_pipelines(
         label: Some("Gradient Pipeline"),
         layout: Some(&pl_gradient),
         module: &shader_gradient,
-        entry_point: "main",
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pl_matrix = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -53,7 +55,9 @@ pub fn init_physics_pipelines(
             label: Some("Momentum Assembly Pipeline"),
             layout: Some(&pl_matrix),
             module: &shader_momentum,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let shader_pressure = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -68,7 +72,9 @@ pub fn init_physics_pipelines(
             label: Some("Pressure Assembly Pipeline"),
             layout: Some(&pl_matrix),
             module: &shader_pressure,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let shader_flux_rhie_chow = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -83,7 +89,9 @@ pub fn init_physics_pipelines(
             label: Some("Flux Rhie-Chow Pipeline"),
             layout: Some(&pl_gradient), // Uses mesh and fields (Group 0, 1)
             module: &shader_flux_rhie_chow,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pl_coupled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -104,7 +112,9 @@ pub fn init_physics_pipelines(
             label: Some("Coupled Assembly Pipeline"),
             layout: Some(&pl_coupled),
             module: &shader_coupled,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let shader_update_coupled = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -139,7 +149,9 @@ pub fn init_physics_pipelines(
             label: Some("Update From Coupled Pipeline"),
             layout: Some(&pl_update_coupled),
             module: &shader_update_coupled,
-            entry_point: "main",
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     PhysicsPipelines {

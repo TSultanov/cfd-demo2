@@ -852,7 +852,9 @@ fn init_coupled_resources(
             label: Some("Extract Diagonal Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "extract_diagonal",
+            entry_point: Some("extract_diagonal"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_precond_velocity =
@@ -860,7 +862,9 @@ fn init_coupled_resources(
             label: Some("Preconditioner Velocity Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "precond_velocity",
+            entry_point: Some("precond_velocity"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_build_schur_rhs =
@@ -868,7 +872,9 @@ fn init_coupled_resources(
             label: Some("Build Schur RHS Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "build_schur_rhs",
+            entry_point: Some("build_schur_rhs"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_finalize_precond =
@@ -876,21 +882,27 @@ fn init_coupled_resources(
             label: Some("Finalize Preconditioner Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "finalize_precond",
+            entry_point: Some("finalize_precond"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_spmv_phat_v = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("SpMV Phat V Pipeline"),
         layout: Some(&pl_precond),
         module: &shader_precond,
-        entry_point: "spmv_phat_v",
+        entry_point: Some("spmv_phat_v"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_spmv_shat_t = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("SpMV Shat T Pipeline"),
         layout: Some(&pl_precond),
         module: &shader_precond,
-        entry_point: "spmv_shat_t",
+        entry_point: Some("spmv_shat_t"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_bicgstab_precond_update_x_r =
@@ -898,7 +910,9 @@ fn init_coupled_resources(
             label: Some("BiCGStab Precond Update X R Pipeline"),
             layout: Some(&pl_precond),
             module: &shader_precond,
-            entry_point: "bicgstab_precond_update_x_r",
+            entry_point: Some("bicgstab_precond_update_x_r"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     // Create max-diff shader and pipelines for GPU convergence check
@@ -1013,7 +1027,9 @@ fn init_coupled_resources(
             label: Some("Max Diff U Partial Pipeline"),
             layout: Some(&pl_max_diff),
             module: &shader_max_diff,
-            entry_point: "max_abs_diff_vec2_partial",
+            entry_point: Some("max_abs_diff_vec2_partial"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_max_diff_p_partial =
@@ -1021,7 +1037,9 @@ fn init_coupled_resources(
             label: Some("Max Diff P Partial Pipeline"),
             layout: Some(&pl_max_diff),
             module: &shader_max_diff,
-            entry_point: "max_abs_diff_partial",
+            entry_point: Some("max_abs_diff_partial"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_max_diff_reduce =
@@ -1029,7 +1047,9 @@ fn init_coupled_resources(
             label: Some("Max Diff Reduce Pipeline"),
             layout: Some(&pl_max_diff),
             module: &shader_max_diff,
-            entry_point: "max_reduce_final",
+            entry_point: Some("max_reduce_final"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     CoupledSolverResources {

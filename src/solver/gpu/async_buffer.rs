@@ -147,7 +147,7 @@ impl AsyncScalarReader {
     /// Block until all pending reads complete (for cleanup or forced sync)
     pub fn flush(&mut self, device: &wgpu::Device) {
         while self.is_pending() {
-            device.poll(wgpu::Maintain::Poll);
+            let _ = device.poll(wgpu::PollType::Poll);
             self.poll();
         }
     }
@@ -245,7 +245,7 @@ impl AsyncStagingBuffer {
     /// Block until the result is ready
     pub fn wait_for_result(&mut self, device: &wgpu::Device) -> Option<Vec<u8>> {
         while self.is_pending {
-            device.poll(wgpu::Maintain::Poll);
+            let _ = device.poll(wgpu::PollType::Poll);
             if let Some(result) = self.try_get_result() {
                 return Some(result);
             }

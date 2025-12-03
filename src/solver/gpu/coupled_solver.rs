@@ -203,7 +203,7 @@ impl GpuSolver {
             // Debug: Check matrix and RHS after assembly on first iteration - DEBUG READS
             if DEBUG_READS_ENABLED && iter == 0 {
                 let sync_start = Instant::now();
-                self.context.device.poll(wgpu::Maintain::Wait);
+                let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
                 self.profiling_stats.record_location(
                     "coupled:debug_sync",
                     ProfileCategory::GpuSync,
@@ -456,7 +456,7 @@ impl GpuSolver {
         self.constants.time += self.constants.dt;
         self.update_constants();
 
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     fn solve_coupled_system(&mut self) -> LinearSolverStats {

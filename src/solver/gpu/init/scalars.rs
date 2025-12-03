@@ -104,7 +104,9 @@ pub fn init_scalars(
         label: Some("Init Scalars Pipeline"),
         layout: Some(&pl_scalars),
         module: &shader_scalars,
-        entry_point: "init_scalars",
+        entry_point: Some("init_scalars"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_init_cg_scalars =
@@ -112,7 +114,9 @@ pub fn init_scalars(
             label: Some("Init CG Scalars Pipeline"),
             layout: Some(&pl_scalars),
             module: &shader_scalars,
-            entry_point: "init_cg_scalars",
+            entry_point: Some("init_cg_scalars"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_reduce_rho_new_r_r =
@@ -120,14 +124,18 @@ pub fn init_scalars(
             label: Some("Reduce Rho New R R Pipeline"),
             layout: Some(&pl_scalars),
             module: &shader_scalars,
-            entry_point: "reduce_rho_new_r_r",
+            entry_point: Some("reduce_rho_new_r_r"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_reduce_r0_v = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Reduce R0 V Pipeline"),
         layout: Some(&pl_scalars),
         module: &shader_scalars,
-        entry_point: "reduce_r0_v",
+        entry_point: Some("reduce_r0_v"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_reduce_t_s_t_t =
@@ -135,7 +143,9 @@ pub fn init_scalars(
             label: Some("Reduce T S T T Pipeline"),
             layout: Some(&pl_scalars),
             module: &shader_scalars,
-            entry_point: "reduce_t_s_t_t",
+            entry_point: Some("reduce_t_s_t_t"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_update_cg_alpha =
@@ -143,7 +153,9 @@ pub fn init_scalars(
             label: Some("Update CG Alpha Pipeline"),
             layout: Some(&pl_scalars),
             module: &shader_scalars,
-            entry_point: "update_cg_alpha",
+            entry_point: Some("update_cg_alpha"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_update_cg_beta =
@@ -151,7 +163,9 @@ pub fn init_scalars(
             label: Some("Update CG Beta Pipeline"),
             layout: Some(&pl_scalars),
             module: &shader_scalars,
-            entry_point: "update_cg_beta",
+            entry_point: Some("update_cg_beta"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_update_rho_old =
@@ -159,7 +173,9 @@ pub fn init_scalars(
             label: Some("Update Rho Old Pipeline"),
             layout: Some(&pl_scalars),
             module: &shader_scalars,
-            entry_point: "update_rho_old",
+            entry_point: Some("update_rho_old"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     ScalarResources {

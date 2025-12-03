@@ -118,7 +118,7 @@ impl GpuSolver {
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv().unwrap().unwrap();
 
         let data = slice.get_mapped_range();
@@ -144,7 +144,7 @@ impl GpuSolver {
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv().unwrap().unwrap();
 
         let data = slice.get_mapped_range();

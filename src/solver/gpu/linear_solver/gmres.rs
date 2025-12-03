@@ -177,7 +177,7 @@ impl GpuSolver {
         let buffer_slice = staging.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
         receiver.recv().unwrap().unwrap();
 
         let data = buffer_slice.get_mapped_range();

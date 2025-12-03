@@ -724,14 +724,18 @@ pub fn init_pipelines(
         label: Some("SPMV P->V Pipeline"),
         layout: Some(&pl_linear),
         module: &shader_linear,
-        entry_point: "spmv_p_v",
+        entry_point: Some("spmv_p_v"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_spmv_s_t = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("SPMV S->T Pipeline"),
         layout: Some(&pl_linear),
         module: &shader_linear,
-        entry_point: "spmv_s_t",
+        entry_point: Some("spmv_s_t"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let shader_dot = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -745,7 +749,9 @@ pub fn init_pipelines(
         label: Some("Dot Product Pipeline"),
         layout: Some(&pl_dot),
         module: &shader_dot,
-        entry_point: "main",
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let shader_dot_pair = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -759,7 +765,9 @@ pub fn init_pipelines(
         label: Some("Dot Pair Pipeline"),
         layout: Some(&pl_dot_pair),
         module: &shader_dot_pair,
-        entry_point: "main",
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_bicgstab_update_x_r =
@@ -767,7 +775,9 @@ pub fn init_pipelines(
             label: Some("BiCGStab Update X and R Pipeline"),
             layout: Some(&pl_linear),
             module: &shader_linear,
-            entry_point: "bicgstab_update_x_r",
+            entry_point: Some("bicgstab_update_x_r"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_bicgstab_update_p =
@@ -775,7 +785,9 @@ pub fn init_pipelines(
             label: Some("BiCGStab Update P Pipeline"),
             layout: Some(&pl_linear),
             module: &shader_linear,
-            entry_point: "bicgstab_update_p",
+            entry_point: Some("bicgstab_update_p"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_bicgstab_update_s =
@@ -783,21 +795,27 @@ pub fn init_pipelines(
             label: Some("BiCGStab Update S Pipeline"),
             layout: Some(&pl_linear),
             module: &shader_linear,
-            entry_point: "bicgstab_update_s",
+            entry_point: Some("bicgstab_update_s"),
+            compilation_options: Default::default(),
+            cache: None,
         });
 
     let pipeline_cg_update_x_r = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("CG Update X R Pipeline"),
         layout: Some(&pl_linear),
         module: &shader_linear,
-        entry_point: "cg_update_x_r",
+        entry_point: Some("cg_update_x_r"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     let pipeline_cg_update_p = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("CG Update P Pipeline"),
         layout: Some(&pl_linear),
         module: &shader_linear,
-        entry_point: "cg_update_p",
+        entry_point: Some("cg_update_p"),
+        compilation_options: Default::default(),
+        cache: None,
     });
 
     PipelineResources {

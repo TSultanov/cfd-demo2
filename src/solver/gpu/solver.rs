@@ -240,7 +240,7 @@ impl GpuSolver {
         
         // 4. Poll/wait for GPU - THIS IS THE BLOCKING CALL
         let t3 = Instant::now();
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
         self.profiling_stats.record_location(
             "read_buffer:device_poll_wait",
             ProfileCategory::GpuSync,
@@ -345,7 +345,7 @@ impl GpuSolver {
             }
             self.context.queue.submit(Some(encoder.finish()));
         }
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     pub fn enable_profiling(&self, enable: bool) {
@@ -419,7 +419,7 @@ impl GpuSolver {
             cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     pub fn initialize_history(&self) {
@@ -442,6 +442,6 @@ impl GpuSolver {
             (self.num_cells as u64) * 8,
         );
         self.context.queue.submit(Some(encoder.finish()));
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
     }
 }

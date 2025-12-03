@@ -16,6 +16,7 @@
 // - All vectors remain on GPU
 // - Only scalar values (dot products, norms) are read to CPU
 // - Preconditioner sweep
+use super::async_buffer::AsyncScalarReader;
 use super::profiling::ProfileCategory;
 use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
@@ -109,6 +110,12 @@ pub struct FgmresResources {
     pub pipeline_solve_triangular: wgpu::ComputePipeline,
     pub pipeline_copy_scalar: wgpu::ComputePipeline,
     pub pipeline_finish_norm: wgpu::ComputePipeline,
+    
+    /// Async scalar reader for non-blocking convergence checks (interior mutability)
+    pub async_scalar_reader: std::cell::RefCell<AsyncScalarReader>,
+    
+    /// Reusable staging buffer for scalar reads (avoids creating new buffers)
+    pub b_staging_scalar: wgpu::Buffer,
 }
 
 #[repr(C)]
@@ -864,6 +871,13 @@ impl GpuSolver {
             pipeline_solve_triangular,
             pipeline_copy_scalar,
             pipeline_finish_norm,
+            async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device)),
+            b_staging_scalar: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("FGMRES Staging Scalar"),
+                size: 4,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
         }
     }
 
@@ -1052,9 +1066,9 @@ impl GpuSolver {
             .queue
             .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
 
-        // Step 3: Read single scalar from scalars[0] (norm^2), then sqrt on CPU
+        // Step 3: Read single scalar using reusable staging buffer (faster than creating new one)
         let read_start = Instant::now();
-        let norm_sq_vec = pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
+        let norm_sq = self.read_scalar_fast(fgmres);
         self.profiling_stats.record_location(
             "gpu_norm:read_scalar",
             ProfileCategory::GpuRead,
@@ -1062,7 +1076,47 @@ impl GpuSolver {
             4, // Just 1 float
         );
 
-        norm_sq_vec[0].sqrt()
+        norm_sq.sqrt()
+    }
+    
+    /// Fast scalar read using reusable staging buffer
+    fn read_scalar_fast(&self, fgmres: &FgmresResources) -> f32 {
+        // Copy to staging buffer
+        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Scalar Copy"),
+        });
+        encoder.copy_buffer_to_buffer(&fgmres.b_scalars, 0, &fgmres.b_staging_scalar, 0, 4);
+        self.context.queue.submit(Some(encoder.finish()));
+        
+        // Map staging buffer
+        let slice = fgmres.b_staging_scalar.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        
+        // Poll until ready - use Poll mode with a spin loop for lower latency
+        loop {
+            self.context.device.poll(wgpu::Maintain::Poll);
+            match rx.try_recv() {
+                Ok(Ok(())) => break,
+                Ok(Err(e)) => panic!("Buffer mapping failed: {:?}", e),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    std::hint::spin_loop();
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("Channel disconnected");
+                }
+            }
+        }
+        
+        // Read the value
+        let data = slice.get_mapped_range();
+        let value: f32 = *bytemuck::from_bytes(&data[0..4]);
+        drop(data);
+        fgmres.b_staging_scalar.unmap();
+        
+        value
     }
 
     fn compute_residual_into(
@@ -1579,37 +1633,53 @@ impl GpuSolver {
                     "FGMRES Update Hessenberg",
                 );
 
-                // Check convergence less frequently to reduce GPU->CPU reads
-                // Read every 5 iterations, or on last iteration of restart cycle
-                let check_interval = 5;
+                // Async convergence checking - use non-blocking poll
+                // Poll the device without waiting (allows GPU work to continue)
+                self.context.device.poll(wgpu::Maintain::Poll);
+                
+                // Check convergence less frequently to reduce overhead
+                let check_interval = 10;
                 let is_last_in_restart = j == max_restart - 1;
                 let should_check = (j + 1) % check_interval == 0 || is_last_in_restart;
 
                 if should_check {
-                    // Check convergence (read back scalars[0])
+                    // Use RefCell to get mutable access to async reader
+                    let mut async_reader = fgmres.async_scalar_reader.borrow_mut();
+                    
+                    // Poll for completed reads from previous iterations
+                    async_reader.poll();
+                    
+                    // Start async read for this iteration's residual
                     let read_start = Instant::now();
-                    let resid_est_vec =
-                        pollster::block_on(self.read_buffer_f32(&fgmres.b_scalars, 1));
-                    self.profiling_stats.record_location(
-                        "fgmres:convergence_check_read",
-                        ProfileCategory::GpuRead,
-                        read_start.elapsed(),
-                        4, // 1 float
+                    async_reader.start_read(
+                        &self.context.device,
+                        &self.context.queue,
+                        &fgmres.b_scalars,
+                        0,
                     );
-                    let resid_est = resid_est_vec[0];
+                    self.profiling_stats.record_location(
+                        "fgmres:convergence_check_start_async",
+                        ProfileCategory::Other,
+                        read_start.elapsed(),
+                        0,
+                    );
+                    
+                    // Check the result from PREVIOUS async read (if available)
+                    // This allows GPU work to continue while we wait
+                    if let Some(resid_est) = async_reader.get_last_value() {
+                        if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
+                            println!(
+                                "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
+                                total_iters,
+                                resid_est,
+                                tol * rhs_norm
+                            );
+                        }
 
-                    if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
-                        println!(
-                            "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
-                            total_iters,
-                            resid_est,
-                            tol * rhs_norm
-                        );
-                    }
-
-                    if resid_est < tol * rhs_norm {
-                        converged = true;
-                        break;
+                        if resid_est < tol * rhs_norm {
+                            converged = true;
+                            break;
+                        }
                     }
                 }
             }

@@ -31,7 +31,7 @@ fn test_gpu_transfer_profile() {
     };
 
     // Use a medium-sized mesh to get meaningful timings
-    let cell_size = 0.025; // ~5600 cells
+    let cell_size = 0.005;
     let mut mesh = generate_cut_cell_mesh(&geo, cell_size, cell_size, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 

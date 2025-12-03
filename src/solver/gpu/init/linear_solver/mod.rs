@@ -3,6 +3,7 @@ pub mod pipelines;
 pub mod state;
 
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
+use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
 
@@ -1218,5 +1219,6 @@ fn init_coupled_resources(
         pipeline_spmv_phat_v,
         pipeline_spmv_shat_t,
         pipeline_bicgstab_precond_update_x_r,
+        async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device, 8)),
     }
 }

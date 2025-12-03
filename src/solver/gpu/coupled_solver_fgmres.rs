@@ -937,7 +937,7 @@ impl GpuSolver {
             pipeline_solve_triangular,
             pipeline_copy_scalar,
             pipeline_finish_norm,
-            async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device)),
+            async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device, 4)),
             b_staging_scalar: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("FGMRES Staging Scalar"),
                 size: 4,

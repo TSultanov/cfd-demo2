@@ -58,6 +58,11 @@ impl GpuSolver {
             return;
         }
 
+        // Reset async reader to clear old values
+        if let Some(res) = self.coupled_resources.as_ref() {
+            res.async_scalar_reader.borrow_mut().reset();
+        }
+
         for iter in 0..max_coupled_iters {
             self.profiling_stats.increment_iteration();
             println!("Coupled Iteration: {}", iter + 1);
@@ -399,51 +404,64 @@ impl GpuSolver {
                 );
             }
 
-            // Check convergence using GPU-computed max-diff
+            // Check convergence using GPU-computed max-diff (Async)
             if iter > 0 {
-                let (max_diff_u, max_diff_p) = self.compute_max_diff_gpu();
+                // Start async computation and read for CURRENT iteration
+                self.start_compute_max_diff_gpu();
 
-                // Store outer loop stats
-                *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
-                *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
-                *self.outer_iterations.lock().unwrap() = iter + 1;
+                // Check if PREVIOUS iteration's result is ready
+                if let Some(res) = self.coupled_resources.as_ref() {
+                    let mut reader = res.async_scalar_reader.borrow_mut();
+                    reader.poll(); // Poll for completion of previous reads
+                    
+                    // Check if we have a result available
+                    if let Some(results) = reader.get_last_value_vec(2) {
+                        let max_diff_u = results[0] as f64;
+                        let max_diff_p = results[1] as f64;
 
-                println!(
-                    "Coupled Residuals - U: {:.2e}, P: {:.2e}",
-                    max_diff_u, max_diff_p
-                );
+                        // Store outer loop stats
+                        *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;
+                        *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
+                        *self.outer_iterations.lock().unwrap() = iter + 1;
 
-                // Converged if both U and P are below tolerance
-                if max_diff_u < convergence_tol_u && max_diff_p < convergence_tol_p {
-                    println!("Coupled Solver Converged in {} iterations", iter + 1);
-                    break;
+                        println!(
+                            "Coupled Residuals - U: {:.2e}, P: {:.2e}",
+                            max_diff_u, max_diff_p
+                        );
+
+                        // Converged if both U and P are below tolerance
+                        if max_diff_u < convergence_tol_u && max_diff_p < convergence_tol_p {
+                            println!("Coupled Solver Converged in {} iterations", iter + 1);
+                            break;
+                        }
+
+                        // Stagnation check
+                        let stagnation_factor = 1e-2;
+                        let rel_u = if prev_residual_u.is_finite() && prev_residual_u.abs() > 1e-14 {
+                            ((max_diff_u - prev_residual_u) / prev_residual_u).abs()
+                        } else {
+                            f64::INFINITY
+                        };
+                        let rel_p = if prev_residual_p.is_finite() && prev_residual_p.abs() > 1e-14 {
+                            ((max_diff_p - prev_residual_p) / prev_residual_p).abs()
+                        } else {
+                            f64::INFINITY
+                        };
+
+                        if rel_u < stagnation_factor && rel_p < stagnation_factor && iter > 2 {
+                            println!(
+                                "Coupled solver stagnated at iter {}: U={:.2e}, P={:.2e}",
+                                iter + 1,
+                                max_diff_u,
+                                max_diff_p
+                            );
+                            break;
+                        }
+
+                        prev_residual_u = max_diff_u;
+                        prev_residual_p = max_diff_p;
+                    }
                 }
-
-                // Stagnation check
-                let stagnation_factor = 1e-2;
-                let rel_u = if prev_residual_u.is_finite() && prev_residual_u.abs() > 1e-14 {
-                    ((max_diff_u - prev_residual_u) / prev_residual_u).abs()
-                } else {
-                    f64::INFINITY
-                };
-                let rel_p = if prev_residual_p.is_finite() && prev_residual_p.abs() > 1e-14 {
-                    ((max_diff_p - prev_residual_p) / prev_residual_p).abs()
-                } else {
-                    f64::INFINITY
-                };
-
-                if rel_u < stagnation_factor && rel_p < stagnation_factor && iter > 2 {
-                    println!(
-                        "Coupled solver stagnated at iter {}: U={:.2e}, P={:.2e}",
-                        iter + 1,
-                        max_diff_u,
-                        max_diff_p
-                    );
-                    break;
-                }
-
-                prev_residual_u = max_diff_u;
-                prev_residual_p = max_diff_p;
             } else {
                 // First iteration - initialize stats
                 *self.outer_residual_u.lock().unwrap() = f32::MAX;
@@ -497,14 +515,11 @@ impl GpuSolver {
         }
     }
 
-    /// Compute max-diff on GPU and return (max_diff_u, max_diff_p)
-    /// 
-    /// This batched implementation submits all GPU work in a single command buffer
-    /// and reads both results in a single GPU->CPU transfer.
-    fn compute_max_diff_gpu(&self) -> (f64, f64) {
+    /// Start computing max-diff on GPU and initiate async read
+    fn start_compute_max_diff_gpu(&self) {
         let res = match self.coupled_resources.as_ref() {
             Some(r) => r,
-            None => return (f64::MAX, f64::MAX),
+            None => return,
         };
 
         let dispatch_start = Instant::now();
@@ -613,18 +628,6 @@ impl GpuSolver {
         // Submit both final reductions
         self.context.queue.submit(Some(encoder2.finish()));
 
-        // Read both results in a single transfer
-        let read_start = Instant::now();
-        let results = pollster::block_on(self.read_buffer_f32(&res.b_max_diff_result, 2));
-        self.profiling_stats.record_location(
-            "coupled:gpu_max_diff_read",
-            ProfileCategory::GpuRead,
-            read_start.elapsed(),
-            8,
-        );
-        let max_diff_u = results[0] as f64;
-        let max_diff_p = results[1] as f64;
-
         self.profiling_stats.record_location(
             "coupled:gpu_max_diff_dispatch",
             ProfileCategory::GpuDispatch,
@@ -632,6 +635,13 @@ impl GpuSolver {
             0,
         );
 
-        (max_diff_u, max_diff_p)
+        // Start async read
+        let mut reader = res.async_scalar_reader.borrow_mut();
+        reader.start_read(
+            &self.context.device,
+            &self.context.queue,
+            &res.b_max_diff_result,
+            0,
+        );
     }
 }

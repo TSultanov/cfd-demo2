@@ -16,18 +16,20 @@ pub struct AsyncScalarReader {
     /// Whether each buffer has a pending read
     pending: [bool; 2],
     /// Last read value (from the completed read)
-    last_value: Option<f32>,
+    last_value: Option<Vec<u8>>,
     /// Receiver for async completion
     receivers: [Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>; 2],
+    /// Size of the read
+    size: u64,
 }
 
 impl AsyncScalarReader {
     /// Create a new async scalar reader
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, size: u64) -> Self {
         let create_staging = || {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Async Scalar Staging"),
-                size: 4, // Single f32
+                size,
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -39,6 +41,7 @@ impl AsyncScalarReader {
             pending: [false, false],
             last_value: None,
             receivers: [None, None],
+            size,
         }
     }
 
@@ -83,7 +86,7 @@ impl AsyncScalarReader {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Async Scalar Copy"),
         });
-        encoder.copy_buffer_to_buffer(source_buffer, source_offset, staging, 0, 4);
+        encoder.copy_buffer_to_buffer(source_buffer, source_offset, staging, 0, self.size);
         queue.submit(Some(encoder.finish()));
         
         // Start async map
@@ -125,7 +128,7 @@ impl AsyncScalarReader {
                     let staging = &self.staging_buffers[buffer_idx];
                     let slice = staging.slice(..);
                     let data = slice.get_mapped_range();
-                    let value: f32 = *bytemuck::from_bytes(&data[0..4]);
+                    let value = data.to_vec();
                     drop(data);
                     staging.unmap();
                     
@@ -154,9 +157,17 @@ impl AsyncScalarReader {
         self.try_complete_read(1);
     }
 
-    /// Get the last successfully read value, if any
+    /// Get the last successfully read value as f32, if any
     pub fn get_last_value(&self) -> Option<f32> {
-        self.last_value
+        self.last_value.as_ref().map(|v| *bytemuck::from_bytes(&v[0..4]))
+    }
+
+    /// Get the last successfully read value as Vec<f32>, if any
+    pub fn get_last_value_vec(&self, count: usize) -> Option<Vec<f32>> {
+        self.last_value.as_ref().map(|v| {
+            let slice: &[f32] = bytemuck::cast_slice(v);
+            slice[0..count].to_vec()
+        })
     }
 
     /// Check if a read is currently pending
@@ -170,6 +181,11 @@ impl AsyncScalarReader {
             let _ = device.poll(wgpu::PollType::Poll);
             self.poll();
         }
+    }
+
+    /// Reset the reader state (clear last value)
+    pub fn reset(&mut self) {
+        self.last_value = None;
     }
 }
 

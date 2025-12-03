@@ -197,8 +197,11 @@ fn report_dispatch_stats() {
         solver.enable_detailed_profiling(true);
         solver.start_profiling_session();
 
+        let start = std::time::Instant::now();
         // Run a single step for analysis
         solver.step();
+        let duration = start.elapsed();
+        println!("Step took: {:?}", duration);
 
         solver.end_profiling_session();
         solver.print_profiling_report();

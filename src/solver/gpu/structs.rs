@@ -1,10 +1,12 @@
 use super::context::GpuContext;
 use super::coupled_solver_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
+use super::async_buffer::AsyncScalarReader;
 use bytemuck::{Pod, Zeroable};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::cell::RefCell;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {
@@ -90,6 +92,9 @@ pub struct CoupledSolverResources {
     pub pipeline_spmv_phat_v: wgpu::ComputePipeline,
     pub pipeline_spmv_shat_t: wgpu::ComputePipeline,
     pub pipeline_bicgstab_precond_update_x_r: wgpu::ComputePipeline,
+
+    /// Async scalar reader for non-blocking convergence checks
+    pub async_scalar_reader: RefCell<AsyncScalarReader>,
 }
 
 #[repr(C)]

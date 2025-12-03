@@ -19,6 +19,11 @@ use super::profiling::ProfileCategory;
 use super::structs::{GpuSolver, LinearSolverStats};
 use std::time::Instant;
 
+/// Enable debug reads for diagnosing matrix assembly issues.
+/// Set to true to enable debug output on the first iteration.
+/// WARNING: This adds significant GPU-CPU synchronization overhead (~65ms per step).
+const DEBUG_READS_ENABLED: bool = false;
+
 impl GpuSolver {
     /// Performs a single timestep using the coupled solver approach.
     ///
@@ -142,7 +147,7 @@ impl GpuSolver {
             }
 
             // Debug: Check d_p values on first iteration - DEBUG READ
-            if iter == 0 {
+            if DEBUG_READS_ENABLED && iter == 0 {
                 let read_start = Instant::now();
                 let d_p_vals = pollster::block_on(self.get_d_p());
                 self.profiling_stats.record_location(
@@ -196,7 +201,7 @@ impl GpuSolver {
             }
 
             // Debug: Check matrix and RHS after assembly on first iteration - DEBUG READS
-            if iter == 0 {
+            if DEBUG_READS_ENABLED && iter == 0 {
                 let sync_start = Instant::now();
                 self.context.device.poll(wgpu::Maintain::Wait);
                 self.profiling_stats.record_location(

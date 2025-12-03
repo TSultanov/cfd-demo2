@@ -66,6 +66,39 @@ fn bench_gpu_step_medium(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark total runtime for multiple steps (tracks overall performance)
+fn bench_gpu_total_runtime(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gpu_total_runtime");
+    group.sample_size(10);
+
+    let cell_size = 0.02;
+    let (mut solver, num_cells) = setup_solver(cell_size);
+
+    // Benchmark 5 steps together to measure total runtime
+    let num_steps = 5;
+    group.throughput(Throughput::Elements((num_cells * num_steps) as u64));
+    group.bench_function(BenchmarkId::new("5_steps", num_cells), |b| {
+        b.iter(|| {
+            for _ in 0..num_steps {
+                solver.step();
+            }
+        });
+    });
+
+    // Benchmark 10 steps for longer runs
+    let num_steps = 10;
+    group.throughput(Throughput::Elements((num_cells * num_steps) as u64));
+    group.bench_function(BenchmarkId::new("10_steps", num_cells), |b| {
+        b.iter(|| {
+            for _ in 0..num_steps {
+                solver.step();
+            }
+        });
+    });
+
+    group.finish();
+}
+
 /// Benchmark single step performance across different mesh sizes
 fn bench_gpu_step_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("gpu_dispatch_scaling");
@@ -224,7 +257,7 @@ fn report_dispatch_stats() {
 criterion_group! {
     name = benches;
     config = Criterion::default().measurement_time(std::time::Duration::from_secs(10));
-    targets = bench_gpu_step_medium, bench_gpu_step_scaling
+    targets = bench_gpu_step_medium, bench_gpu_total_runtime, bench_gpu_step_scaling
 }
 
 criterion_group! {

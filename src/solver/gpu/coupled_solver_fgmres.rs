@@ -1444,7 +1444,10 @@ impl GpuSolver {
                 );
 
                 // 3. Relax Pressure
-                let p_iters = 20;
+                // Scale iterations with mesh size: Jacobi convergence degrades with larger meshes.
+                // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
+                // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
+                let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200);
                 for _ in 0..p_iters {
                     self.dispatch_vector_pipeline(
                         &fgmres.pipeline_relax_pressure,

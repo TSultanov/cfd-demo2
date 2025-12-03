@@ -51,6 +51,9 @@ impl AsyncScalarReader {
         source_buffer: &wgpu::Buffer,
         source_offset: u64,
     ) {
+        // Poll device first to give pending operations a chance to complete
+        let _ = device.poll(wgpu::PollType::Poll);
+        
         let buffer_idx = self.current_buffer;
         
         // If the current buffer has a pending read, try to complete it first
@@ -64,6 +67,12 @@ impl AsyncScalarReader {
             let buffer_idx = self.current_buffer;
             if self.pending[buffer_idx] {
                 self.try_complete_read(buffer_idx);
+            }
+            
+            // If BOTH buffers are still pending, we must wait for one to complete
+            // to avoid the "buffer still mapped" error
+            if self.pending[buffer_idx] {
+                self.wait_for_buffer(device, buffer_idx);
             }
         }
         
@@ -89,6 +98,17 @@ impl AsyncScalarReader {
         
         // Switch to the other buffer for next read
         self.current_buffer = 1 - self.current_buffer;
+    }
+    
+    /// Wait for a specific buffer to complete (blocking)
+    fn wait_for_buffer(&mut self, device: &wgpu::Device, buffer_idx: usize) {
+        while self.pending[buffer_idx] {
+            let _ = device.poll(wgpu::PollType::Poll);
+            self.try_complete_read(buffer_idx);
+            if self.pending[buffer_idx] {
+                std::thread::yield_now();
+            }
+        }
     }
 
     /// Try to complete a pending read without blocking

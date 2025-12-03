@@ -1704,8 +1704,10 @@ impl GpuSolver {
                 // Poll the device without waiting (allows GPU work to continue)
                 let _ = self.context.device.poll(wgpu::PollType::Poll);
                 
-                // Check convergence less frequently to reduce overhead
-                let check_interval = 10;
+                // Check convergence every few iterations to balance early termination vs overhead.
+                // Lower values detect convergence earlier but have slightly more overhead.
+                // The async buffer now handles back-pressure safely, so any value >= 1 is safe.
+                let check_interval = 1;
                 let is_last_in_restart = j == max_restart - 1;
                 let should_check = (j + 1) % check_interval == 0 || is_last_in_restart;
 

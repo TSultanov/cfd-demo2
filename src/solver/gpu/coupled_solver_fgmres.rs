@@ -996,6 +996,49 @@ impl GpuSolver {
         );
     }
 
+    /// Dispatch multiple iterations of a pipeline in a single command buffer submission.
+    /// This reduces CPU-GPU synchronization overhead by batching dispatches.
+    fn dispatch_vector_pipeline_batched(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        fgmres: &FgmresResources,
+        vector_bg: &wgpu::BindGroup,
+        group3_bg: &wgpu::BindGroup,
+        workgroups: u32,
+        iterations: usize,
+        label: &str,
+    ) {
+        let start = Instant::now();
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+
+        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
+
+        // Encode all iterations in a single command buffer
+        for _ in 0..iterations {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(label),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, vector_bg, &[]);
+            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
+            pass.set_bind_group(2, &fgmres.bg_precond, &[]);
+            pass.set_bind_group(3, group3_bg, &[]);
+            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+        }
+
+        self.context.queue.submit(Some(encoder.finish()));
+        self.profiling_stats.record_location(
+            label,
+            ProfileCategory::GpuDispatch,
+            start.elapsed(),
+            0,
+        );
+    }
+
     /// Compute norm of a vector using GPU reduction and async read
     /// 
     /// This uses a batched approach: all GPU work (partial reduction, final reduction,
@@ -1448,16 +1491,15 @@ impl GpuSolver {
                 // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
                 // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
                 let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200);
-                for _ in 0..p_iters {
-                    self.dispatch_vector_pipeline(
-                        &fgmres.pipeline_relax_pressure,
-                        fgmres,
-                        &precond_bg,
-                        &fgmres.bg_pressure_matrix,
-                        workgroups_cells,
-                        "Schur Relax P",
-                    );
-                }
+                self.dispatch_vector_pipeline_batched(
+                    &fgmres.pipeline_relax_pressure,
+                    fgmres,
+                    &precond_bg,
+                    &fgmres.bg_pressure_matrix,
+                    workgroups_cells,
+                    p_iters,
+                    "Schur Relax P",
+                );
 
                 // 4. Correct Velocity
                 self.dispatch_vector_pipeline(

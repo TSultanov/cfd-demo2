@@ -41,3 +41,7 @@ harness = false
 [[bench]]
 name = "delaunay_voronoi_benchmark"
 harness = false
+
+[[bench]]
+name = "gpu_dispatch_benchmark"
+harness = false

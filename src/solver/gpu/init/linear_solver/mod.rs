@@ -278,9 +278,16 @@ fn init_coupled_resources(
         mapped_at_creation: false,
     });
 
-    let b_max_diff_partial = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Max Diff Partial"),
-        size: (num_max_diff_groups as u64) * 2 * 4, // 2 floats per workgroup (U and P)
+    let b_max_diff_partial_u = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Max Diff Partial U"),
+        size: (num_max_diff_groups as u64) * 4, // 1 float per workgroup for U
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_max_diff_partial_p = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Max Diff Partial P"),
+        size: (num_max_diff_groups as u64) * 4, // 1 float per workgroup for P
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
@@ -1052,6 +1059,16 @@ fn init_coupled_resources(
             cache: None,
         });
 
+    let pipeline_max_diff_reduce_p =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Max Diff Reduce P Pipeline"),
+            layout: Some(&pl_max_diff),
+            module: &shader_max_diff,
+            entry_point: Some("max_reduce_final_p"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
     CoupledSolverResources {
         b_row_offsets: matrix_res.b_row_offsets,
         b_col_indices: matrix_res.b_col_indices,
@@ -1077,7 +1094,8 @@ fn init_coupled_resources(
         // Max-diff convergence check
         b_u_snapshot,
         b_p_snapshot,
-        b_max_diff_partial,
+        b_max_diff_partial_u,
+        b_max_diff_partial_p,
         b_max_diff_result,
         num_max_diff_groups,
         bg_solver,
@@ -1103,6 +1121,7 @@ fn init_coupled_resources(
         pipeline_max_diff_u_partial,
         pipeline_max_diff_p_partial,
         pipeline_max_diff_reduce,
+        pipeline_max_diff_reduce_p,
         // Preconditioner pipelines
         pipeline_extract_diagonal,
         pipeline_precond_velocity,

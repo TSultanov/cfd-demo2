@@ -498,6 +498,9 @@ impl GpuSolver {
     }
 
     /// Compute max-diff on GPU and return (max_diff_u, max_diff_p)
+    /// 
+    /// This batched implementation submits all GPU work in a single command buffer
+    /// and reads both results in a single GPU->CPU transfer.
     fn compute_max_diff_gpu(&self) -> (f64, f64) {
         let res = match self.coupled_resources.as_ref() {
             Some(r) => r,
@@ -506,7 +509,20 @@ impl GpuSolver {
 
         let dispatch_start = Instant::now();
 
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct MaxDiffParams {
+            n: u32,
+            _pad1: u32,
+            _pad2: u32,
+            _pad3: u32,
+        }
+
+        let workgroup_size = 64u32;
+        let num_groups = self.num_cells.div_ceil(workgroup_size);
+
         // Create bind groups for max-diff (using current fields and snapshots)
+        // U uses b_max_diff_partial_u, P uses b_max_diff_partial_p
         let bg_max_diff_u = self
             .context
             .device
@@ -524,7 +540,7 @@ impl GpuSolver {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: res.b_max_diff_partial.as_entire_binding(),
+                        resource: res.b_max_diff_partial_u.as_entire_binding(),
                     },
                 ],
             });
@@ -546,22 +562,58 @@ impl GpuSolver {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: res.b_max_diff_partial.as_entire_binding(),
+                        resource: res.b_max_diff_partial_p.as_entire_binding(),
+                    },
+                ],
+            });
+
+        // Bind groups for final reduction
+        let bg_reduce_u = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Max Diff U Reduce Bind Group"),
+                layout: &res.bgl_max_diff,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: res.b_max_diff_partial_u.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: res.b_p_snapshot.as_entire_binding(), // Dummy
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: res.b_u_snapshot.as_entire_binding(), // Dummy
+                    },
+                ],
+            });
+
+        let bg_reduce_p = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Max Diff P Reduce Bind Group"),
+                layout: &res.bgl_max_diff,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: res.b_max_diff_partial_p.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: res.b_p_snapshot.as_entire_binding(), // Dummy
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: res.b_u_snapshot.as_entire_binding(), // Dummy
                     },
                 ],
             });
 
         // Write params for partial reduction (n = num_cells)
-        #[repr(C)]
-        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-        struct MaxDiffParams {
-            n: u32,
-            _pad1: u32,
-            _pad2: u32,
-            _pad3: u32,
-        }
-
-        let params = MaxDiffParams {
+        let params_partial = MaxDiffParams {
             n: self.num_cells,
             _pad1: 0,
             _pad2: 0,
@@ -569,173 +621,100 @@ impl GpuSolver {
         };
         self.context
             .queue
-            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params));
+            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params_partial));
 
-        let workgroup_size = 64u32;
-        let num_groups = self.num_cells.div_ceil(workgroup_size);
-
-        // Compute max-diff for U (vec2)
-        {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Max Diff U Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Max Diff U Partial Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&res.pipeline_max_diff_u_partial);
-                cpass.set_bind_group(0, &bg_max_diff_u, &[]);
-                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
-                cpass.dispatch_workgroups(num_groups, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-        }
-
-        // Final reduction for U
-        let params_reduce_u = MaxDiffParams {
-            n: num_groups,
-            _pad1: 0,
-            _pad2: 0,
-            _pad3: 0,
-        };
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            0,
-            bytemuck::bytes_of(&params_reduce_u),
-        );
-
-        // Reuse a simpler bind group for reduce - only need partial results as read input
-        let bg_reduce = self
+        // Create single command encoder for all GPU work
+        let mut encoder = self
             .context
             .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Max Diff Reduce Bind Group"),
-                layout: &res.bgl_max_diff,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: res.b_max_diff_partial.as_entire_binding(), // Partial results as input
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: res.b_p_snapshot.as_entire_binding(), // Dummy, not used by reduce
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: res.b_u_snapshot.as_entire_binding(), // Dummy, not used by reduce
-                    },
-                ],
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Max Diff Batched Encoder"),
             });
 
+        // Pass 1: Partial reduction for U
         {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Max Diff U Reduce Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Max Diff U Reduce Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&res.pipeline_max_diff_reduce);
-                cpass.set_bind_group(0, &bg_reduce, &[]);
-                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
-                cpass.dispatch_workgroups(1, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Max Diff U Partial Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&res.pipeline_max_diff_u_partial);
+            cpass.set_bind_group(0, &bg_max_diff_u, &[]);
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
         }
 
-        // Read max_diff_u from result buffer
-        let read_start = Instant::now();
-        let max_diff_u_vec = pollster::block_on(self.read_buffer_f32(&res.b_max_diff_result, 1));
-        self.profiling_stats.record_location(
-            "coupled:gpu_max_diff_u_read",
-            ProfileCategory::GpuRead,
-            read_start.elapsed(),
-            4,
-        );
-        let max_diff_u = max_diff_u_vec[0] as f64;
+        // Pass 2: Partial reduction for P
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Max Diff P Partial Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&res.pipeline_max_diff_p_partial);
+            cpass.set_bind_group(0, &bg_max_diff_p, &[]);
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
+        }
 
-        // Compute max-diff for P (scalar)
-        let params_p = MaxDiffParams {
-            n: self.num_cells,
+        // Submit partial reductions
+        self.context.queue.submit(Some(encoder.finish()));
+
+        // Write params for final reduction (n = num_groups)
+        let params_reduce = MaxDiffParams {
+            n: num_groups,
             _pad1: 0,
             _pad2: 0,
             _pad3: 0,
         };
         self.context
             .queue
-            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params_p));
+            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params_reduce));
 
+        // Create encoder for final reductions - batch both U and P together
+        let mut encoder2 = self
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Max Diff Final Reduce Encoder"),
+            });
+
+        // Pass 3: Final reduction for U (writes to result[0])
         {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Max Diff P Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Max Diff P Partial Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&res.pipeline_max_diff_p_partial);
-                cpass.set_bind_group(0, &bg_max_diff_p, &[]);
-                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
-                cpass.dispatch_workgroups(num_groups, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
+            let mut cpass = encoder2.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Max Diff U Final Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&res.pipeline_max_diff_reduce);
+            cpass.set_bind_group(0, &bg_reduce_u, &[]);
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            cpass.dispatch_workgroups(1, 1, 1);
         }
 
-        // Final reduction for P
-        let params_reduce_p = MaxDiffParams {
-            n: num_groups,
-            _pad1: 0,
-            _pad2: 0,
-            _pad3: 0,
-        };
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            0,
-            bytemuck::bytes_of(&params_reduce_p),
-        );
-
+        // Pass 4: Final reduction for P (writes to result[1])
         {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Max Diff P Reduce Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Max Diff P Reduce Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&res.pipeline_max_diff_reduce);
-                cpass.set_bind_group(0, &bg_reduce, &[]);
-                cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
-                cpass.dispatch_workgroups(1, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
+            let mut cpass = encoder2.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Max Diff P Final Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&res.pipeline_max_diff_reduce_p);
+            cpass.set_bind_group(0, &bg_reduce_p, &[]);
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            cpass.dispatch_workgroups(1, 1, 1);
         }
 
-        // Read max_diff_p from result buffer
+        // Submit both final reductions
+        self.context.queue.submit(Some(encoder2.finish()));
+
+        // Read both results in a single transfer
         let read_start = Instant::now();
-        let max_diff_p_vec = pollster::block_on(self.read_buffer_f32(&res.b_max_diff_result, 1));
+        let results = pollster::block_on(self.read_buffer_f32(&res.b_max_diff_result, 2));
         self.profiling_stats.record_location(
-            "coupled:gpu_max_diff_p_read",
+            "coupled:gpu_max_diff_read",
             ProfileCategory::GpuRead,
             read_start.elapsed(),
-            4,
+            8,
         );
-        let max_diff_p = max_diff_p_vec[0] as f64;
+        let max_diff_u = results[0] as f64;
+        let max_diff_p = results[1] as f64;
 
         self.profiling_stats.record_location(
             "coupled:gpu_max_diff_dispatch",

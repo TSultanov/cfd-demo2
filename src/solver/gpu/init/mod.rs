@@ -26,8 +26,14 @@ impl GpuSolver {
         let fields_res = fields::init_fields(&context.device, num_cells, num_faces);
 
         // 3. Initialize Linear Solver
-        let linear_res =
-            linear_solver::init_linear_solver(&context.device, mesh, num_cells, &mesh_res.bgl_mesh);
+        let linear_res = linear_solver::init_linear_solver(
+            &context.device,
+            mesh,
+            num_cells,
+            &mesh_res.bgl_mesh,
+            &fields_res.b_u,
+            &fields_res.b_p,
+        );
 
         // 4. Initialize Scalars
         let scalar_res = scalars::init_scalars(

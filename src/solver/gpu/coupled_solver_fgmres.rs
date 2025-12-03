@@ -42,6 +42,7 @@ pub struct FgmresResources {
     pub b_diag_p: wgpu::Buffer,
     /// Temporary buffer for pressure RHS (r_p')
     pub b_temp_p: wgpu::Buffer,
+    pub b_p_sol: wgpu::Buffer,
     /// Parameters buffer
     pub b_params: wgpu::Buffer,
     pub b_precond_params: wgpu::Buffer, // New buffer for PreconditionerParams
@@ -51,6 +52,8 @@ pub struct FgmresResources {
     pub num_dot_groups: u32,
     /// Vector bind group layout (x, y, z)
     pub bgl_vectors: wgpu::BindGroupLayout,
+    /// Schur Vector bind group layout (r_in, z_out, temp_p, p_sol)
+    pub bgl_schur_vectors: wgpu::BindGroupLayout,
     /// Matrix bind group layout (row offsets, indices, values)
     pub bgl_matrix: wgpu::BindGroupLayout,
     /// Preconditioner bind group layout (diag buffers)
@@ -247,6 +250,15 @@ impl GpuSolver {
             mapped_at_creation: false,
         });
 
+        let b_p_sol = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES p_sol"),
+            size: (self.num_cells as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
         let b_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("FGMRES params"),
             size: std::mem::size_of::<RawFgmresParams>() as u64,
@@ -380,6 +392,52 @@ impl GpuSolver {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_schur_vectors = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("FGMRES Schur Vectors BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // temp_p (read/write)
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // p_sol (read/write)
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -741,7 +799,7 @@ impl GpuSolver {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("FGMRES Schur Pipeline Layout"),
                 bind_group_layouts: &[
-                    &bgl_vectors,
+                    &bgl_schur_vectors,
                     &bgl_matrix,
                     &bgl_precond,
                     &bgl_pressure_matrix,
@@ -835,11 +893,13 @@ impl GpuSolver {
             b_diag_v,
             b_diag_p,
             b_temp_p,
+            b_p_sol,
             b_params,
             b_precond_params,
             max_restart,
             num_dot_groups: num_groups,
             bgl_vectors,
+            bgl_schur_vectors,
             bgl_matrix,
             bgl_precond,
             bgl_params,
@@ -952,6 +1012,41 @@ impl GpuSolver {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: z.as_entire_binding(),
+                    },
+                ],
+            })
+    }
+
+    fn create_schur_vector_bind_group(
+        &self,
+        fgmres: &FgmresResources,
+        r_in: &wgpu::Buffer,
+        z_out: &wgpu::Buffer,
+        temp_p: &wgpu::Buffer,
+        p_sol: &wgpu::Buffer,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        self.context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &fgmres.bgl_schur_vectors,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: r_in.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: z_out.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: temp_p.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: p_sol.as_entire_binding(),
                     },
                 ],
             })
@@ -1378,11 +1473,12 @@ impl GpuSolver {
         );
 
         // Refresh block diagonals
-        let diag_bg = self.create_vector_bind_group(
+        let diag_bg = self.create_schur_vector_bind_group(
             fgmres,
             &res.b_rhs,
             &fgmres.b_temp,
             &fgmres.b_w,
+            &fgmres.b_p_sol,
             "FGMRES Extract Diagonal BG",
         );
         self.dispatch_vector_pipeline(
@@ -1460,12 +1556,22 @@ impl GpuSolver {
                 total_iters += 1;
 
                 // 1. Predict Velocity
-                let precond_bg = self.create_vector_bind_group(
+                // Clear p_sol before starting
+                {
+                    let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Clear p_sol"),
+                    });
+                    encoder.clear_buffer(&fgmres.b_p_sol, 0, None);
+                    self.context.queue.submit(Some(encoder.finish()));
+                }
+
+                let precond_bg = self.create_schur_vector_bind_group(
                     fgmres,
                     &fgmres.basis_vectors[j],
                     &fgmres.z_vectors[j],
                     &fgmres.b_temp_p,
-                    "FGMRES Preconditioner BG",
+                    &fgmres.b_p_sol,
+                    "FGMRES Schur BG",
                 );
 
                 self.dispatch_vector_pipeline(

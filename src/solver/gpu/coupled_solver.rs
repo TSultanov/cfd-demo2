@@ -521,97 +521,6 @@ impl GpuSolver {
         let workgroup_size = 64u32;
         let num_groups = self.num_cells.div_ceil(workgroup_size);
 
-        // Create bind groups for max-diff (using current fields and snapshots)
-        // U uses b_max_diff_partial_u, P uses b_max_diff_partial_p
-        let bg_max_diff_u = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Max Diff U Bind Group"),
-                layout: &res.bgl_max_diff,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.b_u.as_entire_binding(), // Current U
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: res.b_u_snapshot.as_entire_binding(), // Snapshot U
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: res.b_max_diff_partial_u.as_entire_binding(),
-                    },
-                ],
-            });
-
-        let bg_max_diff_p = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Max Diff P Bind Group"),
-                layout: &res.bgl_max_diff,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.b_p.as_entire_binding(), // Current P
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: res.b_p_snapshot.as_entire_binding(), // Snapshot P
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: res.b_max_diff_partial_p.as_entire_binding(),
-                    },
-                ],
-            });
-
-        // Bind groups for final reduction
-        let bg_reduce_u = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Max Diff U Reduce Bind Group"),
-                layout: &res.bgl_max_diff,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: res.b_max_diff_partial_u.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: res.b_p_snapshot.as_entire_binding(), // Dummy
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: res.b_u_snapshot.as_entire_binding(), // Dummy
-                    },
-                ],
-            });
-
-        let bg_reduce_p = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Max Diff P Reduce Bind Group"),
-                layout: &res.bgl_max_diff,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: res.b_max_diff_partial_p.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: res.b_p_snapshot.as_entire_binding(), // Dummy
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: res.b_u_snapshot.as_entire_binding(), // Dummy
-                    },
-                ],
-            });
-
         // Write params for partial reduction (n = num_cells)
         let params_partial = MaxDiffParams {
             n: self.num_cells,
@@ -638,7 +547,7 @@ impl GpuSolver {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_u_partial);
-            cpass.set_bind_group(0, &bg_max_diff_u, &[]);
+            cpass.set_bind_group(0, &res.bg_max_diff_u, &[]);
             cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
             cpass.dispatch_workgroups(num_groups, 1, 1);
         }
@@ -650,7 +559,7 @@ impl GpuSolver {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_p_partial);
-            cpass.set_bind_group(0, &bg_max_diff_p, &[]);
+            cpass.set_bind_group(0, &res.bg_max_diff_p, &[]);
             cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
             cpass.dispatch_workgroups(num_groups, 1, 1);
         }
@@ -684,7 +593,7 @@ impl GpuSolver {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_reduce);
-            cpass.set_bind_group(0, &bg_reduce_u, &[]);
+            cpass.set_bind_group(0, &res.bg_reduce_u, &[]);
             cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
             cpass.dispatch_workgroups(1, 1, 1);
         }
@@ -696,7 +605,7 @@ impl GpuSolver {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_reduce_p);
-            cpass.set_bind_group(0, &bg_reduce_p, &[]);
+            cpass.set_bind_group(0, &res.bg_reduce_p, &[]);
             cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
             cpass.dispatch_workgroups(1, 1, 1);
         }

@@ -60,6 +60,8 @@ pub fn init_linear_solver(
     mesh: &Mesh,
     num_cells: u32,
     bgl_mesh: &wgpu::BindGroupLayout,
+    b_u: &wgpu::Buffer,
+    b_p: &wgpu::Buffer,
 ) -> LinearSolverResources {
     // 1. Initialize Matrix Resources (Buffers)
     // Note: row_offsets and col_indices are passed in, but we need to create buffers for them.
@@ -140,6 +142,8 @@ pub fn init_linear_solver(
         num_cells,
         &pipeline_res,
         &matrix_res.b_row_offsets,
+        b_u,
+        b_p,
     );
 
     LinearSolverResources {
@@ -203,6 +207,8 @@ fn init_coupled_resources(
     num_cells: u32,
     pipeline_res: &pipelines::PipelineResources,
     scalar_row_offsets_buffer: &wgpu::Buffer,
+    b_u: &wgpu::Buffer,
+    b_p: &wgpu::Buffer,
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
     let num_coupled_cells = num_cells * 3;
@@ -1069,6 +1075,83 @@ fn init_coupled_resources(
             cache: None,
         });
 
+    // Create cached bind groups for max-diff
+    let bg_max_diff_u = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Max Diff U Bind Group"),
+        layout: &bgl_max_diff,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: b_u.as_entire_binding(), // Current U
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: b_u_snapshot.as_entire_binding(), // Snapshot U
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b_max_diff_partial_u.as_entire_binding(),
+            },
+        ],
+    });
+
+    let bg_max_diff_p = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Max Diff P Bind Group"),
+        layout: &bgl_max_diff,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: b_p.as_entire_binding(), // Current P
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: b_p_snapshot.as_entire_binding(), // Snapshot P
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b_max_diff_partial_p.as_entire_binding(),
+            },
+        ],
+    });
+
+    let bg_reduce_u = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Max Diff U Reduce Bind Group"),
+        layout: &bgl_max_diff,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: b_max_diff_partial_u.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: b_p_snapshot.as_entire_binding(), // Dummy
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b_u_snapshot.as_entire_binding(), // Dummy
+            },
+        ],
+    });
+
+    let bg_reduce_p = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Max Diff P Reduce Bind Group"),
+        layout: &bgl_max_diff,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: b_max_diff_partial_p.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: b_p_snapshot.as_entire_binding(), // Dummy
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b_u_snapshot.as_entire_binding(), // Dummy
+            },
+        ],
+    });
+
     CoupledSolverResources {
         b_row_offsets: matrix_res.b_row_offsets,
         b_col_indices: matrix_res.b_col_indices,
@@ -1122,6 +1205,11 @@ fn init_coupled_resources(
         pipeline_max_diff_p_partial,
         pipeline_max_diff_reduce,
         pipeline_max_diff_reduce_p,
+        // Cached bind groups
+        bg_max_diff_u,
+        bg_max_diff_p,
+        bg_reduce_u,
+        bg_reduce_p,
         // Preconditioner pipelines
         pipeline_extract_diagonal,
         pipeline_precond_velocity,

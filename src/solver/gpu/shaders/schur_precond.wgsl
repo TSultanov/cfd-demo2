@@ -20,6 +20,7 @@ struct PrecondParams {
 @group(0) @binding(0) var<storage, read> r_in: array<f32>;       // Input residual
 @group(0) @binding(1) var<storage, read_write> z_out: array<f32>; // Output preconditioned vector
 @group(0) @binding(2) var<storage, read_write> temp_p: array<f32>; // Temporary pressure vector
+@group(0) @binding(3) var<storage, read_write> p_sol: array<f32>; // Pressure solution (contiguous)
 
 // Group 1: Coupled Matrix (CSR) - for form_schur_rhs and correct_velocity
 @group(1) @binding(0) var<storage, read> row_offsets: array<u32>;
@@ -137,8 +138,7 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let base = cell * 3u;
-    let z_p_old = z_out[base + 2u];
+    let z_p_old = p_sol[cell];
 
     // Compute A_p * z_p (using Scalar Pressure Matrix)
     // Row index is 'cell'
@@ -147,11 +147,11 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     var sigma = 0.0;
     for (var k = start; k < end; k++) {
-        let col_cell = p_col_indices[k]; // This is a cell index, not a coupled index
+        let col_cell = p_col_indices[k]; // This is a cell index
         
         if (col_cell != cell) {
-            // Map cell index to pressure DOF index: col_cell * 3 + 2
-            let z_p_neighbor = z_out[col_cell * 3u + 2u];
+            // Direct access to contiguous buffer
+            let z_p_neighbor = p_sol[col_cell];
             sigma += p_matrix_values[k] * z_p_neighbor;
         }
     }
@@ -160,7 +160,7 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rhs = temp_p[cell]; 
 
     let z_p_new = d_inv * (rhs - sigma);
-    z_out[base + 2u] = mix(z_p_old, z_p_new, params.omega);
+    p_sol[cell] = mix(z_p_old, z_p_new, params.omega);
 }
 
 // Kernel 5: Correct Velocity
@@ -182,7 +182,10 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var k = start_u; k < end_u; k++) {
         let col = col_indices[k];
         if (col % 3u == 2u) { 
-            correction_u += matrix_values[k] * z_out[col];
+            // col is a coupled index (3*cell + 2)
+            // We need to map it to cell index for p_sol
+            let p_cell = col / 3u;
+            correction_u += matrix_values[k] * p_sol[p_cell];
         }
     }
     z_out[row_u] -= diag_u_inv[cell] * correction_u;
@@ -194,8 +197,12 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var k = start_v; k < end_v; k++) {
         let col = col_indices[k];
         if (col % 3u == 2u) { 
-            correction_v += matrix_values[k] * z_out[col];
+            let p_cell = col / 3u;
+            correction_v += matrix_values[k] * p_sol[p_cell];
         }
     }
     z_out[row_v] -= diag_v_inv[cell] * correction_v;
+    
+    // Update z_out pressure component
+    z_out[base + 2u] = p_sol[cell];
 }

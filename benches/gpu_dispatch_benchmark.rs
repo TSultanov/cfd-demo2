@@ -221,10 +221,7 @@ fn report_dispatch_stats() {
         println!("{}", "=".repeat(80));
         println!("Dispatch Operations by Call Count (Top 20)");
         println!("{}", "=".repeat(80));
-        println!(
-            "{:<50} {:>10} {:>12}",
-            "Operation", "Calls", "Total Time"
-        );
+        println!("{:<50} {:>10} {:>12}", "Operation", "Calls", "Total Time");
         println!("{}", "-".repeat(74));
 
         for (location, stats) in dispatch_stats.iter().take(20) {
@@ -252,9 +249,7 @@ fn report_dispatch_stats() {
             "  Average dispatch overhead: {:?}",
             total_dispatch_time / total_dispatches as u32
         );
-        println!(
-            "  Estimated reduction potential: Look for operations with >100 calls"
-        );
+        println!("  Estimated reduction potential: Look for operations with >100 calls");
     });
 }
 
@@ -264,7 +259,7 @@ fn bench_preconditioner_comparison(c: &mut Criterion) {
     group.sample_size(10);
 
     let cell_size = 0.01;
-    
+
     // Setup solver for Jacobi
     let (mut solver_jacobi, num_cells) = setup_solver(cell_size);
     solver_jacobi.set_precond_type(PreconditionerType::Jacobi);
@@ -276,7 +271,7 @@ fn bench_preconditioner_comparison(c: &mut Criterion) {
     solver_amg.step();
 
     group.throughput(Throughput::Elements(num_cells as u64));
-    
+
     group.bench_function(BenchmarkId::new("jacobi", num_cells), |b| {
         b.iter(|| {
             solver_jacobi.step();

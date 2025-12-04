@@ -6,7 +6,7 @@ pub trait Geometry {
     fn is_inside(&self, p: &Point2<f64>) -> bool;
     // Returns distance to surface. Negative inside.
     fn sdf(&self, p: &Point2<f64>) -> f64;
-    
+
     fn sdf_batch(&self, px: f64x4, py: f64x4) -> f64x4 {
         let arr_x: [f64; 4] = px.into();
         let arr_y: [f64; 4] = py.into();
@@ -48,24 +48,24 @@ impl Geometry for ChannelWithObstacle {
     fn sdf_batch(&self, px: f64x4, py: f64x4) -> f64x4 {
         let half_len = f64x4::splat(self.length / 2.0);
         let half_height = f64x4::splat(self.height / 2.0);
-        
+
         let dx = (px - half_len).abs() - half_len;
         let dy = (py - half_height).abs() - half_height;
-        
+
         let zero = f64x4::splat(0.0);
         let dx_max = dx.max(zero);
         let dy_max = dy.max(zero);
-        
+
         let box_dist = dx.max(dy).min(zero) + (dx_max * dx_max + dy_max * dy_max).sqrt();
-        
+
         let obs_cx = f64x4::splat(self.obstacle_center.x);
         let obs_cy = f64x4::splat(self.obstacle_center.y);
         let obs_r = f64x4::splat(self.obstacle_radius);
-        
+
         let diff_x = px - obs_cx;
         let diff_y = py - obs_cy;
         let circle_dist = (diff_x * diff_x + diff_y * diff_y).sqrt() - obs_r;
-        
+
         box_dist.max(-circle_dist)
     }
 
@@ -139,34 +139,34 @@ impl Geometry for BackwardsStep {
     fn sdf_batch(&self, px: f64x4, py: f64x4) -> f64x4 {
         let half_len = f64x4::splat(self.length / 2.0);
         let half_h_out = f64x4::splat(self.height_outlet / 2.0);
-        
+
         let outer_box_dx = (px - half_len).abs() - half_len;
         let outer_box_dy = (py - half_h_out).abs() - half_h_out;
-        
+
         let zero = f64x4::splat(0.0);
         let ob_dx_max = outer_box_dx.max(zero);
         let ob_dy_max = outer_box_dy.max(zero);
-        
-        let outer_dist = outer_box_dx.max(outer_box_dy).min(zero) 
+
+        let outer_dist = outer_box_dx.max(outer_box_dy).min(zero)
             + (ob_dx_max * ob_dx_max + ob_dy_max * ob_dy_max).sqrt();
 
         let step_h = self.height_outlet - self.height_inlet;
         let step_w = self.step_x;
-        
+
         let block_cx = f64x4::splat(step_w / 2.0);
         let block_cy = f64x4::splat(step_h / 2.0);
         let half_step_w = f64x4::splat(step_w / 2.0);
         let half_step_h = f64x4::splat(step_h / 2.0);
-        
+
         let block_dx = (px - block_cx).abs() - half_step_w;
         let block_dy = (py - block_cy).abs() - half_step_h;
-        
+
         let b_dx_max = block_dx.max(zero);
         let b_dy_max = block_dy.max(zero);
-        
-        let block_dist = block_dx.max(block_dy).min(zero)
-            + (b_dx_max * b_dx_max + b_dy_max * b_dy_max).sqrt();
-            
+
+        let block_dist =
+            block_dx.max(block_dy).min(zero) + (b_dx_max * b_dx_max + b_dy_max * b_dy_max).sqrt();
+
         outer_dist.max(-block_dist)
     }
 
@@ -229,14 +229,14 @@ impl Geometry for RectangularChannel {
     fn sdf_batch(&self, px: f64x4, py: f64x4) -> f64x4 {
         let half_len = f64x4::splat(self.length / 2.0);
         let half_height = f64x4::splat(self.height / 2.0);
-        
+
         let dx = (px - half_len).abs() - half_len;
         let dy = (py - half_height).abs() - half_height;
-        
+
         let zero = f64x4::splat(0.0);
         let dx_max = dx.max(zero);
         let dy_max = dy.max(zero);
-        
+
         dx.max(dy).min(zero) + (dx_max * dx_max + dy_max * dy_max).sqrt()
     }
 

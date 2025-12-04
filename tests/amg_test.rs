@@ -1,5 +1,5 @@
-use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use nalgebra::Vector2;
 
@@ -68,12 +68,12 @@ fn test_amg_preconditioner() {
         // but they should be somewhat close or at least stable.
         // Actually, if both converge, they should be close.
         // But 5 steps might not be enough for full convergence.
-        
+
         // Just check that AMG runs without crashing and produces reasonable values.
         let max_p = p_amg.iter().fold(0.0f64, |a, &b| a.max(b.abs()));
         assert!(max_p < 1000.0, "Pressure exploded with AMG");
         assert!(max_p > 0.0, "Pressure is zero with AMG");
-        
+
         println!("Max pressure with AMG: {}", max_p);
     });
 }

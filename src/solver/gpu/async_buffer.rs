@@ -56,14 +56,14 @@ impl AsyncScalarReader {
     ) {
         // Poll device first to give pending operations a chance to complete
         let _ = device.poll(wgpu::PollType::Poll);
-        
+
         let buffer_idx = self.current_buffer;
-        
+
         // If the current buffer has a pending read, try to complete it first
         if self.pending[buffer_idx] {
             self.try_complete_read(buffer_idx);
         }
-        
+
         // If still pending, switch to other buffer
         if self.pending[buffer_idx] {
             self.current_buffer = 1 - self.current_buffer;
@@ -71,38 +71,38 @@ impl AsyncScalarReader {
             if self.pending[buffer_idx] {
                 self.try_complete_read(buffer_idx);
             }
-            
+
             // If BOTH buffers are still pending, we must wait for one to complete
             // to avoid the "buffer still mapped" error
             if self.pending[buffer_idx] {
                 self.wait_for_buffer(device, buffer_idx);
             }
         }
-        
+
         let buffer_idx = self.current_buffer;
         let staging = &self.staging_buffers[buffer_idx];
-        
+
         // Submit copy command
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Async Scalar Copy"),
         });
         encoder.copy_buffer_to_buffer(source_buffer, source_offset, staging, 0, self.size);
         queue.submit(Some(encoder.finish()));
-        
+
         // Start async map
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        
+
         self.receivers[buffer_idx] = Some(rx);
         self.pending[buffer_idx] = true;
-        
+
         // Switch to the other buffer for next read
         self.current_buffer = 1 - self.current_buffer;
     }
-    
+
     /// Wait for a specific buffer to complete (blocking)
     fn wait_for_buffer(&mut self, device: &wgpu::Device, buffer_idx: usize) {
         while self.pending[buffer_idx] {
@@ -119,7 +119,7 @@ impl AsyncScalarReader {
         if !self.pending[buffer_idx] {
             return;
         }
-        
+
         if let Some(rx) = self.receivers[buffer_idx].take() {
             // Try to receive without blocking
             match rx.try_recv() {
@@ -131,7 +131,7 @@ impl AsyncScalarReader {
                     let value = data.to_vec();
                     drop(data);
                     staging.unmap();
-                    
+
                     self.last_value = Some(value);
                     self.pending[buffer_idx] = false;
                 }
@@ -159,7 +159,9 @@ impl AsyncScalarReader {
 
     /// Get the last successfully read value as f32, if any
     pub fn get_last_value(&self) -> Option<f32> {
-        self.last_value.as_ref().map(|v| *bytemuck::from_bytes(&v[0..4]))
+        self.last_value
+            .as_ref()
+            .map(|v| *bytemuck::from_bytes(&v[0..4]))
     }
 
     /// Get the last successfully read value as Vec<f32>, if any
@@ -174,7 +176,7 @@ impl AsyncScalarReader {
     pub fn is_pending(&self) -> bool {
         self.pending[0] || self.pending[1]
     }
-    
+
     /// Block until all pending reads complete (for cleanup or forced sync)
     pub fn flush(&mut self, device: &wgpu::Device) {
         while self.is_pending() {
@@ -205,7 +207,7 @@ impl AsyncStagingBuffer {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         Self {
             buffer,
             size,
@@ -224,21 +226,21 @@ impl AsyncStagingBuffer {
         size: u64,
     ) {
         assert!(size <= self.size);
-        
+
         // Submit copy
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Async Staging Copy"),
         });
         encoder.copy_buffer_to_buffer(source, offset, &self.buffer, 0, size);
         queue.submit(Some(encoder.finish()));
-        
+
         // Start async map
         let slice = self.buffer.slice(0..size);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        
+
         self.receiver = Some(rx);
         self.is_pending = true;
     }
@@ -248,7 +250,7 @@ impl AsyncStagingBuffer {
         if !self.is_pending {
             return None;
         }
-        
+
         if let Some(rx) = self.receiver.take() {
             match rx.try_recv() {
                 Ok(Ok(())) => {
@@ -302,25 +304,28 @@ pub fn start_async_buffer_read(
     queue: &wgpu::Queue,
     source: &wgpu::Buffer,
     size: u64,
-) -> (wgpu::Buffer, std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>) {
+) -> (
+    wgpu::Buffer,
+    std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+) {
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Async Staging Buffer"),
         size,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Async Buffer Copy"),
     });
     encoder.copy_buffer_to_buffer(source, 0, &staging, 0, size);
     queue.submit(Some(encoder.finish()));
-    
+
     let slice = staging.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = tx.send(result);
     });
-    
+
     (staging, rx)
 }

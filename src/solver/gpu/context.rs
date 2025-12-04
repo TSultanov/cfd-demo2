@@ -30,8 +30,7 @@ impl GpuContext {
                     max_storage_buffers_per_shader_stage: 31,
                     // Use adapter's max buffer size to support large meshes
                     max_buffer_size: adapter_limits.max_buffer_size,
-                    max_storage_buffer_binding_size: adapter_limits
-                        .max_storage_buffer_binding_size,
+                    max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
                     ..wgpu::Limits::downlevel_defaults()
                 },
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),

@@ -17,9 +17,9 @@
 // - Only scalar values (dot products, norms) are read to CPU
 // - Preconditioner sweep
 use super::async_buffer::AsyncScalarReader;
+use super::linear_solver::amg::{AmgResources, CsrMatrix};
 use super::profiling::ProfileCategory;
 use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
-use super::linear_solver::amg::{AmgResources, CsrMatrix};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use std::time::Instant;
 
@@ -114,10 +114,10 @@ pub struct FgmresResources {
     pub pipeline_solve_triangular: wgpu::ComputePipeline,
     pub pipeline_copy_scalar: wgpu::ComputePipeline,
     pub pipeline_finish_norm: wgpu::ComputePipeline,
-    
+
     /// Async scalar reader for non-blocking convergence checks (interior mutability)
     pub async_scalar_reader: std::cell::RefCell<AsyncScalarReader>,
-    
+
     /// Reusable staging buffer for scalar reads (avoids creating new buffers)
     pub b_staging_scalar: wgpu::Buffer,
 
@@ -167,10 +167,16 @@ impl GpuSolver {
         };
 
         if needs_init {
-            let row_offsets = self.read_buffer_u32(&self.b_row_offsets, self.num_cells + 1).await;
-            let col_indices = self.read_buffer_u32(&self.b_col_indices, self.num_nonzeros).await;
-            let values = self.read_buffer_f32(&self.b_matrix_values, self.num_nonzeros).await;
-            
+            let row_offsets = self
+                .read_buffer_u32(&self.b_row_offsets, self.num_cells + 1)
+                .await;
+            let col_indices = self
+                .read_buffer_u32(&self.b_col_indices, self.num_nonzeros)
+                .await;
+            let values = self
+                .read_buffer_f32(&self.b_matrix_values, self.num_nonzeros)
+                .await;
+
             let matrix = CsrMatrix {
                 row_offsets,
                 col_indices,
@@ -178,12 +184,12 @@ impl GpuSolver {
                 num_rows: self.num_cells as usize,
                 num_cols: self.num_cells as usize,
             };
-            
+
             // Use enough levels to reach a small coarse grid (< 100 cells)
             // For 1M cells with agg factor ~4, we need log4(1M/100) = log4(10000) = 6-7 levels.
             // 20 is a safe upper bound; it will stop early when size < 100.
             let amg = AmgResources::new(&self.context.device, &matrix, 20);
-            
+
             if let Some(fgmres) = &mut self.fgmres_resources {
                 fgmres.amg_resources = Some(amg);
             }
@@ -1170,16 +1176,16 @@ impl GpuSolver {
     }
 
     /// Compute norm of a vector using GPU reduction and async read
-    /// 
+    ///
     /// This uses a batched approach: all GPU work (partial reduction, final reduction,
     /// and buffer copy) is submitted in a single command buffer, then we do an async
     /// map and wait. This avoids multiple sync points.
     fn gpu_norm(&self, fgmres: &FgmresResources, x: &wgpu::Buffer, n: u32) -> f32 {
         let start = Instant::now();
-        
+
         let workgroups = self.workgroups_for_size(n);
         let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-        
+
         // Create bind groups
         let vector_bg = self.create_vector_bind_group(
             fgmres,
@@ -1188,7 +1194,7 @@ impl GpuSolver {
             &fgmres.b_dot_partial,
             "FGMRES Norm BG",
         );
-        
+
         let reduce_bg = self.create_vector_bind_group(
             fgmres,
             &fgmres.b_dot_partial,
@@ -1196,7 +1202,7 @@ impl GpuSolver {
             &fgmres.b_temp,
             "FGMRES Reduce BG",
         );
-        
+
         // Write params for partial reduction (n = vector size)
         let partial_params = RawFgmresParams {
             n,
@@ -1211,12 +1217,15 @@ impl GpuSolver {
         self.context
             .queue
             .write_buffer(&fgmres.b_params, 0, bytes_of(&partial_params));
-        
+
         // Create a single encoder for all GPU work
-        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("GPU Norm Batched"),
-        });
-        
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("GPU Norm Batched"),
+                });
+
         // Pass 1: Partial norm-squared reduction
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1230,10 +1239,10 @@ impl GpuSolver {
             pass.set_bind_group(3, &fgmres.bg_params, &[]);
             pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
-        
+
         // Submit partial reduction first (params need to change)
         self.context.queue.submit(Some(encoder.finish()));
-        
+
         // Write params for final reduction (n = num_dot_groups)
         let reduce_params = RawFgmresParams {
             n: fgmres.num_dot_groups,
@@ -1248,12 +1257,15 @@ impl GpuSolver {
         self.context
             .queue
             .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
-        
+
         // Create encoder for final reduction + copy
-        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("GPU Norm Final + Copy"),
-        });
-        
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("GPU Norm Final + Copy"),
+                });
+
         // Pass 2: Final reduction (sums partials, writes to scalars[0])
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1267,20 +1279,20 @@ impl GpuSolver {
             pass.set_bind_group(3, &fgmres.bg_params, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
-        
+
         // Copy result to staging buffer (in same encoder)
         encoder.copy_buffer_to_buffer(&fgmres.b_scalars, 0, &fgmres.b_staging_scalar, 0, 4);
-        
+
         // Submit final reduction + copy together
         self.context.queue.submit(Some(encoder.finish()));
-        
+
         self.profiling_stats.record_location(
             "gpu_norm:dispatch",
             ProfileCategory::GpuDispatch,
             start.elapsed(),
             0,
         );
-        
+
         // Restore params.n for future operations (non-blocking write)
         let restore_params = RawFgmresParams {
             n,
@@ -1295,7 +1307,7 @@ impl GpuSolver {
         self.context
             .queue
             .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
-        
+
         // Async read the scalar
         let read_start = Instant::now();
         let norm_sq = self.read_scalar_async(fgmres);
@@ -1308,7 +1320,7 @@ impl GpuSolver {
 
         norm_sq.sqrt()
     }
-    
+
     /// Async scalar read - starts async map immediately after submission
     /// and polls with yielding to allow other work to proceed
     fn read_scalar_async(&self, fgmres: &FgmresResources) -> f32 {
@@ -1318,13 +1330,13 @@ impl GpuSolver {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        
+
         // Poll with a combination of spinning and yielding for efficiency
         let mut spin_count = 0;
         loop {
             // Poll the device to make progress on GPU work
             let _ = self.context.device.poll(wgpu::PollType::Poll);
-            
+
             match rx.try_recv() {
                 Ok(Ok(())) => break,
                 Ok(Err(e)) => panic!("Buffer mapping failed: {:?}", e),
@@ -1346,13 +1358,13 @@ impl GpuSolver {
                 }
             }
         }
-        
+
         // Read the value
         let data = slice.get_mapped_range();
         let value: f32 = *bytemuck::from_bytes(&data[0..4]);
         drop(data);
         fgmres.b_staging_scalar.unmap();
-        
+
         value
     }
 
@@ -1476,7 +1488,7 @@ impl GpuSolver {
         self.ensure_fgmres_resources(max_restart);
 
         if self.constants.precond_type == 1 {
-             pollster::block_on(self.ensure_amg_resources());
+            pollster::block_on(self.ensure_amg_resources());
         }
 
         let Some(res) = &self.coupled_resources else {
@@ -1598,9 +1610,11 @@ impl GpuSolver {
                 // 1. Predict Velocity
                 // Clear p_sol before starting
                 {
-                    let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Clear p_sol"),
-                    });
+                    let mut encoder = self.context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("Clear p_sol"),
+                        },
+                    );
                     encoder.clear_buffer(&fgmres.b_p_sol, 0, None);
                     self.context.queue.submit(Some(encoder.finish()));
                 }
@@ -1636,15 +1650,37 @@ impl GpuSolver {
                 if self.constants.precond_type == 1 {
                     if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
                         let level0 = &amg.levels[0];
-                        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("AMG Setup") });
-                        
-                        encoder.copy_buffer_to_buffer(&fgmres.b_temp_p, 0, &level0.b_b, 0, (self.num_cells as u64) * 4);
-                        encoder.copy_buffer_to_buffer(&fgmres.b_p_sol, 0, &level0.b_x, 0, (self.num_cells as u64) * 4);
-                        
+                        let mut encoder = self.context.device.create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor {
+                                label: Some("AMG Setup"),
+                            },
+                        );
+
+                        encoder.copy_buffer_to_buffer(
+                            &fgmres.b_temp_p,
+                            0,
+                            &level0.b_b,
+                            0,
+                            (self.num_cells as u64) * 4,
+                        );
+                        encoder.copy_buffer_to_buffer(
+                            &fgmres.b_p_sol,
+                            0,
+                            &level0.b_x,
+                            0,
+                            (self.num_cells as u64) * 4,
+                        );
+
                         amg.v_cycle(&mut encoder, &self.context.device);
-                        
-                        encoder.copy_buffer_to_buffer(&level0.b_x, 0, &fgmres.b_p_sol, 0, (self.num_cells as u64) * 4);
-                        
+
+                        encoder.copy_buffer_to_buffer(
+                            &level0.b_x,
+                            0,
+                            &fgmres.b_p_sol,
+                            0,
+                            (self.num_cells as u64) * 4,
+                        );
+
                         self.context.queue.submit(Some(encoder.finish()));
                     }
                 } else {
@@ -1907,7 +1943,7 @@ impl GpuSolver {
                 // Async convergence checking - use non-blocking poll
                 // Poll the device without waiting (allows GPU work to continue)
                 let _ = self.context.device.poll(wgpu::PollType::Poll);
-                
+
                 // Check convergence every few iterations to balance early termination vs overhead.
                 // Lower values detect convergence earlier but have slightly more overhead.
                 // The async buffer now handles back-pressure safely, so any value >= 1 is safe.
@@ -1918,10 +1954,10 @@ impl GpuSolver {
                 if should_check {
                     // Use RefCell to get mutable access to async reader
                     let mut async_reader = fgmres.async_scalar_reader.borrow_mut();
-                    
+
                     // Poll for completed reads from previous iterations
                     async_reader.poll();
-                    
+
                     // Start async read for this iteration's residual
                     let read_start = Instant::now();
                     async_reader.start_read(
@@ -1936,7 +1972,7 @@ impl GpuSolver {
                         read_start.elapsed(),
                         0,
                     );
-                    
+
                     // Check the result from PREVIOUS async read (if available)
                     // This allows GPU work to continue while we wait
                     if let Some(resid_est) = async_reader.get_last_value() {

@@ -286,29 +286,33 @@ fn test_voronoi_generation() {
 
         assert!(faces.len() >= 3, "Cell {} has fewer than 3 faces", i);
     }
-    
+
     // Verify all cells have CCW vertex ordering (positive signed area)
     let mut cw_count = 0;
     for i in 0..mesh.num_cells() {
         let start = mesh.cell_vertex_offsets[i];
         let end = mesh.cell_vertex_offsets[i + 1];
         let n = end - start;
-        
+
         if n < 3 {
             continue;
         }
-        
+
         let mut signed_area = 0.0;
         for k in 0..n {
             let v_idx0 = mesh.cell_vertices[start + k];
             let v_idx1 = mesh.cell_vertices[start + (k + 1) % n];
             signed_area += mesh.vx[v_idx0] * mesh.vy[v_idx1] - mesh.vx[v_idx1] * mesh.vy[v_idx0];
         }
-        
+
         if signed_area < 0.0 {
             cw_count += 1;
         }
     }
-    
-    assert_eq!(cw_count, 0, "All Voronoi cells should have CCW vertex ordering, found {} CW cells", cw_count);
+
+    assert_eq!(
+        cw_count, 0,
+        "All Voronoi cells should have CCW vertex ordering, found {} CW cells",
+        cw_count
+    );
 }

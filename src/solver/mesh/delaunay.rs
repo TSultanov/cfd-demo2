@@ -94,7 +94,7 @@ impl Triangle {
 
         // Check orientation of a, b, c
         let det_abc = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        
+
         // If det_abc is negative, points are clockwise. Swap b and c to make them CCW for the check.
         // Note: we don't change self.v2/v3, just local variables.
         let (b, c) = if det_abc < 0.0 { (c, b) } else { (b, c) };
@@ -111,15 +111,12 @@ impl Triangle {
         let blift = bdx * bdx + bdy * bdy;
         let clift = cdx * cdx + cdy * cdy;
 
-        let det = adx * (bdy * clift - cdy * blift)
-                - ady * (bdx * clift - cdx * blift)
-                + alift * (bdx * cdy - cdx * bdy);
+        let det = adx * (bdy * clift - cdy * blift) - ady * (bdx * clift - cdx * blift)
+            + alift * (bdx * cdy - cdx * bdy);
 
         det > 1e-10 // Positive means inside
     }
 }
-
-
 
 use rand::Rng;
 use rayon::prelude::*;
@@ -386,21 +383,21 @@ fn smooth_generators(
             let py = f64x4::new([points[n0].y, points[n1].y, points[n2].y, points[n3].y]);
 
             let dist = geo.sdf_batch(px, py).abs();
-            
+
             let min_sz = f64x4::splat(min_cell_size);
             let max_sz = f64x4::splat(max_cell_size);
             let gr = f64x4::splat((growth_rate - 1.0).max(0.0));
-            
+
             let r = (min_sz + gr * dist).min(max_sz);
             let w = f64x4::splat(1.0) / r.max(f64x4::splat(1e-6));
-            
+
             let wx = px * w;
             let wy = py * w;
-            
+
             let arr_wx: [f64; 4] = wx.into();
             let arr_wy: [f64; 4] = wy.into();
             let arr_w: [f64; 4] = w.into();
-            
+
             sum_x += arr_wx[0] + arr_wx[1] + arr_wx[2] + arr_wx[3];
             sum_y += arr_wy[0] + arr_wy[1] + arr_wy[2] + arr_wy[3];
             sum_w += arr_w[0] + arr_w[1] + arr_w[2] + arr_w[3];
@@ -513,7 +510,7 @@ fn compute_triangulation(
 
     for (i, &p) in points.iter().enumerate() {
         let mut curr = last_tri_idx;
-        
+
         // Walk to find triangle containing p
         let mut iter = 0;
         let max_iter = dt.triangles.len(); // Safety break
@@ -528,13 +525,13 @@ fn compute_triangulation(
             iter += 1;
 
             if !dt.active[curr] {
-                 if let Some(idx) = dt.active.iter().position(|&x| x) {
+                if let Some(idx) = dt.active.iter().position(|&x| x) {
                     curr = idx;
-                 } else {
-                     break; 
-                 }
+                } else {
+                    break;
+                }
             }
-            
+
             let t = dt.triangles[curr];
             let p_a = working_points[t.v1];
             let p_b = working_points[t.v2];
@@ -566,7 +563,7 @@ fn compute_triangulation(
         }
 
         let start_bad = curr;
-        
+
         let mut bad_triangles = Vec::new();
         let mut queue = Vec::new();
         let mut visited = HashSet::new();
@@ -595,12 +592,12 @@ fn compute_triangulation(
             continue;
         }
 
-        let mut boundary_edges = Vec::new(); 
+        let mut boundary_edges = Vec::new();
 
         for &t_idx in &bad_triangles {
             let t = dt.triangles[t_idx];
             let edges = [(t.v1, t.v2, 0), (t.v2, t.v3, 1), (t.v3, t.v1, 2)];
-            
+
             for (v_start, v_end, neigh_idx) in edges {
                 let neighbor = t.neighbors[neigh_idx];
                 let is_boundary_edge = match neighbor {
@@ -619,84 +616,114 @@ fn compute_triangulation(
         }
 
         let mut new_tri_indices = Vec::new();
-        
+
         for &(u, v, neighbor) in &boundary_edges {
-            let new_t = Triangle::new(u, v, i, working_points[u], working_points[v], working_points[i]);
+            let new_t = Triangle::new(
+                u,
+                v,
+                i,
+                working_points[u],
+                working_points[v],
+                working_points[i],
+            );
             let idx = dt.add_triangle(new_t);
             new_tri_indices.push(idx);
-            
+
             // Assign neighbor for the boundary edge
             let t = &mut dt.triangles[idx];
-            if t.v1 == u && t.v2 == v { t.neighbors[0] = neighbor; }
-            else if t.v2 == u && t.v3 == v { t.neighbors[1] = neighbor; }
-            else if t.v3 == u && t.v1 == v { t.neighbors[2] = neighbor; }
+            if t.v1 == u && t.v2 == v {
+                t.neighbors[0] = neighbor;
+            } else if t.v2 == u && t.v3 == v {
+                t.neighbors[1] = neighbor;
+            } else if t.v3 == u && t.v1 == v {
+                t.neighbors[2] = neighbor;
+            }
             // Handle swapped cases if any (though u,v should match edge direction)
-            else if t.v1 == v && t.v2 == u { t.neighbors[0] = neighbor; }
-            else if t.v2 == v && t.v3 == u { t.neighbors[1] = neighbor; }
-            else if t.v3 == v && t.v1 == u { t.neighbors[2] = neighbor; }
-            
+            else if t.v1 == v && t.v2 == u {
+                t.neighbors[0] = neighbor;
+            } else if t.v2 == v && t.v3 == u {
+                t.neighbors[1] = neighbor;
+            } else if t.v3 == v && t.v1 == u {
+                t.neighbors[2] = neighbor;
+            }
+
             if let Some(n_idx) = neighbor {
                 let n_tri = &mut dt.triangles[n_idx];
-                if n_tri.v1 == v && n_tri.v2 == u { n_tri.neighbors[0] = Some(idx); }
-                else if n_tri.v2 == v && n_tri.v3 == u { n_tri.neighbors[1] = Some(idx); }
-                else if n_tri.v3 == v && n_tri.v1 == u { n_tri.neighbors[2] = Some(idx); }
+                if n_tri.v1 == v && n_tri.v2 == u {
+                    n_tri.neighbors[0] = Some(idx);
+                } else if n_tri.v2 == v && n_tri.v3 == u {
+                    n_tri.neighbors[1] = Some(idx);
+                } else if n_tri.v3 == v && n_tri.v1 == u {
+                    n_tri.neighbors[2] = Some(idx);
+                }
             }
         }
-        
+
         let n_new = new_tri_indices.len();
         for k in 0..n_new {
             let t_idx = new_tri_indices[k];
             let t = dt.triangles[t_idx];
-            
+
             for edge_idx in 0..3 {
                 if dt.triangles[t_idx].neighbors[edge_idx].is_some() {
                     continue;
                 }
-                
+
                 let (ea, eb) = match edge_idx {
                     0 => (t.v1, t.v2),
                     1 => (t.v2, t.v3),
                     2 => (t.v3, t.v1),
                     _ => unreachable!(),
                 };
-                
+
                 for m in 0..n_new {
-                    if k == m { continue; }
+                    if k == m {
+                        continue;
+                    }
                     let other_idx = new_tri_indices[m];
                     let other = dt.triangles[other_idx];
-                    
-                    if (other.v1 == eb && other.v2 == ea) || 
-                       (other.v2 == eb && other.v3 == ea) || 
-                       (other.v3 == eb && other.v1 == ea) {
+
+                    if (other.v1 == eb && other.v2 == ea)
+                        || (other.v2 == eb && other.v3 == ea)
+                        || (other.v3 == eb && other.v1 == ea)
+                    {
                         dt.triangles[t_idx].neighbors[edge_idx] = Some(other_idx);
                         break;
                     }
                 }
             }
         }
-        
+
         if !new_tri_indices.is_empty() {
             last_tri_idx = new_tri_indices[0];
         }
     }
 
-    dt.triangles.into_iter().enumerate().filter_map(|(i, t)| {
-        if !dt.active[i] { return None; }
-        if t.v1 >= n_points || t.v2 >= n_points || t.v3 >= n_points { return None; }
-        
-        if !fixed_nodes[t.v1] || !fixed_nodes[t.v2] || !fixed_nodes[t.v3] {
-             return Some(t);
-        }
-        let p1 = points[t.v1];
-        let p2 = points[t.v2];
-        let p3 = points[t.v3];
-        let centroid = Point2::new((p1.x + p2.x + p3.x) / 3.0, (p1.y + p2.y + p3.y) / 3.0);
-        if geo.is_inside(&centroid) {
-            Some(t)
-        } else {
-            None
-        }
-    }).collect()
+    dt.triangles
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            if !dt.active[i] {
+                return None;
+            }
+            if t.v1 >= n_points || t.v2 >= n_points || t.v3 >= n_points {
+                return None;
+            }
+
+            if !fixed_nodes[t.v1] || !fixed_nodes[t.v2] || !fixed_nodes[t.v3] {
+                return Some(t);
+            }
+            let p1 = points[t.v1];
+            let p2 = points[t.v2];
+            let p3 = points[t.v3];
+            let centroid = Point2::new((p1.x + p2.x + p3.x) / 3.0, (p1.y + p2.y + p3.y) / 3.0);
+            if geo.is_inside(&centroid) {
+                Some(t)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 pub fn generate_delaunay_mesh(

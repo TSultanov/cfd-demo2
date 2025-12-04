@@ -208,7 +208,10 @@ impl GpuSolver {
             // Debug: Check matrix and RHS after assembly on first iteration - DEBUG READS
             if DEBUG_READS_ENABLED && iter == 0 {
                 let sync_start = Instant::now();
-                let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
+                let _ = self
+                    .context
+                    .device
+                    .poll(wgpu::PollType::wait_indefinitely());
                 self.profiling_stats.record_location(
                     "coupled:debug_sync",
                     ProfileCategory::GpuSync,
@@ -413,7 +416,7 @@ impl GpuSolver {
                 if let Some(res) = self.coupled_resources.as_ref() {
                     let mut reader = res.async_scalar_reader.borrow_mut();
                     reader.poll(); // Poll for completion of previous reads
-                    
+
                     // Check if we have a result available
                     if let Some(results) = reader.get_last_value_vec(2) {
                         let max_diff_u = results[0] as f64;
@@ -437,12 +440,14 @@ impl GpuSolver {
 
                         // Stagnation check
                         let stagnation_factor = 1e-2;
-                        let rel_u = if prev_residual_u.is_finite() && prev_residual_u.abs() > 1e-14 {
+                        let rel_u = if prev_residual_u.is_finite() && prev_residual_u.abs() > 1e-14
+                        {
                             ((max_diff_u - prev_residual_u) / prev_residual_u).abs()
                         } else {
                             f64::INFINITY
                         };
-                        let rel_p = if prev_residual_p.is_finite() && prev_residual_p.abs() > 1e-14 {
+                        let rel_p = if prev_residual_p.is_finite() && prev_residual_p.abs() > 1e-14
+                        {
                             ((max_diff_p - prev_residual_p) / prev_residual_p).abs()
                         } else {
                             f64::INFINITY
@@ -474,7 +479,10 @@ impl GpuSolver {
         self.constants.time += self.constants.dt;
         self.update_constants();
 
-        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self
+            .context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
     }
 
     fn solve_coupled_system(&mut self) -> LinearSolverStats {
@@ -543,17 +551,19 @@ impl GpuSolver {
             _pad2: 0,
             _pad3: 0,
         };
-        self.context
-            .queue
-            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params_partial));
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            0,
+            bytemuck::bytes_of(&params_partial),
+        );
 
         // Create single command encoder for all GPU work
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Max Diff Batched Encoder"),
-            });
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Max Diff Batched Encoder"),
+                });
 
         // Pass 1: Partial reduction for U
         {
@@ -589,17 +599,19 @@ impl GpuSolver {
             _pad2: 0,
             _pad3: 0,
         };
-        self.context
-            .queue
-            .write_buffer(&res.b_max_diff_params, 0, bytemuck::bytes_of(&params_reduce));
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            0,
+            bytemuck::bytes_of(&params_reduce),
+        );
 
         // Create encoder for final reductions - batch both U and P together
-        let mut encoder2 = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Max Diff Final Reduce Encoder"),
-            });
+        let mut encoder2 =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Max Diff Final Reduce Encoder"),
+                });
 
         // Pass 3: Final reduction for U (writes to result[0])
         {

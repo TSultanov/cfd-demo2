@@ -197,9 +197,9 @@ impl GpuSolver {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        use std::time::Instant;
         use super::profiling::ProfileCategory;
-        
+        use std::time::Instant;
+
         // 1. Create staging buffer
         let t0 = Instant::now();
         let staging_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
@@ -214,7 +214,7 @@ impl GpuSolver {
             t0.elapsed(),
             0,
         );
-        
+
         // 2. Encode and submit copy command
         let t1 = Instant::now();
         let mut encoder = self
@@ -241,17 +241,20 @@ impl GpuSolver {
             t2.elapsed(),
             0,
         );
-        
+
         // 4. Poll/wait for GPU - THIS IS THE BLOCKING CALL
         let t3 = Instant::now();
-        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self
+            .context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
         self.profiling_stats.record_location(
             "read_buffer:device_poll_wait",
             ProfileCategory::GpuSync,
             t3.elapsed(),
             0,
         );
-        
+
         // 5. Wait for channel (should be instant after poll)
         let t4 = Instant::now();
         rx.recv().unwrap().unwrap();
@@ -274,7 +277,7 @@ impl GpuSolver {
             t5.elapsed(),
             size,
         );
-        
+
         result
     }
 
@@ -349,7 +352,10 @@ impl GpuSolver {
             }
             self.context.queue.submit(Some(encoder.finish()));
         }
-        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self
+            .context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
     }
 
     /// Get a reference to the detailed profiling statistics
@@ -405,7 +411,10 @@ impl GpuSolver {
             cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
-        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self
+            .context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
     }
 
     pub fn initialize_history(&self) {
@@ -428,6 +437,9 @@ impl GpuSolver {
             (self.num_cells as u64) * 8,
         );
         self.context.queue.submit(Some(encoder.finish()));
-        let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self
+            .context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
     }
 }

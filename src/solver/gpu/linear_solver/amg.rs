@@ -60,6 +60,10 @@ pub struct AmgLevel {
     pub bg_p: wgpu::BindGroup,
     pub bg_r: wgpu::BindGroup,
     pub bg_state: wgpu::BindGroup, // x, b, r
+
+    // Cross-level bind groups (interaction with next coarser level)
+    pub bg_restrict: Option<wgpu::BindGroup>,   // Binds coarse.b_b
+    pub bg_prolongate: Option<wgpu::BindGroup>, // Binds coarse.b_x
 }
 
 pub struct AmgResources {
@@ -363,6 +367,20 @@ impl AmgResources {
             ],
         });
 
+        let bgl_cross = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("AMG Cross Level BGL"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
         // Build Hierarchy
         for level_idx in 0..max_levels {
             let n = current_matrix.num_rows;
@@ -590,11 +608,40 @@ impl AmgResources {
                 bg_p,
                 bg_r,
                 bg_state,
+                bg_restrict: None,
+                bg_prolongate: None,
             });
 
             if p.is_none() {
                 break;
             }
+        }
+
+        // Create cross-level bind groups
+        for i in 0..levels.len() - 1 {
+            let coarse_b = &levels[i + 1].b_b;
+            let coarse_x = &levels[i + 1].b_x;
+
+            let bg_restrict = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("AMG L{} Cross Restrict", i)),
+                layout: &bgl_cross,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: coarse_b.as_entire_binding(),
+                }],
+            });
+
+            let bg_prolongate = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("AMG L{} Cross Prolongate", i)),
+                layout: &bgl_cross,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: coarse_x.as_entire_binding(),
+                }],
+            });
+
+            levels[i].bg_restrict = Some(bg_restrict);
+            levels[i].bg_prolongate = Some(bg_prolongate);
         }
 
         // Pipelines
@@ -604,19 +651,7 @@ impl AmgResources {
         });
 
         // Layouts
-        let bgl_cross = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("AMG Cross Level BGL"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        // bgl_cross moved up
 
         let layout_smooth = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("AMG Smooth Layout"),
@@ -656,7 +691,7 @@ impl AmgResources {
         }
     }
 
-    pub fn v_cycle(&self, encoder: &mut wgpu::CommandEncoder, device: &wgpu::Device) {
+    pub fn v_cycle(&self, encoder: &mut wgpu::CommandEncoder, _device: &wgpu::Device) {
         let num_levels = self.levels.len();
         if num_levels == 0 {
             return;
@@ -695,16 +730,7 @@ impl AmgResources {
             }
 
             // 3. Restrict (r_fine -> b_coarse)
-            let bg_cross = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("AMG Cross Restrict"),
-                layout: &self.bgl_cross,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: coarse.b_b.as_entire_binding(),
-                }],
-            });
-
-            {
+            if let Some(bg_cross) = &fine.bg_restrict {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("AMG Restrict"),
                     timestamp_writes: None,
@@ -713,7 +739,7 @@ impl AmgResources {
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
                 pass.set_bind_group(1, &fine.bg_state, &[]);
                 pass.set_bind_group(2, &fine.bg_r, &[]);
-                pass.set_bind_group(3, &bg_cross, &[]);
+                pass.set_bind_group(3, bg_cross, &[]);
                 pass.dispatch_workgroups(coarse_groups, 1, 1);
             }
 
@@ -747,20 +773,11 @@ impl AmgResources {
         // Upward cycle
         for i in (0..num_levels - 1).rev() {
             let fine = &self.levels[i];
-            let coarse = &self.levels[i + 1];
+            let _coarse = &self.levels[i + 1];
             let fine_groups = fine.size.div_ceil(64);
 
             // Prolongate (x_fine += P * x_coarse)
-            let bg_cross = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("AMG Cross Prolongate"),
-                layout: &self.bgl_cross,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: coarse.b_x.as_entire_binding(),
-                }],
-            });
-
-            {
+            if let Some(bg_cross) = &fine.bg_prolongate {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("AMG Prolongate"),
                     timestamp_writes: None,
@@ -769,7 +786,7 @@ impl AmgResources {
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
                 pass.set_bind_group(1, &fine.bg_state, &[]);
                 pass.set_bind_group(2, &fine.bg_p, &[]);
-                pass.set_bind_group(3, &bg_cross, &[]);
+                pass.set_bind_group(3, bg_cross, &[]);
                 pass.dispatch_workgroups(fine_groups, 1, 1);
             }
 

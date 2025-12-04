@@ -73,19 +73,6 @@ impl GpuSolver {
             self.profiling_stats.increment_iteration();
             println!("Coupled Iteration: {}", iter + 1);
 
-            // Update fluxes with current velocity for advection terms
-            if iter > 0 {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Flux and D_P Encoder"),
-                        });
-                // Merged kernel for Flux and D_P
-                self.compute_fluxes_and_dp_with_encoder(&mut encoder);
-                self.context.queue.submit(Some(encoder.finish()));
-            }
-
             // Debug: Check d_p values on first iteration - DEBUG READ
             if DEBUG_READS_ENABLED && iter == 0 {
                 let read_start = Instant::now();
@@ -106,14 +93,22 @@ impl GpuSolver {
             }
 
             // Compute Gradients AND Assemble Coupled System (Merged Dispatch)
-            if let Some(res) = self.coupled_resources.as_ref() {
+            if self.coupled_resources.is_some() {
                 let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Gradient & Assembly Encoder"),
+                            label: Some("Coupled Step Encoder"),
                         });
+
+                // Update fluxes with current velocity for advection terms (if iter > 0)
+                if iter > 0 {
+                    // Merged kernel for Flux and D_P
+                    self.compute_fluxes_and_dp_with_encoder(&mut encoder);
+                }
+
+                let res = self.coupled_resources.as_ref().unwrap();
 
                 // 1. Gradient Coupled (Only if scheme != 0)
                 if self.constants.scheme != 0 {

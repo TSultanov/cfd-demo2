@@ -120,6 +120,7 @@ struct CachedGpuStats {
     outer_residual_u: f32,
     outer_residual_p: f32,
     outer_iterations: u32,
+    step_time_ms: f32,
 }
 
 pub struct CFDApp {
@@ -839,7 +840,9 @@ impl eframe::App for CFDApp {
                                 thread::spawn(move || {
                                     while running_flag.load(Ordering::Relaxed) {
                                         if let Ok(mut solver) = solver_arc.lock() {
+                                            let start = std::time::Instant::now();
                                             solver.step();
+                                            let step_time = start.elapsed().as_secs_f32() * 1000.0;
                                             let u = pollster::block_on(solver.get_u());
                                             let p = pollster::block_on(solver.get_p());
 
@@ -892,6 +895,7 @@ impl eframe::App for CFDApp {
                                                     .outer_iterations
                                                     .lock()
                                                     .unwrap(),
+                                                step_time_ms: step_time,
                                             };
 
                                             if let Ok(mut results) = shared_results.lock() {
@@ -919,11 +923,10 @@ impl eframe::App for CFDApp {
                         }
 
                         let stats = &self.cached_gpu_stats;
-                        ui.label(format!("Time: {:.3}", stats.time));
                         ui.label(format!("dt: {:.2e}", stats.dt));
                         ui.label(format!(
-                            "Coupled: {} iters, U:{:.2e} P:{:.2e}",
-                            stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p
+                            "Coupled: {} iters, U:{:.2e} P:{:.2e} ({:.1} ms)",
+                            stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p, stats.step_time_ms
                         ));
                     }
                 });

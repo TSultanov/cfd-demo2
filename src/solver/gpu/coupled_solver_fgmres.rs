@@ -1237,20 +1237,15 @@ impl GpuSolver {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
 
-        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some(label),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, vector_bg, &[]);
-            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
-            pass.set_bind_group(2, &fgmres.bg_precond, &[]);
-            pass.set_bind_group(3, group3_bg, &[]);
-            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-        }
+        self.dispatch_vector_pipeline_with_encoder(
+            &mut encoder,
+            pipeline,
+            fgmres,
+            vector_bg,
+            group3_bg,
+            workgroups,
+            label,
+        );
 
         self.context.queue.submit(Some(encoder.finish()));
         self.profiling_stats.record_location(
@@ -1261,10 +1256,35 @@ impl GpuSolver {
         );
     }
 
-    /// Dispatch multiple iterations of a pipeline in a single command buffer submission.
-    /// This reduces CPU-GPU synchronization overhead by batching dispatches.
-    fn dispatch_vector_pipeline_batched(
+    fn dispatch_vector_pipeline_with_encoder(
         &self,
+        encoder: &mut wgpu::CommandEncoder,
+        pipeline: &wgpu::ComputePipeline,
+        fgmres: &FgmresResources,
+        vector_bg: &wgpu::BindGroup,
+        group3_bg: &wgpu::BindGroup,
+        workgroups: u32,
+        label: &str,
+    ) {
+        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
+
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(label),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, vector_bg, &[]);
+        pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
+        pass.set_bind_group(2, &fgmres.bg_precond, &[]);
+        pass.set_bind_group(3, group3_bg, &[]);
+        pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+    }
+
+
+
+    fn dispatch_vector_pipeline_batched_with_encoder(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
         pipeline: &wgpu::ComputePipeline,
         fgmres: &FgmresResources,
         vector_bg: &wgpu::BindGroup,
@@ -1273,12 +1293,6 @@ impl GpuSolver {
         iterations: usize,
         label: &str,
     ) {
-        let start = Instant::now();
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
-
         let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
 
         // Encode all iterations in a single command buffer
@@ -1294,14 +1308,6 @@ impl GpuSolver {
             pass.set_bind_group(3, group3_bg, &[]);
             pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
-
-        self.context.queue.submit(Some(encoder.finish()));
-        self.profiling_stats.record_location(
-            label,
-            ProfileCategory::GpuDispatch,
-            start.elapsed(),
-            0,
-        );
     }
 
     /// Compute norm of a vector using GPU reduction and async read
@@ -1747,16 +1753,7 @@ impl GpuSolver {
                 total_iters += 1;
 
                 // 1. Predict Velocity
-                // Clear p_sol before starting
-                {
-                    let mut encoder = self.context.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("Clear p_sol"),
-                        },
-                    );
-                    encoder.clear_buffer(&fgmres.b_p_sol, 0, None);
-                    self.context.queue.submit(Some(encoder.finish()));
-                }
+                // Clear p_sol is now handled by predict_and_form_schur (initializes with first Jacobi step)
 
                 let precond_bg = self.create_schur_vector_bind_group(
                     fgmres,
@@ -1767,7 +1764,15 @@ impl GpuSolver {
                     "FGMRES Schur BG",
                 );
 
-                self.dispatch_vector_pipeline(
+                let dispatch_start = Instant::now();
+                let mut encoder = self.context.device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("FGMRES Preconditioner Step"),
+                    },
+                );
+
+                self.dispatch_vector_pipeline_with_encoder(
+                    &mut encoder,
                     &fgmres.pipeline_predict_and_form,
                     fgmres,
                     &precond_bg,
@@ -1780,12 +1785,7 @@ impl GpuSolver {
                 if self.constants.precond_type == 1 {
                     if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
                         let level0 = &amg.levels[0];
-                        let mut encoder = self.context.device.create_command_encoder(
-                            &wgpu::CommandEncoderDescriptor {
-                                label: Some("AMG Setup"),
-                            },
-                        );
-
+                        
                         encoder.copy_buffer_to_buffer(
                             &fgmres.b_temp_p,
                             0,
@@ -1810,33 +1810,44 @@ impl GpuSolver {
                             0,
                             (self.num_cells as u64) * 4,
                         );
-
-                        self.context.queue.submit(Some(encoder.finish()));
                     }
                 } else {
                     // Scale iterations with mesh size: Jacobi convergence degrades with larger meshes.
                     // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
                     // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
-                    let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200);
-                    self.dispatch_vector_pipeline_batched(
-                        &fgmres.pipeline_relax_pressure,
-                        fgmres,
-                        &precond_bg,
-                        &fgmres.bg_pressure_matrix,
-                        workgroups_cells,
-                        p_iters,
-                        "Schur Relax P",
-                    );
+                    // Reduced by 1 because predict_and_form now does the first iteration
+                    let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200).saturating_sub(1);
+                    if p_iters > 0 {
+                        self.dispatch_vector_pipeline_batched_with_encoder(
+                            &mut encoder,
+                            &fgmres.pipeline_relax_pressure,
+                            fgmres,
+                            &precond_bg,
+                            &fgmres.bg_pressure_matrix,
+                            workgroups_cells,
+                            p_iters,
+                            "Schur Relax P",
+                        );
+                    }
                 }
 
                 // 4. Correct Velocity
-                self.dispatch_vector_pipeline(
+                self.dispatch_vector_pipeline_with_encoder(
+                    &mut encoder,
                     &fgmres.pipeline_correct_vel,
                     fgmres,
                     &precond_bg,
                     &fgmres.bg_pressure_matrix,
                     workgroups_cells,
                     "Schur Correct Vel",
+                );
+
+                self.context.queue.submit(Some(encoder.finish()));
+                self.profiling_stats.record_location(
+                    "FGMRES Preconditioner Step",
+                    ProfileCategory::GpuDispatch,
+                    dispatch_start.elapsed(),
+                    0,
                 );
 
                 // w = A * z_j

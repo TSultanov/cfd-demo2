@@ -253,4 +253,8 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     temp_p[cell] = rhs_p;
+    
+    // Initialize p_sol with first Jacobi step (assuming initial p_sol is 0)
+    // p_sol = D^{-1} * rhs
+    p_sol[cell] = diag_p_inv[cell] * rhs_p;
 }

@@ -239,6 +239,7 @@ pub struct GpuSolver {
     pub pipeline_coupled_assembly: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
+    pub pipeline_flux_and_dp: wgpu::ComputePipeline,
     pub pipeline_init_cg_scalars: wgpu::ComputePipeline,
 
     pub num_cells: u32,

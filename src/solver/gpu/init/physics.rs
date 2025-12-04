@@ -8,6 +8,7 @@ pub struct PhysicsPipelines {
     pub pipeline_coupled_assembly: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
+    pub pipeline_flux_and_dp: wgpu::ComputePipeline,
 }
 
 pub fn init_physics_pipelines(
@@ -168,6 +169,23 @@ pub fn init_physics_pipelines(
             cache: None,
         });
 
+    let shader_flux_and_dp = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Flux and DP Shader"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+            "../shaders/flux_and_dp.wgsl"
+        ))),
+    });
+
+    let pipeline_flux_and_dp =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Flux and DP Pipeline"),
+            layout: Some(&pl_matrix), // Uses mesh, fields, and solver (Group 0, 1, 2)
+            module: &shader_flux_and_dp,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
     PhysicsPipelines {
         pipeline_gradient_coupled,
         pipeline_momentum_assembly,
@@ -176,5 +194,6 @@ pub fn init_physics_pipelines(
         pipeline_coupled_assembly,
         pipeline_coupled_assembly_merged,
         pipeline_update_from_coupled,
+        pipeline_flux_and_dp,
     }
 }

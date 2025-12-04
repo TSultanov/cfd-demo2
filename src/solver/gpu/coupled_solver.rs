@@ -45,8 +45,8 @@ impl GpuSolver {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Init Flux and D_P Encoder"),
                     });
-            self.compute_fluxes_with_encoder(&mut encoder);
-            self.initialize_d_p_with_encoder(num_groups_cells, &mut encoder);
+            // Merged kernel for Flux and D_P
+            self.compute_fluxes_and_dp_with_encoder(&mut encoder);
             self.context.queue.submit(Some(encoder.finish()));
         }
 
@@ -81,9 +81,8 @@ impl GpuSolver {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("Flux and D_P Encoder"),
                         });
-                self.compute_fluxes_with_encoder(&mut encoder);
-                // Re-compute d_p based on current velocity/fluxes
-                self.initialize_d_p_with_encoder(num_groups_cells, &mut encoder);
+                // Merged kernel for Flux and D_P
+                self.compute_fluxes_and_dp_with_encoder(&mut encoder);
                 self.context.queue.submit(Some(encoder.finish()));
             }
 

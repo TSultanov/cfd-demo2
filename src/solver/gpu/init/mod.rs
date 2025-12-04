@@ -135,6 +135,7 @@ impl GpuSolver {
             pipeline_coupled_assembly: physics_res.pipeline_coupled_assembly,
             pipeline_coupled_assembly_merged: physics_res.pipeline_coupled_assembly_merged,
             pipeline_update_from_coupled: physics_res.pipeline_update_from_coupled,
+            pipeline_flux_and_dp: physics_res.pipeline_flux_and_dp,
 
             // Misc
             num_cells,

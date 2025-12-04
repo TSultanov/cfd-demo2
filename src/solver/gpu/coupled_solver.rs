@@ -443,28 +443,14 @@ impl GpuSolver {
             bytemuck::bytes_of(&params_reduce),
         );
 
-        // Pass 1: Final reduction for U (writes to result[0])
+        // Single pass reduction writes both U and P maxima
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Max Diff U Final Pass"),
+                label: Some("Max Diff Final Pass"),
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_reduce);
-            cpass.set_bind_group(0, &res.bg_reduce_u, &[]);
-            // Use dynamic offset 256
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[256]);
-            cpass.dispatch_workgroups(1, 1, 1);
-        }
-
-        // Pass 2: Final reduction for P (writes to result[1])
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Max Diff P Final Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&res.pipeline_max_diff_reduce_p);
-            cpass.set_bind_group(0, &res.bg_reduce_p, &[]);
-            // Use dynamic offset 256
+            cpass.set_bind_group(0, &res.bg_reduce, &[]);
             cpass.set_bind_group(1, &res.bg_max_diff_params, &[256]);
             cpass.dispatch_workgroups(1, 1, 1);
         }

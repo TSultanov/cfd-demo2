@@ -1081,21 +1081,11 @@ fn init_coupled_resources(
             cache: None,
         });
 
-    let pipeline_max_diff_reduce_p =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Max Diff Reduce P Pipeline"),
-            layout: Some(&pl_max_diff),
-            module: &shader_max_diff,
-            entry_point: Some("max_reduce_final_p"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
     // Create cached bind groups for max-diff
     // bg_max_diff_u and bg_max_diff_p removed
 
-    let bg_reduce_u = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Max Diff U Reduce Bind Group"),
+    let bg_reduce = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Max Diff Combined Reduce Bind Group"),
         layout: &bgl_max_diff,
         entries: &[
             wgpu::BindGroupEntry {
@@ -1104,30 +1094,11 @@ fn init_coupled_resources(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_max_diff_partial_p.as_entire_binding(), // Dummy (unused by shader)
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_dummy.as_entire_binding(), // Dummy (unused by shader)
-            },
-        ],
-    });
-
-    let bg_reduce_p = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Max Diff P Reduce Bind Group"),
-        layout: &bgl_max_diff,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
                 resource: b_max_diff_partial_p.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_max_diff_partial_u.as_entire_binding(), // Dummy (unused by shader)
-            },
-            wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_dummy.as_entire_binding(), // Dummy (unused by shader)
+                resource: b_dummy.as_entire_binding(),
             },
         ],
     });
@@ -1181,10 +1152,8 @@ fn init_coupled_resources(
         b_max_diff_params,
         bg_max_diff_params,
         pipeline_max_diff_reduce,
-        pipeline_max_diff_reduce_p,
         // Cached bind groups
-        bg_reduce_u,
-        bg_reduce_p,
+        bg_reduce,
         // Preconditioner pipelines
         pipeline_extract_diagonal,
         pipeline_precond_velocity,

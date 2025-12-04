@@ -52,34 +52,21 @@ fn max_abs_diff_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
     }
 }
 
-// Final reduction of partial maxes
-// Note: For the reduce step, we bind partial results to vec_a (binding 0)
-// and write to result (binding 1 of group 1)
+// Final reduction of partial maxes for both velocity (vec_a) and pressure (vec_b)
+// Both reductions now occur in a single dispatch to minimize GPU submissions.
 @compute @workgroup_size(1)
 fn max_reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    // params.n now holds the number of partial results
-    // Partial results are in vec_a (binding 0) for the reduce step
-    var total_max = 0.0;
     let num_partials = params.n;
-    
-    for (var i = 0u; i < num_partials; i++) {
-        total_max = max(total_max, vec_a[i]);
-    }
-    
-    result[0] = total_max;
-}
+    var total_max_u = 0.0;
+    var total_max_p = 0.0;
 
-// Final reduction writing to result[1] (for P, so U and P can be read together)
-@compute @workgroup_size(1)
-fn max_reduce_final_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var total_max = 0.0;
-    let num_partials = params.n;
-    
     for (var i = 0u; i < num_partials; i++) {
-        total_max = max(total_max, vec_a[i]);
+        total_max_u = max(total_max_u, vec_a[i]);
+        total_max_p = max(total_max_p, vec_b[i]);
     }
-    
-    result[1] = total_max;
+
+    result[0] = total_max_u;
+    result[1] = total_max_p;
 }
 
 // Variant for vec2 (e.g., velocity with u, v components)

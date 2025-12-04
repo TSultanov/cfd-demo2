@@ -62,10 +62,7 @@ pub struct CoupledSolverResources {
     pub b_max_diff_result: wgpu::Buffer, // Final max-diff result (2 floats: max_u, max_p)
     pub num_max_diff_groups: u32,   // Number of workgroups for max-diff reduction
 
-    // pub bg_max_diff_u: wgpu::BindGroup, // Removed
-    // pub bg_max_diff_p: wgpu::BindGroup, // Removed
-    pub bg_reduce_u: wgpu::BindGroup,
-    pub bg_reduce_p: wgpu::BindGroup,
+    pub bg_reduce: wgpu::BindGroup,
 
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
@@ -90,7 +87,6 @@ pub struct CoupledSolverResources {
     // pub pipeline_max_diff_u_partial: wgpu::ComputePipeline, // Removed
     // pub pipeline_max_diff_p_partial: wgpu::ComputePipeline, // Removed
     pub pipeline_max_diff_reduce: wgpu::ComputePipeline,
-    pub pipeline_max_diff_reduce_p: wgpu::ComputePipeline, // Writes to result[1]
 
     // Preconditioner pipelines
     pub pipeline_extract_diagonal: wgpu::ComputePipeline,

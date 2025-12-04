@@ -147,6 +147,7 @@ impl GpuSolver {
             n_outer_correctors: 20,
             coupled_resources: Some(linear_res.coupled_resources),
             profiling_stats: Arc::new(ProfilingStats::new()),
+            staging_buffers: Mutex::new(std::collections::HashMap::new()),
         }
     }
 }

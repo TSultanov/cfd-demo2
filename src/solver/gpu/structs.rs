@@ -3,6 +3,7 @@ use super::context::GpuContext;
 use super::coupled_solver_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
 use bytemuck::{Pod, Zeroable};
+use std::collections::HashMap;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -259,4 +260,7 @@ pub struct GpuSolver {
 
     /// Detailed profiling statistics for GPU-CPU communication analysis
     pub profiling_stats: Arc<ProfilingStats>,
+
+    // Cache of persistent staging buffers for GPU->CPU reads, keyed by exact size in bytes
+    pub staging_buffers: Mutex<HashMap<u64, wgpu::Buffer>>,
 }

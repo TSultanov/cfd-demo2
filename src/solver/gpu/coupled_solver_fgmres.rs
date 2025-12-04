@@ -25,8 +25,9 @@ use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
 pub struct FgmresResources {
-    /// Krylov basis vectors V_0, V_1, ..., V_m (each of size n)
-    pub basis_vectors: Vec<wgpu::Buffer>,
+    /// Krylov basis vectors V_0, V_1, ..., V_m (stored in one large buffer)
+    pub b_basis: wgpu::Buffer,
+    pub basis_stride: u64,
     /// Preconditioned vectors Z_0, Z_1, ..., Z_m-1 (for FGMRES)
     pub z_vectors: Vec<wgpu::Buffer>,
     /// Temporary vector for SpMV result
@@ -115,6 +116,13 @@ pub struct FgmresResources {
     pub pipeline_copy_scalar: wgpu::ComputePipeline,
     pub pipeline_finish_norm: wgpu::ComputePipeline,
 
+    // CGS Pipelines
+    pub pipeline_calc_dots_cgs: wgpu::ComputePipeline,
+    pub pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
+    pub pipeline_update_w_cgs: wgpu::ComputePipeline,
+    pub bgl_cgs: wgpu::BindGroupLayout,
+    pub bg_cgs: wgpu::BindGroup,
+
     /// Async scalar reader for non-blocking convergence checks (interior mutability)
     pub async_scalar_reader: std::cell::RefCell<AsyncScalarReader>,
 
@@ -132,8 +140,8 @@ struct RawFgmresParams {
     num_iters: u32,
     omega: f32,
     dispatch_x: u32, // Width of 2D dispatch (in workgroups * 64)
-    _pad1: u32,
-    _pad2: u32,
+    max_restart: u32,
+    column_offset: u32,
     _pad3: u32,
 }
 
@@ -209,17 +217,19 @@ impl GpuSolver {
             .expect("Coupled resources must be initialized before FGMRES");
 
         // Krylov buffers
-        let mut basis_vectors = Vec::with_capacity(max_restart + 1);
-        for i in 0..=max_restart {
-            basis_vectors.push(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("FGMRES V_{}", i)),
-                size: (n as u64) * 4,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }));
-        }
+        let min_alignment = 256u64;
+        let basis_stride_unaligned = (n as u64) * 4;
+        let basis_stride = (basis_stride_unaligned + min_alignment - 1) & !(min_alignment - 1);
+        let total_basis_size = basis_stride * ((max_restart + 1) as u64);
+
+        let b_basis = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FGMRES Basis Vectors"),
+            size: total_basis_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
 
         let mut z_vectors = Vec::with_capacity(max_restart);
         for i in 0..max_restart {
@@ -253,7 +263,7 @@ impl GpuSolver {
 
         let b_dot_partial = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("FGMRES dot partial"),
-            size: (num_groups as u64) * 4,
+            size: (num_groups as u64) * ((max_restart + 1) as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
@@ -320,8 +330,8 @@ impl GpuSolver {
             num_iters: 2,
             omega: 1.0,
             dispatch_x,
-            _pad1: 0,
-            _pad2: 0,
+            max_restart: max_restart as u32,
+            column_offset: 0,
             _pad3: 0,
         };
         queue.write_buffer(&b_params, 0, bytes_of(&params));
@@ -922,8 +932,119 @@ impl GpuSolver {
         let pipeline_copy_scalar = make_logic_pipeline("FGMRES Copy Scalar", "copy_scalar");
         let pipeline_finish_norm = make_logic_pipeline("FGMRES Finish Norm", "finish_norm");
 
+        // CGS Setup
+        let bgl_cgs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("FGMRES CGS BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg_cgs = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("FGMRES CGS BG"),
+            layout: &bgl_cgs,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_basis.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_w.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_dot_partial.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+            ],
+        });
+
+        let shader_cgs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("FGMRES CGS Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_cgs.wgsl").into()),
+        });
+
+        let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("FGMRES CGS Pipeline Layout"),
+            bind_group_layouts: &[&bgl_cgs],
+            push_constant_ranges: &[],
+        });
+
+        let make_cgs_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_cgs),
+                module: &shader_cgs,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let pipeline_calc_dots_cgs = make_cgs_pipeline("CGS Calc Dots", "calc_dots_cgs");
+        let pipeline_reduce_dots_cgs = make_cgs_pipeline("CGS Reduce Dots", "reduce_dots_cgs");
+        let pipeline_update_w_cgs = make_cgs_pipeline("CGS Update W", "update_w_cgs");
+
         FgmresResources {
-            basis_vectors,
+            b_basis,
+            basis_stride,
             z_vectors,
             b_w,
             b_temp,
@@ -977,6 +1098,12 @@ impl GpuSolver {
             pipeline_solve_triangular,
             pipeline_copy_scalar,
             pipeline_finish_norm,
+            // CGS
+            pipeline_calc_dots_cgs,
+            pipeline_reduce_dots_cgs,
+            pipeline_update_w_cgs,
+            bgl_cgs,
+            bg_cgs,
             async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device, 4)),
             b_staging_scalar: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("FGMRES Staging Scalar"),
@@ -1028,12 +1155,27 @@ impl GpuSolver {
         );
     }
 
-    fn create_vector_bind_group(
+    fn basis_binding<'a>(
+        &self,
+        fgmres: &'a FgmresResources,
+        idx: usize,
+    ) -> wgpu::BindingResource<'a> {
+        let stride = fgmres.basis_stride;
+        // Use the actual vector size for the binding size, not the stride (which includes padding)
+        let vector_size = fgmres.b_w.size();
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &fgmres.b_basis,
+            offset: (idx as u64) * stride,
+            size: std::num::NonZeroU64::new(vector_size),
+        })
+    }
+
+    fn create_vector_bind_group<'a>(
         &self,
         fgmres: &FgmresResources,
-        x: &wgpu::Buffer,
-        y: &wgpu::Buffer,
-        z: &wgpu::Buffer,
+        x: wgpu::BindingResource<'a>,
+        y: wgpu::BindingResource<'a>,
+        z: wgpu::BindingResource<'a>,
         label: &str,
     ) -> wgpu::BindGroup {
         self.context
@@ -1044,27 +1186,27 @@ impl GpuSolver {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: x.as_entire_binding(),
+                        resource: x,
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: y.as_entire_binding(),
+                        resource: y,
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: z.as_entire_binding(),
+                        resource: z,
                     },
                 ],
             })
     }
 
-    fn create_schur_vector_bind_group(
+    fn create_schur_vector_bind_group<'a>(
         &self,
         fgmres: &FgmresResources,
-        r_in: &wgpu::Buffer,
-        z_out: &wgpu::Buffer,
-        temp_p: &wgpu::Buffer,
-        p_sol: &wgpu::Buffer,
+        r_in: wgpu::BindingResource<'a>,
+        z_out: wgpu::BindingResource<'a>,
+        temp_p: wgpu::BindingResource<'a>,
+        p_sol: wgpu::BindingResource<'a>,
         label: &str,
     ) -> wgpu::BindGroup {
         self.context
@@ -1075,19 +1217,19 @@ impl GpuSolver {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: r_in.as_entire_binding(),
+                        resource: r_in,
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: z_out.as_entire_binding(),
+                        resource: z_out,
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: temp_p.as_entire_binding(),
+                        resource: temp_p,
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: p_sol.as_entire_binding(),
+                        resource: p_sol,
                     },
                 ],
             })
@@ -1180,7 +1322,12 @@ impl GpuSolver {
     /// This uses a batched approach: all GPU work (partial reduction, final reduction,
     /// and buffer copy) is submitted in a single command buffer, then we do an async
     /// map and wait. This avoids multiple sync points.
-    fn gpu_norm(&self, fgmres: &FgmresResources, x: &wgpu::Buffer, n: u32) -> f32 {
+    fn gpu_norm<'a>(
+        &self,
+        fgmres: &'a FgmresResources,
+        x: wgpu::BindingResource<'a>,
+        n: u32,
+    ) -> f32 {
         let start = Instant::now();
 
         let workgroups = self.workgroups_for_size(n);
@@ -1190,16 +1337,16 @@ impl GpuSolver {
         let vector_bg = self.create_vector_bind_group(
             fgmres,
             x,
-            &fgmres.b_temp,
-            &fgmres.b_dot_partial,
+            fgmres.b_temp.as_entire_binding(),
+            fgmres.b_dot_partial.as_entire_binding(),
             "FGMRES Norm BG",
         );
 
         let reduce_bg = self.create_vector_bind_group(
             fgmres,
-            &fgmres.b_dot_partial,
-            &fgmres.b_temp,
-            &fgmres.b_temp,
+            fgmres.b_dot_partial.as_entire_binding(),
+            fgmres.b_temp.as_entire_binding(),
+            fgmres.b_temp.as_entire_binding(),
             "FGMRES Reduce BG",
         );
 
@@ -1210,8 +1357,8 @@ impl GpuSolver {
             num_iters: 2,
             omega: 1.0,
             dispatch_x: self.dispatch_x_threads(workgroups),
-            _pad1: 0,
-            _pad2: 0,
+            max_restart: fgmres.max_restart as u32,
+            column_offset: 0,
             _pad3: 0,
         };
         self.context
@@ -1250,8 +1397,8 @@ impl GpuSolver {
             num_iters: 0,
             omega: 0.0,
             dispatch_x: Self::WORKGROUP_SIZE,
-            _pad1: 0,
-            _pad2: 0,
+            max_restart: 0,
+            column_offset: 0,
             _pad3: 0,
         };
         self.context
@@ -1300,8 +1447,8 @@ impl GpuSolver {
             num_iters: 2,
             omega: 1.0,
             dispatch_x: self.dispatch_x_threads(workgroups),
-            _pad1: 0,
-            _pad2: 0,
+            max_restart: fgmres.max_restart as u32,
+            column_offset: 0,
             _pad3: 0,
         };
         self.context
@@ -1368,19 +1515,19 @@ impl GpuSolver {
         value
     }
 
-    fn compute_residual_into(
+    fn compute_residual_into<'a>(
         &self,
-        fgmres: &FgmresResources,
-        res: &CoupledSolverResources,
-        target: &wgpu::Buffer,
+        fgmres: &'a FgmresResources,
+        res: &'a CoupledSolverResources,
+        target: wgpu::BindingResource<'a>,
         workgroups: u32,
         n: u32,
     ) -> f32 {
         let spmv_bg = self.create_vector_bind_group(
             fgmres,
-            &res.b_x,
-            &fgmres.b_w,
-            &fgmres.b_temp,
+            res.b_x.as_entire_binding(),
+            fgmres.b_w.as_entire_binding(),
+            fgmres.b_temp.as_entire_binding(),
             "FGMRES Residual SpMV",
         );
         self.dispatch_vector_pipeline(
@@ -1395,9 +1542,9 @@ impl GpuSolver {
         self.write_scalars(fgmres, &[1.0, -1.0]);
         let residual_bg = self.create_vector_bind_group(
             fgmres,
-            &res.b_rhs,
-            &fgmres.b_w,
-            target,
+            res.b_rhs.as_entire_binding(),
+            fgmres.b_w.as_entire_binding(),
+            target.clone(),
             "FGMRES Residual Axpby",
         );
         self.dispatch_vector_pipeline(
@@ -1412,18 +1559,18 @@ impl GpuSolver {
         self.gpu_norm(fgmres, target, n)
     }
 
-    fn scale_vector_in_place(
+    fn scale_vector_in_place<'a>(
         &self,
-        fgmres: &FgmresResources,
-        buffer: &wgpu::Buffer,
+        fgmres: &'a FgmresResources,
+        buffer: wgpu::BindingResource<'a>,
         workgroups: u32,
         label: &str,
     ) {
         let vector_bg = self.create_vector_bind_group(
             fgmres,
-            &fgmres.b_temp,
+            fgmres.b_temp.as_entire_binding(),
             buffer,
-            &fgmres.b_dot_partial,
+            fgmres.b_dot_partial.as_entire_binding(),
             label,
         );
         self.dispatch_vector_pipeline(
@@ -1527,10 +1674,10 @@ impl GpuSolver {
         // Refresh block diagonals
         let diag_bg = self.create_schur_vector_bind_group(
             fgmres,
-            &res.b_rhs,
-            &fgmres.b_temp,
-            &fgmres.b_w,
-            &fgmres.b_p_sol,
+            res.b_rhs.as_entire_binding(),
+            fgmres.b_temp.as_entire_binding(),
+            fgmres.b_w.as_entire_binding(),
+            fgmres.b_p_sol.as_entire_binding(),
             "FGMRES Extract Diagonal BG",
         );
         self.dispatch_vector_pipeline(
@@ -1542,7 +1689,7 @@ impl GpuSolver {
             "Schur Extract Diag",
         );
 
-        let rhs_norm = self.gpu_norm(fgmres, &res.b_rhs, n);
+        let rhs_norm = self.gpu_norm(fgmres, res.b_rhs.as_entire_binding(), n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
             return LinearSolverStats {
                 iterations: 0,
@@ -1556,8 +1703,13 @@ impl GpuSolver {
         let h_idx = |row: usize, col: usize| -> usize { col * (max_restart + 1) + row };
 
         // Initial residual r = b - A x stored in V_0
-        let mut residual_norm =
-            self.compute_residual_into(fgmres, res, &fgmres.basis_vectors[0], workgroups_dofs, n);
+        let mut residual_norm = self.compute_residual_into(
+            fgmres,
+            res,
+            self.basis_binding(fgmres, 0),
+            workgroups_dofs,
+            n,
+        );
 
         let target_resid = (tol * rhs_norm).max(abstol);
 
@@ -1579,12 +1731,10 @@ impl GpuSolver {
         self.write_scalars(fgmres, &[1.0 / residual_norm]);
         self.scale_vector_in_place(
             fgmres,
-            &fgmres.basis_vectors[0],
+            self.basis_binding(fgmres, 0),
             workgroups_dofs,
             "FGMRES Normalize V0",
-        );
-
-        // Initialize g on GPU
+        ); // Initialize g on GPU
         let mut g_initial = vec![0.0f32; max_restart + 1];
         g_initial[0] = residual_norm;
         self.context
@@ -1621,10 +1771,10 @@ impl GpuSolver {
 
                 let precond_bg = self.create_schur_vector_bind_group(
                     fgmres,
-                    &fgmres.basis_vectors[j],
-                    &fgmres.z_vectors[j],
-                    &fgmres.b_temp_p,
-                    &fgmres.b_p_sol,
+                    self.basis_binding(fgmres, j),
+                    fgmres.z_vectors[j].as_entire_binding(),
+                    fgmres.b_temp_p.as_entire_binding(),
+                    fgmres.b_p_sol.as_entire_binding(),
                     "FGMRES Schur BG",
                 );
 
@@ -1712,9 +1862,9 @@ impl GpuSolver {
                 // w = A * z_j
                 let spmv_bg = self.create_vector_bind_group(
                     fgmres,
-                    &fgmres.z_vectors[j],
-                    &fgmres.b_w,
-                    &fgmres.b_temp,
+                    fgmres.z_vectors[j].as_entire_binding(),
+                    fgmres.b_w.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
                     "FGMRES SpMV",
                 );
                 self.dispatch_vector_pipeline(
@@ -1726,97 +1876,79 @@ impl GpuSolver {
                     "FGMRES SpMV",
                 );
 
-                // Modified Gram-Schmidt on GPU
-                for i in 0..=j {
-                    // Update iter_params for i
-                    iter_params.current_idx = h_idx(i, j) as u32;
-                    self.context.queue.write_buffer(
-                        &fgmres.b_iter_params,
-                        0,
-                        bytes_of(&iter_params),
+                // CGS on GPU
+                // 1. Calculate all dot products (w . V_i) for i in 0..=j
+                let cgs_params = RawFgmresParams {
+                    n,
+                    num_cells: self.num_cells,
+                    num_iters: j as u32,
+                    omega: 0.0,
+                    dispatch_x: fgmres.num_dot_groups,
+                    max_restart: max_restart as u32,
+                    column_offset: 0,
+                    _pad3: 0,
+                };
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_params, 0, bytes_of(&cgs_params));
+
+                {
+                    let mut encoder = self.context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("CGS Step"),
+                        },
                     );
 
-                    // 1. Dot product partial
-                    let dot_bg = self.create_vector_bind_group(
-                        fgmres,
-                        &fgmres.b_w,
-                        &fgmres.basis_vectors[i],
-                        &fgmres.b_dot_partial,
-                        "FGMRES Dot Partial BG",
-                    );
-                    self.dispatch_vector_pipeline(
-                        &fgmres.pipeline_dot_partial,
-                        fgmres,
-                        &dot_bg,
-                        &fgmres.bg_params,
-                        fgmres.num_dot_groups,
-                        "FGMRES Dot Partial",
-                    );
+                    // Pass 1: Calc Dots
+                    {
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("CGS Calc Dots"),
+                            timestamp_writes: None,
+                        });
+                        pass.set_pipeline(&fgmres.pipeline_calc_dots_cgs);
+                        pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
+                        pass.dispatch_workgroups(fgmres.num_dot_groups, (j + 1) as u32, 1);
+                    }
 
-                    // 2. Reduce Final (sums partials, writes to H[i,j] and scalars[0])
-                    let reduce_bg = self.create_vector_bind_group(
-                        fgmres,
-                        &fgmres.b_dot_partial,
-                        &fgmres.b_temp,
-                        &fgmres.b_temp,
-                        "FGMRES Reduce BG",
-                    );
+                    // Pass 2: Reduce Dots
+                    {
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("CGS Reduce Dots"),
+                            timestamp_writes: None,
+                        });
+                        pass.set_pipeline(&fgmres.pipeline_reduce_dots_cgs);
+                        pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
+                        pass.dispatch_workgroups((j + 1) as u32, 1, 1);
+                    }
 
-                    let reduce_params = RawFgmresParams {
-                        n: fgmres.num_dot_groups,
-                        num_cells: 0,
-                        num_iters: 0,
-                        omega: 0.0,
-                        dispatch_x: Self::WORKGROUP_SIZE, // Single workgroup dispatch
-                        _pad1: 0,
-                        _pad2: 0,
-                        _pad3: 0,
-                    };
-                    self.context
-                        .queue
-                        .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+                    // Pass 3: Update W
+                    {
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("CGS Update W"),
+                            timestamp_writes: None,
+                        });
+                        pass.set_pipeline(&fgmres.pipeline_update_w_cgs);
+                        pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
+                        pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
+                    }
 
-                    self.dispatch_vector_pipeline(
-                        &fgmres.pipeline_reduce_final,
-                        fgmres,
-                        &reduce_bg,
-                        &fgmres.bg_params,
-                        1,
-                        "FGMRES Reduce Final",
-                    );
-
-                    // Restore params.n
-                    let restore_params = RawFgmresParams {
-                        n,
-                        num_cells: self.num_cells,
-                        num_iters: 2,
-                        omega: 1.0,
-                        dispatch_x: self.dispatch_x_threads(workgroups_dofs),
-                        _pad1: 0,
-                        _pad2: 0,
-                        _pad3: 0,
-                    };
-                    self.context
-                        .queue
-                        .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
-
-                    // 3. Orthogonalize
-                    let ortho_bg = self.create_vector_bind_group(
-                        fgmres,
-                        &fgmres.basis_vectors[i],
-                        &fgmres.b_w,
-                        &fgmres.b_temp,
-                        "FGMRES Orthogonalize",
-                    );
-                    self.dispatch_vector_pipeline(
-                        &fgmres.pipeline_orthogonalize,
-                        fgmres,
-                        &ortho_bg,
-                        &fgmres.bg_params,
-                        workgroups_dofs,
-                        "FGMRES Orthogonalize",
-                    );
+                    self.context.queue.submit(Some(encoder.finish()));
                 }
+
+                // Restore params.n
+                let restore_params = RawFgmresParams {
+                    n,
+                    num_cells: self.num_cells,
+                    num_iters: 2,
+                    omega: 1.0,
+                    dispatch_x: self.dispatch_x_threads(workgroups_dofs),
+                    max_restart: max_restart as u32,
+                    column_offset: 0,
+                    _pad3: 0,
+                };
+                self.context
+                    .queue
+                    .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
 
                 // Compute norm of w (H[j+1, j])
                 iter_params.current_idx = h_idx(j + 1, j) as u32;
@@ -1827,9 +1959,9 @@ impl GpuSolver {
                 // Norm squared partial
                 let norm_bg = self.create_vector_bind_group(
                     fgmres,
-                    &fgmres.b_w,
-                    &fgmres.b_temp,
-                    &fgmres.b_dot_partial,
+                    fgmres.b_w.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                    fgmres.b_dot_partial.as_entire_binding(),
                     "FGMRES Norm BG",
                 );
                 self.dispatch_vector_pipeline(
@@ -1848,8 +1980,8 @@ impl GpuSolver {
                     num_iters: 0,
                     omega: 0.0,
                     dispatch_x: Self::WORKGROUP_SIZE, // Single workgroup dispatch
-                    _pad1: 0,
-                    _pad2: 0,
+                    max_restart: 0,
+                    column_offset: 0,
                     _pad3: 0,
                 };
                 self.context
@@ -1858,9 +1990,9 @@ impl GpuSolver {
 
                 let reduce_bg = self.create_vector_bind_group(
                     fgmres,
-                    &fgmres.b_dot_partial,
-                    &fgmres.b_temp,
-                    &fgmres.b_temp,
+                    fgmres.b_dot_partial.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
                     "FGMRES Reduce BG",
                 );
 
@@ -1888,8 +2020,8 @@ impl GpuSolver {
                     num_iters: 2,
                     omega: 1.0,
                     dispatch_x: self.dispatch_x_threads(workgroups_dofs),
-                    _pad1: 0,
-                    _pad2: 0,
+                    max_restart: max_restart as u32,
+                    column_offset: 0,
                     _pad3: 0,
                 };
                 self.context
@@ -1899,16 +2031,16 @@ impl GpuSolver {
                 // Normalize w (scale in place using scalars[0])
                 self.scale_vector_in_place(
                     fgmres,
-                    &fgmres.b_w,
+                    fgmres.b_w.as_entire_binding(),
                     workgroups_dofs,
                     "FGMRES Normalize w",
                 );
 
                 let copy_bg = self.create_vector_bind_group(
                     fgmres,
-                    &fgmres.b_w,
-                    &fgmres.basis_vectors[j + 1],
-                    &fgmres.b_temp,
+                    fgmres.b_w.as_entire_binding(),
+                    self.basis_binding(fgmres, j + 1),
+                    fgmres.b_temp.as_entire_binding(),
                     "FGMRES Copy w",
                 );
                 self.dispatch_vector_pipeline(
@@ -2023,9 +2155,9 @@ impl GpuSolver {
 
                 let axpy_bg = self.create_vector_bind_group(
                     fgmres,
-                    &fgmres.z_vectors[i],
-                    &res.b_x,
-                    &fgmres.b_temp,
+                    fgmres.z_vectors[i].as_entire_binding(),
+                    res.b_x.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
                     "FGMRES Solution Update",
                 );
                 self.dispatch_vector_pipeline(
@@ -2057,7 +2189,7 @@ impl GpuSolver {
             residual_norm = self.compute_residual_into(
                 fgmres,
                 res,
-                &fgmres.basis_vectors[0],
+                self.basis_binding(fgmres, 0),
                 workgroups_dofs,
                 n,
             );
@@ -2090,7 +2222,7 @@ impl GpuSolver {
             self.write_scalars(fgmres, &[1.0 / residual_norm]);
             self.scale_vector_in_place(
                 fgmres,
-                &fgmres.basis_vectors[0],
+                self.basis_binding(fgmres, 0),
                 workgroups_dofs,
                 "FGMRES Restart Normalize",
             );

@@ -263,6 +263,8 @@ fn bench_preconditioner_comparison(c: &mut Criterion) {
     // Setup solver for Jacobi
     let (mut solver_jacobi, num_cells) = setup_solver(cell_size);
     solver_jacobi.set_precond_type(PreconditionerType::Jacobi);
+    // Warm up solver
+    solver_jacobi.step();
 
     // Setup solver for AMG
     let (mut solver_amg, _) = setup_solver(cell_size);

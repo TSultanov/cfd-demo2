@@ -34,7 +34,9 @@ fn test_gpu_profile() {
         }
         solver.set_u(&u_init);
 
-        solver.enable_profiling(true);
+        // Use the detailed ProfilingStats as the single source of truth
+        solver.enable_detailed_profiling(true);
+        solver.start_profiling_session();
 
         println!("Starting profiling...");
         let start_total = Instant::now();
@@ -50,29 +52,26 @@ fn test_gpu_profile() {
         }
 
         let total_duration = start_total.elapsed();
+        solver.end_profiling_session();
+
         println!("Total time for {} steps: {:?}", steps, total_duration);
         println!("Average time per step: {:?}", total_duration / steps);
 
-        let (time_dot, time_compute, time_spmv, time_transfer) = solver.get_profiling_data();
-        println!("Profiling Data:");
-        println!("  Dot Product (CPU Wait): {:?}", time_dot);
-        println!("  Compute Kernels (Submit): {:?}", time_compute);
-        println!("  SpMV Kernels (Submit): {:?}", time_spmv);
-        println!("  Transfer (Submit): {:?}", time_transfer);
-
-        let total_profiled = time_dot + time_compute + time_spmv + time_transfer;
-        println!("  Total Profiled: {:?}", total_profiled);
-        // Note: total_duration includes initial setup time if not careful, but here we measure loop only?
-        // No, start_total is before loop.
-        // But profiling data is accumulated over the loop.
-        // So it should be comparable.
-        if total_duration > total_profiled {
-            println!(
-                "  Unaccounted (CPU Overhead): {:?}",
-                total_duration - total_profiled
-            );
-        } else {
-            println!("  Unaccounted (CPU Overhead): 0 (Profiled > Total?)");
+        // Print detailed profiling report from ProfilingStats
+        let stats = solver.get_profiling_stats();
+        let session_total = stats.get_session_total();
+        println!("\nProfiling Summary (ProfilingStats):");
+        println!("  Session total: {:?}", session_total);
+        for (category, cat_stats) in stats.get_all_stats() {
+            if cat_stats.call_count > 0 {
+                println!(
+                    "  {:<22} total={:?} calls={} avg={:?}",
+                    category.name(),
+                    cat_stats.total_time,
+                    cat_stats.call_count,
+                    cat_stats.avg_time()
+                );
+            }
         }
     });
 }

@@ -5,7 +5,6 @@ pub mod physics;
 pub mod scalars;
 
 use crate::solver::mesh::Mesh;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -146,10 +145,6 @@ impl GpuSolver {
             // Misc
             num_cells,
             num_faces,
-            profiling_enabled: AtomicBool::new(false),
-            time_compute: Mutex::new(std::time::Duration::new(0, 0)),
-            time_spmv: Mutex::new(std::time::Duration::new(0, 0)),
-            time_dot: Mutex::new(std::time::Duration::new(0, 0)),
             stats_ux: Mutex::new(Default::default()),
             stats_uy: Mutex::new(Default::default()),
             stats_p: Mutex::new(Default::default()),

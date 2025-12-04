@@ -3,7 +3,6 @@ use super::coupled_solver_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
 use super::async_buffer::AsyncScalarReader;
 use bytemuck::{Pod, Zeroable};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::cell::RefCell;
@@ -255,12 +254,6 @@ pub struct GpuSolver {
     pub num_faces: u32,
 
     pub constants: GpuConstants,
-
-    // Profiling
-    pub profiling_enabled: AtomicBool,
-    pub time_compute: Mutex<std::time::Duration>,
-    pub time_spmv: Mutex<std::time::Duration>,
-    pub time_dot: Mutex<std::time::Duration>,
 
     // Solver Stats
     pub stats_ux: Mutex<LinearSolverStats>,

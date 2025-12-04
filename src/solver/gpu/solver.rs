@@ -1,5 +1,4 @@
 // Force recompile 2
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::profiling::ProfilingStats;
@@ -351,24 +350,6 @@ impl GpuSolver {
             self.context.queue.submit(Some(encoder.finish()));
         }
         let _ = self.context.device.poll(wgpu::PollType::wait_indefinitely());
-    }
-
-    pub fn enable_profiling(&self, enable: bool) {
-        self.profiling_enabled.store(enable, Ordering::Relaxed);
-    }
-
-    pub fn get_profiling_data(
-        &self,
-    ) -> (
-        std::time::Duration,
-        std::time::Duration,
-        std::time::Duration,
-        std::time::Duration,
-    ) {
-        let compute = *self.time_compute.lock().unwrap();
-        let spmv = *self.time_spmv.lock().unwrap();
-        let dot = *self.time_dot.lock().unwrap();
-        (dot, compute, spmv, std::time::Duration::new(0, 0))
     }
 
     /// Get a reference to the detailed profiling statistics

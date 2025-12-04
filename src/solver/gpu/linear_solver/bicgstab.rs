@@ -1,5 +1,5 @@
+use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::GpuSolver;
-use std::sync::atomic::Ordering;
 
 impl GpuSolver {
     pub async fn solve(
@@ -61,15 +61,15 @@ impl GpuSolver {
             {
                 // Submit pending commands before reading back
                 if pending_commands {
-                    let start = if self.profiling_enabled.load(Ordering::Relaxed) {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    };
+                    // Submit pending commands before reading scalar from GPU
+                    let dispatch_start = std::time::Instant::now();
                     self.context.queue.submit(Some(encoder.finish()));
-                    if let Some(start) = start {
-                        *self.time_compute.lock().unwrap() += start.elapsed();
-                    }
+                    self.profiling_stats.record_location(
+                        "linear_solver:submit_pending",
+                        ProfileCategory::GpuDispatch,
+                        dispatch_start.elapsed(),
+                        0,
+                    );
                     encoder = self.context.device.create_command_encoder(
                         &wgpu::CommandEncoderDescriptor {
                             label: Some("Solver Loop Encoder"),

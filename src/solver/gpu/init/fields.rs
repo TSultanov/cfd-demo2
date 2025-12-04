@@ -95,6 +95,7 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
         time_scheme: 0,
         inlet_velocity: 1.0,
         ramp_time: 0.1,
+        precond_type: 0,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Constants Buffer"),

@@ -19,6 +19,7 @@
 use super::async_buffer::AsyncScalarReader;
 use super::profiling::ProfileCategory;
 use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
+use super::linear_solver::amg::{AmgResources, CsrMatrix};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use std::time::Instant;
 
@@ -119,6 +120,8 @@ pub struct FgmresResources {
     
     /// Reusable staging buffer for scalar reads (avoids creating new buffers)
     pub b_staging_scalar: wgpu::Buffer,
+
+    pub amg_resources: Option<AmgResources>,
 }
 
 #[repr(C)]
@@ -153,6 +156,37 @@ impl GpuSolver {
         if rebuild {
             let resources = self.init_fgmres_resources(max_restart);
             self.fgmres_resources = Some(resources);
+        }
+    }
+
+    pub async fn ensure_amg_resources(&mut self) {
+        let needs_init = if let Some(fgmres) = &self.fgmres_resources {
+            fgmres.amg_resources.is_none()
+        } else {
+            false
+        };
+
+        if needs_init {
+            let row_offsets = self.read_buffer_u32(&self.b_row_offsets, self.num_cells + 1).await;
+            let col_indices = self.read_buffer_u32(&self.b_col_indices, self.num_nonzeros).await;
+            let values = self.read_buffer_f32(&self.b_matrix_values, self.num_nonzeros).await;
+            
+            let matrix = CsrMatrix {
+                row_offsets,
+                col_indices,
+                values,
+                num_rows: self.num_cells as usize,
+                num_cols: self.num_cells as usize,
+            };
+            
+            // Use enough levels to reach a small coarse grid (< 100 cells)
+            // For 1M cells with agg factor ~4, we need log4(1M/100) = log4(10000) = 6-7 levels.
+            // 20 is a safe upper bound; it will stop early when size < 100.
+            let amg = AmgResources::new(&self.context.device, &matrix, 20);
+            
+            if let Some(fgmres) = &mut self.fgmres_resources {
+                fgmres.amg_resources = Some(amg);
+            }
         }
     }
 
@@ -944,6 +978,7 @@ impl GpuSolver {
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
+            amg_resources: None,
         }
     }
 
@@ -1439,6 +1474,11 @@ impl GpuSolver {
         let abstol = 1e-7f32;
 
         self.ensure_fgmres_resources(max_restart);
+
+        if self.constants.precond_type == 1 {
+             pollster::block_on(self.ensure_amg_resources());
+        }
+
         let Some(res) = &self.coupled_resources else {
             return LinearSolverStats::default();
         };
@@ -1464,7 +1504,7 @@ impl GpuSolver {
             n: 0,
             num_cells: self.num_cells,
             omega: 0.7,
-            _pad: 0,
+            precond_type: self.constants.precond_type,
         };
         self.context.queue.write_buffer(
             &fgmres.b_precond_params,
@@ -1593,19 +1633,35 @@ impl GpuSolver {
                 );
 
                 // 3. Relax Pressure
-                // Scale iterations with mesh size: Jacobi convergence degrades with larger meshes.
-                // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
-                // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
-                let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200);
-                self.dispatch_vector_pipeline_batched(
-                    &fgmres.pipeline_relax_pressure,
-                    fgmres,
-                    &precond_bg,
-                    &fgmres.bg_pressure_matrix,
-                    workgroups_cells,
-                    p_iters,
-                    "Schur Relax P",
-                );
+                if self.constants.precond_type == 1 {
+                    if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
+                        let level0 = &amg.levels[0];
+                        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("AMG Setup") });
+                        
+                        encoder.copy_buffer_to_buffer(&fgmres.b_temp_p, 0, &level0.b_b, 0, (self.num_cells as u64) * 4);
+                        encoder.copy_buffer_to_buffer(&fgmres.b_p_sol, 0, &level0.b_x, 0, (self.num_cells as u64) * 4);
+                        
+                        amg.v_cycle(&mut encoder, &self.context.device);
+                        
+                        encoder.copy_buffer_to_buffer(&level0.b_x, 0, &fgmres.b_p_sol, 0, (self.num_cells as u64) * 4);
+                        
+                        self.context.queue.submit(Some(encoder.finish()));
+                    }
+                } else {
+                    // Scale iterations with mesh size: Jacobi convergence degrades with larger meshes.
+                    // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
+                    // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
+                    let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200);
+                    self.dispatch_vector_pipeline_batched(
+                        &fgmres.pipeline_relax_pressure,
+                        fgmres,
+                        &precond_bg,
+                        &fgmres.bg_pressure_matrix,
+                        workgroups_cells,
+                        p_iters,
+                        "Schur Relax P",
+                    );
+                }
 
                 // 4. Correct Velocity
                 self.dispatch_vector_pipeline(

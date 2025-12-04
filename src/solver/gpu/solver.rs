@@ -77,6 +77,11 @@ impl GpuSolver {
         self.update_constants();
     }
 
+    pub fn set_precond_type(&mut self, precond_type: super::structs::PreconditionerType) {
+        self.constants.precond_type = precond_type as u32;
+        self.update_constants();
+    }
+
     pub fn set_uniform_u(&self, ux: f64, uy: f64) {
         let u_data = vec![[ux as f32, uy as f32]; self.num_cells as usize];
         self.context

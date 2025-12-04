@@ -17,6 +17,12 @@ pub struct LinearSolverStats {
     pub time: std::time::Duration,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PreconditionerType {
+    Jacobi = 0,
+    Amg = 1,
+}
+
 pub struct CoupledSolverResources {
     pub b_row_offsets: wgpu::Buffer,
     pub b_col_indices: wgpu::Buffer,
@@ -113,6 +119,7 @@ pub struct GpuConstants {
     pub time_scheme: u32, // 0: Euler, 1: BDF2
     pub inlet_velocity: f32,
     pub ramp_time: f32,
+    pub precond_type: u32, // 0: Jacobi, 1: AMG
 }
 
 #[repr(C)]
@@ -129,7 +136,7 @@ pub struct PreconditionerParams {
     pub n: u32,
     pub num_cells: u32,
     pub omega: f32,
-    pub _pad: u32,
+    pub precond_type: u32, // 0: Jacobi, 1: AMG
 }
 
 impl Default for PreconditionerParams {
@@ -138,7 +145,7 @@ impl Default for PreconditionerParams {
             n: 0,
             num_cells: 0,
             omega: 1.0,
-            _pad: 0,
+            precond_type: 0,
         }
     }
 }

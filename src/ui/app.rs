@@ -1,4 +1,4 @@
-use crate::solver::gpu::structs::LinearSolverStats;
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::GpuSolver;
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
@@ -153,6 +153,7 @@ pub struct CFDApp {
     time_scheme: TimeScheme,
     inlet_velocity: f32,
     ramp_time: f32,
+    selected_preconditioner: PreconditionerType,
 }
 
 impl CFDApp {
@@ -191,6 +192,7 @@ impl CFDApp {
             time_scheme: TimeScheme::Euler,
             inlet_velocity: 1.0,
             ramp_time: 0.1,
+            selected_preconditioner: PreconditionerType::Jacobi,
         }
     }
 
@@ -226,6 +228,7 @@ impl CFDApp {
         gpu_solver.set_p(&initial_p);
         gpu_solver.set_inlet_velocity(self.inlet_velocity);
         gpu_solver.set_ramp_time(self.ramp_time);
+        gpu_solver.set_precond_type(self.selected_preconditioner);
         gpu_solver.initialize_history();
 
         self.cached_u = initial_u;
@@ -415,6 +418,10 @@ impl CFDApp {
 
     fn update_gpu_ramp_time(&self) {
         self.with_gpu_solver(|solver| solver.set_ramp_time(self.ramp_time));
+    }
+
+    fn update_gpu_preconditioner(&self) {
+        self.with_gpu_solver(|solver| solver.set_precond_type(self.selected_preconditioner));
     }
 
     /// Render the CFD mesh using egui's batched mesh for maximum performance
@@ -738,6 +745,29 @@ impl eframe::App for CFDApp {
                         {
                             self.selected_scheme = Scheme::QUICK;
                             self.update_gpu_scheme();
+                        }
+
+                        ui.separator();
+                        ui.label("Preconditioner");
+                        if ui
+                            .radio(
+                                matches!(self.selected_preconditioner, PreconditionerType::Jacobi),
+                                "Jacobi",
+                            )
+                            .clicked()
+                        {
+                            self.selected_preconditioner = PreconditionerType::Jacobi;
+                            self.update_gpu_preconditioner();
+                        }
+                        if ui
+                            .radio(
+                                matches!(self.selected_preconditioner, PreconditionerType::Amg),
+                                "AMG (Multigrid)",
+                            )
+                            .clicked()
+                        {
+                            self.selected_preconditioner = PreconditionerType::Amg;
+                            self.update_gpu_preconditioner();
                         }
 
                         ui.separator();

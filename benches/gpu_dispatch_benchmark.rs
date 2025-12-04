@@ -3,6 +3,7 @@
 /// This benchmark measures GPU solver performance with focus on dispatch operations.
 /// It provides a baseline for tracking performance improvements when optimizing
 /// the number of GPU dispatches.
+use cfd2::solver::gpu::structs::PreconditionerType;
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -257,10 +258,44 @@ fn report_dispatch_stats() {
     });
 }
 
+/// Benchmark preconditioner performance (Jacobi vs AMG)
+fn bench_preconditioner_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("preconditioner_comparison");
+    group.sample_size(10);
+
+    let cell_size = 0.01;
+    
+    // Setup solver for Jacobi
+    let (mut solver_jacobi, num_cells) = setup_solver(cell_size);
+    solver_jacobi.set_precond_type(PreconditionerType::Jacobi);
+
+    // Setup solver for AMG
+    let (mut solver_amg, _) = setup_solver(cell_size);
+    solver_amg.set_precond_type(PreconditionerType::Amg);
+    // Warmup AMG (allocates resources)
+    solver_amg.step();
+
+    group.throughput(Throughput::Elements(num_cells as u64));
+    
+    group.bench_function(BenchmarkId::new("jacobi", num_cells), |b| {
+        b.iter(|| {
+            solver_jacobi.step();
+        });
+    });
+
+    group.bench_function(BenchmarkId::new("amg", num_cells), |b| {
+        b.iter(|| {
+            solver_amg.step();
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().measurement_time(std::time::Duration::from_secs(10));
-    targets = bench_gpu_step_medium, bench_gpu_total_runtime, bench_gpu_step_scaling
+    targets = bench_gpu_step_medium, bench_gpu_total_runtime, bench_gpu_step_scaling, bench_preconditioner_comparison
 }
 
 criterion_group! {

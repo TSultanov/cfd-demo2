@@ -1,4 +1,4 @@
-// DEPRECATED: Coupled Solver using FGMRES with Schur Complement Preconditioning
+// Coupled Solver using FGMRES with Schur Complement Preconditioning
 //
 // For the saddle-point system:
 // [A   G] [u]   [b_u]

@@ -50,6 +50,16 @@ struct Constants {
 @group(2) @binding(3) var<storage, read_write> grad_u: array<Vector2>;
 @group(2) @binding(4) var<storage, read_write> grad_v: array<Vector2>;
 @group(2) @binding(5) var<storage, read_write> scalar_matrix_values: array<f32>;
+@group(2) @binding(6) var<storage, read_write> diag_u_inv: array<f32>;
+@group(2) @binding(7) var<storage, read_write> diag_v_inv: array<f32>;
+@group(2) @binding(8) var<storage, read_write> diag_p_inv: array<f32>;
+
+fn safe_inverse(val: f32) -> f32 {
+    if (abs(val) > 1e-14) {
+        return 1.0 / val;
+    }
+    return 0.0;
+}
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -74,6 +84,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var diag_u: f32 = 0.0;
     var diag_v: f32 = 0.0;
     var diag_p: f32 = 0.0;
+    
+    // Diagonal accumulators for coupled terms
+    var sum_diag_up: f32 = 0.0;
+    var sum_diag_vp: f32 = 0.0;
+    var sum_diag_pu: f32 = 0.0;
+    var sum_diag_pv: f32 = 0.0;
+    var sum_diag_pp: f32 = 0.0;
     
     var rhs_u: f32 = 0.0;
     var rhs_v: f32 = 0.0;
@@ -179,9 +196,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         
         let idx_0_0 = start_row_0 + 3u * neighbor_rank + 0u;
-        let idx_1_1 = start_row_1 + 3u * neighbor_rank + 1u;
-        
+        let idx_0_1 = start_row_0 + 3u * neighbor_rank + 1u;
         let idx_0_2 = start_row_0 + 3u * neighbor_rank + 2u;
+
+        let idx_1_0 = start_row_1 + 3u * neighbor_rank + 0u;
+        let idx_1_1 = start_row_1 + 3u * neighbor_rank + 1u;
         let idx_1_2 = start_row_1 + 3u * neighbor_rank + 2u;
         
         let idx_2_0 = start_row_2 + 3u * neighbor_rank + 0u;
@@ -194,6 +213,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             
             // Off-diagonal U-U and V-V
             matrix_values[idx_0_0] = coeff; // A_uu
+            matrix_values[idx_0_1] = 0.0;   // A_uv
+            matrix_values[idx_1_0] = 0.0;   // A_vu
             matrix_values[idx_1_1] = coeff; // A_vv
             
             diag_u += diff_coeff + conv_coeff_diag;
@@ -283,14 +304,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[idx_1_2] = (1.0 - lambda) * pg_force_y; // A_vp
             
             // Diagonal U-P and V-P (Own P) - accumulated
-            let scalar_diag_idx = diagonal_indices[idx];
-            let diag_rank = scalar_diag_idx - scalar_offset;
-            
-            let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
-            let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
-            
-            matrix_values[diag_0_2] += lambda * pg_force_x;
-            matrix_values[diag_1_2] += lambda * pg_force_y;
+            sum_diag_up += lambda * pg_force_x;
+            sum_diag_vp += lambda * pg_force_y;
             
             // --- Continuity Equation ---
             let div_coeff_x = normal.x * area;
@@ -301,11 +316,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[idx_2_1] = (1.0 - lambda) * div_coeff_y; // A_pv
             
             // Diagonal P-U and P-V (Own U, V)
-            let diag_2_0 = start_row_2 + 3u * diag_rank + 0u;
-            let diag_2_1 = start_row_2 + 3u * diag_rank + 1u;
-            
-            matrix_values[diag_2_0] += lambda * div_coeff_x;
-            matrix_values[diag_2_1] += lambda * div_coeff_y;
+            sum_diag_pu += lambda * div_coeff_x;
+            sum_diag_pv += lambda * div_coeff_y;
             
             // Rhie-Chow Pressure Laplacian
             let dp_f = lambda * d_p[idx] + (1.0 - lambda) * d_p[other_idx];
@@ -315,8 +327,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[idx_2_2] = -lapl_coeff; // A_pp (Negative for diffusion)
             
             // Diagonal P-P (Own P)
-            let diag_2_2 = start_row_2 + 3u * diag_rank + 2u;
-            matrix_values[diag_2_2] += lapl_coeff; // Positive for diffusion
+            sum_diag_pp += lapl_coeff; // Positive for diffusion
 
             // --- Scalar Pressure Matrix Assembly ---
             // Calculate scalar pressure matrix coefficient
@@ -357,13 +368,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let pg_force_x = area * normal.x;
                 let pg_force_y = area * normal.y;
                 
-                let scalar_diag_idx = diagonal_indices[idx];
-                let diag_rank = scalar_diag_idx - scalar_offset;
-                let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
-                let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
-                
-                matrix_values[diag_0_2] += pg_force_x;
-                matrix_values[diag_1_2] += pg_force_y;
+                sum_diag_up += pg_force_x;
+                sum_diag_vp += pg_force_y;
                 
                 // Continuity at inlet:
                 let flux_bc = (u_bc_x * normal.x + u_bc_y * normal.y) * area;
@@ -378,13 +384,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let pg_force_x = area * normal.x;
                 let pg_force_y = area * normal.y;
                 
-                let scalar_diag_idx = diagonal_indices[idx];
-                let diag_rank = scalar_diag_idx - scalar_offset;
-                let diag_0_2 = start_row_0 + 3u * diag_rank + 2u;
-                let diag_1_2 = start_row_1 + 3u * diag_rank + 2u;
-                
-                matrix_values[diag_0_2] += pg_force_x;
-                matrix_values[diag_1_2] += pg_force_y;
+                sum_diag_up += pg_force_x;
+                sum_diag_vp += pg_force_y;
                 
             } else if (boundary_type == 2u) { // Outlet
                 if (flux > 0.0) {
@@ -396,20 +397,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let div_coeff_x = normal.x * area;
                 let div_coeff_y = normal.y * area;
                 
-                let scalar_diag_idx = diagonal_indices[idx];
-                let diag_rank = scalar_diag_idx - scalar_offset;
-                
-                let diag_2_0 = start_row_2 + 3u * diag_rank + 0u;
-                let diag_2_1 = start_row_2 + 3u * diag_rank + 1u;
-                
-                matrix_values[diag_2_0] += div_coeff_x;
-                matrix_values[diag_2_1] += div_coeff_y;
+                sum_diag_pu += div_coeff_x;
+                sum_diag_pv += div_coeff_y;
                 
                 // Rhie-Chow at outlet
                 let dp_f = d_p[idx];
                 let lapl_coeff = dp_f * area / dist; // dist here is d_own
-                let diag_2_2 = start_row_2 + 3u * diag_rank + 2u;
-                matrix_values[diag_2_2] += lapl_coeff;
+                sum_diag_pp += lapl_coeff;
 
                 // Scalar Pressure Matrix at Outlet (Dirichlet p=0)
                 let d_p_own = d_p[idx];
@@ -423,13 +417,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = scalar_diag_idx - scalar_offset;
     
-    let idx_0_0 = start_row_0 + 3u * diag_rank + 0u;
-    let idx_1_1 = start_row_1 + 3u * diag_rank + 1u;
-    let idx_2_2 = start_row_2 + 3u * diag_rank + 2u;
+    let d_0_0 = start_row_0 + 3u * diag_rank + 0u;
+    let d_0_1 = start_row_0 + 3u * diag_rank + 1u;
+    let d_0_2 = start_row_0 + 3u * diag_rank + 2u;
     
-    matrix_values[idx_0_0] += diag_u;
-    matrix_values[idx_1_1] += diag_v;
-    matrix_values[idx_2_2] += diag_p;
+    let d_1_0 = start_row_1 + 3u * diag_rank + 0u;
+    let d_1_1 = start_row_1 + 3u * diag_rank + 1u;
+    let d_1_2 = start_row_1 + 3u * diag_rank + 2u;
+    
+    let d_2_0 = start_row_2 + 3u * diag_rank + 0u;
+    let d_2_1 = start_row_2 + 3u * diag_rank + 1u;
+    let d_2_2 = start_row_2 + 3u * diag_rank + 2u;
+    
+    matrix_values[d_0_0] = diag_u;
+    matrix_values[d_0_1] = 0.0;
+    matrix_values[d_0_2] = sum_diag_up;
+    
+    matrix_values[d_1_0] = 0.0;
+    matrix_values[d_1_1] = diag_v;
+    matrix_values[d_1_2] = sum_diag_vp;
+    
+    matrix_values[d_2_0] = sum_diag_pu;
+    matrix_values[d_2_1] = sum_diag_pv;
+    matrix_values[d_2_2] = diag_p + sum_diag_pp;
     
     // Write RHS
     rhs[3u * idx + 0u] = rhs_u;
@@ -438,4 +448,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Write Scalar Pressure Diagonal
     scalar_matrix_values[scalar_diag_idx] = scalar_diag_p;
+
+    // Write Diagonal Inverses
+    diag_u_inv[idx] = safe_inverse(diag_u);
+    diag_v_inv[idx] = safe_inverse(diag_v);
+    diag_p_inv[idx] = safe_inverse(scalar_diag_p);
+
 }

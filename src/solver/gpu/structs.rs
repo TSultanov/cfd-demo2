@@ -41,6 +41,9 @@ pub struct CoupledSolverResources {
 
     // Preconditioner buffers
     pub b_diag_inv: wgpu::Buffer, // 3x3 block inverse for block-Jacobi preconditioner
+    pub b_diag_u: wgpu::Buffer,   // Diagonal inverse for U (FGMRES-Schur)
+    pub b_diag_v: wgpu::Buffer,   // Diagonal inverse for V (FGMRES-Schur)
+    pub b_diag_p: wgpu::Buffer,   // Diagonal inverse for P (FGMRES-Schur)
     pub b_p_hat: wgpu::Buffer,    // M^{-1} * p
     pub b_s_hat: wgpu::Buffer,    // M^{-1} * s
     pub b_precond_rhs: wgpu::Buffer, // Schur RHS per DOF

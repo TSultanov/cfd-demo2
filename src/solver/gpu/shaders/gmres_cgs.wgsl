@@ -94,7 +94,8 @@ fn reduce_dots_cgs(
 ) {
     let i = group_id.x; // Which vector V_i
     let j = params.num_iters; // Current iteration index
-    let num_groups_n = params.dispatch_x; // Passed as param (number of partials per vector)
+    // let num_groups_n = params.dispatch_x; // Old way
+    let num_groups_n = (params.n + 63u) / 64u; // Calculate from n
 
     var sum = 0.0;
     // Loop over all partials for this vector

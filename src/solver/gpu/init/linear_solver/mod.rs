@@ -306,6 +306,77 @@ fn init_coupled_resources(
     // 3. Init State Buffers (size * 3)
     let state_res = state::init_state(device, num_coupled_cells);
 
+    // Create preconditioner buffers (Moved up for bg_solver)
+    let b_diag_inv = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Block Inverse"),
+        size: (num_cells as u64) * 9 * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_diag_u = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Diag U"),
+        size: (num_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_diag_v = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Diag V"),
+        size: (num_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_diag_p = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Diag P"),
+        size: (num_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_p_hat = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled P Hat"),
+        size: (num_coupled_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_s_hat = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled S Hat"),
+        size: (num_coupled_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_precond_rhs = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Precond RHS"),
+        size: (num_coupled_cells as u64) * 4,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let precond_params = PreconditionerParams::default();
+    let b_precond_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Preconditioner Params"),
+        contents: bytemuck::bytes_of(&precond_params),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
     // 4. Create Bind Groups
     // Reuse layouts from pipeline_res
 
@@ -379,6 +450,39 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
+            // 6: Diag U (Write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // 7: Diag V (Write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 7,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // 8: Diag P (Write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 8,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -409,6 +513,18 @@ fn init_coupled_resources(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: b_scalar_matrix_values.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: b_diag_u.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: b_diag_v.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: b_diag_p.as_entire_binding(),
             },
         ],
     });
@@ -680,49 +796,7 @@ fn init_coupled_resources(
 
     // ========== Preconditioner Setup ==========
 
-    // Create preconditioner buffers
-    let b_diag_inv = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Coupled Block Inverse"),
-        size: (num_cells as u64) * 9 * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_p_hat = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Coupled P Hat"),
-        size: (num_coupled_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_s_hat = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Coupled S Hat"),
-        size: (num_coupled_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_precond_rhs = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Coupled Precond RHS"),
-        size: (num_coupled_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let precond_params = PreconditionerParams::default();
-    let b_precond_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Preconditioner Params"),
-        contents: bytemuck::bytes_of(&precond_params),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    // Preconditioner buffers moved up
 
     // Preconditioner bind group layout
     let bgl_precond = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1074,6 +1148,9 @@ fn init_coupled_resources(
         b_staging_scalar: state_res.b_staging_scalar,
         num_nonzeros: matrix_res.num_nonzeros,
         b_diag_inv,
+        b_diag_u,
+        b_diag_v,
+        b_diag_p,
         b_p_hat,
         b_s_hat,
         b_precond_rhs,

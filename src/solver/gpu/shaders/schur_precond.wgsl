@@ -206,3 +206,51 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Update z_out pressure component
     z_out[base + 2u] = p_sol[cell];
 }
+
+// Kernel 6: Merged Predict Velocity + Form Schur RHS
+@compute @workgroup_size(64)
+fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let cell = global_id.x;
+    if (cell >= params.num_cells) {
+        return;
+    }
+
+    // Part 1: Predict Velocity (Local)
+    let base = cell * 3u;
+    let r_u = r_in[base + 0u];
+    let r_v = r_in[base + 1u];
+
+    z_out[base + 0u] = diag_u_inv[cell] * r_u;
+    z_out[base + 1u] = diag_v_inv[cell] * r_v;
+    z_out[base + 2u] = 0.0;
+
+    // Part 2: Form Schur RHS
+    let row_p = base + 2u;
+    var rhs_p = r_in[row_p];
+
+    // Subtract A_{row_p} * z_out (using Coupled Matrix)
+    // Instead of reading z_out (which is not ready for neighbors), we re-compute it:
+    // z_out[col] = diag[col] * r_in[col]
+    
+    let start = row_offsets[row_p];
+    let end = row_offsets[row_p + 1u];
+
+    for (var k = start; k < end; k++) {
+        let col = col_indices[k];
+        let rem = col % 3u;
+        
+        var z_val = 0.0;
+        if (rem == 0u) {
+            let c = col / 3u;
+            z_val = r_in[col] * diag_u_inv[c];
+        } else if (rem == 1u) {
+            let c = col / 3u;
+            z_val = r_in[col] * diag_v_inv[c];
+        }
+        // if rem == 2u, z_val is 0.0 (pressure part of z_out is 0)
+
+        rhs_p -= matrix_values[k] * z_val;
+    }
+
+    temp_p[cell] = rhs_p;
+}

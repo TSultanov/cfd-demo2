@@ -116,8 +116,8 @@ impl GpuSolver {
                             label: Some("Gradient & Assembly Encoder"),
                         });
 
-                // 1. Gradient Coupled
-                {
+                // 1. Gradient Coupled (Only if scheme != 0)
+                if self.constants.scheme != 0 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Gradient Coupled Pass"),
                         timestamp_writes: None,
@@ -130,17 +130,8 @@ impl GpuSolver {
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
 
-                // 2. Zero Buffers
-                self.zero_buffer_with_encoder(
-                    &res.b_matrix_values,
-                    (res.num_nonzeros as u64) * 4,
-                    &mut encoder,
-                );
-                self.zero_buffer_with_encoder(
-                    &res.b_rhs,
-                    (self.num_cells as u64) * 3 * 4,
-                    &mut encoder,
-                );
+                // 2. Zero Buffers - Removed (Merged into Coupled Assembly Kernel)
+                // self.zero_buffer_with_encoder(...)
 
                 // 3. Coupled Assembly Merged
                 {

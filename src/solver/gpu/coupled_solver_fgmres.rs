@@ -38,10 +38,10 @@ pub struct FgmresResources {
     pub b_dot_partial: wgpu::Buffer,
     /// Scalar parameters buffer
     pub b_scalars: wgpu::Buffer,
-    /// Block diagonal (u, v, p diagonals)
-    pub b_diag_u: wgpu::Buffer,
-    pub b_diag_v: wgpu::Buffer,
-    pub b_diag_p: wgpu::Buffer,
+    // Diagonals are now owned by CoupledSolverResources
+    // pub b_diag_u: wgpu::Buffer,
+    // pub b_diag_v: wgpu::Buffer,
+    // pub b_diag_p: wgpu::Buffer,
     /// Temporary buffer for pressure RHS (r_p')
     pub b_temp_p: wgpu::Buffer,
     pub b_p_sol: wgpu::Buffer,
@@ -92,9 +92,8 @@ pub struct FgmresResources {
     pub pipeline_orthogonalize: wgpu::ComputePipeline,
     /// Compute pipeline for diagonal extraction
     pub pipeline_extract_diag: wgpu::ComputePipeline,
+    pub pipeline_predict_and_form: wgpu::ComputePipeline,
     /// Schur Preconditioner Pipelines
-    pub pipeline_predict_vel: wgpu::ComputePipeline,
-    pub pipeline_form_schur: wgpu::ComputePipeline,
     pub pipeline_relax_pressure: wgpu::ComputePipeline,
     pub pipeline_correct_vel: wgpu::ComputePipeline,
 
@@ -279,18 +278,8 @@ impl GpuSolver {
             mapped_at_creation: false,
         });
 
-        let cell_size = (self.num_cells as u64) * 4;
-        let create_diag = |label: &str| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: cell_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        };
-        let b_diag_u = create_diag("FGMRES diag_u");
-        let b_diag_v = create_diag("FGMRES diag_v");
-        let b_diag_p = create_diag("FGMRES diag_p");
+        // Diagonals are in CoupledSolverResources
+        
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("FGMRES temp_p"),
             size: (self.num_cells as u64) * 4,
@@ -654,15 +643,15 @@ impl GpuSolver {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: b_diag_u.as_entire_binding(),
+                    resource: coupled.b_diag_u.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: b_diag_v.as_entire_binding(),
+                    resource: coupled.b_diag_v.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: b_diag_p.as_entire_binding(),
+                    resource: coupled.b_diag_p.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -918,11 +907,10 @@ impl GpuSolver {
         let pipeline_norm_sq = make_pipeline("FGMRES Norm Partial", "norm_sq_partial");
         let pipeline_orthogonalize = make_pipeline("FGMRES Orthogonalize", "orthogonalize");
 
-        let pipeline_predict_vel = make_schur_pipeline("Schur Predict", "predict_velocity");
-        let pipeline_form_schur = make_schur_pipeline("Schur Form RHS", "form_schur_rhs");
         let pipeline_relax_pressure = make_schur_pipeline("Schur Relax P", "relax_pressure");
         let pipeline_correct_vel = make_schur_pipeline("Schur Correct Vel", "correct_velocity");
         let pipeline_extract_diag = make_schur_pipeline("Schur Extract Diag", "extract_diagonals");
+        let pipeline_predict_and_form = make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur");
 
         let pipeline_reduce_final = make_pipeline("FGMRES Reduce Final", "reduce_final");
         let pipeline_update_hessenberg =
@@ -1050,9 +1038,9 @@ impl GpuSolver {
             b_temp,
             b_dot_partial,
             b_scalars,
-            b_diag_u,
-            b_diag_v,
-            b_diag_p,
+            // b_diag_u,
+            // b_diag_v,
+            // b_diag_p,
             b_temp_p,
             b_p_sol,
             b_params,
@@ -1079,8 +1067,7 @@ impl GpuSolver {
             pipeline_norm_sq,
             pipeline_orthogonalize,
             pipeline_extract_diag,
-            pipeline_predict_vel,
-            pipeline_form_schur,
+            pipeline_predict_and_form,
             pipeline_relax_pressure,
             pipeline_correct_vel,
             // New
@@ -1671,7 +1658,8 @@ impl GpuSolver {
             bytemuck::bytes_of(&precond_params),
         );
 
-        // Refresh block diagonals
+        // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
+        /*
         let diag_bg = self.create_schur_vector_bind_group(
             fgmres,
             res.b_rhs.as_entire_binding(),
@@ -1688,6 +1676,7 @@ impl GpuSolver {
             workgroups_cells,
             "Schur Extract Diag",
         );
+        */
 
         let rhs_norm = self.gpu_norm(fgmres, res.b_rhs.as_entire_binding(), n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
@@ -1779,21 +1768,12 @@ impl GpuSolver {
                 );
 
                 self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_predict_vel,
+                    &fgmres.pipeline_predict_and_form,
                     fgmres,
                     &precond_bg,
                     &fgmres.bg_pressure_matrix,
                     workgroups_cells,
-                    "Schur Predict",
-                );
-                // 2. Form Schur RHS
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_form_schur,
-                    fgmres,
-                    &precond_bg,
-                    &fgmres.bg_pressure_matrix,
-                    workgroups_cells,
-                    "Schur Form RHS",
+                    "Schur Predict & Form",
                 );
 
                 // 3. Relax Pressure

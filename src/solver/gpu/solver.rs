@@ -339,30 +339,36 @@ impl GpuSolver {
     /// Initialize d_p values before the pressure solve by running momentum assembly
     /// This ensures d_p is non-zero even at the first timestep
     pub fn initialize_d_p(&mut self, num_groups: u32) {
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Initial D_P Assembly Encoder"),
+                });
+        self.initialize_d_p_with_encoder(num_groups, &mut encoder);
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn initialize_d_p_with_encoder(
+        &mut self,
+        num_groups: u32,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
         // Run momentum assembly for component 0 just to compute d_p
         // We don't solve the system, just assemble to get the diagonal coefficients
         self.constants.component = 0;
         self.update_constants();
 
         {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Initial D_P Assembly Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Initial Momentum Assembly Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_momentum_assembly);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.set_bind_group(2, &self.bg_solver, &[]);
-                cpass.dispatch_workgroups(num_groups, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Initial Momentum Assembly Pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_momentum_assembly);
+            cpass.set_bind_group(0, &self.bg_mesh, &[]);
+            cpass.set_bind_group(1, &self.bg_fields, &[]);
+            cpass.set_bind_group(2, &self.bg_solver, &[]);
+            cpass.dispatch_workgroups(num_groups, 1, 1);
         }
     }
 
@@ -396,18 +402,23 @@ impl GpuSolver {
     }
 
     pub fn compute_fluxes(&mut self) {
-        let workgroup_size = 64;
-        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
-        let max_groups_x = 65535;
-        let dispatch_faces_x = num_groups_faces.min(max_groups_x);
-        let dispatch_faces_y = num_groups_faces.div_ceil(max_groups_x);
-
         let mut encoder =
             self.context
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Flux Computation Encoder"),
                 });
+        self.compute_fluxes_with_encoder(&mut encoder);
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn compute_fluxes_with_encoder(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        let workgroup_size = 64;
+        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
+        let max_groups_x = 65535;
+        let dispatch_faces_x = num_groups_faces.min(max_groups_x);
+        let dispatch_faces_y = num_groups_faces.div_ceil(max_groups_x);
+
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Flux RC Pass"),
@@ -418,7 +429,6 @@ impl GpuSolver {
             cpass.set_bind_group(1, &self.bg_fields, &[]);
             cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
         }
-        self.context.queue.submit(Some(encoder.finish()));
     }
 
     pub fn initialize_history(&self) {

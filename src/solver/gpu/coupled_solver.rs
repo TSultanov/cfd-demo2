@@ -37,12 +37,18 @@ impl GpuSolver {
         // Save old velocity for under-relaxation and time derivative
         self.copy_u_to_u_old();
 
-        // Initialize fluxes based on current U
-        self.compute_fluxes();
-
-        // Initialize d_p by running a preliminary momentum assembly
-        // This is crucial for Rhie-Chow interpolation in the coupled solver
-        self.initialize_d_p(num_groups_cells);
+        // Initialize fluxes and d_p
+        {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Init Flux and D_P Encoder"),
+                    });
+            self.compute_fluxes_with_encoder(&mut encoder);
+            self.initialize_d_p_with_encoder(num_groups_cells, &mut encoder);
+            self.context.queue.submit(Some(encoder.finish()));
+        }
 
         // Coupled iteration loop - use more iterations for robustness
         let max_coupled_iters = self.n_outer_correctors.max(10);
@@ -69,42 +75,16 @@ impl GpuSolver {
 
             // Update fluxes with current velocity for advection terms
             if iter > 0 {
-                self.compute_fluxes();
-                // Re-compute d_p based on current velocity/fluxes
-                self.initialize_d_p(num_groups_cells);
-            }
-
-            // Compute Gradients for Higher Order Schemes (2nd Order Upwind / QUICK)
-            // We need to compute grad U and grad V and store them in the coupled resources
-            // This is done inside the loop to use the latest U field for deferred correction
-            if let Some(res) = self.coupled_resources.as_ref() {
-                let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Gradient Coupled Encoder"),
+                            label: Some("Flux and D_P Encoder"),
                         });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Gradient Coupled Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_gradient_coupled);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    // Bind Group 2: Output buffers (grad_u, grad_v)
-                    // We reuse bg_solver which has them at bindings 3 and 4
-                    cpass.set_bind_group(2, &res.bg_solver, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
+                self.compute_fluxes_with_encoder(&mut encoder);
+                // Re-compute d_p based on current velocity/fluxes
+                self.initialize_d_p_with_encoder(num_groups_cells, &mut encoder);
                 self.context.queue.submit(Some(encoder.finish()));
-                self.profiling_stats.record_location(
-                    "coupled:gradient_coupled",
-                    ProfileCategory::GpuDispatch,
-                    dispatch_start.elapsed(),
-                    0,
-                );
             }
 
             // Debug: Check d_p values on first iteration - DEBUG READ
@@ -126,35 +106,58 @@ impl GpuSolver {
                 );
             }
 
-            // 1. Assemble Coupled System
-            // We need to zero the matrix and RHS first
-            {
-                let res = self.coupled_resources.as_ref().unwrap();
-                self.zero_buffer(&res.b_matrix_values, (res.num_nonzeros as u64) * 4);
-                self.zero_buffer(&res.b_rhs, (self.num_cells as u64) * 3 * 4);
-
-                // Dispatch Assembly
+            // Compute Gradients AND Assemble Coupled System (Merged Dispatch)
+            if let Some(res) = self.coupled_resources.as_ref() {
                 let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Coupled Assembly Encoder"),
+                            label: Some("Gradient & Assembly Encoder"),
                         });
+
+                // 1. Gradient Coupled
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Coupled Assembly Pass"),
+                        label: Some("Gradient Coupled Pass"),
                         timestamp_writes: None,
                     });
-                    cpass.set_pipeline(&self.pipeline_coupled_assembly);
+                    cpass.set_pipeline(&self.pipeline_gradient_coupled);
+                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                    cpass.set_bind_group(1, &self.bg_fields, &[]);
+                    // Bind Group 2: Output buffers (grad_u, grad_v)
+                    cpass.set_bind_group(2, &res.bg_solver, &[]);
+                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                }
+
+                // 2. Zero Buffers
+                self.zero_buffer_with_encoder(
+                    &res.b_matrix_values,
+                    (res.num_nonzeros as u64) * 4,
+                    &mut encoder,
+                );
+                self.zero_buffer_with_encoder(
+                    &res.b_rhs,
+                    (self.num_cells as u64) * 3 * 4,
+                    &mut encoder,
+                );
+
+                // 3. Coupled Assembly Merged
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Coupled Assembly Merged Pass"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&self.pipeline_coupled_assembly_merged);
                     cpass.set_bind_group(0, &self.bg_mesh, &[]);
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
                     cpass.set_bind_group(2, &res.bg_solver, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
+
                 self.context.queue.submit(Some(encoder.finish()));
                 self.profiling_stats.record_location(
-                    "coupled:assembly",
+                    "coupled:gradient_assembly_merged",
                     ProfileCategory::GpuDispatch,
                     dispatch_start.elapsed(),
                     0,
@@ -277,32 +280,10 @@ impl GpuSolver {
                 println!("RHS has NaN: {}", rhs_has_nan);
             }
 
-            // 1.5 & 1.8. Assemble Scalar Pressure Matrix
-            {
-                let _res = self.coupled_resources.as_ref().unwrap();
-
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Precond Setup Encoder"),
-                        });
-
-                // Pass 2: Scalar Pressure Assembly
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Scalar Pressure Assembly Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_pressure_assembly);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &self.bg_solver, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-
-                self.context.queue.submit(Some(encoder.finish()));
-            }
+            // 1.5 & 1.8. Assemble Scalar Pressure Matrix (Merged above)
+            // {
+            //     // Merged into coupled_assembly_merged
+            // }
 
             // 2. Solve Coupled System using FGMRES-based coupled solver (CPU-side Krylov, GPU SpMV/precond)
             let stats = self.solve_coupled_system();
@@ -312,7 +293,7 @@ impl GpuSolver {
                 stats.iterations, stats.residual, stats.converged
             );
 
-            // 3. Update Fields
+            // 3. Update Fields & Compute Max Diff
             {
                 let res = self.coupled_resources.as_ref().unwrap();
                 let dispatch_start = Instant::now();
@@ -320,8 +301,10 @@ impl GpuSolver {
                     self.context
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Update Fields Encoder"),
+                            label: Some("Update Fields & Max Diff Encoder"),
                         });
+
+                // Update Fields
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Update Fields Pass"),
@@ -333,9 +316,15 @@ impl GpuSolver {
                     cpass.set_bind_group(2, &res.bg_coupled_solution, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
+
+                // Compute Max Diff (if iter > 0)
+                if iter > 0 {
+                    self.compute_max_diff_gpu_with_encoder(&mut encoder);
+                }
+
                 self.context.queue.submit(Some(encoder.finish()));
                 self.profiling_stats.record_location(
-                    "coupled:update_fields",
+                    "coupled:update_fields_max_diff",
                     ProfileCategory::GpuDispatch,
                     dispatch_start.elapsed(),
                     0,
@@ -344,12 +333,16 @@ impl GpuSolver {
 
             // Check convergence using GPU-computed max-diff (Async)
             if iter > 0 {
-                // Start async computation and read for CURRENT iteration
-                self.start_compute_max_diff_gpu();
-
-                // Check if PREVIOUS iteration's result is ready
                 if let Some(res) = self.coupled_resources.as_ref() {
+                    // Start async read for CURRENT iteration
                     let mut reader = res.async_scalar_reader.borrow_mut();
+                    reader.start_read(
+                        &self.context.device,
+                        &self.context.queue,
+                        &res.b_max_diff_result,
+                        0,
+                    );
+
                     reader.poll(); // Poll for completion of previous reads
 
                     // Check if we have a result available
@@ -426,14 +419,11 @@ impl GpuSolver {
         self.solve_coupled_fgmres()
     }
 
-    /// Start computing max-diff on GPU and initiate async read
-    fn start_compute_max_diff_gpu(&self) {
+    fn compute_max_diff_gpu_with_encoder(&self, encoder: &mut wgpu::CommandEncoder) {
         let res = match self.coupled_resources.as_ref() {
             Some(r) => r,
             None => return,
         };
-
-        let dispatch_start = Instant::now();
 
         #[repr(C)]
         #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -476,14 +466,6 @@ impl GpuSolver {
             256,
             bytemuck::bytes_of(&params_reduce),
         );
-
-        // Create single command encoder for all GPU work
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Max Diff Batched Encoder"),
-                });
 
         // Pass 1: Partial reduction for U
         {
@@ -536,24 +518,5 @@ impl GpuSolver {
             cpass.set_bind_group(1, &res.bg_max_diff_params, &[256]);
             cpass.dispatch_workgroups(1, 1, 1);
         }
-
-        // Submit all reductions
-        self.context.queue.submit(Some(encoder.finish()));
-
-        self.profiling_stats.record_location(
-            "coupled:gpu_max_diff_dispatch",
-            ProfileCategory::GpuDispatch,
-            dispatch_start.elapsed(),
-            0,
-        );
-
-        // Start async read
-        let mut reader = res.async_scalar_reader.borrow_mut();
-        reader.start_read(
-            &self.context.device,
-            &self.context.queue,
-            &res.b_max_diff_result,
-            0,
-        );
     }
 }

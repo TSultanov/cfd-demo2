@@ -6,6 +6,7 @@ pub struct PhysicsPipelines {
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly: wgpu::ComputePipeline,
+    pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
 }
 
@@ -127,6 +128,23 @@ pub fn init_physics_pipelines(
             cache: None,
         });
 
+    let shader_coupled_merged = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Coupled Assembly Merged Shader"),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+            "../shaders/coupled_assembly_merged.wgsl"
+        ))),
+    });
+
+    let pipeline_coupled_assembly_merged =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Coupled Assembly Merged Pipeline"),
+            layout: Some(&pl_coupled),
+            module: &shader_coupled_merged,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
     let shader_update_coupled = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Update From Coupled Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
@@ -156,6 +174,7 @@ pub fn init_physics_pipelines(
         pipeline_pressure_assembly,
         pipeline_flux_rhie_chow,
         pipeline_coupled_assembly,
+        pipeline_coupled_assembly_merged,
         pipeline_update_from_coupled,
     }
 }

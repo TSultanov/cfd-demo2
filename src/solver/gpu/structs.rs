@@ -237,6 +237,7 @@ pub struct GpuSolver {
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly: wgpu::ComputePipeline,
+    pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
     pub pipeline_init_cg_scalars: wgpu::ComputePipeline,
 

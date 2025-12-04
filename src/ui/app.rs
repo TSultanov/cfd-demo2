@@ -926,7 +926,10 @@ impl eframe::App for CFDApp {
                         ui.label(format!("dt: {:.2e}", stats.dt));
                         ui.label(format!(
                             "Coupled: {} iters, U:{:.2e} P:{:.2e} ({:.1} ms)",
-                            stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p, stats.step_time_ms
+                            stats.outer_iterations,
+                            stats.outer_residual_u,
+                            stats.outer_residual_p,
+                            stats.step_time_ms
                         ));
                     }
                 });

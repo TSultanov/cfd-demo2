@@ -145,6 +145,7 @@ pub fn init_linear_solver(
         &matrix_res.b_row_offsets,
         b_u,
         b_p,
+        &matrix_res.b_matrix_values,
     );
 
     LinearSolverResources {
@@ -210,6 +211,7 @@ fn init_coupled_resources(
     scalar_row_offsets_buffer: &wgpu::Buffer,
     b_u: &wgpu::Buffer,
     b_p: &wgpu::Buffer,
+    b_scalar_matrix_values: &wgpu::Buffer,
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
     let num_coupled_cells = num_cells * 3;
@@ -371,6 +373,17 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
+            // 5: Scalar Matrix Values (Read/Write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -397,6 +410,10 @@ fn init_coupled_resources(
             wgpu::BindGroupEntry {
                 binding: 4,
                 resource: b_grad_v.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: b_scalar_matrix_values.as_entire_binding(),
             },
         ],
     });

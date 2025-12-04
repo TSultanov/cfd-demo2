@@ -12,6 +12,15 @@ impl GpuSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
+    pub fn zero_buffer_with_encoder(
+        &self,
+        buffer: &wgpu::Buffer,
+        size: u64,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        encoder.clear_buffer(buffer, 0, Some(size));
+    }
+
     pub fn encode_compute(
         &self,
         encoder: &mut wgpu::CommandEncoder,

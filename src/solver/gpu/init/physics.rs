@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 
 pub struct PhysicsPipelines {
-    pub pipeline_gradient: wgpu::ComputePipeline,
     pub pipeline_gradient_coupled: wgpu::ComputePipeline,
     pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
@@ -18,29 +17,17 @@ pub fn init_physics_pipelines(
     bgl_coupled_solver: &wgpu::BindGroupLayout,
 ) -> PhysicsPipelines {
     // Shaders
-    let shader_gradient = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Gradient Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/gradient.wgsl"))),
-    });
-
-    let pl_gradient = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Gradient Pipeline Layout"),
+    let pl_mesh_fields = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Mesh Fields Pipeline Layout"),
         bind_group_layouts: &[bgl_mesh, bgl_fields], // Needs mesh and fields
         push_constant_ranges: &[],
     });
 
-    let pipeline_gradient = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Gradient Pipeline"),
-        layout: Some(&pl_gradient),
-        module: &shader_gradient,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
     let shader_gradient_coupled = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Gradient Coupled Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/gradient_coupled.wgsl"))),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+            "../shaders/gradient_coupled.wgsl"
+        ))),
     });
 
     let pl_gradient_coupled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -49,14 +36,15 @@ pub fn init_physics_pipelines(
         push_constant_ranges: &[],
     });
 
-    let pipeline_gradient_coupled = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Gradient Coupled Pipeline"),
-        layout: Some(&pl_gradient_coupled),
-        module: &shader_gradient_coupled,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
+    let pipeline_gradient_coupled =
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Gradient Coupled Pipeline"),
+            layout: Some(&pl_gradient_coupled),
+            module: &shader_gradient_coupled,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
 
     let pl_matrix = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Matrix Assembly Pipeline Layout"),
@@ -108,7 +96,7 @@ pub fn init_physics_pipelines(
     let pipeline_flux_rhie_chow =
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Flux Rhie-Chow Pipeline"),
-            layout: Some(&pl_gradient), // Uses mesh and fields (Group 0, 1)
+            layout: Some(&pl_mesh_fields), // Uses mesh and fields (Group 0, 1)
             module: &shader_flux_rhie_chow,
             entry_point: Some("main"),
             compilation_options: Default::default(),
@@ -176,7 +164,6 @@ pub fn init_physics_pipelines(
         });
 
     PhysicsPipelines {
-        pipeline_gradient,
         pipeline_gradient_coupled,
         pipeline_momentum_assembly,
         pipeline_pressure_assembly,

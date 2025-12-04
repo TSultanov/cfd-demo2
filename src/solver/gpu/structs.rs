@@ -3,8 +3,8 @@ use super::context::GpuContext;
 use super::coupled_solver_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
 use bytemuck::{Pod, Zeroable};
-use std::collections::HashMap;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -217,7 +217,6 @@ pub struct GpuSolver {
     pub bgl_dot_inputs: wgpu::BindGroupLayout,
     pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
 
-    pub pipeline_gradient: wgpu::ComputePipeline,
     pub pipeline_gradient_coupled: wgpu::ComputePipeline,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,

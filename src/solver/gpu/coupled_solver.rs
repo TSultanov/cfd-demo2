@@ -292,7 +292,7 @@ impl GpuSolver {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("Precond Setup Encoder"),
                         });
-                
+
                 // Pass 1: Extract Diagonal
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -318,7 +318,7 @@ impl GpuSolver {
                     cpass.set_bind_group(2, &self.bg_solver, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
-                
+
                 self.context.queue.submit(Some(encoder.finish()));
             }
 
@@ -505,7 +505,7 @@ impl GpuSolver {
             _pad2: 0,
             _pad3: 0,
         };
-        
+
         // Write params for final reduction (n = num_groups)
         let params_reduce = MaxDiffParams {
             n: num_groups,
@@ -606,4 +606,5 @@ impl GpuSolver {
             &res.b_max_diff_result,
             0,
         );
-    }}
+    }
+}

@@ -75,6 +75,7 @@ pub struct CoupledSolverResources {
     pub bg_precond: wgpu::BindGroup, // Preconditioner bind group
 
     pub bgl_coupled_solver: wgpu::BindGroupLayout,
+    pub bgl_coupled_solution: wgpu::BindGroupLayout,
     pub bgl_precond: wgpu::BindGroupLayout, // Preconditioner bind group layout
 
     // Max-diff convergence check resources

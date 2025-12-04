@@ -531,25 +531,60 @@ fn init_coupled_resources(
     // Coupled solution bind group
     let bgl_coupled_solution = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Coupled Solution Layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
+        entries: &[
+            // 0: Solution X (Read Only)
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-            count: None,
-        }],
+            // 1: U Snapshot (Read/Write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // 2: P Snapshot (Read/Write)
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
     });
 
     let bg_coupled_solution = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Coupled Solution Bind Group"),
         layout: &bgl_coupled_solution,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: state_res.b_x.as_entire_binding(),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: state_res.b_x.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: b_u_snapshot.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b_p_snapshot.as_entire_binding(),
+            },
+        ],
     });
 
     // Scalars Bind Group (Recreated layout to match init_scalars.rs)
@@ -1105,6 +1140,7 @@ fn init_coupled_resources(
         bg_dot_params,
         bg_precond,
         bgl_coupled_solver,
+        bgl_coupled_solution,
         bgl_precond,
         // Max-diff resources
         bgl_max_diff,

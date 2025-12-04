@@ -67,11 +67,6 @@ impl GpuSolver {
             self.profiling_stats.increment_iteration();
             println!("Coupled Iteration: {}", iter + 1);
 
-            // Snapshot U and P on GPU for convergence check (instead of reading to CPU)
-            if iter > 0 {
-                self.snapshot_fields_for_convergence();
-            }
-
             // Update fluxes with current velocity for advection terms
             if iter > 0 {
                 self.compute_fluxes();
@@ -282,9 +277,9 @@ impl GpuSolver {
                 println!("RHS has NaN: {}", rhs_has_nan);
             }
 
-            // 1.5 & 1.8. Extract diagonal and Assemble Scalar Pressure Matrix
+            // 1.5 & 1.8. Assemble Scalar Pressure Matrix
             {
-                let res = self.coupled_resources.as_ref().unwrap();
+                let _res = self.coupled_resources.as_ref().unwrap();
 
                 let mut encoder =
                     self.context
@@ -292,19 +287,6 @@ impl GpuSolver {
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("Precond Setup Encoder"),
                         });
-
-                // Pass 1: Extract Diagonal
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Extract Diagonal Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&res.pipeline_extract_diagonal);
-                    cpass.set_bind_group(0, &res.bg_linear_state, &[]);
-                    cpass.set_bind_group(1, &res.bg_linear_matrix, &[]);
-                    cpass.set_bind_group(2, &res.bg_precond, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
 
                 // Pass 2: Scalar Pressure Assembly
                 {
@@ -444,39 +426,6 @@ impl GpuSolver {
         self.solve_coupled_fgmres()
     }
 
-    /// Copy current U and P to snapshot buffers for GPU-based convergence check
-    fn snapshot_fields_for_convergence(&self) {
-        if let Some(res) = self.coupled_resources.as_ref() {
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Snapshot Fields Encoder"),
-                    });
-
-            // Copy U to snapshot
-            encoder.copy_buffer_to_buffer(
-                &self.b_u,
-                0,
-                &res.b_u_snapshot,
-                0,
-                (self.num_cells as u64) * 8,
-            );
-
-            // Copy P to snapshot
-            encoder.copy_buffer_to_buffer(
-                &self.b_p,
-                0,
-                &res.b_p_snapshot,
-                0,
-                (self.num_cells as u64) * 4,
-            );
-
-            self.context.queue.submit(Some(encoder.finish()));
-        }
-    }
-
-    /// Start computing max-diff on GPU and initiate async read
     /// Start computing max-diff on GPU and initiate async read
     fn start_compute_max_diff_gpu(&self) {
         let res = match self.coupled_resources.as_ref() {

@@ -15,6 +15,7 @@ pub fn init_physics_pipelines(
     bgl_fields: &wgpu::BindGroupLayout,
     bgl_solver: &wgpu::BindGroupLayout,
     bgl_coupled_solver: &wgpu::BindGroupLayout,
+    bgl_coupled_solution: &wgpu::BindGroupLayout,
 ) -> PhysicsPipelines {
     // Shaders
     let pl_mesh_fields = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -133,23 +134,9 @@ pub fn init_physics_pipelines(
         ))),
     });
 
-    let bgl_coupled_solution = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Coupled Solution Layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-
     let pl_update_coupled = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Update From Coupled Pipeline Layout"),
-        bind_group_layouts: &[bgl_mesh, bgl_fields, &bgl_coupled_solution],
+        bind_group_layouts: &[bgl_mesh, bgl_fields, bgl_coupled_solution],
         push_constant_ranges: &[],
     });
 

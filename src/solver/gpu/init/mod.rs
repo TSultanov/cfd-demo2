@@ -50,6 +50,7 @@ impl GpuSolver {
             &fields_res.bgl_fields,
             &linear_res.bgl_solver,
             &linear_res.coupled_resources.bgl_coupled_solver,
+            &linear_res.coupled_resources.bgl_coupled_solution, // Pass the solution layout
         );
 
         // Misc

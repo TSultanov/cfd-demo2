@@ -26,6 +26,8 @@ struct Constants {
 @group(1) @binding(1) var<storage, read_write> p: array<f32>;
 
 @group(2) @binding(0) var<storage, read> x: array<f32>;
+@group(2) @binding(1) var<storage, read_write> u_snapshot: array<Vector2>;
+@group(2) @binding(2) var<storage, read_write> p_snapshot: array<f32>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -42,6 +44,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // U_updated = U_old + alpha * (U_new - U_old) = (1-alpha)*U_old + alpha*U_new
     let u_old = u[idx];
     let p_old = p[idx];
+    
+    // Snapshot current values (U_old) for convergence check in next iteration
+    u_snapshot[idx] = u_old;
+    p_snapshot[idx] = p_old;
     
     // Use relaxation factors (typically 0.7 for velocity, 0.3 for pressure in coupled solvers)
     let alpha_u = constants.alpha_u;

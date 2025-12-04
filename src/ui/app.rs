@@ -191,7 +191,7 @@ impl CFDApp {
             alpha_p: 1.0,
             time_scheme: TimeScheme::Euler,
             inlet_velocity: 1.0,
-            ramp_time: 0.1,
+            ramp_time: 0.001,
             selected_preconditioner: PreconditionerType::Jacobi,
         }
     }

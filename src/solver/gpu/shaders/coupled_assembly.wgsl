@@ -47,8 +47,8 @@ struct Constants {
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
 @group(2) @binding(1) var<storage, read_write> rhs: array<f32>;
 @group(2) @binding(2) var<storage, read> scalar_row_offsets: array<u32>;
-@group(2) @binding(3) var<storage, read> grad_u: array<Vector2>;
-@group(2) @binding(4) var<storage, read> grad_v: array<Vector2>;
+@group(2) @binding(3) var<storage, read_write> grad_u: array<Vector2>;
+@group(2) @binding(4) var<storage, read_write> grad_v: array<Vector2>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {

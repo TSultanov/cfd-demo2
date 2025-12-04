@@ -128,6 +128,7 @@ impl GpuSolver {
 
             // Physics
             pipeline_gradient: physics_res.pipeline_gradient,
+            pipeline_gradient_coupled: physics_res.pipeline_gradient_coupled,
             pipeline_momentum_assembly: physics_res.pipeline_momentum_assembly,
             pipeline_pressure_assembly: physics_res.pipeline_pressure_assembly,
             pipeline_flux_rhie_chow: physics_res.pipeline_flux_rhie_chow,

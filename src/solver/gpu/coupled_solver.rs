@@ -83,72 +83,33 @@ impl GpuSolver {
             // We need to compute grad U and grad V and store them in the coupled resources
             // This is done inside the loop to use the latest U field for deferred correction
             if let Some(res) = self.coupled_resources.as_ref() {
-                // 1. Compute Grad U (Component 0)
-                self.constants.component = 0;
-                self.update_constants();
-
                 let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Gradient U Encoder"),
+                            label: Some("Gradient Coupled Encoder"),
                         });
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Gradient U Pass"),
+                        label: Some("Gradient Coupled Pass"),
                         timestamp_writes: None,
                     });
-                    cpass.set_pipeline(&self.pipeline_gradient);
+                    cpass.set_pipeline(&self.pipeline_gradient_coupled);
                     cpass.set_bind_group(0, &self.bg_mesh, &[]);
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
+                    // Bind Group 2: Output buffers (grad_u, grad_v)
+                    // We reuse bg_solver which has them at bindings 3 and 4
+                    cpass.set_bind_group(2, &res.bg_solver, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
-                // Copy from b_grad_component to res.b_grad_u
-                encoder.copy_buffer_to_buffer(
-                    &self.b_grad_component,
-                    0,
-                    &res.b_grad_u,
-                    0,
-                    (self.num_cells as u64) * 8,
-                );
                 self.context.queue.submit(Some(encoder.finish()));
                 self.profiling_stats.record_location(
-                    "coupled:gradient_u",
+                    "coupled:gradient_coupled",
                     ProfileCategory::GpuDispatch,
                     dispatch_start.elapsed(),
                     0,
                 );
-
-                // 2. Compute Grad V (Component 1)
-                self.constants.component = 1;
-                self.update_constants();
-
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Gradient V Encoder"),
-                        });
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Gradient V Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_gradient);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-                // Copy from b_grad_component to res.b_grad_v
-                encoder.copy_buffer_to_buffer(
-                    &self.b_grad_component,
-                    0,
-                    &res.b_grad_v,
-                    0,
-                    (self.num_cells as u64) * 8,
-                );
-                self.context.queue.submit(Some(encoder.finish()));
             }
 
             // Debug: Check d_p values on first iteration - DEBUG READ
@@ -321,7 +282,7 @@ impl GpuSolver {
                 println!("RHS has NaN: {}", rhs_has_nan);
             }
 
-            // 1.5. Extract diagonal for Jacobi preconditioner
+            // 1.5 & 1.8. Extract diagonal and Assemble Scalar Pressure Matrix
             {
                 let res = self.coupled_resources.as_ref().unwrap();
 
@@ -329,8 +290,10 @@ impl GpuSolver {
                     self.context
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Extract Diagonal Encoder"),
+                            label: Some("Precond Setup Encoder"),
                         });
+                
+                // Pass 1: Extract Diagonal
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Extract Diagonal Pass"),
@@ -342,19 +305,8 @@ impl GpuSolver {
                     cpass.set_bind_group(2, &res.bg_precond, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
 
-            // 1.8. Assemble Scalar Pressure Matrix (for Preconditioner)
-            // The Schur preconditioner uses the scalar pressure Laplacian matrix
-            // to approximate the Schur complement. We need to assemble it here.
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Scalar Pressure Assembly Encoder"),
-                        });
+                // Pass 2: Scalar Pressure Assembly
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Scalar Pressure Assembly Pass"),
@@ -366,6 +318,7 @@ impl GpuSolver {
                     cpass.set_bind_group(2, &self.bg_solver, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
+                
                 self.context.queue.submit(Some(encoder.finish()));
             }
 
@@ -524,6 +477,7 @@ impl GpuSolver {
     }
 
     /// Start computing max-diff on GPU and initiate async read
+    /// Start computing max-diff on GPU and initiate async read
     fn start_compute_max_diff_gpu(&self) {
         let res = match self.coupled_resources.as_ref() {
             Some(r) => r,
@@ -551,10 +505,27 @@ impl GpuSolver {
             _pad2: 0,
             _pad3: 0,
         };
+        
+        // Write params for final reduction (n = num_groups)
+        let params_reduce = MaxDiffParams {
+            n: num_groups,
+            _pad1: 0,
+            _pad2: 0,
+            _pad3: 0,
+        };
+
+        // Write both params to the buffer at different offsets
+        // Offset 0: Partial
+        // Offset 256: Final
         self.context.queue.write_buffer(
             &res.b_max_diff_params,
             0,
             bytemuck::bytes_of(&params_partial),
+        );
+        self.context.queue.write_buffer(
+            &res.b_max_diff_params,
+            256,
+            bytemuck::bytes_of(&params_reduce),
         );
 
         // Create single command encoder for all GPU work
@@ -573,7 +544,8 @@ impl GpuSolver {
             });
             cpass.set_pipeline(&res.pipeline_max_diff_u_partial);
             cpass.set_bind_group(0, &res.bg_max_diff_u, &[]);
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            // Use dynamic offset 0
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[0]);
             cpass.dispatch_workgroups(num_groups, 1, 1);
         }
 
@@ -585,60 +557,39 @@ impl GpuSolver {
             });
             cpass.set_pipeline(&res.pipeline_max_diff_p_partial);
             cpass.set_bind_group(0, &res.bg_max_diff_p, &[]);
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            // Use dynamic offset 0
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[0]);
             cpass.dispatch_workgroups(num_groups, 1, 1);
         }
 
-        // Submit partial reductions
-        self.context.queue.submit(Some(encoder.finish()));
-
-        // Write params for final reduction (n = num_groups)
-        let params_reduce = MaxDiffParams {
-            n: num_groups,
-            _pad1: 0,
-            _pad2: 0,
-            _pad3: 0,
-        };
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            0,
-            bytemuck::bytes_of(&params_reduce),
-        );
-
-        // Create encoder for final reductions - batch both U and P together
-        let mut encoder2 =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Max Diff Final Reduce Encoder"),
-                });
-
         // Pass 3: Final reduction for U (writes to result[0])
         {
-            let mut cpass = encoder2.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Max Diff U Final Pass"),
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_reduce);
             cpass.set_bind_group(0, &res.bg_reduce_u, &[]);
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            // Use dynamic offset 256
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[256]);
             cpass.dispatch_workgroups(1, 1, 1);
         }
 
         // Pass 4: Final reduction for P (writes to result[1])
         {
-            let mut cpass = encoder2.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Max Diff P Final Pass"),
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&res.pipeline_max_diff_reduce_p);
             cpass.set_bind_group(0, &res.bg_reduce_p, &[]);
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[]);
+            // Use dynamic offset 256
+            cpass.set_bind_group(1, &res.bg_max_diff_params, &[256]);
             cpass.dispatch_workgroups(1, 1, 1);
         }
 
-        // Submit both final reductions
-        self.context.queue.submit(Some(encoder2.finish()));
+        // Submit all reductions
+        self.context.queue.submit(Some(encoder.finish()));
 
         self.profiling_stats.record_location(
             "coupled:gpu_max_diff_dispatch",
@@ -655,5 +606,4 @@ impl GpuSolver {
             &res.b_max_diff_result,
             0,
         );
-    }
-}
+    }}

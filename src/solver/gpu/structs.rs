@@ -218,6 +218,7 @@ pub struct GpuSolver {
     pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
 
     pub pipeline_gradient: wgpu::ComputePipeline,
+    pub pipeline_gradient_coupled: wgpu::ComputePipeline,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,
     pub pipeline_dot_pair: wgpu::ComputePipeline,

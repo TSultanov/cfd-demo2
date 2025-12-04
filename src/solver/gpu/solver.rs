@@ -364,10 +364,6 @@ impl GpuSolver {
             }
             self.context.queue.submit(Some(encoder.finish()));
         }
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
     }
 
     /// Get a reference to the detailed profiling statistics
@@ -423,10 +419,6 @@ impl GpuSolver {
             cpass.dispatch_workgroups(dispatch_faces_x, dispatch_faces_y, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
     }
 
     pub fn initialize_history(&self) {
@@ -449,9 +441,5 @@ impl GpuSolver {
             (self.num_cells as u64) * 8,
         );
         self.context.queue.submit(Some(encoder.finish()));
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
     }
 }

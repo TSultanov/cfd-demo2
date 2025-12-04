@@ -349,23 +349,23 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
-            // 3: Grad U (Read)
+            // 3: Grad U (Read/Write)
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
                 count: None,
             },
-            // 4: Grad V (Read)
+            // 4: Grad V (Read/Write)
             wgpu::BindGroupLayoutEntry {
                 binding: 4,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -895,7 +895,7 @@ fn init_coupled_resources(
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
+                    has_dynamic_offset: true,
                     min_binding_size: None,
                 },
                 count: None,
@@ -917,7 +917,7 @@ fn init_coupled_resources(
     // Create max-diff params buffer
     let b_max_diff_params = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Max Diff Params"),
-        size: 16, // MaxDiffParams struct
+        size: 512, // MaxDiffParams struct (16 bytes) * 2, aligned to 256
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -928,7 +928,11 @@ fn init_coupled_resources(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: b_max_diff_params.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &b_max_diff_params,
+                    offset: 0,
+                    size: Some(std::num::NonZeroU64::new(16).unwrap()),
+                }),
             },
             wgpu::BindGroupEntry {
                 binding: 1,

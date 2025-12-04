@@ -319,7 +319,7 @@ impl GpuSolver {
 
                 // Compute Max Diff (if iter > 0)
                 if iter > 0 {
-                    self.compute_max_diff_gpu_with_encoder(&mut encoder);
+                    self.compute_max_diff_final_with_encoder(&mut encoder);
                 }
 
                 self.context.queue.submit(Some(encoder.finish()));
@@ -419,7 +419,7 @@ impl GpuSolver {
         self.solve_coupled_fgmres()
     }
 
-    fn compute_max_diff_gpu_with_encoder(&self, encoder: &mut wgpu::CommandEncoder) {
+    fn compute_max_diff_final_with_encoder(&self, encoder: &mut wgpu::CommandEncoder) {
         let res = match self.coupled_resources.as_ref() {
             Some(r) => r,
             None => return,
@@ -437,14 +437,6 @@ impl GpuSolver {
         let workgroup_size = 64u32;
         let num_groups = self.num_cells.div_ceil(workgroup_size);
 
-        // Write params for partial reduction (n = num_cells)
-        let params_partial = MaxDiffParams {
-            n: self.num_cells,
-            _pad1: 0,
-            _pad2: 0,
-            _pad3: 0,
-        };
-
         // Write params for final reduction (n = num_groups)
         let params_reduce = MaxDiffParams {
             n: num_groups,
@@ -453,47 +445,14 @@ impl GpuSolver {
             _pad3: 0,
         };
 
-        // Write both params to the buffer at different offsets
-        // Offset 0: Partial
-        // Offset 256: Final
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            0,
-            bytemuck::bytes_of(&params_partial),
-        );
+        // Write params to the buffer at offset 256 (as expected by shader binding dynamic offset)
         self.context.queue.write_buffer(
             &res.b_max_diff_params,
             256,
             bytemuck::bytes_of(&params_reduce),
         );
 
-        // Pass 1: Partial reduction for U
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Max Diff U Partial Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&res.pipeline_max_diff_u_partial);
-            cpass.set_bind_group(0, &res.bg_max_diff_u, &[]);
-            // Use dynamic offset 0
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[0]);
-            cpass.dispatch_workgroups(num_groups, 1, 1);
-        }
-
-        // Pass 2: Partial reduction for P
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Max Diff P Partial Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&res.pipeline_max_diff_p_partial);
-            cpass.set_bind_group(0, &res.bg_max_diff_p, &[]);
-            // Use dynamic offset 0
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[0]);
-            cpass.dispatch_workgroups(num_groups, 1, 1);
-        }
-
-        // Pass 3: Final reduction for U (writes to result[0])
+        // Pass 1: Final reduction for U (writes to result[0])
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Max Diff U Final Pass"),
@@ -506,7 +465,7 @@ impl GpuSolver {
             cpass.dispatch_workgroups(1, 1, 1);
         }
 
-        // Pass 4: Final reduction for P (writes to result[1])
+        // Pass 2: Final reduction for P (writes to result[1])
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Max Diff P Final Pass"),
@@ -520,3 +479,4 @@ impl GpuSolver {
         }
     }
 }
+

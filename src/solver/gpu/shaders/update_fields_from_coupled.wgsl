@@ -26,36 +26,64 @@ struct Constants {
 @group(1) @binding(1) var<storage, read_write> p: array<f32>;
 
 @group(2) @binding(0) var<storage, read> x: array<f32>;
-@group(2) @binding(1) var<storage, read_write> u_snapshot: array<Vector2>;
-@group(2) @binding(2) var<storage, read_write> p_snapshot: array<f32>;
+// Replaced snapshots with partial max diff outputs
+@group(2) @binding(1) var<storage, read_write> partial_max_u: array<f32>;
+@group(2) @binding(2) var<storage, read_write> partial_max_p: array<f32>;
+
+var<workgroup> shared_max_u: array<f32, 64>;
+var<workgroup> shared_max_p: array<f32, 64>;
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>,
+        @builtin(local_invocation_id) local_id: vec3<u32>,
+        @builtin(workgroup_id) wg_id: vec3<u32>) {
     let idx = global_id.x;
-    if (idx >= arrayLength(&p)) {
-        return;
+    let lid = local_id.x;
+    
+    var diff_u = 0.0;
+    var diff_p = 0.0;
+
+    if (idx < arrayLength(&p)) {
+        let u_new_val = x[3u * idx + 0u];
+        let v_new_val = x[3u * idx + 1u];
+        let p_new_val = x[3u * idx + 2u];
+        
+        // Under-relaxation for stability
+        // U_updated = U_old + alpha * (U_new - U_old) = (1-alpha)*U_old + alpha*U_new
+        let u_old = u[idx];
+        let p_old = p[idx];
+        
+        // Use relaxation factors
+        let alpha_u = constants.alpha_u;
+        let alpha_p = constants.alpha_p;
+        
+        let u_updated_x = u_old.x + alpha_u * (u_new_val - u_old.x);
+        let u_updated_y = u_old.y + alpha_u * (v_new_val - u_old.y);
+        let p_updated = p_old + alpha_p * (p_new_val - p_old);
+
+        u[idx] = Vector2(u_updated_x, u_updated_y);
+        p[idx] = p_updated;
+
+        // Compute diffs for convergence check
+        diff_u = max(abs(u_updated_x - u_old.x), abs(u_updated_y - u_old.y));
+        diff_p = abs(p_updated - p_old);
     }
     
-    let u_new = x[3u * idx + 0u];
-    let v_new = x[3u * idx + 1u];
-    let p_new = x[3u * idx + 2u];
+    // Workgroup Reduction
+    shared_max_u[lid] = diff_u;
+    shared_max_p[lid] = diff_p;
+    workgroupBarrier();
     
-    // Under-relaxation for stability
-    // U_updated = U_old + alpha * (U_new - U_old) = (1-alpha)*U_old + alpha*U_new
-    let u_old = u[idx];
-    let p_old = p[idx];
+    for (var stride = 32u; stride > 0u; stride >>= 1u) {
+        if (lid < stride) {
+            shared_max_u[lid] = max(shared_max_u[lid], shared_max_u[lid + stride]);
+            shared_max_p[lid] = max(shared_max_p[lid], shared_max_p[lid + stride]);
+        }
+        workgroupBarrier();
+    }
     
-    // Snapshot current values (U_old) for convergence check in next iteration
-    u_snapshot[idx] = u_old;
-    p_snapshot[idx] = p_old;
-    
-    // Use relaxation factors (typically 0.7 for velocity, 0.3 for pressure in coupled solvers)
-    let alpha_u = constants.alpha_u;
-    let alpha_p = constants.alpha_p;
-    
-    u[idx] = Vector2(
-        u_old.x + alpha_u * (u_new - u_old.x),
-        u_old.y + alpha_u * (v_new - u_old.y)
-    );
-    p[idx] = p_old + alpha_p * (p_new - p_old);
+    if (lid == 0u) {
+        partial_max_u[wg_id.x] = shared_max_u[0];
+        partial_max_p[wg_id.x] = shared_max_p[0];
+    }
 }

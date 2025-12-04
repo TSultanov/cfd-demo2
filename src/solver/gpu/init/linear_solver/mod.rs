@@ -273,19 +273,7 @@ fn init_coupled_resources(
     let workgroup_size = 64u32;
     let num_max_diff_groups = num_cells.div_ceil(workgroup_size);
 
-    let b_u_snapshot = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("U Snapshot"),
-        size: (num_cells as u64) * 8, // vec2<f32> per cell
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_p_snapshot = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("P Snapshot"),
-        size: (num_cells as u64) * 4, // f32 per cell
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    // Snapshots removed - merged into update_fields
 
     let b_max_diff_partial_u = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Max Diff Partial U"),
@@ -305,6 +293,13 @@ fn init_coupled_resources(
         label: Some("Max Diff Result"),
         size: 8, // 2 floats: max_u, max_p
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
+    let b_dummy = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Dummy Buffer"),
+        size: 4,
+        usage: wgpu::BufferUsages::STORAGE,
         mapped_at_creation: false,
     });
 
@@ -560,7 +555,7 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
-            // 1: U Snapshot (Read/Write)
+            // 1: Partial Max U (Read/Write)
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -571,7 +566,7 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
-            // 2: P Snapshot (Read/Write)
+            // 2: Partial Max P (Read/Write)
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -595,11 +590,11 @@ fn init_coupled_resources(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_u_snapshot.as_entire_binding(),
+                resource: b_max_diff_partial_u.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_p_snapshot.as_entire_binding(),
+                resource: b_max_diff_partial_p.as_entire_binding(),
             },
         ],
     });
@@ -1000,25 +995,7 @@ fn init_coupled_resources(
         push_constant_ranges: &[],
     });
 
-    let pipeline_max_diff_u_partial =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Max Diff U Partial Pipeline"),
-            layout: Some(&pl_max_diff),
-            module: &shader_max_diff,
-            entry_point: Some("max_abs_diff_vec2_partial"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-    let pipeline_max_diff_p_partial =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Max Diff P Partial Pipeline"),
-            layout: Some(&pl_max_diff),
-            module: &shader_max_diff,
-            entry_point: Some("max_abs_diff_partial"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+    // Partial pipelines removed
 
     let pipeline_max_diff_reduce =
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -1041,43 +1018,7 @@ fn init_coupled_resources(
         });
 
     // Create cached bind groups for max-diff
-    let bg_max_diff_u = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Max Diff U Bind Group"),
-        layout: &bgl_max_diff,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: b_u.as_entire_binding(), // Current U
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_u_snapshot.as_entire_binding(), // Snapshot U
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_max_diff_partial_u.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_max_diff_p = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Max Diff P Bind Group"),
-        layout: &bgl_max_diff,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: b_p.as_entire_binding(), // Current P
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_p_snapshot.as_entire_binding(), // Snapshot P
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_max_diff_partial_p.as_entire_binding(),
-            },
-        ],
-    });
+    // bg_max_diff_u and bg_max_diff_p removed
 
     let bg_reduce_u = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Max Diff U Reduce Bind Group"),
@@ -1089,11 +1030,11 @@ fn init_coupled_resources(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_p_snapshot.as_entire_binding(), // Dummy
+                resource: b_max_diff_partial_p.as_entire_binding(), // Dummy (unused by shader)
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_u_snapshot.as_entire_binding(), // Dummy
+                resource: b_dummy.as_entire_binding(), // Dummy (unused by shader)
             },
         ],
     });
@@ -1108,11 +1049,11 @@ fn init_coupled_resources(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_p_snapshot.as_entire_binding(), // Dummy
+                resource: b_max_diff_partial_u.as_entire_binding(), // Dummy (unused by shader)
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: b_u_snapshot.as_entire_binding(), // Dummy
+                resource: b_dummy.as_entire_binding(), // Dummy (unused by shader)
             },
         ],
     });
@@ -1140,8 +1081,6 @@ fn init_coupled_resources(
         b_grad_u,
         b_grad_v,
         // Max-diff convergence check
-        b_u_snapshot,
-        b_p_snapshot,
         b_max_diff_partial_u,
         b_max_diff_partial_p,
         b_max_diff_result,
@@ -1164,13 +1103,9 @@ fn init_coupled_resources(
         bgl_max_diff_params,
         b_max_diff_params,
         bg_max_diff_params,
-        pipeline_max_diff_u_partial,
-        pipeline_max_diff_p_partial,
         pipeline_max_diff_reduce,
         pipeline_max_diff_reduce_p,
         // Cached bind groups
-        bg_max_diff_u,
-        bg_max_diff_p,
         bg_reduce_u,
         bg_reduce_p,
         // Preconditioner pipelines

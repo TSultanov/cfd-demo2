@@ -66,11 +66,8 @@ pub struct CoupledSolverResources {
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,
     pub bg_linear_state_ro: wgpu::BindGroup,
-    pub bg_dot_r0_v: wgpu::BindGroup,
     pub bg_dot_p_v: wgpu::BindGroup,
     pub bg_dot_r_r: wgpu::BindGroup,
-    pub bg_dot_pair_r0r_rr: wgpu::BindGroup,
-    pub bg_dot_pair_tstt: wgpu::BindGroup,
     pub bg_coupled_solution: wgpu::BindGroup,
     pub bg_scalars: wgpu::BindGroup,
     pub bg_dot_params: wgpu::BindGroup,
@@ -96,7 +93,7 @@ pub struct CoupledSolverResources {
     pub pipeline_finalize_precond: wgpu::ComputePipeline,
     pub pipeline_spmv_phat_v: wgpu::ComputePipeline,
     pub pipeline_spmv_shat_t: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_precond_update_x_r: wgpu::ComputePipeline,
+    // pub pipeline_bicgstab_precond_update_x_r: wgpu::ComputePipeline, // removed (BiCGStab unused)
 
     /// Async scalar reader for non-blocking convergence checks
     pub async_scalar_reader: RefCell<AsyncScalarReader>,
@@ -214,9 +211,6 @@ pub struct GpuSolver {
     pub bg_linear_state: wgpu::BindGroup,
     pub bg_linear_state_ro: wgpu::BindGroup,
     pub bg_dot_params: wgpu::BindGroup,
-    pub bg_dot_r0_v: wgpu::BindGroup,
-    pub bg_dot_pair_r0r_rr: wgpu::BindGroup,
-    pub bg_dot_pair_tstt: wgpu::BindGroup,
     pub bg_scalars: wgpu::BindGroup,
     pub bg_dot_p_v: wgpu::BindGroup,
     pub bg_dot_r_r: wgpu::BindGroup, // For CG r.r
@@ -225,12 +219,8 @@ pub struct GpuSolver {
 
     pub pipeline_gradient: wgpu::ComputePipeline,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
-    pub pipeline_spmv_s_t: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,
     pub pipeline_dot_pair: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_x_r: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_p: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_s: wgpu::ComputePipeline,
     pub pipeline_cg_update_x_r: wgpu::ComputePipeline,
     pub pipeline_cg_update_p: wgpu::ComputePipeline,
     pub pipeline_update_cg_alpha: wgpu::ComputePipeline,
@@ -241,7 +231,6 @@ pub struct GpuSolver {
     pub pipeline_init_scalars: wgpu::ComputePipeline,
     pub pipeline_reduce_rho_new_r_r: wgpu::ComputePipeline,
     pub pipeline_reduce_r0_v: wgpu::ComputePipeline,
-    pub pipeline_reduce_t_s_t_t: wgpu::ComputePipeline,
 
     pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,

@@ -490,26 +490,6 @@ fn init_coupled_resources(
         ],
     });
 
-    // Dot product bind groups
-    let bg_dot_r0_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Coupled Dot R0 V Bind Group"),
-        layout: &pipeline_res.bgl_dot_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state_res.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state_res.b_r0.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state_res.b_v.as_entire_binding(),
-            },
-        ],
-    });
-
     let bg_dot_p_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Coupled Dot P V Bind Group"),
         layout: &pipeline_res.bgl_dot_inputs,
@@ -544,68 +524,6 @@ fn init_coupled_resources(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: state_res.b_r.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_pair_r0r_rr = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Coupled Dot Pair R0R RR Bind Group"),
-        layout: &pipeline_res.bgl_dot_pair_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state_res.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state_res.b_dot_result_2.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state_res.b_r0.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state_res.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state_res.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state_res.b_r.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_pair_tstt = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Coupled Dot Pair TSTT Bind Group"),
-        layout: &pipeline_res.bgl_dot_pair_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state_res.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state_res.b_dot_result_2.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state_res.b_t.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state_res.b_s.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state_res.b_t.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state_res.b_t.as_entire_binding(),
             },
         ],
     });
@@ -919,16 +837,6 @@ fn init_coupled_resources(
         cache: None,
     });
 
-    let pipeline_bicgstab_precond_update_x_r =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("BiCGStab Precond Update X R Pipeline"),
-            layout: Some(&pl_precond),
-            module: &shader_precond,
-            entry_point: Some("bicgstab_precond_update_x_r"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
     // Create max-diff shader and pipelines for GPU convergence check
     let shader_max_diff = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Max Diff Shader"),
@@ -1186,11 +1094,8 @@ fn init_coupled_resources(
         bg_linear_matrix,
         bg_linear_state,
         bg_linear_state_ro,
-        bg_dot_r0_v,
         bg_dot_p_v,
         bg_dot_r_r,
-        bg_dot_pair_r0r_rr,
-        bg_dot_pair_tstt,
         bg_coupled_solution,
         bg_scalars,
         bg_dot_params,
@@ -1218,7 +1123,6 @@ fn init_coupled_resources(
         pipeline_finalize_precond,
         pipeline_spmv_phat_v,
         pipeline_spmv_shat_t,
-        pipeline_bicgstab_precond_update_x_r,
         async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device, 8)),
     }
 }

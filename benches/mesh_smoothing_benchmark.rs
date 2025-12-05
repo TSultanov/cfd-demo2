@@ -17,13 +17,7 @@ fn mesh_smoothing_benchmark(c: &mut Criterion) {
     let max_cell_size = 0.00175;
 
     // Generate mesh once
-    let mesh = generate_cut_cell_mesh(
-        &geo,
-        min_cell_size,
-        max_cell_size,
-        1.2,
-        domain_size,
-    );
+    let mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
 
     let mut group = c.benchmark_group("mesh_smoothing");
     group.sample_size(10);

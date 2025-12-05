@@ -25,12 +25,8 @@ impl GpuSolver {
         let fields_res = fields::init_fields(&context.device, num_cells, num_faces);
 
         // 3. Initialize Linear Solver
-        let linear_res = linear_solver::init_linear_solver(
-            &context.device,
-            mesh,
-            num_cells,
-            &mesh_res.bgl_mesh,
-        );
+        let linear_res =
+            linear_solver::init_linear_solver(&context.device, mesh, num_cells, &mesh_res.bgl_mesh);
 
         // 4. Initialize Scalars
         let scalar_res = scalars::init_scalars(
@@ -126,13 +122,12 @@ impl GpuSolver {
             pipeline_update_rho_old: scalar_res.pipeline_update_rho_old,
 
             // Physics
-            pipeline_gradient_coupled: physics_res.pipeline_gradient_coupled,
             pipeline_momentum_assembly: physics_res.pipeline_momentum_assembly,
             pipeline_pressure_assembly: physics_res.pipeline_pressure_assembly,
             pipeline_flux_rhie_chow: physics_res.pipeline_flux_rhie_chow,
             pipeline_coupled_assembly_merged: physics_res.pipeline_coupled_assembly_merged,
             pipeline_update_from_coupled: physics_res.pipeline_update_from_coupled,
-            pipeline_flux_and_dp: physics_res.pipeline_flux_and_dp,
+            pipeline_prepare_coupled: physics_res.pipeline_prepare_coupled,
 
             // Misc
             num_cells,

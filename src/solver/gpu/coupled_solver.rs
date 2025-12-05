@@ -34,10 +34,16 @@ impl GpuSolver {
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
 
+        // We need to access coupled resources. If not available, return.
+        if self.coupled_resources.is_none() {
+            println!("Coupled resources not initialized!");
+            return;
+        }
+
         // Save old velocity for under-relaxation and time derivative
         self.copy_u_to_u_old();
 
-        // Initialize fluxes and d_p
+        // Initialize fluxes and d_p (and gradients)
         {
             let mut encoder =
                 self.context
@@ -45,8 +51,25 @@ impl GpuSolver {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Init Flux and D_P Encoder"),
                     });
-            // Merged kernel for Flux and D_P
-            self.compute_fluxes_and_dp_with_encoder(&mut encoder);
+
+            let res = self.coupled_resources.as_ref().unwrap();
+
+            // Ensure component is 0 for d_p calculation (if needed)
+            self.constants.component = 0;
+            self.update_constants();
+
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Init Prepare Coupled Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_prepare_coupled);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.set_bind_group(2, &res.bg_solver, &[]);
+                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+            }
+
             self.context.queue.submit(Some(encoder.finish()));
         }
 
@@ -57,12 +80,6 @@ impl GpuSolver {
 
         let mut prev_residual_u = f64::MAX;
         let mut prev_residual_p = f64::MAX;
-
-        // We need to access coupled resources. If not available, return.
-        if self.coupled_resources.is_none() {
-            println!("Coupled resources not initialized!");
-            return;
-        }
 
         // Reset async reader to clear old values
         if let Some(res) = self.coupled_resources.as_ref() {
@@ -102,24 +119,23 @@ impl GpuSolver {
                             label: Some("Coupled Step Encoder"),
                         });
 
-                // Update fluxes with current velocity for advection terms (if iter > 0)
-                if iter > 0 {
-                    // Merged kernel for Flux and D_P
-                    self.compute_fluxes_and_dp_with_encoder(&mut encoder);
-                }
-
                 let res = self.coupled_resources.as_ref().unwrap();
 
-                // 1. Gradient Coupled (Only if scheme != 0)
-                if self.constants.scheme != 0 {
+                // Merged Prepare Coupled Pass (Flux, D_P, Grad P, Grad U, Grad V)
+                if iter > 0 || self.constants.scheme != 0 {
+                    // Ensure component is 0 for d_p calculation (if needed)
+                    if iter > 0 {
+                        self.constants.component = 0;
+                        self.update_constants();
+                    }
+
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Gradient Coupled Pass"),
+                        label: Some("Prepare Coupled Pass"),
                         timestamp_writes: None,
                     });
-                    cpass.set_pipeline(&self.pipeline_gradient_coupled);
+                    cpass.set_pipeline(&self.pipeline_prepare_coupled);
                     cpass.set_bind_group(0, &self.bg_mesh, &[]);
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    // Bind Group 2: Output buffers (grad_u, grad_v)
                     cpass.set_bind_group(2, &res.bg_solver, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }

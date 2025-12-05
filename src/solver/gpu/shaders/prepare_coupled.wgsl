@@ -44,10 +44,10 @@ struct Constants {
 @group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
 @group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
 
-// Group 2: Solver (Unused but kept for layout compatibility if needed, or we can use a smaller layout)
-// We will reuse the layout from momentum assembly which has 2 bindings in group 2
-@group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) var<storage, read_write> rhs: array<f32>;
+// Group 2: Coupled Solver Resources
+// We use bindings 3 and 4 for grad_u and grad_v
+@group(2) @binding(3) var<storage, read_write> grad_u: array<Vector2>;
+@group(2) @binding(4) var<storage, read_write> grad_v: array<Vector2>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -61,12 +61,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start = cell_face_offsets[idx];
     let end = cell_face_offsets[idx + 1];
     
+    // --- Part 1: Flux and D_P Calculation ---
+    
     var diag_coeff: f32 = 0.0;
     
     // Time derivative
     let u_n = u_old[idx];
-    // We only compute d_p, so we assume component 0 for simplicity or just use generic logic
-    // d_p is isotropic usually.
     
     var time_coeff = vol * constants.density / constants.dt;
     if (constants.time_scheme == 1u) {
@@ -80,6 +80,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Variables for gradient calculation (fused)
     let val_c_p = p[idx];
     var grad_p_accum = Vector2(0.0, 0.0);
+
+    // Variables for velocity gradient calculation
+    let u_val = u[idx];
+    let val_c_u = u_val.x;
+    let val_c_v = u_val.y;
+    
+    var g_u = Vector2(0.0, 0.0);
+    var g_v = Vector2(0.0, 0.0);
 
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
@@ -99,14 +107,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         
         // --- Compute Flux (Rhie-Chow) ---
-        // We need to compute flux for this face.
-        // We need owner and neighbor data.
-        // Note: 'owner' variable is the face owner. 'idx' is current cell.
-        // If idx != owner, then idx is the neighbor of the face.
-        
-        // Let's identify the "other" cell from the perspective of the face owner
-        // But here we are in cell 'idx'.
-        // Let's just use the face data directly.
         
         let c_owner = cell_centers[owner];
         // Ensure normal points out of owner (for flux calculation convention)
@@ -189,10 +189,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         
         // --- Compute D_P Contribution ---
-        // We need flux relative to current cell 'idx'
-        // 'flux' is computed with 'normal_flux' which points out of 'owner'.
-        // If idx == owner, flux_out = flux.
-        // If idx != owner, flux_out = -flux.
         
         var flux_out = flux;
         if (owner != idx) {
@@ -265,17 +261,56 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
              var val_f_p = val_c_p;
              if (boundary_type == 2u) { // Outlet
-                 val_f_p = 0.0; // Or extrapolate? Original code used 0.0 for outlet in momentum_assembly?
-                 // Checking momentum_assembly_v2:
-                 // if (boundary_type == 2u) { val_f_p = 0.0; } else { val_f_p = val_c_p; }
-                 // Wait, original code:
-                 // if (boundary_type == 2u) { val_f_p = 0.0; } else { val_f_p = val_c_p; }
-                 // This seems wrong for outlet (p=0 is Dirichlet, but usually we set p=0 at outlet).
-                 // If p=0 at outlet, then val_f_p = 0.0 is correct.
+                 val_f_p = 0.0; 
              }
              grad_p_accum.x += val_f_p * normal.x * area;
              grad_p_accum.y += val_f_p * normal.y * area;
         }
+
+        // --- Part 2: Velocity Gradient Calculation ---
+        
+        var val_f_u = 0.0;
+        var val_f_v = 0.0;
+        
+        if (!is_boundary) {
+            // Internal Face
+            let u_other = u[other_idx];
+            let val_other_u = u_other.x;
+            let val_other_v = u_other.y;
+            
+            let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+            let d_o = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+            
+            let total_dist = d_c + d_o;
+            if (total_dist > 1e-6) {
+                let lambda = d_o / total_dist;
+                val_f_u = lambda * val_c_u + (1.0 - lambda) * val_other_u;
+                val_f_v = lambda * val_c_v + (1.0 - lambda) * val_other_v;
+            } else {
+                val_f_u = 0.5 * (val_c_u + val_other_u);
+                val_f_v = 0.5 * (val_c_v + val_other_v);
+            }
+        } else {
+            // Boundary
+            // Velocity Boundary
+            if (boundary_type == 1u) { // Inlet
+                let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
+                val_f_u = constants.inlet_velocity * ramp;
+                val_f_v = 0.0;
+            } else if (boundary_type == 3u) { // Wall
+                val_f_u = 0.0;
+                val_f_v = 0.0;
+            } else { // Outlet
+                val_f_u = val_c_u; // Zero Gradient
+                val_f_v = val_c_v;
+            }
+        }
+        
+        g_u.x += val_f_u * normal.x * area;
+        g_u.y += val_f_u * normal.y * area;
+        
+        g_v.x += val_f_v * normal.x * area;
+        g_v.y += val_f_v * normal.y * area;
     }
     
     // Write d_p
@@ -289,4 +324,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     grad_p_accum.x /= vol;
     grad_p_accum.y /= vol;
     grad_p[idx] = grad_p_accum;
+
+    // Write grad_u, grad_v
+    g_u.x /= vol;
+    g_u.y /= vol;
+    
+    g_v.x /= vol;
+    g_v.y /= vol;
+    
+    grad_u[idx] = g_u;
+    grad_v[idx] = g_v;
 }

@@ -431,27 +431,6 @@ impl GpuSolver {
         }
     }
 
-    pub fn compute_fluxes_and_dp_with_encoder(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        let workgroup_size = 64;
-        let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
-
-        // Ensure component is 0 for d_p calculation (if needed by shader logic)
-        self.constants.component = 0;
-        self.update_constants();
-
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Flux and DP Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&self.pipeline_flux_and_dp);
-            cpass.set_bind_group(0, &self.bg_mesh, &[]);
-            cpass.set_bind_group(1, &self.bg_fields, &[]);
-            cpass.set_bind_group(2, &self.bg_solver, &[]); // Needed for layout compatibility
-            cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-        }
-    }
-
     pub fn initialize_history(&self) {
         let mut encoder =
             self.context

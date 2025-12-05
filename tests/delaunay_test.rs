@@ -14,17 +14,11 @@ fn test_delaunay_005_correctness() {
     let max_cell_size = 0.005;
     let growth_rate = 1.2;
 
-    let mesh = generate_delaunay_mesh(
-        &geo,
-        min_cell_size,
-        max_cell_size,
-        growth_rate,
-        domain_size,
-    );
+    let mesh = generate_delaunay_mesh(&geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
     assert!(mesh.num_cells() > 0);
     println!("Generated mesh with {} cells", mesh.num_cells());
-    
+
     // Check that we have a reasonable number of cells for this resolution
     // Area approx 3.5 * 1.0 - 0.5 * 0.5 = 3.25
     // Cell area approx 0.5 * 0.005^2 (very rough)
@@ -34,6 +28,6 @@ fn test_delaunay_005_correctness() {
     // Area of equilateral triangle with side a is sqrt(3)/4 * a^2.
     // N_triangles approx Area / Area_tri.
     // 3.25 / (0.433 * 0.005^2) = 3.25 / 0.0000108 = ~300,000 cells.
-    
+
     assert!(mesh.num_cells() > 100_000);
 }

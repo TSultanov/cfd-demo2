@@ -210,7 +210,6 @@ pub struct GpuSolver {
     pub bgl_dot_inputs: wgpu::BindGroupLayout,
     pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
 
-    pub pipeline_gradient_coupled: wgpu::ComputePipeline,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,
     pub pipeline_dot_pair: wgpu::ComputePipeline,
@@ -230,7 +229,7 @@ pub struct GpuSolver {
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
-    pub pipeline_flux_and_dp: wgpu::ComputePipeline,
+    pub pipeline_prepare_coupled: wgpu::ComputePipeline,
     pub pipeline_init_cg_scalars: wgpu::ComputePipeline,
 
     pub num_cells: u32,

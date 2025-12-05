@@ -286,6 +286,10 @@ impl GpuSolver {
                 stats.iterations, stats.residual, stats.converged
             );
 
+            if stats.residual.is_nan() {
+                panic!("Coupled Linear Solver Diverged: NaN detected in linear residual");
+            }
+
             // 4. Update Fields & Compute Max Diff
             {
                 let res = self.coupled_resources.as_ref().unwrap();
@@ -343,6 +347,13 @@ impl GpuSolver {
                     if let Some(results) = reader.get_last_value_vec(2) {
                         let max_diff_u = results[0] as f64;
                         let max_diff_p = results[1] as f64;
+
+                        if max_diff_u.is_nan() || max_diff_p.is_nan() {
+                            panic!(
+                                "Coupled Solver Diverged: NaN detected in outer residuals (U: {}, P: {})",
+                                max_diff_u, max_diff_p
+                            );
+                        }
 
                         // Store outer loop stats
                         *self.outer_residual_u.lock().unwrap() = max_diff_u as f32;

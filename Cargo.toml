@@ -45,3 +45,7 @@ harness = false
 [[bench]]
 name = "gpu_dispatch_benchmark"
 harness = false
+
+[[bench]]
+name = "mesh_profile"
+harness = false

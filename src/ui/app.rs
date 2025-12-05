@@ -548,6 +548,11 @@ impl CFDApp {
 
 impl eframe::App for CFDApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Sync running state from background thread
+        if self.is_running && !self.gpu_solver_running.load(Ordering::Relaxed) {
+            self.is_running = false;
+        }
+
         egui::SidePanel::left("controls").show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
@@ -829,6 +834,11 @@ impl eframe::App for CFDApp {
 
                         if let Some(gpu_solver) = &self.gpu_solver {
                             if self.is_running {
+                                // Reset stop flag
+                                if let Ok(mut solver) = gpu_solver.lock() {
+                                    solver.should_stop = false;
+                                }
+
                                 self.gpu_solver_running.store(true, Ordering::Relaxed);
                                 let solver_arc = gpu_solver.clone();
                                 let running_flag = self.gpu_solver_running.clone();
@@ -842,6 +852,11 @@ impl eframe::App for CFDApp {
                                         if let Ok(mut solver) = solver_arc.lock() {
                                             let start = std::time::Instant::now();
                                             solver.step();
+                                            
+                                            if solver.should_stop {
+                                                running_flag.store(false, Ordering::Relaxed);
+                                            }
+
                                             let step_time = start.elapsed().as_secs_f32() * 1000.0;
                                             let u = pollster::block_on(solver.get_u());
                                             let p = pollster::block_on(solver.get_p());

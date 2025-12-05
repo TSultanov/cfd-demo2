@@ -240,6 +240,13 @@ pub struct GpuSolver {
 
     pub coupled_resources: Option<CoupledSolverResources>,
 
+    // Evolution check
+    pub variance_history: Vec<(f64, f64)>,
+    pub degenerate_count: u32,
+    pub prev_u_cpu: Vec<f32>,
+    pub steady_state_count: u32,
+    pub should_stop: bool,
+
     /// Detailed profiling statistics for GPU-CPU communication analysis
     pub profiling_stats: Arc<ProfilingStats>,
 

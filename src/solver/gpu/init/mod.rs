@@ -141,6 +141,11 @@ impl GpuSolver {
             fgmres_resources: None,
             n_outer_correctors: 20,
             coupled_resources: Some(linear_res.coupled_resources),
+            variance_history: Vec::new(),
+            degenerate_count: 0,
+            prev_u_cpu: Vec::new(),
+            steady_state_count: 0,
+            should_stop: false,
             profiling_stats: Arc::new(ProfilingStats::new()),
             staging_buffers: Mutex::new(std::collections::HashMap::new()),
         }

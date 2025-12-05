@@ -27,8 +27,7 @@ struct Constants {
 
 @group(2) @binding(0) var<storage, read> x: array<f32>;
 // Replaced snapshots with partial max diff outputs
-@group(2) @binding(1) var<storage, read_write> partial_max_u: array<f32>;
-@group(2) @binding(2) var<storage, read_write> partial_max_p: array<f32>;
+@group(2) @binding(1) var<storage, read_write> max_diff_result: array<atomic<u32>>;
 
 var<workgroup> shared_max_u: array<f32, 64>;
 var<workgroup> shared_max_p: array<f32, 64>;
@@ -83,7 +82,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>,
     }
     
     if (lid == 0u) {
-        partial_max_u[wg_id.x] = shared_max_u[0];
-        partial_max_p[wg_id.x] = shared_max_p[0];
+        atomicMax(&max_diff_result[0], bitcast<u32>(shared_max_u[0]));
+        atomicMax(&max_diff_result[1], bitcast<u32>(shared_max_p[0]));
     }
 }

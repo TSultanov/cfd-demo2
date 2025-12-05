@@ -235,31 +235,10 @@ fn init_coupled_resources(
     let workgroup_size = 64u32;
     let num_max_diff_groups = num_cells.div_ceil(workgroup_size);
 
-    let b_max_diff_partial_u = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Max Diff Partial U"),
-        size: (num_max_diff_groups as u64) * 4, // 1 float per workgroup for U
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_max_diff_partial_p = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Max Diff Partial P"),
-        size: (num_max_diff_groups as u64) * 4, // 1 float per workgroup for P
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
     let b_max_diff_result = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Max Diff Result"),
         size: 8, // 2 floats: max_u, max_p
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    let b_dummy = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Dummy Buffer"),
-        size: 4,
-        usage: wgpu::BufferUsages::STORAGE,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -631,20 +610,9 @@ fn init_coupled_resources(
                 },
                 count: None,
             },
-            // 1: Partial Max U (Read/Write)
+            // 1: Max Diff Result (Atomic)
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 2: Partial Max P (Read/Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -666,11 +634,7 @@ fn init_coupled_resources(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: b_max_diff_partial_u.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_max_diff_partial_p.as_entire_binding(),
+                resource: b_max_diff_result.as_entire_binding(),
             },
         ],
     });
@@ -898,150 +862,6 @@ fn init_coupled_resources(
         cache: None,
     });
 
-    // Create max-diff shader and pipelines for GPU convergence check
-    let shader_max_diff = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Max Diff Shader"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../shaders/max_diff.wgsl"
-        ))),
-    });
-
-    // Bind group layout for max-diff inputs
-    let bgl_max_diff = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Max Diff Inputs Layout"),
-        entries: &[
-            // 0: vec_a (current values)
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 1: vec_b (snapshot values)
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 2: partial_max
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
-    // Bind group layout for max-diff params
-    let bgl_max_diff_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Max Diff Params Layout"),
-        entries: &[
-            // 0: params (uniform)
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 1: result
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
-    // Create max-diff params buffer
-    let b_max_diff_params = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Max Diff Params"),
-        size: 512, // MaxDiffParams struct (16 bytes) * 2, aligned to 256
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let bg_max_diff_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Max Diff Params Bind Group"),
-        layout: &bgl_max_diff_params,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &b_max_diff_params,
-                    offset: 0,
-                    size: Some(std::num::NonZeroU64::new(16).unwrap()),
-                }),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_max_diff_result.as_entire_binding(),
-            },
-        ],
-    });
-
-    // Max-diff pipeline layout
-    let pl_max_diff = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Max Diff Pipeline Layout"),
-        bind_group_layouts: &[&bgl_max_diff, &bgl_max_diff_params],
-        push_constant_ranges: &[],
-    });
-
-    let pipeline_max_diff_reduce =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Max Diff Reduce Pipeline"),
-            layout: Some(&pl_max_diff),
-            module: &shader_max_diff,
-            entry_point: Some("max_reduce_final"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-    // Create cached bind groups for max-diff
-    // bg_max_diff_u and bg_max_diff_p removed
-    // Create cached bind groups for max-diff
-
-    let bg_reduce = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Max Diff Combined Reduce Bind Group"),
-        layout: &bgl_max_diff,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: b_max_diff_partial_u.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_max_diff_partial_p.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_dummy.as_entire_binding(),
-            },
-        ],
-    });
-
     CoupledSolverResources {
         b_row_offsets: matrix_res.b_row_offsets,
         b_col_indices: matrix_res.b_col_indices,
@@ -1068,8 +888,6 @@ fn init_coupled_resources(
         b_grad_u,
         b_grad_v,
         // Max-diff convergence check
-        b_max_diff_partial_u,
-        b_max_diff_partial_p,
         b_max_diff_result,
         num_max_diff_groups,
         bg_solver,
@@ -1085,14 +903,6 @@ fn init_coupled_resources(
         bgl_coupled_solver,
         bgl_coupled_solution,
         bgl_precond,
-        // Max-diff resources
-        bgl_max_diff,
-        bgl_max_diff_params,
-        b_max_diff_params,
-        bg_max_diff_params,
-        pipeline_max_diff_reduce,
-        // Cached bind groups
-        bg_reduce,
         // Preconditioner pipelines
         pipeline_build_schur_rhs,
         pipeline_finalize_precond,

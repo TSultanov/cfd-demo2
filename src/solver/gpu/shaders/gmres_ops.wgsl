@@ -49,6 +49,16 @@ fn get_workgroup_index(wg_id: vec3<u32>) -> u32 {
 @group(3) @binding(0) var<uniform> params: GmresParams;
 @group(3) @binding(1) var<storage, read_write> scalars: array<f32>;
 
+struct IterParams {
+    current_idx: u32,
+    max_restart: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+@group(3) @binding(2) var<uniform> iter_params: IterParams;
+@group(3) @binding(3) var<storage, read_write> hessenberg: array<f32>;
+@group(3) @binding(4) var<storage, read> y_sol: array<f32>;
+
 // SpMV: y = A * x
 @compute @workgroup_size(64)
 fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -79,6 +89,18 @@ fn axpy(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     
     let alpha = scalars[0];
+    vec_y[idx] = alpha * vec_x[idx] + vec_y[idx];
+}
+
+// AXPY from Y: y = y_sol[current_idx] * x + y
+@compute @workgroup_size(64)
+fn axpy_from_y(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = get_global_index(global_id);
+    if (idx >= params.n) {
+        return;
+    }
+    
+    let alpha = y_sol[iter_params.current_idx];
     vec_y[idx] = alpha * vec_x[idx] + vec_y[idx];
 }
 
@@ -278,16 +300,6 @@ fn orthogonalize(@builtin(global_invocation_id) global_id: vec3<u32>) {
     vec_y[idx] = vec_y[idx] - h * vec_x[idx];
 }
 
-struct IterParams {
-    current_idx: u32, // Target index in Hessenberg matrix
-    max_restart: u32,
-    _pad1: u32,
-    _pad2: u32,
-}
-
-@group(3) @binding(2) var<uniform> iter_params: IterParams;
-@group(3) @binding(3) var<storage, read_write> hessenberg: array<f32>;
-
 // Final reduction: sums partial results from workgroups and writes to H and scalars
 @compute @workgroup_size(1)
 fn reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -318,4 +330,27 @@ fn reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Write to Hessenberg matrix
     // iter_params.current_idx is the flat index in H
     hessenberg[iter_params.current_idx] = total_sum;
+}
+
+// Merged Reduce Final + Finish Norm
+@compute @workgroup_size(1)
+fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var total_sum = 0.0;
+    let num_partials = params.n;
+    
+    for (var i = 0u; i < num_partials; i++) {
+        total_sum += vec_x[i];
+    }
+    
+    let norm = sqrt(total_sum);
+    
+    // Store in H
+    hessenberg[iter_params.current_idx] = norm;
+    
+    // Store 1/norm for scaling
+    if (norm > 1e-20) {
+        scalars[0] = 1.0 / norm;
+    } else {
+        scalars[0] = 0.0;
+    }
 }

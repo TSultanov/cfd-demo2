@@ -289,6 +289,12 @@ impl GpuSolver {
             // 4. Update Fields & Compute Max Diff
             {
                 let res = self.coupled_resources.as_ref().unwrap();
+                
+                // Clear max diff result buffer before update (using atomics in shader)
+                if iter > 0 {
+                    self.context.queue.write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
+                }
+
                 let dispatch_start = Instant::now();
                 let mut encoder =
                     self.context
@@ -308,11 +314,6 @@ impl GpuSolver {
                     cpass.set_bind_group(1, &self.bg_fields, &[]);
                     cpass.set_bind_group(2, &res.bg_coupled_solution, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-
-                // Compute Max Diff (if iter > 0)
-                if iter > 0 {
-                    self.compute_max_diff_final_with_encoder(&mut encoder);
                 }
 
                 self.context.queue.submit(Some(encoder.finish()));
@@ -410,51 +411,5 @@ impl GpuSolver {
         // Use the FGMRES-based coupled solver implementation from
         // `coupled_solver_fgmres.rs` to solve the coupled block system.
         self.solve_coupled_fgmres()
-    }
-
-    fn compute_max_diff_final_with_encoder(&self, encoder: &mut wgpu::CommandEncoder) {
-        let res = match self.coupled_resources.as_ref() {
-            Some(r) => r,
-            None => return,
-        };
-
-        #[repr(C)]
-        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-        struct MaxDiffParams {
-            n: u32,
-            _pad1: u32,
-            _pad2: u32,
-            _pad3: u32,
-        }
-
-        let workgroup_size = 64u32;
-        let num_groups = self.num_cells.div_ceil(workgroup_size);
-
-        // Write params for final reduction (n = num_groups)
-        let params_reduce = MaxDiffParams {
-            n: num_groups,
-            _pad1: 0,
-            _pad2: 0,
-            _pad3: 0,
-        };
-
-        // Write params to the buffer at offset 256 (as expected by shader binding dynamic offset)
-        self.context.queue.write_buffer(
-            &res.b_max_diff_params,
-            256,
-            bytemuck::bytes_of(&params_reduce),
-        );
-
-        // Single pass reduction writes both U and P maxima
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Max Diff Final Pass"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&res.pipeline_max_diff_reduce);
-            cpass.set_bind_group(0, &res.bg_reduce, &[]);
-            cpass.set_bind_group(1, &res.bg_max_diff_params, &[256]);
-            cpass.dispatch_workgroups(1, 1, 1);
-        }
     }
 }

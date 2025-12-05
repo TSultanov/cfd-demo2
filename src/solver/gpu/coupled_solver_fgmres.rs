@@ -70,6 +70,7 @@ pub struct FgmresResources {
     pub pipeline_spmv: wgpu::ComputePipeline,
     /// Compute pipeline for y = alpha x + y
     pub pipeline_axpy: wgpu::ComputePipeline,
+    pub pipeline_axpy_from_y: wgpu::ComputePipeline,
     /// Compute pipeline for z = alpha x + beta y
     pub pipeline_axpby: wgpu::ComputePipeline,
     /// Compute pipeline for y = alpha x
@@ -102,9 +103,9 @@ pub struct FgmresResources {
     pub bg_logic_params: wgpu::BindGroup,
 
     pub pipeline_reduce_final: wgpu::ComputePipeline,
+    pub pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
     pub pipeline_update_hessenberg: wgpu::ComputePipeline,
     pub pipeline_solve_triangular: wgpu::ComputePipeline,
-    pub pipeline_copy_scalar: wgpu::ComputePipeline,
     pub pipeline_finish_norm: wgpu::ComputePipeline,
 
     // CGS Pipelines
@@ -607,6 +608,17 @@ impl GpuSolver {
                     },
                     count: None,
                 },
+                // New binding for y
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -671,6 +683,10 @@ impl GpuSolver {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: b_hessenberg.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_y.as_entire_binding(),
                 },
             ],
         });
@@ -888,6 +904,7 @@ impl GpuSolver {
 
         let pipeline_spmv = make_pipeline("FGMRES SpMV", "spmv");
         let pipeline_axpy = make_pipeline("FGMRES AXPY", "axpy");
+        let pipeline_axpy_from_y = make_pipeline("FGMRES AXPY from Y", "axpy_from_y");
         let pipeline_axpby = make_pipeline("FGMRES AXPBY", "axpby");
         let pipeline_scale = make_pipeline("FGMRES Scale", "scale");
         let pipeline_scale_in_place = make_pipeline("FGMRES Scale In Place", "scale_in_place");
@@ -905,11 +922,11 @@ impl GpuSolver {
             make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur");
 
         let pipeline_reduce_final = make_pipeline("FGMRES Reduce Final", "reduce_final");
+        let pipeline_reduce_final_and_finish_norm = make_pipeline("FGMRES Reduce Final & Finish Norm", "reduce_final_and_finish_norm");
         let pipeline_update_hessenberg =
             make_logic_pipeline("FGMRES Update Hessenberg", "update_hessenberg_givens");
         let pipeline_solve_triangular =
             make_logic_pipeline("FGMRES Solve Triangular", "solve_triangular");
-        let pipeline_copy_scalar = make_logic_pipeline("FGMRES Copy Scalar", "copy_scalar");
         let pipeline_finish_norm = make_logic_pipeline("FGMRES Finish Norm", "finish_norm");
 
         // CGS Setup
@@ -1047,6 +1064,7 @@ impl GpuSolver {
             bg_pressure_matrix,
             pipeline_spmv,
             pipeline_axpy,
+            pipeline_axpy_from_y,
             pipeline_axpby,
             pipeline_scale,
             pipeline_scale_in_place,
@@ -1067,9 +1085,9 @@ impl GpuSolver {
             bg_logic,
             bg_logic_params,
             pipeline_reduce_final,
+            pipeline_reduce_final_and_finish_norm,
             pipeline_update_hessenberg,
             pipeline_solve_triangular,
-            pipeline_copy_scalar,
             pipeline_finish_norm,
             // CGS
             pipeline_calc_dots_cgs,
@@ -1867,7 +1885,7 @@ impl GpuSolver {
                         });
                         pass.set_pipeline(&fgmres.pipeline_calc_dots_cgs);
                         pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                        pass.dispatch_workgroups(fgmres.num_dot_groups, (j + 1) as u32, 1);
+                        pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
                     }
 
                     // Pass 2: Reduce Dots
@@ -1957,20 +1975,12 @@ impl GpuSolver {
                 );
 
                 self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_reduce_final,
+                    &fgmres.pipeline_reduce_final_and_finish_norm,
                     fgmres,
                     &reduce_bg,
                     &fgmres.bg_params,
                     1,
-                    "FGMRES Reduce Final",
-                );
-
-                // Finish Norm (sqrt, write to H, write 1/norm to scalars[0])
-                self.dispatch_logic_pipeline(
-                    &fgmres.pipeline_finish_norm,
-                    fgmres,
-                    1,
-                    "FGMRES Finish Norm",
+                    "FGMRES Reduce Final & Finish Norm",
                 );
 
                 // Restore params.n
@@ -1988,28 +1998,22 @@ impl GpuSolver {
                     .queue
                     .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
 
-                // Normalize w (scale in place using scalars[0])
-                self.scale_vector_in_place(
-                    fgmres,
-                    fgmres.b_w.as_entire_binding(),
-                    workgroups_dofs,
-                    "FGMRES Normalize w",
-                );
-
-                let copy_bg = self.create_vector_bind_group(
+                // Normalize w directly into basis[j+1]
+                // basis[j+1] = scalars[0] * w
+                let scale_bg = self.create_vector_bind_group(
                     fgmres,
                     fgmres.b_w.as_entire_binding(),
                     self.basis_binding(fgmres, j + 1),
                     fgmres.b_temp.as_entire_binding(),
-                    "FGMRES Copy w",
+                    "FGMRES Normalize & Copy",
                 );
                 self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_copy,
+                    &fgmres.pipeline_scale,
                     fgmres,
-                    &copy_bg,
+                    &scale_bg,
                     &fgmres.bg_params,
                     workgroups_dofs,
-                    "FGMRES Copy w",
+                    "FGMRES Normalize & Copy",
                 );
 
                 // Update Hessenberg and Givens (GPU)
@@ -2100,18 +2104,11 @@ impl GpuSolver {
 
             // Update solution x = x + sum_j y_j * z_j
             for i in 0..basis_size {
-                // Copy y[i] to scalars[0]
+                // Set current index for y[i] access
                 iter_params.current_idx = i as u32;
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-
-                self.dispatch_logic_pipeline(
-                    &fgmres.pipeline_copy_scalar,
-                    fgmres,
-                    1,
-                    "FGMRES Copy Scalar",
-                );
 
                 let axpy_bg = self.create_vector_bind_group(
                     fgmres,
@@ -2121,7 +2118,7 @@ impl GpuSolver {
                     "FGMRES Solution Update",
                 );
                 self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_axpy,
+                    &fgmres.pipeline_axpy_from_y,
                     fgmres,
                     &axpy_bg,
                     &fgmres.bg_params,

@@ -54,12 +54,8 @@ pub struct CoupledSolverResources {
     pub b_grad_v: wgpu::Buffer,
 
     // Convergence check buffers (GPU max-diff)
-    pub b_max_diff_partial_u: wgpu::Buffer, // Partial max values for U from workgroups
-    pub b_max_diff_partial_p: wgpu::Buffer, // Partial max values for P from workgroups
     pub b_max_diff_result: wgpu::Buffer,    // Final max-diff result (2 floats: max_u, max_p)
     pub num_max_diff_groups: u32,           // Number of workgroups for max-diff reduction
-
-    pub bg_reduce: wgpu::BindGroup,
 
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
@@ -75,13 +71,6 @@ pub struct CoupledSolverResources {
     pub bgl_coupled_solver: wgpu::BindGroupLayout,
     pub bgl_coupled_solution: wgpu::BindGroupLayout,
     pub bgl_precond: wgpu::BindGroupLayout, // Preconditioner bind group layout
-
-    // Max-diff convergence check resources
-    pub bgl_max_diff: wgpu::BindGroupLayout,
-    pub bgl_max_diff_params: wgpu::BindGroupLayout,
-    pub b_max_diff_params: wgpu::Buffer,
-    pub bg_max_diff_params: wgpu::BindGroup,
-    pub pipeline_max_diff_reduce: wgpu::ComputePipeline,
 
     // Preconditioner pipelines
     pub pipeline_build_schur_rhs: wgpu::ComputePipeline,

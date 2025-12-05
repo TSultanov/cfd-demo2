@@ -62,7 +62,7 @@ pub struct AmgLevel {
     pub bg_state: wgpu::BindGroup, // x, b, r
 
     // Cross-level bind groups (interaction with next coarser level)
-    pub bg_restrict: Option<wgpu::BindGroup>,   // Binds coarse.b_b
+    pub bg_restrict: Option<wgpu::BindGroup>, // Binds coarse.b_b
     pub bg_prolongate: Option<wgpu::BindGroup>, // Binds coarse.b_x
 }
 

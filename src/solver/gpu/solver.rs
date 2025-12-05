@@ -434,7 +434,7 @@ impl GpuSolver {
     pub fn compute_fluxes_and_dp_with_encoder(&mut self, encoder: &mut wgpu::CommandEncoder) {
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
-        
+
         // Ensure component is 0 for d_p calculation (if needed by shader logic)
         self.constants.component = 0;
         self.update_constants();

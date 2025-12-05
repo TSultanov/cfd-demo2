@@ -5,7 +5,6 @@ pub struct PhysicsPipelines {
     pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
-    pub pipeline_coupled_assembly: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
     pub pipeline_flux_and_dp: wgpu::ComputePipeline,
@@ -112,23 +111,6 @@ pub fn init_physics_pipelines(
         push_constant_ranges: &[],
     });
 
-    let shader_coupled = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Coupled Assembly Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../shaders/coupled_assembly.wgsl"
-        ))),
-    });
-
-    let pipeline_coupled_assembly =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Coupled Assembly Pipeline"),
-            layout: Some(&pl_coupled),
-            module: &shader_coupled,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
     let shader_coupled_merged = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Coupled Assembly Merged Shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
@@ -176,22 +158,20 @@ pub fn init_physics_pipelines(
         ))),
     });
 
-    let pipeline_flux_and_dp =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Flux and DP Pipeline"),
-            layout: Some(&pl_matrix), // Uses mesh, fields, and solver (Group 0, 1, 2)
-            module: &shader_flux_and_dp,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+    let pipeline_flux_and_dp = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Flux and DP Pipeline"),
+        layout: Some(&pl_matrix), // Uses mesh, fields, and solver (Group 0, 1, 2)
+        module: &shader_flux_and_dp,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
 
     PhysicsPipelines {
         pipeline_gradient_coupled,
         pipeline_momentum_assembly,
         pipeline_pressure_assembly,
         pipeline_flux_rhie_chow,
-        pipeline_coupled_assembly,
         pipeline_coupled_assembly_merged,
         pipeline_update_from_coupled,
         pipeline_flux_and_dp,

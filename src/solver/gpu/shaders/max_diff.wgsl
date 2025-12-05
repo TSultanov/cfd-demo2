@@ -19,39 +19,6 @@ struct MaxDiffParams {
 @group(1) @binding(0) var<uniform> params: MaxDiffParams;
 @group(1) @binding(1) var<storage, read_write> result: array<f32>; // Output scalar(s)
 
-var<workgroup> shared_max: array<f32, 64>;
-
-// Compute max|a - b| with workgroup reduction
-@compute @workgroup_size(64)
-fn max_abs_diff_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
-                        @builtin(local_invocation_id) local_id: vec3<u32>,
-                        @builtin(workgroup_id) wg_id: vec3<u32>) {
-    let idx = global_id.x;
-    let lid = local_id.x;
-    
-    // Compute local max diff
-    var local_max = 0.0;
-    if (idx < params.n) {
-        local_max = abs(vec_a[idx] - vec_b[idx]);
-    }
-    
-    shared_max[lid] = local_max;
-    workgroupBarrier();
-    
-    // Reduce within workgroup (max operation)
-    for (var stride = 32u; stride > 0u; stride >>= 1u) {
-        if (lid < stride) {
-            shared_max[lid] = max(shared_max[lid], shared_max[lid + stride]);
-        }
-        workgroupBarrier();
-    }
-    
-    // First thread writes workgroup result
-    if (lid == 0u) {
-        partial_max[wg_id.x] = shared_max[0];
-    }
-}
-
 // Final reduction of partial maxes for both velocity (vec_a) and pressure (vec_b)
 // Both reductions now occur in a single dispatch to minimize GPU submissions.
 @compute @workgroup_size(1)
@@ -69,38 +36,3 @@ fn max_reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
     result[1] = total_max_p;
 }
 
-// Variant for vec2 (e.g., velocity with u, v components)
-// Reads 2 floats per element and returns max of both component diffs
-@compute @workgroup_size(64)
-fn max_abs_diff_vec2_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
-                              @builtin(local_invocation_id) local_id: vec3<u32>,
-                              @builtin(workgroup_id) wg_id: vec3<u32>) {
-    let cell = global_id.x;
-    let lid = local_id.x;
-    let num_cells = params.n;
-    
-    // Compute local max diff for both components
-    var local_max = 0.0;
-    if (cell < num_cells) {
-        let base = cell * 2u;
-        let diff_u = abs(vec_a[base] - vec_b[base]);
-        let diff_v = abs(vec_a[base + 1u] - vec_b[base + 1u]);
-        local_max = max(diff_u, diff_v);
-    }
-    
-    shared_max[lid] = local_max;
-    workgroupBarrier();
-    
-    // Reduce within workgroup
-    for (var stride = 32u; stride > 0u; stride >>= 1u) {
-        if (lid < stride) {
-            shared_max[lid] = max(shared_max[lid], shared_max[lid + stride]);
-        }
-        workgroupBarrier();
-    }
-    
-    // First thread writes workgroup result
-    if (lid == 0u) {
-        partial_max[wg_id.x] = shared_max[0];
-    }
-}

@@ -38,10 +38,6 @@ pub struct FgmresResources {
     pub b_dot_partial: wgpu::Buffer,
     /// Scalar parameters buffer
     pub b_scalars: wgpu::Buffer,
-    // Diagonals are now owned by CoupledSolverResources
-    // pub b_diag_u: wgpu::Buffer,
-    // pub b_diag_v: wgpu::Buffer,
-    // pub b_diag_p: wgpu::Buffer,
     /// Temporary buffer for pressure RHS (r_p')
     pub b_temp_p: wgpu::Buffer,
     pub b_p_sol: wgpu::Buffer,
@@ -82,16 +78,12 @@ pub struct FgmresResources {
     pub pipeline_scale_in_place: wgpu::ComputePipeline,
     /// Compute pipeline for y = x
     pub pipeline_copy: wgpu::ComputePipeline,
-    /// Compute pipeline for Jacobi preconditioner
-    pub pipeline_precond: wgpu::ComputePipeline,
     /// Compute pipeline for dot partial reduction
     pub pipeline_dot_partial: wgpu::ComputePipeline,
     /// Compute pipeline for norm-squared reduction
     pub pipeline_norm_sq: wgpu::ComputePipeline,
     /// Compute pipeline for Gram-Schmidt update
     pub pipeline_orthogonalize: wgpu::ComputePipeline,
-    /// Compute pipeline for diagonal extraction
-    pub pipeline_extract_diag: wgpu::ComputePipeline,
     pub pipeline_predict_and_form: wgpu::ComputePipeline,
     /// Schur Preconditioner Pipelines
     pub pipeline_relax_pressure: wgpu::ComputePipeline,
@@ -279,7 +271,7 @@ impl GpuSolver {
         });
 
         // Diagonals are in CoupledSolverResources
-        
+
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("FGMRES temp_p"),
             size: (self.num_cells as u64) * 4,
@@ -901,7 +893,7 @@ impl GpuSolver {
         let pipeline_scale_in_place = make_pipeline("FGMRES Scale In Place", "scale_in_place");
         let pipeline_copy = make_pipeline("FGMRES Copy", "copy");
         // let pipeline_precond = make_pipeline("FGMRES Precond", "block_jacobi_precond"); // Replaced by Schur
-        let pipeline_precond = make_schur_pipeline("Schur Predict", "predict_velocity"); // Placeholder for struct
+        // let pipeline_precond = make_schur_pipeline("Schur Predict", "predict_velocity"); // Placeholder for struct
 
         let pipeline_dot_partial = make_pipeline("FGMRES Dot Partial", "dot_product_partial");
         let pipeline_norm_sq = make_pipeline("FGMRES Norm Partial", "norm_sq_partial");
@@ -909,8 +901,8 @@ impl GpuSolver {
 
         let pipeline_relax_pressure = make_schur_pipeline("Schur Relax P", "relax_pressure");
         let pipeline_correct_vel = make_schur_pipeline("Schur Correct Vel", "correct_velocity");
-        let pipeline_extract_diag = make_schur_pipeline("Schur Extract Diag", "extract_diagonals");
-        let pipeline_predict_and_form = make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur");
+        let pipeline_predict_and_form =
+            make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur");
 
         let pipeline_reduce_final = make_pipeline("FGMRES Reduce Final", "reduce_final");
         let pipeline_update_hessenberg =
@@ -1038,9 +1030,6 @@ impl GpuSolver {
             b_temp,
             b_dot_partial,
             b_scalars,
-            // b_diag_u,
-            // b_diag_v,
-            // b_diag_p,
             b_temp_p,
             b_p_sol,
             b_params,
@@ -1062,15 +1051,12 @@ impl GpuSolver {
             pipeline_scale,
             pipeline_scale_in_place,
             pipeline_copy,
-            pipeline_precond,
             pipeline_dot_partial,
             pipeline_norm_sq,
             pipeline_orthogonalize,
-            pipeline_extract_diag,
             pipeline_predict_and_form,
             pipeline_relax_pressure,
             pipeline_correct_vel,
-            // New
             b_hessenberg,
             b_givens,
             b_g,
@@ -1279,8 +1265,6 @@ impl GpuSolver {
         pass.set_bind_group(3, group3_bg, &[]);
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
-
-
 
     fn dispatch_vector_pipeline_batched_with_encoder(
         &self,
@@ -1665,24 +1649,6 @@ impl GpuSolver {
         );
 
         // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
-        /*
-        let diag_bg = self.create_schur_vector_bind_group(
-            fgmres,
-            res.b_rhs.as_entire_binding(),
-            fgmres.b_temp.as_entire_binding(),
-            fgmres.b_w.as_entire_binding(),
-            fgmres.b_p_sol.as_entire_binding(),
-            "FGMRES Extract Diagonal BG",
-        );
-        self.dispatch_vector_pipeline(
-            &fgmres.pipeline_extract_diag,
-            fgmres,
-            &diag_bg,
-            &fgmres.bg_pressure_matrix,
-            workgroups_cells,
-            "Schur Extract Diag",
-        );
-        */
 
         let rhs_norm = self.gpu_norm(fgmres, res.b_rhs.as_entire_binding(), n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
@@ -1765,11 +1731,12 @@ impl GpuSolver {
                 );
 
                 let dispatch_start = Instant::now();
-                let mut encoder = self.context.device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor {
-                        label: Some("FGMRES Preconditioner Step"),
-                    },
-                );
+                let mut encoder =
+                    self.context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("FGMRES Preconditioner Step"),
+                        });
 
                 self.dispatch_vector_pipeline_with_encoder(
                     &mut encoder,
@@ -1785,7 +1752,7 @@ impl GpuSolver {
                 if self.constants.precond_type == 1 {
                     if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
                         let level0 = &amg.levels[0];
-                        
+
                         encoder.copy_buffer_to_buffer(
                             &fgmres.b_temp_p,
                             0,
@@ -1816,7 +1783,9 @@ impl GpuSolver {
                     // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
                     // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
                     // Reduced by 1 because predict_and_form now does the first iteration
-                    let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2).min(200).saturating_sub(1);
+                    let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2)
+                        .min(200)
+                        .saturating_sub(1);
                     if p_iters > 0 {
                         self.dispatch_vector_pipeline_batched_with_encoder(
                             &mut encoder,

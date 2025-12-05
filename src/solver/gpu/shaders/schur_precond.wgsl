@@ -38,96 +38,11 @@ struct PrecondParams {
 @group(3) @binding(1) var<storage, read> p_col_indices: array<u32>;
 @group(3) @binding(2) var<storage, read> p_matrix_values: array<f32>;
 
-fn get_matrix_value(row: u32, col: u32) -> f32 {
-    let start = row_offsets[row];
-    let end = row_offsets[row + 1u];
-    for (var k = start; k < end; k++) {
-        if (col_indices[k] == col) {
-            return matrix_values[k];
-        }
-    }
-    return 0.0;
-}
-
 fn safe_inverse(val: f32) -> f32 {
     if (abs(val) > 1e-14) {
         return 1.0 / val;
     }
     return 0.0;
-}
-
-// Kernel 1: Extract Diagonals
-@compute @workgroup_size(64)
-fn extract_diagonals(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
-    if (cell >= params.num_cells) {
-        return;
-    }
-
-    let row_u = cell * 3u;
-    let row_v = row_u + 1u;
-    
-    let d_u = get_matrix_value(row_u, row_u);
-    let d_v = get_matrix_value(row_v, row_v);
-    
-    diag_u_inv[cell] = safe_inverse(d_u);
-    diag_v_inv[cell] = safe_inverse(d_v);
-    
-    // For pressure, we use the Pressure Matrix (Scalar Laplacian, N x N)
-    // The row index in the pressure matrix corresponds directly to the cell index
-    let start = p_row_offsets[cell];
-    let end = p_row_offsets[cell + 1u];
-    var d_p = 0.0;
-    for (var k = start; k < end; k++) {
-        if (p_col_indices[k] == cell) {
-            d_p = p_matrix_values[k];
-            break;
-        }
-    }
-    diag_p_inv[cell] = safe_inverse(d_p);
-}
-
-// Kernel 2: Predict Velocity
-@compute @workgroup_size(64)
-fn predict_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
-    if (cell >= params.num_cells) {
-        return;
-    }
-
-    let base = cell * 3u;
-    
-    let r_u = r_in[base + 0u];
-    let r_v = r_in[base + 1u];
-
-    z_out[base + 0u] = diag_u_inv[cell] * r_u;
-    z_out[base + 1u] = diag_v_inv[cell] * r_v;
-    z_out[base + 2u] = 0.0; 
-}
-
-// Kernel 3: Form Schur RHS
-@compute @workgroup_size(64)
-fn form_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
-    if (cell >= params.num_cells) {
-        return;
-    }
-
-    let base = cell * 3u;
-    let row_p = base + 2u;
-    
-    var rhs_p = r_in[row_p];
-
-    // Subtract A_{row_p} * z_out (using Coupled Matrix)
-    let start = row_offsets[row_p];
-    let end = row_offsets[row_p + 1u];
-
-    for (var k = start; k < end; k++) {
-        let col = col_indices[k];
-        rhs_p -= matrix_values[k] * z_out[col];
-    }
-
-    temp_p[cell] = rhs_p;
 }
 
 // Kernel 4: Relax Pressure (Jacobi on Scalar Pressure Matrix)

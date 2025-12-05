@@ -124,10 +124,7 @@ impl GpuSolver {
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
 
-                // 2. Zero Buffers - Removed (Merged into Coupled Assembly Kernel)
-                // self.zero_buffer_with_encoder(...)
-
-                // 3. Coupled Assembly Merged
+                // 2. Coupled Assembly Merged
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("Coupled Assembly Merged Pass"),
@@ -265,12 +262,7 @@ impl GpuSolver {
                 println!("RHS has NaN: {}", rhs_has_nan);
             }
 
-            // 1.5 & 1.8. Assemble Scalar Pressure Matrix (Merged above)
-            // {
-            //     // Merged into coupled_assembly_merged
-            // }
-
-            // 2. Solve Coupled System using FGMRES-based coupled solver (CPU-side Krylov, GPU SpMV/precond)
+            // 3. Solve Coupled System using FGMRES-based coupled solver (CPU-side Krylov, GPU SpMV/precond)
             let stats = self.solve_coupled_system();
             *self.stats_p.lock().unwrap() = stats;
             println!(
@@ -278,7 +270,7 @@ impl GpuSolver {
                 stats.iterations, stats.residual, stats.converged
             );
 
-            // 3. Update Fields & Compute Max Diff
+            // 4. Update Fields & Compute Max Diff
             {
                 let res = self.coupled_resources.as_ref().unwrap();
                 let dispatch_start = Instant::now();
@@ -450,4 +442,3 @@ impl GpuSolver {
         }
     }
 }
-

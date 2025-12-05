@@ -61,45 +61,11 @@ pub fn init_linear_solver(
     mesh: &Mesh,
     num_cells: u32,
     bgl_mesh: &wgpu::BindGroupLayout,
-    b_u: &wgpu::Buffer,
-    b_p: &wgpu::Buffer,
 ) -> LinearSolverResources {
     // 1. Initialize Matrix Resources (Buffers)
-    // Note: row_offsets and col_indices are passed in, but we need to create buffers for them.
-    // Wait, init_mesh returns row_offsets and col_indices as Vec<u32>.
-    // But init_matrix expects them as arguments.
-    // We need to pass them from the caller (init/mod.rs) or recalculate them.
-    // The previous implementation calculated them inside init_linear_solver.
-    // But init_mesh also calculates them.
-    // Let's check init/mod.rs. It calls init_mesh, which returns MeshResources.
-    // MeshResources contains row_offsets and col_indices.
-    // So we should pass them to init_linear_solver.
-    // However, the signature of init_linear_solver in init/mod.rs currently is:
-    // init_linear_solver(device, mesh, num_cells, bgl_mesh)
-    // It doesn't take row_offsets and col_indices.
-    // Ah, in the previous refactoring (Step 78), I added row_offsets and col_indices to MeshResources.
-    // But I didn't update init_linear_solver to take them.
-    // Instead, init_linear_solver was recalculating them!
-    // That's inefficient.
-    // I should update init_linear_solver to take row_offsets and col_indices.
-    // But for now, to match the existing signature (and avoid changing init/mod.rs too much yet),
-    // I will recalculate them OR use the ones from MeshResources if I update init/mod.rs.
-    // The plan says "Update init/mod.rs to use new structure".
-    // So I can change the signature.
-
-    // Let's recalculate them here for now to match the previous behavior of init_linear_solver,
-    // OR better, since I am refactoring, I should use the ones from MeshResources.
-    // But init_linear_solver signature in init/mod.rs is:
-    // pub fn init_linear_solver(..., mesh: &Mesh, ...)
-    // It has access to mesh.
-
-    // Let's look at what I wrote in init/mesh.rs in Step 78.
-    // It returns MeshResources which has row_offsets and col_indices.
-
-    // So I will update init_linear_solver to take row_offsets and col_indices.
-
-    // Recalculating for now to keep it simple and consistent with the previous file content I'm splitting.
-    // The previous file `init/linear_solver.rs` calculated them.
+    // We recalculate the CSR structure here to ensure it matches the mesh connectivity.
+    // Ideally, this should be passed from the mesh initialization, but for now we
+    // recompute it to keep the initialization logic self-contained.
 
     // --- CSR Matrix Structure ---
     let mut row_offsets = vec![0u32; num_cells as usize + 1];
@@ -143,8 +109,6 @@ pub fn init_linear_solver(
         num_cells,
         &pipeline_res,
         &matrix_res.b_row_offsets,
-        b_u,
-        b_p,
         &matrix_res.b_matrix_values,
     );
 
@@ -209,8 +173,6 @@ fn init_coupled_resources(
     num_cells: u32,
     pipeline_res: &pipelines::PipelineResources,
     scalar_row_offsets_buffer: &wgpu::Buffer,
-    b_u: &wgpu::Buffer,
-    b_p: &wgpu::Buffer,
     b_scalar_matrix_values: &wgpu::Buffer,
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
@@ -272,8 +234,6 @@ fn init_coupled_resources(
     // Init Max-Diff Convergence Check Buffers
     let workgroup_size = 64u32;
     let num_max_diff_groups = num_cells.div_ceil(workgroup_size);
-
-    // Snapshots removed - merged into update_fields
 
     let b_max_diff_partial_u = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Max Diff Partial U"),
@@ -900,26 +860,6 @@ fn init_coupled_resources(
         push_constant_ranges: &[],
     });
 
-    let pipeline_extract_diagonal =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Extract Diagonal Pipeline"),
-            layout: Some(&pl_precond),
-            module: &shader_precond,
-            entry_point: Some("extract_diagonal"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-    let pipeline_precond_velocity =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Preconditioner Velocity Pipeline"),
-            layout: Some(&pl_precond),
-            module: &shader_precond,
-            entry_point: Some("precond_velocity"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
     let pipeline_build_schur_rhs =
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Build Schur RHS Pipeline"),
@@ -1069,8 +1009,6 @@ fn init_coupled_resources(
         push_constant_ranges: &[],
     });
 
-    // Partial pipelines removed
-
     let pipeline_max_diff_reduce =
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Max Diff Reduce Pipeline"),
@@ -1083,6 +1021,7 @@ fn init_coupled_resources(
 
     // Create cached bind groups for max-diff
     // bg_max_diff_u and bg_max_diff_p removed
+    // Create cached bind groups for max-diff
 
     let bg_reduce = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Max Diff Combined Reduce Bind Group"),
@@ -1155,8 +1094,6 @@ fn init_coupled_resources(
         // Cached bind groups
         bg_reduce,
         // Preconditioner pipelines
-        pipeline_extract_diagonal,
-        pipeline_precond_velocity,
         pipeline_build_schur_rhs,
         pipeline_finalize_precond,
         pipeline_spmv_phat_v,

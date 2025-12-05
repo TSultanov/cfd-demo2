@@ -54,13 +54,10 @@ pub struct CoupledSolverResources {
     pub b_grad_v: wgpu::Buffer,
 
     // Convergence check buffers (GPU max-diff)
-    // Snapshots removed as they are no longer needed (merged into update_fields)
-    // pub b_u_snapshot: wgpu::Buffer, 
-    // pub b_p_snapshot: wgpu::Buffer, 
     pub b_max_diff_partial_u: wgpu::Buffer, // Partial max values for U from workgroups
     pub b_max_diff_partial_p: wgpu::Buffer, // Partial max values for P from workgroups
-    pub b_max_diff_result: wgpu::Buffer, // Final max-diff result (2 floats: max_u, max_p)
-    pub num_max_diff_groups: u32,   // Number of workgroups for max-diff reduction
+    pub b_max_diff_result: wgpu::Buffer,    // Final max-diff result (2 floats: max_u, max_p)
+    pub num_max_diff_groups: u32,           // Number of workgroups for max-diff reduction
 
     pub bg_reduce: wgpu::BindGroup,
 
@@ -84,18 +81,13 @@ pub struct CoupledSolverResources {
     pub bgl_max_diff_params: wgpu::BindGroupLayout,
     pub b_max_diff_params: wgpu::Buffer,
     pub bg_max_diff_params: wgpu::BindGroup,
-    // pub pipeline_max_diff_u_partial: wgpu::ComputePipeline, // Removed
-    // pub pipeline_max_diff_p_partial: wgpu::ComputePipeline, // Removed
     pub pipeline_max_diff_reduce: wgpu::ComputePipeline,
 
     // Preconditioner pipelines
-    pub pipeline_extract_diagonal: wgpu::ComputePipeline,
-    pub pipeline_precond_velocity: wgpu::ComputePipeline,
     pub pipeline_build_schur_rhs: wgpu::ComputePipeline,
     pub pipeline_finalize_precond: wgpu::ComputePipeline,
     pub pipeline_spmv_phat_v: wgpu::ComputePipeline,
     pub pipeline_spmv_shat_t: wgpu::ComputePipeline,
-    // pub pipeline_bicgstab_precond_update_x_r: wgpu::ComputePipeline, // removed (BiCGStab unused)
     /// Async scalar reader for non-blocking convergence checks
     pub async_scalar_reader: RefCell<AsyncScalarReader>,
 }
@@ -236,7 +228,6 @@ pub struct GpuSolver {
     pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
-    pub pipeline_coupled_assembly: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
     pub pipeline_update_from_coupled: wgpu::ComputePipeline,
     pub pipeline_flux_and_dp: wgpu::ComputePipeline,

@@ -69,6 +69,14 @@ fn test_gpu_divergence_channel_obstacle() {
 
         gpu_solver.step();
 
+        if gpu_solver.should_stop {
+            if gpu_solver.degenerate_count > 10 {
+                panic!("Solver stopped due to degenerate solution!");
+            }
+            println!("Solver stopped early (steady state).");
+            break;
+        }
+
         if step % 10 == 0 {
             println!(
                 "Step {}: Max Vel = {:.4}, dt = {:.6}",

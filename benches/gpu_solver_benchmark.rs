@@ -37,6 +37,9 @@ fn gpu_solver_step_benchmark(c: &mut Criterion) {
     group.bench_function("step", |b| {
         b.iter(|| {
             solver.step();
+            if solver.should_stop && solver.degenerate_count > 10 {
+                panic!("Solver stopped due to degenerate solution!");
+            }
         });
     });
     group.finish();

@@ -62,6 +62,14 @@ fn test_reproduce_divergence() {
     for step in 0..max_steps {
         solver.step();
 
+        if solver.should_stop {
+            if solver.degenerate_count > 10 {
+                panic!("Solver stopped due to degenerate solution!");
+            }
+            println!("Solver stopped early (steady state).");
+            break;
+        }
+
         {
             // Check for divergence
             let stats_u = solver.stats_ux.lock().unwrap();

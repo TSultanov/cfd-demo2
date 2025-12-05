@@ -74,6 +74,15 @@ fn test_gpu_transfer_profile() {
             let step_start = Instant::now();
             solver.step();
             let step_duration = step_start.elapsed();
+
+            if solver.should_stop {
+                if solver.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
+                println!("Solver stopped early (steady state).");
+                break;
+            }
+
             step_times.push(step_duration);
             println!("Step {} completed in {:?}", step + 1, step_duration);
         }

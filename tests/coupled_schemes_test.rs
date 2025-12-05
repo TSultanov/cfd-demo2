@@ -51,6 +51,14 @@ async fn run_coupled_solver(
     for i in 0..NUM_STEPS {
         solver.step();
 
+        if solver.should_stop {
+            if solver.degenerate_count > 10 {
+                panic!("Solver stopped due to degenerate solution!");
+            }
+            println!("Solver stopped early (steady state).");
+            break;
+        }
+
         // Check for NaN early
         let u = solver.get_u().await;
         let p = solver.get_p().await;

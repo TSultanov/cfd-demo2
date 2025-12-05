@@ -61,6 +61,9 @@ fn bench_gpu_step_medium(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("step_medium", num_cells), |b| {
         b.iter(|| {
             solver.step();
+            if solver.should_stop && solver.degenerate_count > 10 {
+                panic!("Solver stopped due to degenerate solution!");
+            }
         });
     });
 
@@ -82,6 +85,9 @@ fn bench_gpu_total_runtime(c: &mut Criterion) {
         b.iter(|| {
             for _ in 0..num_steps {
                 solver.step();
+                if solver.should_stop && solver.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
             }
         });
     });
@@ -93,6 +99,9 @@ fn bench_gpu_total_runtime(c: &mut Criterion) {
         b.iter(|| {
             for _ in 0..num_steps {
                 solver.step();
+                if solver.should_stop && solver.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
             }
         });
     });

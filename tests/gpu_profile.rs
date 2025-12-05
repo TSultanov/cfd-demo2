@@ -46,6 +46,15 @@ fn test_gpu_profile() {
             let start_step = Instant::now();
             solver.step();
             let duration = start_step.elapsed();
+
+            if solver.should_stop {
+                if solver.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
+                println!("Solver stopped early (steady state).");
+                break;
+            }
+
             if step % 10 == 0 {
                 println!("Step {}: {:?}", step, duration);
             }

@@ -42,6 +42,12 @@ fn test_amg_preconditioner() {
         solver.set_precond_type(PreconditionerType::Jacobi);
         for _ in 0..5 {
             solver.step();
+            if solver.should_stop {
+                if solver.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
+                break;
+            }
         }
         let p_jacobi = solver.get_p().await;
 
@@ -60,6 +66,12 @@ fn test_amg_preconditioner() {
         solver_amg.set_precond_type(PreconditionerType::Amg);
         for _ in 0..5 {
             solver_amg.step();
+            if solver_amg.should_stop {
+                if solver_amg.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
+                break;
+            }
         }
         let p_amg = solver_amg.get_p().await;
 

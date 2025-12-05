@@ -51,6 +51,15 @@ fn test_gpu_fine_mesh_obstacle() {
         println!("Running solver steps...");
         for i in 0..10 {
             solver.step();
+
+            if solver.should_stop {
+                if solver.degenerate_count > 10 {
+                    panic!("Solver stopped due to degenerate solution!");
+                }
+                println!("Solver stopped early (steady state).");
+                break;
+            }
+
             if i % 1 == 0 {
                 println!("Step {}", i);
                 let u = solver.get_u().await;

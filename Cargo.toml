@@ -49,3 +49,7 @@ harness = false
 [[bench]]
 name = "mesh_profile"
 harness = false
+
+[[bench]]
+name = "mesh_smoothing_benchmark"
+harness = false

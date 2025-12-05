@@ -1,5 +1,6 @@
 use super::geometry::Geometry;
 use nalgebra::{Point2, Vector2};
+use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BoundaryType {
@@ -59,83 +60,103 @@ impl Mesh {
 
     pub fn recalculate_geometry(&mut self) {
         // 1. Recalculate Faces
-        for i in 0..self.face_cx.len() {
-            let v0_idx = self.face_v1[i];
-            let v1_idx = self.face_v2[i];
+        let vx = &self.vx;
+        let vy = &self.vy;
+        let face_v1 = &self.face_v1;
+        let face_v2 = &self.face_v2;
 
-            let v0 = Point2::new(self.vx[v0_idx], self.vy[v0_idx]);
-            let v1 = Point2::new(self.vx[v1_idx], self.vy[v1_idx]);
+        self.face_cx
+            .par_iter_mut()
+            .zip(&mut self.face_cy)
+            .zip(&mut self.face_area)
+            .zip(&mut self.face_nx)
+            .zip(&mut self.face_ny)
+            .enumerate()
+            .for_each(|(i, ((((cx, cy), area), nx), ny))| {
+                let v0_idx = face_v1[i];
+                let v1_idx = face_v2[i];
 
-            let center = Point2::from((v0.coords + v1.coords) * 0.5);
-            self.face_cx[i] = center.x;
-            self.face_cy[i] = center.y;
+                let v0 = Point2::new(vx[v0_idx], vy[v0_idx]);
+                let v1 = Point2::new(vx[v1_idx], vy[v1_idx]);
 
-            let edge_vec = v1 - v0;
-            self.face_area[i] = edge_vec.norm();
+                let center = Point2::from((v0.coords + v1.coords) * 0.5);
+                *cx = center.x;
+                *cy = center.y;
 
-            // Preserve normal orientation
-            let tangent = edge_vec.normalize();
-            let mut normal = Vector2::new(tangent.y, -tangent.x);
+                let edge_vec = v1 - v0;
+                *area = edge_vec.norm();
 
-            let current_normal = Vector2::new(self.face_nx[i], self.face_ny[i]);
-            if normal.dot(&current_normal) < 0.0 {
-                normal = -normal;
-            }
-            self.face_nx[i] = normal.x;
-            self.face_ny[i] = normal.y;
-        }
+                // Preserve normal orientation
+                let tangent = edge_vec.normalize();
+                let mut normal = Vector2::new(tangent.y, -tangent.x);
+
+                let current_normal = Vector2::new(*nx, *ny);
+                if normal.dot(&current_normal) < 0.0 {
+                    normal = -normal;
+                }
+                *nx = normal.x;
+                *ny = normal.y;
+            });
 
         // 2. Recalculate Cells
-        for i in 0..self.cell_cx.len() {
-            let mut center = Vector2::zeros();
-            let start = self.cell_vertex_offsets[i];
-            let end = self.cell_vertex_offsets[i + 1];
-            let n = end - start;
+        let cell_vertex_offsets = &self.cell_vertex_offsets;
+        let cell_vertices = &self.cell_vertices;
 
-            // Polygon Area and Centroid
-            let mut signed_area = 0.0;
-            let mut c_x = 0.0;
-            let mut c_y = 0.0;
+        self.cell_cx
+            .par_iter_mut()
+            .zip(&mut self.cell_cy)
+            .zip(&mut self.cell_vol)
+            .enumerate()
+            .for_each(|(i, ((cx_out, cy_out), vol_out))| {
+                let mut center = Vector2::zeros();
+                let start = cell_vertex_offsets[i];
+                let end = cell_vertex_offsets[i + 1];
+                let n = end - start;
 
-            for k in 0..n {
-                let idx0 = self.cell_vertices[start + k];
-                let idx1 = self.cell_vertices[start + (k + 1) % n];
+                // Polygon Area and Centroid
+                let mut signed_area = 0.0;
+                let mut c_x = 0.0;
+                let mut c_y = 0.0;
 
-                let p0_x = self.vx[idx0];
-                let p0_y = self.vy[idx0];
-                let p1_x = self.vx[idx1];
-                let p1_y = self.vy[idx1];
-
-                let cross = p0_x * p1_y - p1_x * p0_y;
-                signed_area += cross;
-                c_x += (p0_x + p1_x) * cross;
-                c_y += (p0_y + p1_y) * cross;
-            }
-
-            signed_area *= 0.5;
-            let area = signed_area.abs();
-
-            if area > 1e-12 {
-                c_x /= 6.0 * signed_area;
-                c_y /= 6.0 * signed_area;
-                center = Vector2::new(c_x, c_y);
-            } else {
-                // Fallback to average
                 for k in 0..n {
-                    let idx = self.cell_vertices[start + k];
-                    center.x += self.vx[idx];
-                    center.y += self.vy[idx];
-                }
-                center /= n as f64;
-            }
+                    let idx0 = cell_vertices[start + k];
+                    let idx1 = cell_vertices[start + (k + 1) % n];
 
-            self.cell_cx[i] = center.x;
-            self.cell_cy[i] = center.y;
-            self.cell_vol[i] = area;
-        }
+                    let p0_x = vx[idx0];
+                    let p0_y = vy[idx0];
+                    let p1_x = vx[idx1];
+                    let p1_y = vy[idx1];
+
+                    let cross = p0_x * p1_y - p1_x * p0_y;
+                    signed_area += cross;
+                    c_x += (p0_x + p1_x) * cross;
+                    c_y += (p0_y + p1_y) * cross;
+                }
+
+                signed_area *= 0.5;
+                let area = signed_area.abs();
+
+                if area > 1e-12 {
+                    c_x /= 6.0 * signed_area;
+                    c_y /= 6.0 * signed_area;
+                    center = Vector2::new(c_x, c_y);
+                } else {
+                    // Fallback to average
+                    for k in 0..n {
+                        let idx = cell_vertices[start + k];
+                        center.x += vx[idx];
+                        center.y += vy[idx];
+                    }
+                    center /= n as f64;
+                }
+
+                *cx_out = center.x;
+                *cy_out = center.y;
+                *vol_out = area;
+            });
     }
 
-    pub fn smooth<G: Geometry>(&mut self, geo: &G, target_skew: f64, max_iterations: usize) {
+    pub fn smooth<G: Geometry + Sync>(&mut self, geo: &G, target_skew: f64, max_iterations: usize) {
         let n_verts = self.vx.len();
         let mut adj = vec![Vec::new(); n_verts];
 
@@ -189,84 +210,78 @@ impl Mesh {
                 println!("Smoothing iter {}: max skew = {:.6}", iter, current_skew);
             }
 
-            let mut new_vx = vec![0.0; n_verts];
-            let mut new_vy = vec![0.0; n_verts];
+            let (new_vx, new_vy): (Vec<f64>, Vec<f64>) = (0..n_verts)
+                .into_par_iter()
+                .map(|i| {
+                    let x_old = self.vx[i];
+                    let y_old = self.vy[i];
 
-            for i in 0..n_verts {
-                let x_old = self.vx[i];
-                let y_old = self.vy[i];
-
-                // If on domain box, fix it
-                if is_on_box(x_old, y_old) {
-                    new_vx[i] = x_old;
-                    new_vy[i] = y_old;
-                    continue;
-                }
-
-                if adj[i].is_empty() {
-                    new_vx[i] = x_old;
-                    new_vy[i] = y_old;
-                    continue;
-                }
-
-                let mut sum_x = 0.0;
-                let mut sum_y = 0.0;
-                let mut count = 0;
-
-                // Internal smoothing: consider all neighbors
-                for &neigh in &adj[i] {
-                    sum_x += self.vx[neigh];
-                    sum_y += self.vy[neigh];
-                    count += 1;
-                }
-
-                let avg_x = sum_x / count as f64;
-                let avg_y = sum_y / count as f64;
-
-                // Relaxation factor
-                let alpha = 0.5;
-                let mut x_new = x_old + (avg_x - x_old) * alpha;
-                let mut y_new = y_old + (avg_y - y_old) * alpha;
-
-                if self.v_fixed[i] {
-                    // Project back to surface
-                    let p_curr = Point2::new(x_new, y_new);
-                    let d = geo.sdf(&p_curr);
-
-                    // Numerical Gradient
-                    let eps = 1e-6;
-                    let d_x = geo.sdf(&Point2::new(x_new + eps, y_new))
-                        - geo.sdf(&Point2::new(x_new - eps, y_new));
-                    let d_y = geo.sdf(&Point2::new(x_new, y_new + eps))
-                        - geo.sdf(&Point2::new(x_new, y_new - eps));
-                    let grad = Vector2::new(d_x, d_y).normalize();
-
-                    let p_proj = p_curr - grad * d;
-                    x_new = p_proj.x;
-                    y_new = p_proj.y;
-                }
-
-                // Check for bad cells (edge collapse)
-                let mut bad_move = false;
-                for &neigh in &adj[i] {
-                    let nx = self.vx[neigh];
-                    let ny = self.vy[neigh];
-                    let dist_sq = (x_new - nx).powi(2) + (y_new - ny).powi(2);
-                    if dist_sq < 1e-8 {
-                        // 1e-4 squared
-                        bad_move = true;
-                        break;
+                    // If on domain box, fix it
+                    if is_on_box(x_old, y_old) {
+                        return (x_old, y_old);
                     }
-                }
 
-                if bad_move {
-                    new_vx[i] = x_old;
-                    new_vy[i] = y_old;
-                } else {
-                    new_vx[i] = x_new;
-                    new_vy[i] = y_new;
-                }
-            }
+                    if adj[i].is_empty() {
+                        return (x_old, y_old);
+                    }
+
+                    let mut sum_x = 0.0;
+                    let mut sum_y = 0.0;
+                    let mut count = 0;
+
+                    // Internal smoothing: consider all neighbors
+                    for &neigh in &adj[i] {
+                        sum_x += self.vx[neigh];
+                        sum_y += self.vy[neigh];
+                        count += 1;
+                    }
+
+                    let avg_x = sum_x / count as f64;
+                    let avg_y = sum_y / count as f64;
+
+                    // Relaxation factor
+                    let alpha = 0.5;
+                    let mut x_new = x_old + (avg_x - x_old) * alpha;
+                    let mut y_new = y_old + (avg_y - y_old) * alpha;
+
+                    if self.v_fixed[i] {
+                        // Project back to surface
+                        let p_curr = Point2::new(x_new, y_new);
+                        let d = geo.sdf(&p_curr);
+
+                        // Numerical Gradient
+                        let eps = 1e-6;
+                        let d_x = geo.sdf(&Point2::new(x_new + eps, y_new))
+                            - geo.sdf(&Point2::new(x_new - eps, y_new));
+                        let d_y = geo.sdf(&Point2::new(x_new, y_new + eps))
+                            - geo.sdf(&Point2::new(x_new, y_new - eps));
+                        let grad = Vector2::new(d_x, d_y).normalize();
+
+                        let p_proj = p_curr - grad * d;
+                        x_new = p_proj.x;
+                        y_new = p_proj.y;
+                    }
+
+                    // Check for bad cells (edge collapse)
+                    let mut bad_move = false;
+                    for &neigh in &adj[i] {
+                        let nx = self.vx[neigh];
+                        let ny = self.vy[neigh];
+                        let dist_sq = (x_new - nx).powi(2) + (y_new - ny).powi(2);
+                        if dist_sq < 1e-8 {
+                            // 1e-4 squared
+                            bad_move = true;
+                            break;
+                        }
+                    }
+
+                    if bad_move {
+                        (x_old, y_old)
+                    } else {
+                        (x_new, y_new)
+                    }
+                })
+                .unzip();
 
             self.vx = new_vx;
             self.vy = new_vy;
@@ -277,33 +292,31 @@ impl Mesh {
     }
 
     pub fn calculate_max_skewness(&self) -> f64 {
-        let mut max_skew = 0.0;
-        for i in 0..self.face_cx.len() {
-            let owner = self.face_owner[i];
-            let d = if let Some(neigh) = self.face_neighbor[i] {
-                let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
-                let c2 = Vector2::new(self.cell_cx[neigh], self.cell_cy[neigh]);
-                c2 - c1
-            } else {
-                // Boundary face
-                let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
-                let f_c = Vector2::new(self.face_cx[i], self.face_cy[i]);
-                f_c - c1
-            };
+        (0..self.face_cx.len())
+            .into_par_iter()
+            .map(|i| {
+                let owner = self.face_owner[i];
+                let d = if let Some(neigh) = self.face_neighbor[i] {
+                    let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
+                    let c2 = Vector2::new(self.cell_cx[neigh], self.cell_cy[neigh]);
+                    c2 - c1
+                } else {
+                    // Boundary face
+                    let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
+                    let f_c = Vector2::new(self.face_cx[i], self.face_cy[i]);
+                    f_c - c1
+                };
 
-            let d_norm = if d.norm_squared() > 1e-12 {
-                d.normalize()
-            } else {
-                Vector2::zeros()
-            };
+                let d_norm = if d.norm_squared() > 1e-12 {
+                    d.normalize()
+                } else {
+                    Vector2::zeros()
+                };
 
-            let normal = Vector2::new(self.face_nx[i], self.face_ny[i]);
-            let skew = 1.0 - d_norm.dot(&normal).abs();
-            if skew > max_skew {
-                max_skew = skew;
-            }
-        }
-        max_skew
+                let normal = Vector2::new(self.face_nx[i], self.face_ny[i]);
+                1.0 - d_norm.dot(&normal).abs()
+            })
+            .reduce(|| 0.0, f64::max)
     }
 
     pub fn calculate_cell_skewness(&self, cell_idx: usize) -> f64 {

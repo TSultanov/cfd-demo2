@@ -293,10 +293,12 @@ impl GpuSolver {
             // 4. Update Fields & Compute Max Diff
             {
                 let res = self.coupled_resources.as_ref().unwrap();
-                
+
                 // Clear max diff result buffer before update (using atomics in shader)
                 if iter > 0 {
-                    self.context.queue.write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
+                    self.context
+                        .queue
+                        .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
                 }
 
                 let dispatch_start = Instant::now();
@@ -314,9 +316,8 @@ impl GpuSolver {
                         timestamp_writes: None,
                     });
                     cpass.set_pipeline(&self.pipeline_update_from_coupled);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]); // Just for size
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &res.bg_coupled_solution, &[]);
+                    cpass.set_bind_group(0, &self.bg_fields, &[]);
+                    cpass.set_bind_group(1, &res.bg_coupled_solution, &[]);
                     cpass.dispatch_workgroups(num_groups_cells, 1, 1);
                 }
 
@@ -425,7 +426,7 @@ impl GpuSolver {
         // Read velocity field to check for evolution and variance
         // This involves a GPU->CPU read, so it has some overhead.
         let u_data = pollster::block_on(self.read_buffer_f32(&self.b_u, self.num_cells * 2));
-        
+
         // 1. Calculate Variance
         let mut sum_u = 0.0;
         let mut sum_v = 0.0;
@@ -494,7 +495,10 @@ impl GpuSolver {
         }
 
         if self.steady_state_count > 10 {
-            println!("Steady state reached. Evolution diff: {:.2e}", evolution_diff);
+            println!(
+                "Steady state reached. Evolution diff: {:.2e}",
+                evolution_diff
+            );
             self.should_stop = true;
         }
     }

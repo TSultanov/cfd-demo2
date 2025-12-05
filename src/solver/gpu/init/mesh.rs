@@ -1,3 +1,4 @@
+use crate::solver::gpu::bindings::coupled_assembly_merged;
 use crate::solver::mesh::{BoundaryType, Mesh};
 use wgpu::util::DeviceExt;
 
@@ -217,185 +218,29 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
     });
 
     // Group 0: Mesh (Read Only)
-    let bgl_mesh = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Mesh Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 6,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 7,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 10,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 11,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 12,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 13,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
+    let bgl_mesh = device
+        .create_bind_group_layout(&coupled_assembly_merged::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
 
     let bg_mesh = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Mesh Bind Group"),
         layout: &bgl_mesh,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: b_face_owner.as_entire_binding(),
+        entries: &coupled_assembly_merged::WgpuBindGroup0Entries::new(
+            coupled_assembly_merged::WgpuBindGroup0EntriesParams {
+                face_owner: b_face_owner.as_entire_buffer_binding(),
+                face_neighbor: b_face_neighbor.as_entire_buffer_binding(),
+                face_areas: b_face_areas.as_entire_buffer_binding(),
+                face_normals: b_face_normals.as_entire_buffer_binding(),
+                cell_centers: b_cell_centers.as_entire_buffer_binding(),
+                cell_vols: b_cell_vols.as_entire_buffer_binding(),
+                cell_face_offsets: b_cell_face_offsets.as_entire_buffer_binding(),
+                cell_faces: b_cell_faces.as_entire_buffer_binding(),
+                cell_face_matrix_indices: b_cell_face_matrix_indices.as_entire_buffer_binding(),
+                diagonal_indices: b_diagonal_indices.as_entire_buffer_binding(),
+                face_boundary: b_face_boundary.as_entire_buffer_binding(),
+                face_centers: b_face_centers.as_entire_buffer_binding(),
             },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_face_neighbor.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_face_areas.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: b_face_normals.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: b_cell_centers.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: b_cell_vols.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 6,
-                resource: b_cell_face_offsets.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 7,
-                resource: b_cell_faces.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 10,
-                resource: b_cell_face_matrix_indices.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 11,
-                resource: b_diagonal_indices.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 12,
-                resource: b_face_boundary.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 13,
-                resource: b_face_centers.as_entire_binding(),
-            },
-        ],
+        )
+        .into_array(),
     });
 
     MeshResources {
@@ -415,5 +260,26 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         bgl_mesh,
         row_offsets,
         col_indices,
+    }
+}
+
+impl MeshResources {
+    pub fn as_bind_group_0_entries(
+        &self,
+    ) -> coupled_assembly_merged::WgpuBindGroup0EntriesParams<'_> {
+        coupled_assembly_merged::WgpuBindGroup0EntriesParams {
+            face_owner: self.b_face_owner.as_entire_buffer_binding(),
+            face_neighbor: self.b_face_neighbor.as_entire_buffer_binding(),
+            face_areas: self.b_face_areas.as_entire_buffer_binding(),
+            face_normals: self.b_face_normals.as_entire_buffer_binding(),
+            cell_centers: self.b_cell_centers.as_entire_buffer_binding(),
+            cell_vols: self.b_cell_vols.as_entire_buffer_binding(),
+            cell_face_offsets: self.b_cell_face_offsets.as_entire_buffer_binding(),
+            cell_faces: self.b_cell_faces.as_entire_buffer_binding(),
+            cell_face_matrix_indices: self.b_cell_face_matrix_indices.as_entire_buffer_binding(),
+            diagonal_indices: self.b_diagonal_indices.as_entire_buffer_binding(),
+            face_boundary: self.b_face_boundary.as_entire_buffer_binding(),
+            face_centers: self.b_face_centers.as_entire_buffer_binding(),
+        }
     }
 }

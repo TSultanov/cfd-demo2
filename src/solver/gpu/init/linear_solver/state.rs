@@ -1,3 +1,4 @@
+use crate::solver::gpu::bindings::linear_solver;
 use crate::solver::gpu::structs::SolverParams;
 use wgpu::util::DeviceExt;
 
@@ -157,5 +158,18 @@ pub fn init_state(device: &wgpu::Device, num_cells: u32) -> StateResources {
         b_staging_scalar,
         b_solver_params,
         num_groups,
+    }
+}
+
+impl StateResources {
+    pub fn as_bind_group_0_entries(&self) -> linear_solver::WgpuBindGroup0EntriesParams<'_> {
+        linear_solver::WgpuBindGroup0EntriesParams {
+            x: self.b_x.as_entire_buffer_binding(),
+            r: self.b_r.as_entire_buffer_binding(),
+            p: self.b_p_solver.as_entire_buffer_binding(),
+            v: self.b_v.as_entire_buffer_binding(),
+            s: self.b_s.as_entire_buffer_binding(),
+            t: self.b_t.as_entire_buffer_binding(),
+        }
     }
 }

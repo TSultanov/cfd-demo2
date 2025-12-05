@@ -3,6 +3,7 @@ pub mod pipelines;
 pub mod state;
 
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
+use crate::solver::gpu::bindings::coupled_assembly_merged;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
@@ -238,7 +239,9 @@ fn init_coupled_resources(
     let b_max_diff_result = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Max Diff Result"),
         size: 8, // 2 floats: max_u, max_p
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -320,152 +323,26 @@ fn init_coupled_resources(
     // Reuse layouts from pipeline_res
 
     // Create custom layout for coupled solver assembly
-    let bgl_coupled_solver = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Coupled Solver Layout"),
-        entries: &[
-            // 0: Matrix Values (RW)
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 1: RHS (RW)
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 2: Scalar Row Offsets (Read)
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 3: Grad U (Read/Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 4: Grad V (Read/Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 5: Scalar Matrix Values (Read/Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 6: Diag U (Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 6,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 7: Diag V (Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 7,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 8: Diag P (Write)
-            wgpu::BindGroupLayoutEntry {
-                binding: 8,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
+    let bgl_coupled_solver = device
+        .create_bind_group_layout(&coupled_assembly_merged::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
 
     let bg_solver = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Coupled Solver Bind Group"),
         layout: &bgl_coupled_solver,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: matrix_res.b_matrix_values.as_entire_binding(),
+        entries: &coupled_assembly_merged::WgpuBindGroup2Entries::new(
+            coupled_assembly_merged::WgpuBindGroup2EntriesParams {
+                matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
+                rhs: state_res.b_rhs.as_entire_buffer_binding(),
+                scalar_row_offsets: scalar_row_offsets_buffer.as_entire_buffer_binding(),
+                grad_u: b_grad_u.as_entire_buffer_binding(),
+                grad_v: b_grad_v.as_entire_buffer_binding(),
+                scalar_matrix_values: b_scalar_matrix_values.as_entire_buffer_binding(),
+                diag_u_inv: b_diag_u.as_entire_buffer_binding(),
+                diag_v_inv: b_diag_v.as_entire_buffer_binding(),
+                diag_p_inv: b_diag_p.as_entire_buffer_binding(),
             },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state_res.b_rhs.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: scalar_row_offsets_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: b_grad_u.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: b_grad_v.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: b_scalar_matrix_values.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 6,
-                resource: b_diag_u.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 7,
-                resource: b_diag_v.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 8,
-                resource: b_diag_p.as_entire_binding(),
-            },
-        ],
+        )
+        .into_array(),
     });
 
     let bg_linear_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {

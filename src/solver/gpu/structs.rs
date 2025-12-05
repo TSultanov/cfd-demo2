@@ -54,8 +54,8 @@ pub struct CoupledSolverResources {
     pub b_grad_v: wgpu::Buffer,
 
     // Convergence check buffers (GPU max-diff)
-    pub b_max_diff_result: wgpu::Buffer,    // Final max-diff result (2 floats: max_u, max_p)
-    pub num_max_diff_groups: u32,           // Number of workgroups for max-diff reduction
+    pub b_max_diff_result: wgpu::Buffer, // Final max-diff result (2 floats: max_u, max_p)
+    pub num_max_diff_groups: u32,        // Number of workgroups for max-diff reduction
 
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,

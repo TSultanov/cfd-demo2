@@ -922,7 +922,10 @@ impl GpuSolver {
             make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur");
 
         let pipeline_reduce_final = make_pipeline("FGMRES Reduce Final", "reduce_final");
-        let pipeline_reduce_final_and_finish_norm = make_pipeline("FGMRES Reduce Final & Finish Norm", "reduce_final_and_finish_norm");
+        let pipeline_reduce_final_and_finish_norm = make_pipeline(
+            "FGMRES Reduce Final & Finish Norm",
+            "reduce_final_and_finish_norm",
+        );
         let pipeline_update_hessenberg =
             make_logic_pipeline("FGMRES Update Hessenberg", "update_hessenberg_givens");
         let pipeline_solve_triangular =

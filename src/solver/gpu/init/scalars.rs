@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use crate::solver::gpu::bindings::scalars;
 
 pub struct ScalarResources {
     pub bg_scalars: wgpu::BindGroup,
@@ -19,164 +19,35 @@ pub fn init_scalars(
     b_dot_result_2: &wgpu::Buffer,
     b_solver_params: &wgpu::Buffer,
 ) -> ScalarResources {
-    // Scalar Pipelines
-    let shader_scalars = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Scalars Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shaders/scalars.wgsl"))),
-    });
-
-    let bgl_scalars = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Scalars Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
+    // Group 0: Scalars
+    let bgl_scalars = device.create_bind_group_layout(&scalars::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
 
     let bg_scalars = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Scalars Bind Group"),
         layout: &bgl_scalars,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: b_scalars.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: b_dot_result_2.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: b_solver_params.as_entire_binding(),
-            },
-        ],
+        entries: &scalars::WgpuBindGroup0Entries::new(scalars::WgpuBindGroup0EntriesParams {
+            scalars: b_scalars.as_entire_buffer_binding(),
+            dot_result_1: b_dot_result.as_entire_buffer_binding(),
+            dot_result_2: b_dot_result_2.as_entire_buffer_binding(),
+            params: b_solver_params.as_entire_buffer_binding(),
+        })
+        .into_array(),
     });
 
-    let pl_scalars = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Scalars Pipeline Layout"),
-        bind_group_layouts: &[&bgl_scalars],
-        push_constant_ranges: &[],
-    });
-
-    let pipeline_init_scalars = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Init Scalars Pipeline"),
-        layout: Some(&pl_scalars),
-        module: &shader_scalars,
-        entry_point: Some("init_scalars"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
+    let pipeline_init_scalars = scalars::compute::create_init_scalars_pipeline_embed_source(device);
     let pipeline_init_cg_scalars =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Init CG Scalars Pipeline"),
-            layout: Some(&pl_scalars),
-            module: &shader_scalars,
-            entry_point: Some("init_cg_scalars"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
+        scalars::compute::create_init_cg_scalars_pipeline_embed_source(device);
     let pipeline_reduce_rho_new_r_r =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Reduce Rho New R R Pipeline"),
-            layout: Some(&pl_scalars),
-            module: &shader_scalars,
-            entry_point: Some("reduce_rho_new_r_r"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-    let pipeline_reduce_r0_v = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Reduce R0 V Pipeline"),
-        layout: Some(&pl_scalars),
-        module: &shader_scalars,
-        entry_point: Some("reduce_r0_v"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
+        scalars::compute::create_reduce_rho_new_r_r_pipeline_embed_source(device);
+    let pipeline_reduce_r0_v = scalars::compute::create_reduce_r0_v_pipeline_embed_source(device);
     let pipeline_reduce_t_s_t_t =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Reduce T S T T Pipeline"),
-            layout: Some(&pl_scalars),
-            module: &shader_scalars,
-            entry_point: Some("reduce_t_s_t_t"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
+        scalars::compute::create_reduce_t_s_t_t_pipeline_embed_source(device);
     let pipeline_update_cg_alpha =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Update CG Alpha Pipeline"),
-            layout: Some(&pl_scalars),
-            module: &shader_scalars,
-            entry_point: Some("update_cg_alpha"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
+        scalars::compute::create_update_cg_alpha_pipeline_embed_source(device);
     let pipeline_update_cg_beta =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Update CG Beta Pipeline"),
-            layout: Some(&pl_scalars),
-            module: &shader_scalars,
-            entry_point: Some("update_cg_beta"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
+        scalars::compute::create_update_cg_beta_pipeline_embed_source(device);
     let pipeline_update_rho_old =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Update Rho Old Pipeline"),
-            layout: Some(&pl_scalars),
-            module: &shader_scalars,
-            entry_point: Some("update_rho_old"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        scalars::compute::create_update_rho_old_pipeline_embed_source(device);
 
     ScalarResources {
         bg_scalars,

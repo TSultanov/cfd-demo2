@@ -20,14 +20,20 @@ struct Constants {
 }
 
 // Constants are at group(1) binding(3) in the bg_fields layout
-@group(1) @binding(3) var<uniform> constants: Constants;
+@group(0) @binding(3) var<uniform> constants: Constants;
 
-@group(1) @binding(0) var<storage, read_write> u: array<Vector2>;
-@group(1) @binding(1) var<storage, read_write> p: array<f32>;
+@group(0) @binding(0) var<storage, read_write> u: array<Vector2>;
+@group(0) @binding(1) var<storage, read_write> p: array<f32>;
+@group(0) @binding(2) var<storage, read_write> fluxes: array<f32>;
+@group(0) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
+@group(0) @binding(5) var<storage, read_write> d_p: array<f32>;
+@group(0) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
+@group(0) @binding(7) var<storage, read> u_old: array<Vector2>;
+@group(0) @binding(8) var<storage, read> u_old_old: array<Vector2>;
 
-@group(2) @binding(0) var<storage, read> x: array<f32>;
+@group(1) @binding(0) var<storage, read> x: array<f32>;
 // Replaced snapshots with partial max diff outputs
-@group(2) @binding(1) var<storage, read_write> max_diff_result: array<atomic<u32>>;
+@group(1) @binding(1) var<storage, read_write> max_diff_result: array<atomic<u32>>;
 
 var<workgroup> shared_max_u: array<f32, 64>;
 var<workgroup> shared_max_p: array<f32, 64>;

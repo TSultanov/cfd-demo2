@@ -852,7 +852,7 @@ impl eframe::App for CFDApp {
                                         if let Ok(mut solver) = solver_arc.lock() {
                                             let start = std::time::Instant::now();
                                             solver.step();
-                                            
+
                                             if solver.should_stop {
                                                 running_flag.store(false, Ordering::Relaxed);
                                             }

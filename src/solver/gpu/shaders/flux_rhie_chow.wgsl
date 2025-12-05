@@ -36,6 +36,9 @@ struct Constants {
 @group(1) @binding(3) var<uniform> constants: Constants;
 @group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
 @group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
+@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
+@group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
+@group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {

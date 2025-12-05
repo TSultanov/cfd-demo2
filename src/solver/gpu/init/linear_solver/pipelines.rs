@@ -1,6 +1,8 @@
 use super::matrix::MatrixResources;
 use super::state::StateResources;
-use std::borrow::Cow;
+use crate::solver::gpu::bindings::dot_product;
+use crate::solver::gpu::bindings::dot_product_pair;
+use crate::solver::gpu::bindings::linear_solver;
 
 pub struct PipelineResources {
     pub bg_solver: wgpu::BindGroup,
@@ -36,265 +38,47 @@ pub fn init_pipelines(
     device: &wgpu::Device,
     matrix: &MatrixResources,
     state: &StateResources,
-    bgl_mesh: &wgpu::BindGroupLayout,
+    _bgl_mesh: &wgpu::BindGroupLayout,
 ) -> PipelineResources {
-    // Group 2: Solver (Read/Write)
-    let bgl_solver = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Solver Bind Group Layout"),
-        entries: &[
-            // 0: Matrix Values
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 1: RHS
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 2: X
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 3: R
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 4: P_Solver
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 5: V
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 6: S
-            wgpu::BindGroupLayoutEntry {
-                binding: 6,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // 7: T
-            wgpu::BindGroupLayoutEntry {
-                binding: 7,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
+    // Use generated layouts
+    // Group 0: Linear State (Vectors)
+    let bgl_linear_state =
+        device.create_bind_group_layout(&linear_solver::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+    // Group 1: Linear Matrix (Matrix & Params)
+    let bgl_linear_matrix =
+        device.create_bind_group_layout(&linear_solver::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+
+    // Dot Product Layouts
+    let bgl_dot_params =
+        device.create_bind_group_layout(&dot_product::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+    let bgl_dot_inputs =
+        device.create_bind_group_layout(&dot_product::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+    let bgl_dot_pair_inputs =
+        device.create_bind_group_layout(&dot_product_pair::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+
+    // Create Bind Groups
+    let entries_1 = matrix.as_bind_group_1_entries(
+        state.b_scalars.as_entire_buffer_binding(),
+        state.b_solver_params.as_entire_buffer_binding(),
+    );
+    let entries_struct_1 = linear_solver::WgpuBindGroup1Entries::new(entries_1);
+    let entries_array_1 = entries_struct_1.into_array();
+    let bg_linear_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Linear Matrix Bind Group"),
+        layout: &bgl_linear_matrix,
+        entries: &entries_array_1,
     });
 
-    let bg_solver = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Solver Bind Group"),
-        layout: &bgl_solver,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: matrix.b_matrix_values.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_rhs.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_x.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state.b_p_solver.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state.b_v.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 6,
-                resource: state.b_s.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 7,
-                resource: state.b_t.as_entire_binding(),
-            },
-        ],
+    let entries_0 = state.as_bind_group_0_entries();
+    let entries_struct_0 = linear_solver::WgpuBindGroup0Entries::new(entries_0);
+    let entries_array_0 = entries_struct_0.into_array();
+    let bg_linear_state = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Linear State Bind Group"),
+        layout: &bgl_linear_state,
+        entries: &entries_array_0,
     });
 
-    // Linear Solver Layouts
-    let bgl_linear_matrix = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Linear Matrix Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
-    let bgl_linear_state = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Linear State Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
+    // Manual creation of RO layout and bind group
     let bgl_linear_state_ro = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Linear State RO Bind Group Layout"),
         entries: &[
@@ -361,189 +145,6 @@ pub fn init_pipelines(
         ],
     });
 
-    let bgl_dot_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Dot Params Bind Group Layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-
-    let bgl_dot_inputs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Dot Inputs Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
-    let bgl_dot_pair_inputs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Dot Pair Inputs Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
-    let bg_dot_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot Params Bind Group"),
-        layout: &bgl_dot_params,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: state.b_solver_params.as_entire_binding(),
-        }],
-    });
-
-    let bg_linear_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Linear Matrix Bind Group"),
-        layout: &bgl_linear_matrix,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: matrix.b_row_offsets.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: matrix.b_col_indices.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: matrix.b_matrix_values.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state.b_scalars.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state.b_solver_params.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_linear_state = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Linear State Bind Group"),
-        layout: &bgl_linear_state,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_x.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_p_solver.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state.b_v.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state.b_s.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state.b_t.as_entire_binding(),
-            },
-        ],
-    });
-
     let bg_linear_state_ro = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Linear State RO Bind Group"),
         layout: &bgl_linear_state_ro,
@@ -573,6 +174,15 @@ pub fn init_pipelines(
                 resource: state.b_t.as_entire_binding(),
             },
         ],
+    });
+
+    let bg_dot_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Dot Params Bind Group"),
+        layout: &bgl_dot_params,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: state.b_solver_params.as_entire_binding(),
+        }],
     });
 
     let bg_dot_r0_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -694,134 +304,28 @@ pub fn init_pipelines(
         ],
     });
 
-    // Shaders
-    let shader_linear = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Linear Solver Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/linear_solver.wgsl"
-        ))),
-    });
+    // Pipelines
+    let pipeline_spmv_p_v = linear_solver::compute::create_spmv_p_v_pipeline_embed_source(device);
+    let pipeline_spmv_s_t = linear_solver::compute::create_spmv_s_t_pipeline_embed_source(device);
 
-    let pl_linear = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Linear Solver Pipeline Layout"),
-        bind_group_layouts: &[&bgl_mesh, &bgl_linear_state, &bgl_linear_matrix],
-        push_constant_ranges: &[],
-    });
-
-    let pl_dot = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Dot Product Pipeline Layout"),
-        bind_group_layouts: &[&bgl_dot_params, &bgl_dot_inputs],
-        push_constant_ranges: &[],
-    });
-
-    let pl_dot_pair = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Dot Pair Pipeline Layout"),
-        bind_group_layouts: &[&bgl_dot_params, &bgl_dot_pair_inputs],
-        push_constant_ranges: &[],
-    });
-
-    let pipeline_spmv_p_v = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("SPMV P->V Pipeline"),
-        layout: Some(&pl_linear),
-        module: &shader_linear,
-        entry_point: Some("spmv_p_v"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
-    let pipeline_spmv_s_t = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("SPMV S->T Pipeline"),
-        layout: Some(&pl_linear),
-        module: &shader_linear,
-        entry_point: Some("spmv_s_t"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
-    let shader_dot = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Dot Product Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/dot_product.wgsl"
-        ))),
-    });
-
-    let pipeline_dot = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Dot Product Pipeline"),
-        layout: Some(&pl_dot),
-        module: &shader_dot,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
-    let shader_dot_pair = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Dot Pair Shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/dot_product_pair.wgsl"
-        ))),
-    });
-
-    let pipeline_dot_pair = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("Dot Pair Pipeline"),
-        layout: Some(&pl_dot_pair),
-        module: &shader_dot_pair,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
+    let pipeline_dot = dot_product::compute::create_main_pipeline_embed_source(device);
+    let pipeline_dot_pair = dot_product_pair::compute::create_main_pipeline_embed_source(device);
 
     let pipeline_bicgstab_update_x_r =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("BiCGStab Update X and R Pipeline"),
-            layout: Some(&pl_linear),
-            module: &shader_linear,
-            entry_point: Some("bicgstab_update_x_r"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
+        linear_solver::compute::create_bicgstab_update_x_r_pipeline_embed_source(device);
     let pipeline_bicgstab_update_p =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("BiCGStab Update P Pipeline"),
-            layout: Some(&pl_linear),
-            module: &shader_linear,
-            entry_point: Some("bicgstab_update_p"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
+        linear_solver::compute::create_bicgstab_update_p_pipeline_embed_source(device);
     let pipeline_bicgstab_update_s =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("BiCGStab Update S Pipeline"),
-            layout: Some(&pl_linear),
-            module: &shader_linear,
-            entry_point: Some("bicgstab_update_s"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-
-    let pipeline_cg_update_x_r = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("CG Update X R Pipeline"),
-        layout: Some(&pl_linear),
-        module: &shader_linear,
-        entry_point: Some("cg_update_x_r"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
-    let pipeline_cg_update_p = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("CG Update P Pipeline"),
-        layout: Some(&pl_linear),
-        module: &shader_linear,
-        entry_point: Some("cg_update_p"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
+        linear_solver::compute::create_bicgstab_update_s_pipeline_embed_source(device);
+    let pipeline_cg_update_x_r =
+        linear_solver::compute::create_cg_update_x_r_pipeline_embed_source(device);
+    let pipeline_cg_update_p =
+        linear_solver::compute::create_cg_update_p_pipeline_embed_source(device);
 
     PipelineResources {
-        bg_solver,
+        bg_solver: bg_linear_state.clone(),
         bg_linear_matrix,
-        bg_linear_state,
+        bg_linear_state: bg_linear_state.clone(),
         bg_linear_state_ro,
         bg_dot_params,
         bg_dot_r0_v,
@@ -829,7 +333,7 @@ pub fn init_pipelines(
         bg_dot_r_r,
         bg_dot_pair_r0r_rr,
         bg_dot_pair_tstt,
-        bgl_solver,
+        bgl_solver: bgl_linear_state.clone(),
         bgl_linear_matrix,
         bgl_linear_state,
         bgl_linear_state_ro,

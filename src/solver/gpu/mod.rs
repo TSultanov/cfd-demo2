@@ -1,4 +1,5 @@
 pub mod async_buffer;
+pub mod bindings;
 pub mod buffers;
 pub mod context;
 pub mod coupled_solver;

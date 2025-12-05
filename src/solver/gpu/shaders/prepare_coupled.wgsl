@@ -45,9 +45,15 @@ struct Constants {
 @group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
 
 // Group 2: Coupled Solver Resources
-// We use bindings 3 and 4 for grad_u and grad_v
+@group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
+@group(2) @binding(1) var<storage, read_write> rhs: array<f32>;
+@group(2) @binding(2) var<storage, read> scalar_row_offsets: array<u32>;
 @group(2) @binding(3) var<storage, read_write> grad_u: array<Vector2>;
 @group(2) @binding(4) var<storage, read_write> grad_v: array<Vector2>;
+@group(2) @binding(5) var<storage, read_write> scalar_matrix_values: array<f32>;
+@group(2) @binding(6) var<storage, read_write> diag_u_inv: array<f32>;
+@group(2) @binding(7) var<storage, read_write> diag_v_inv: array<f32>;
+@group(2) @binding(8) var<storage, read_write> diag_p_inv: array<f32>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {

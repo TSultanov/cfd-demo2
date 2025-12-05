@@ -3,17 +3,17 @@
 // Group 0: Mesh (Not used here)
 
 // Group 1: Vectors
-@group(1) @binding(0) var<storage, read_write> x: array<f32>;
-@group(1) @binding(1) var<storage, read_write> r: array<f32>;
-@group(1) @binding(2) var<storage, read_write> p: array<f32>;
-@group(1) @binding(3) var<storage, read_write> v: array<f32>;
-@group(1) @binding(4) var<storage, read_write> s: array<f32>;
-@group(1) @binding(5) var<storage, read_write> t: array<f32>;
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@group(0) @binding(1) var<storage, read_write> r: array<f32>;
+@group(0) @binding(2) var<storage, read_write> p: array<f32>;
+@group(0) @binding(3) var<storage, read_write> v: array<f32>;
+@group(0) @binding(4) var<storage, read_write> s: array<f32>;
+@group(0) @binding(5) var<storage, read_write> t: array<f32>;
 
 // Group 2: Matrix & Params
-@group(2) @binding(0) var<storage, read> row_offsets: array<u32>;
-@group(2) @binding(1) var<storage, read> col_indices: array<u32>;
-@group(2) @binding(2) var<storage, read> matrix_values: array<f32>;
+@group(1) @binding(0) var<storage, read> row_offsets: array<u32>;
+@group(1) @binding(1) var<storage, read> col_indices: array<u32>;
+@group(1) @binding(2) var<storage, read> matrix_values: array<f32>;
 
 struct GpuScalars {
     rho_old: f32,
@@ -26,12 +26,12 @@ struct GpuScalars {
     t_t: f32,
     r_r: f32,
 }
-@group(2) @binding(3) var<storage, read_write> scalars: GpuScalars;
+@group(1) @binding(3) var<storage, read_write> scalars: GpuScalars;
 
 struct SolverParams {
     n: u32,
 }
-@group(2) @binding(4) var<uniform> params: SolverParams;
+@group(1) @binding(4) var<uniform> params: SolverParams;
 
 // SpMV: v = A * p (or t = A * s)
 // We need to specify which vectors to use.

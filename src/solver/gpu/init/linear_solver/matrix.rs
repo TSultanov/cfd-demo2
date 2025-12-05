@@ -1,3 +1,4 @@
+use crate::solver::gpu::bindings::linear_solver;
 use wgpu::util::DeviceExt;
 
 pub struct MatrixResources {
@@ -40,5 +41,21 @@ pub fn init_matrix(
         b_col_indices,
         b_matrix_values,
         num_nonzeros,
+    }
+}
+
+impl MatrixResources {
+    pub fn as_bind_group_1_entries<'a>(
+        &'a self,
+        scalars: wgpu::BufferBinding<'a>,
+        params: wgpu::BufferBinding<'a>,
+    ) -> linear_solver::WgpuBindGroup1EntriesParams<'a> {
+        linear_solver::WgpuBindGroup1EntriesParams {
+            row_offsets: self.b_row_offsets.as_entire_buffer_binding(),
+            col_indices: self.b_col_indices.as_entire_buffer_binding(),
+            matrix_values: self.b_matrix_values.as_entire_buffer_binding(),
+            scalars,
+            params,
+        }
     }
 }

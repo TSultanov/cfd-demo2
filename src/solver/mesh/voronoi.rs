@@ -293,6 +293,7 @@ pub fn generate_voronoi_mesh(
             if let Some(&first) = adj.keys().next() {
                 first
             } else {
+                mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
                 continue; // Should not happen
             }
         };
@@ -311,6 +312,7 @@ pub fn generate_voronoi_mesh(
 
         if let Some(neighbors) = adj.get(&curr) {
             if neighbors.is_empty() {
+                mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
                 continue;
             }
 

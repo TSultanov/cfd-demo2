@@ -164,6 +164,9 @@ pub fn triangulate(
         fixed_nodes.push(false);
     }
 
+    // Sort points to improve triangulation performance (spatial locality)
+    sort_points_morton(&mut points, &mut fixed_nodes);
+
     // 2. Initial Triangulation
     let mut triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo);
 
@@ -842,4 +845,40 @@ pub fn generate_delaunay_mesh(
     }
 
     mesh
+}
+
+fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>) {
+    let mut indices: Vec<usize> = (0..points.len()).collect();
+
+    // Compute bounding box to normalize coordinates
+    let min_x = points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+    let max_x = points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+    let min_y = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+    let max_y = points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+
+    let width = max_x - min_x;
+    let height = max_y - min_y;
+
+    let morton = |p: Point2<f64>| -> u64 {
+        let x = ((p.x - min_x) / width * 65535.0).max(0.0).min(65535.0) as u32;
+        let y = ((p.y - min_y) / height * 65535.0).max(0.0).min(65535.0) as u32;
+
+        let mut code = 0;
+        for i in 0..16 {
+            code |= ((x as u64 >> i) & 1) << (2 * i);
+            code |= ((y as u64 >> i) & 1) << (2 * i + 1);
+        }
+        code
+    };
+
+    indices.sort_by_key(|&i| morton(points[i]));
+
+    // Permute points and fixed_nodes
+    let p_old = points.clone();
+    let f_old = fixed_nodes.clone();
+
+    for (new_idx, &old_idx) in indices.iter().enumerate() {
+        points[new_idx] = p_old[old_idx];
+        fixed_nodes[new_idx] = f_old[old_idx];
+    }
 }

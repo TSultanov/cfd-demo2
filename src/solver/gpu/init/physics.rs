@@ -1,12 +1,10 @@
 use crate::solver::gpu::bindings::coupled_assembly_merged;
 use crate::solver::gpu::bindings::flux_rhie_chow;
-use crate::solver::gpu::bindings::momentum_assembly_v2;
 use crate::solver::gpu::bindings::prepare_coupled;
 use crate::solver::gpu::bindings::pressure_assembly;
 use crate::solver::gpu::bindings::update_fields_from_coupled;
 
 pub struct PhysicsPipelines {
-    pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
@@ -23,8 +21,6 @@ pub fn init_physics_pipelines(
     _bgl_coupled_solution: &wgpu::BindGroupLayout,
 ) -> PhysicsPipelines {
     // Shaders
-    let pipeline_momentum_assembly =
-        momentum_assembly_v2::compute::create_main_pipeline_embed_source(device);
     let pipeline_pressure_assembly =
         pressure_assembly::compute::create_main_pipeline_embed_source(device);
     let pipeline_flux_rhie_chow =
@@ -37,7 +33,6 @@ pub fn init_physics_pipelines(
         prepare_coupled::compute::create_main_pipeline_embed_source(device);
 
     PhysicsPipelines {
-        pipeline_momentum_assembly,
         pipeline_pressure_assembly,
         pipeline_flux_rhie_chow,
         pipeline_coupled_assembly_merged,

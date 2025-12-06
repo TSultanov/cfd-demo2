@@ -1,4 +1,4 @@
-use crate::solver::gpu::bindings::momentum_assembly_v2;
+use crate::solver::gpu::bindings::prepare_coupled;
 use crate::solver::gpu::structs::GpuConstants;
 use wgpu::util::DeviceExt;
 
@@ -106,13 +106,13 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
 
     // Group 1: Fields (Read/Write)
     let bgl_fields =
-        device.create_bind_group_layout(&momentum_assembly_v2::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+        device.create_bind_group_layout(&prepare_coupled::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
 
     let bg_fields = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Fields Bind Group"),
         layout: &bgl_fields,
-        entries: &momentum_assembly_v2::WgpuBindGroup1Entries::new(
-            momentum_assembly_v2::WgpuBindGroup1EntriesParams {
+        entries: &prepare_coupled::WgpuBindGroup1Entries::new(
+            prepare_coupled::WgpuBindGroup1EntriesParams {
                 u: b_u.as_entire_buffer_binding(),
                 p: b_p.as_entire_buffer_binding(),
                 fluxes: b_fluxes.as_entire_buffer_binding(),

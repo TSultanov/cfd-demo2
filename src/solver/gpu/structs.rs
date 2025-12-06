@@ -213,7 +213,6 @@ pub struct GpuSolver {
     pub pipeline_reduce_rho_new_r_r: wgpu::ComputePipeline,
     pub pipeline_reduce_r0_v: wgpu::ComputePipeline,
 
-    pub pipeline_momentum_assembly: wgpu::ComputePipeline,
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,
     pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
     pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,

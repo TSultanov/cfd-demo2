@@ -152,69 +152,6 @@ fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
     vec_y[idx] = vec_x[idx];
 }
 
-// Block-diagonal preconditioner: z = M^{-1} * x
-// Uses diagonal Jacobi for each block (u, v, p)
-@compute @workgroup_size(64)
-fn block_jacobi_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = get_global_index(global_id);
-    if (cell >= params.num_cells) {
-        return;
-    }
-    
-    let base = cell * 3u;
-    
-    // u component: z_u = r_u / diag_u
-    let d_u = diag_u[cell];
-    if (abs(d_u) > 1e-14) {
-        vec_z[base + 0u] = vec_x[base + 0u] / d_u;
-    } else {
-        vec_z[base + 0u] = 0.0;
-    }
-    
-    // v component: z_v = r_v / diag_v
-    let d_v = diag_v[cell];
-    if (abs(d_v) > 1e-14) {
-        vec_z[base + 1u] = vec_x[base + 1u] / d_v;
-    } else {
-        vec_z[base + 1u] = 0.0;
-    }
-    
-    // p component: z_p = r_p / diag_p
-    let d_p = diag_p[cell];
-    if (abs(d_p) > 1e-14) {
-        vec_z[base + 2u] = vec_x[base + 2u] / d_p;
-    } else {
-        vec_z[base + 2u] = 0.0;
-    }
-}
-
-fn read_diagonal(row: u32) -> f32 {
-    let start = row_offsets[row];
-    let end = row_offsets[row + 1u];
-    for (var k = start; k < end; k++) {
-        if (col_indices[k] == row) {
-            return matrix_values[k];
-        }
-    }
-    return 0.0;
-}
-
-@compute @workgroup_size(64)
-fn extract_block_diagonal(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = get_global_index(global_id);
-    if (cell >= params.num_cells) {
-        return;
-    }
-
-    let base = cell * 3u;
-    let row_u = base;
-    let row_v = base + 1u;
-    let row_p = base + 2u;
-
-    diag_u[cell] = read_diagonal(row_u);
-    diag_v[cell] = read_diagonal(row_v);
-    diag_p[cell] = read_diagonal(row_p);
-}
 
 // Compute squared norm (partial reduction per workgroup)
 var<workgroup> partial_sums: array<f32, 64>;

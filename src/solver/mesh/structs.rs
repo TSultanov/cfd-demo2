@@ -319,40 +319,7 @@ impl Mesh {
             .reduce(|| 0.0, f64::max)
     }
 
-    pub fn calculate_cell_skewness(&self, cell_idx: usize) -> f64 {
-        let mut max_skew = 0.0;
-        let start = self.cell_face_offsets[cell_idx];
-        let end = self.cell_face_offsets[cell_idx + 1];
 
-        for k in start..end {
-            let face_idx = self.cell_faces[k];
-            let owner = self.face_owner[face_idx];
-
-            let d = if let Some(neigh) = self.face_neighbor[face_idx] {
-                let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
-                let c2 = Vector2::new(self.cell_cx[neigh], self.cell_cy[neigh]);
-                c2 - c1
-            } else {
-                // Boundary face
-                let c1 = Vector2::new(self.cell_cx[cell_idx], self.cell_cy[cell_idx]);
-                let f_c = Vector2::new(self.face_cx[face_idx], self.face_cy[face_idx]);
-                f_c - c1
-            };
-
-            let d_norm = if d.norm_squared() > 1e-12 {
-                d.normalize()
-            } else {
-                Vector2::zeros()
-            };
-
-            let normal = Vector2::new(self.face_nx[face_idx], self.face_ny[face_idx]);
-            let skew = 1.0 - d_norm.dot(&normal).abs();
-            if skew > max_skew {
-                max_skew = skew;
-            }
-        }
-        max_skew
-    }
 
     pub fn get_cell_at_pos(&self, p: Point2<f64>) -> Option<usize> {
         for i in 0..self.cell_cx.len() {

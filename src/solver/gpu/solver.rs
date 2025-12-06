@@ -19,12 +19,6 @@ impl GpuSolver {
             .write_buffer(&self.b_p, 0, bytemuck::cast_slice(&p_f32));
     }
 
-    pub fn set_fluxes(&self, fluxes: &[f64]) {
-        let fluxes_f32: Vec<f32> = fluxes.iter().map(|&x| x as f32).collect();
-        self.context
-            .queue
-            .write_buffer(&self.b_fluxes, 0, bytemuck::cast_slice(&fluxes_f32));
-    }
 
     pub fn set_dt(&mut self, dt: f32) {
         if self.constants.dt > 0.0 {
@@ -81,12 +75,6 @@ impl GpuSolver {
         self.update_constants();
     }
 
-    pub fn set_uniform_u(&self, ux: f64, uy: f64) {
-        let u_data = vec![[ux as f32, uy as f32]; self.num_cells as usize];
-        self.context
-            .queue
-            .write_buffer(&self.b_u, 0, bytemuck::cast_slice(&u_data));
-    }
 
     pub fn update_constants(&self) {
         self.context
@@ -105,32 +93,8 @@ impl GpuSolver {
             .collect()
     }
 
-    pub async fn get_grad_p(&self) -> Vec<(f64, f64)> {
-        let data = self
-            .read_buffer(&self.b_grad_p, (self.num_cells as u64) * 8)
-            .await;
-        let u_f32: &[f32] = bytemuck::cast_slice(&data);
-        u_f32
-            .chunks(2)
-            .map(|c| (c[0] as f64, c[1] as f64))
-            .collect()
-    }
 
-    pub async fn get_matrix_values(&self) -> Vec<f64> {
-        let data = self
-            .read_buffer(&self.b_matrix_values, (self.num_nonzeros as u64) * 4)
-            .await;
-        let vals_f32: &[f32] = bytemuck::cast_slice(&data);
-        vals_f32.iter().map(|&x| x as f64).collect()
-    }
 
-    pub async fn get_x(&self) -> Vec<f32> {
-        let data = self
-            .read_buffer(&self.b_x, (self.num_cells as u64) * 4)
-            .await;
-        let vals_f32: &[f32] = bytemuck::cast_slice(&data);
-        vals_f32.to_vec()
-    }
 
     pub async fn get_p(&self) -> Vec<f64> {
         let data = self
@@ -140,45 +104,10 @@ impl GpuSolver {
         p_f32.iter().map(|&x| x as f64).collect()
     }
 
-    pub async fn get_rhs(&self) -> Vec<f64> {
-        let data = self
-            .read_buffer(&self.b_rhs, (self.num_cells as u64) * 4)
-            .await;
-        let vals_f32: &[f32] = bytemuck::cast_slice(&data);
-        vals_f32.iter().map(|&x| x as f64).collect()
-    }
 
-    pub async fn get_row_offsets(&self) -> Vec<u32> {
-        let data = self
-            .read_buffer(&self.b_row_offsets, ((self.num_cells as u64) + 1) * 4)
-            .await;
-        let vals_u32: &[u32] = bytemuck::cast_slice(&data);
-        vals_u32.to_vec()
-    }
 
-    pub async fn get_col_indices(&self) -> Vec<u32> {
-        let data = self
-            .read_buffer(&self.b_col_indices, (self.num_nonzeros as u64) * 4)
-            .await;
-        let vals_u32: &[u32] = bytemuck::cast_slice(&data);
-        vals_u32.to_vec()
-    }
 
-    pub async fn get_cell_vols(&self) -> Vec<f32> {
-        let data = self
-            .read_buffer(&self.b_cell_vols, (self.num_cells as u64) * 4)
-            .await;
-        let vals_f32: &[f32] = bytemuck::cast_slice(&data);
-        vals_f32.to_vec()
-    }
 
-    pub async fn get_diagonal_indices(&self) -> Vec<u32> {
-        let data = self
-            .read_buffer(&self.b_diagonal_indices, (self.num_cells as u64) * 4)
-            .await;
-        let vals_u32: &[u32] = bytemuck::cast_slice(&data);
-        vals_u32.to_vec()
-    }
 
     pub async fn get_d_p(&self) -> Vec<f64> {
         let data = self
@@ -188,13 +117,6 @@ impl GpuSolver {
         vals_f32.iter().map(|&x| x as f64).collect()
     }
 
-    pub async fn get_fluxes(&self) -> Vec<f32> {
-        let data = self
-            .read_buffer(&self.b_fluxes, (self.num_faces as u64) * 4)
-            .await;
-        let vals_f32: &[f32] = bytemuck::cast_slice(&data);
-        vals_f32.to_vec()
-    }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
         use super::profiling::ProfileCategory;

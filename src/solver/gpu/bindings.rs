@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: c0b61d954d36b9e2955094e8c91800343fd305b57b6467d627fdfbd4fb61114f
+// SourceHash: 25263b8332208bea62fc4cb4d3bf2549fd1fe4d42518ac0b12b918b9e9d59b55
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -15,9 +15,7 @@ pub enum ShaderEntry {
     GmresCgs,
     GmresLogic,
     GmresOps,
-    GmresSpmvCgs,
     LinearSolver,
-    MaxDiff,
     Preconditioner,
     PrepareCoupled,
     PressureAssembly,
@@ -36,9 +34,7 @@ impl ShaderEntry {
             Self::GmresCgs => gmres_cgs::create_pipeline_layout(device),
             Self::GmresLogic => gmres_logic::create_pipeline_layout(device),
             Self::GmresOps => gmres_ops::create_pipeline_layout(device),
-            Self::GmresSpmvCgs => gmres_spmv_cgs::create_pipeline_layout(device),
             Self::LinearSolver => linear_solver::create_pipeline_layout(device),
-            Self::MaxDiff => max_diff::create_pipeline_layout(device),
             Self::Preconditioner => preconditioner::create_pipeline_layout(device),
             Self::PrepareCoupled => prepare_coupled::create_pipeline_layout(device),
             Self::PressureAssembly => pressure_assembly::create_pipeline_layout(device),
@@ -61,9 +57,7 @@ impl ShaderEntry {
             Self::GmresCgs => gmres_cgs::create_shader_module_embed_source(device),
             Self::GmresLogic => gmres_logic::create_shader_module_embed_source(device),
             Self::GmresOps => gmres_ops::create_shader_module_embed_source(device),
-            Self::GmresSpmvCgs => gmres_spmv_cgs::create_shader_module_embed_source(device),
             Self::LinearSolver => linear_solver::create_shader_module_embed_source(device),
-            Self::MaxDiff => max_diff::create_shader_module_embed_source(device),
             Self::Preconditioner => preconditioner::create_shader_module_embed_source(device),
             Self::PrepareCoupled => prepare_coupled::create_shader_module_embed_source(device),
             Self::PressureAssembly => pressure_assembly::create_shader_module_embed_source(device),
@@ -191,17 +185,6 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(gmres_ops::IterParams, _pad2) == 12);
         assert!(std::mem::size_of::<gmres_ops::IterParams>() == 16);
     };
-    const GMRES_SPMV_CGS_PARAMS_ASSERTS: () = {
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, n) == 0);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, num_cells) == 4);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, num_iters) == 8);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, omega) == 12);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, dispatch_x) == 16);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, max_restart) == 20);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, column_offset) == 24);
-        assert!(std::mem::offset_of!(gmres_spmv_cgs::Params, pad3) == 28);
-        assert!(std::mem::size_of::<gmres_spmv_cgs::Params>() == 32);
-    };
     const LINEAR_SOLVER_GPU_SCALARS_ASSERTS: () = {
         assert!(std::mem::offset_of!(linear_solver::GpuScalars, rho_old) == 0);
         assert!(std::mem::offset_of!(linear_solver::GpuScalars, rho_new) == 4);
@@ -217,13 +200,6 @@ pub mod layout_asserts {
     const LINEAR_SOLVER_SOLVER_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(linear_solver::SolverParams, n) == 0);
         assert!(std::mem::size_of::<linear_solver::SolverParams>() == 4);
-    };
-    const MAX_DIFF_MAX_DIFF_PARAMS_ASSERTS: () = {
-        assert!(std::mem::offset_of!(max_diff::MaxDiffParams, n) == 0);
-        assert!(std::mem::offset_of!(max_diff::MaxDiffParams, _pad1) == 4);
-        assert!(std::mem::offset_of!(max_diff::MaxDiffParams, _pad2) == 8);
-        assert!(std::mem::offset_of!(max_diff::MaxDiffParams, _pad3) == 12);
-        assert!(std::mem::size_of::<max_diff::MaxDiffParams>() == 16);
     };
     const PRECONDITIONER_GPU_SCALARS_ASSERTS: () = {
         assert!(std::mem::offset_of!(preconditioner::GpuScalars, rho_old) == 0);
@@ -1083,14 +1059,10 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for gmres_ops::GmresParams {}
     unsafe impl bytemuck::Zeroable for gmres_ops::IterParams {}
     unsafe impl bytemuck::Pod for gmres_ops::IterParams {}
-    unsafe impl bytemuck::Zeroable for gmres_spmv_cgs::Params {}
-    unsafe impl bytemuck::Pod for gmres_spmv_cgs::Params {}
     unsafe impl bytemuck::Zeroable for linear_solver::GpuScalars {}
     unsafe impl bytemuck::Pod for linear_solver::GpuScalars {}
     unsafe impl bytemuck::Zeroable for linear_solver::SolverParams {}
     unsafe impl bytemuck::Pod for linear_solver::SolverParams {}
-    unsafe impl bytemuck::Zeroable for max_diff::MaxDiffParams {}
-    unsafe impl bytemuck::Pod for max_diff::MaxDiffParams {}
     unsafe impl bytemuck::Zeroable for preconditioner::GpuScalars {}
     unsafe impl bytemuck::Pod for preconditioner::GpuScalars {}
     unsafe impl bytemuck::Zeroable for preconditioner::SolverParams {}
@@ -4505,21 +4477,6 @@ pub mod gmres_logic {
                 cache: None,
             })
         }
-        pub const COPY_SCALAR_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
-        pub fn create_copy_scalar_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline copy_scalar"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("copy_scalar"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
         pub const FINISH_NORM_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
         pub fn create_finish_norm_pipeline_embed_source(
             device: &wgpu::Device,
@@ -4538,7 +4495,6 @@ pub mod gmres_logic {
     }
     pub const ENTRY_UPDATE_HESSENBERG_GIVENS: &str = "update_hessenberg_givens";
     pub const ENTRY_SOLVE_TRIANGULAR: &str = "solve_triangular";
-    pub const ENTRY_COPY_SCALAR: &str = "copy_scalar";
     pub const ENTRY_FINISH_NORM: &str = "finish_norm";
     #[derive(Debug)]
     pub struct WgpuBindGroup0EntriesParams<'a> {
@@ -4924,15 +4880,7 @@ fn solve_triangular(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
 }
 
 @compute @workgroup_size(1, 1, 1) 
-fn copy_scalar(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
-    let idx = iter_params.current_idx;
-    let _e7 = y_sol[idx];
-    scalars[0] = _e7;
-    return;
-}
-
-@compute @workgroup_size(1, 1, 1) 
-fn finish_norm(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
+fn finish_norm(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
     let norm_sq = scalars[0];
     let norm = sqrt(norm_sq);
     let _e7 = iter_params.current_idx;
@@ -5111,36 +5059,6 @@ pub mod gmres_ops {
                 cache: None,
             })
         }
-        pub const BLOCK_JACOBI_PRECOND_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_block_jacobi_precond_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline block_jacobi_precond"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("block_jacobi_precond"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-        pub const EXTRACT_BLOCK_DIAGONAL_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_extract_block_diagonal_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline extract_block_diagonal"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("extract_block_diagonal"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
         pub const DOT_PRODUCT_PARTIAL_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
         pub fn create_dot_product_partial_pipeline_embed_source(
             device: &wgpu::Device,
@@ -5224,8 +5142,6 @@ pub mod gmres_ops {
     pub const ENTRY_SCALE: &str = "scale";
     pub const ENTRY_SCALE_IN_PLACE: &str = "scale_in_place";
     pub const ENTRY_COPY: &str = "copy";
-    pub const ENTRY_BLOCK_JACOBI_PRECOND: &str = "block_jacobi_precond";
-    pub const ENTRY_EXTRACT_BLOCK_DIAGONAL: &str = "extract_block_diagonal";
     pub const ENTRY_DOT_PRODUCT_PARTIAL: &str = "dot_product_partial";
     pub const ENTRY_NORM_SQ_PARTIAL: &str = "norm_sq_partial";
     pub const ENTRY_ORTHOGONALIZE: &str = "orthogonalize";
@@ -5757,44 +5673,15 @@ var<storage, read_write> hessenberg: array<f32>;
 var<storage> y_sol: array<f32>;
 var<workgroup> partial_sums: array<f32, 64>;
 
-fn get_global_index(global_id_14: vec3<u32>) -> u32 {
+fn get_global_index(global_id_12: vec3<u32>) -> u32 {
     let _e5 = params.dispatch_x;
-    return (global_id_14.x + (global_id_14.y * _e5));
+    return (global_id_12.x + (global_id_12.y * _e5));
 }
 
 fn get_workgroup_index(wg_id_2: vec3<u32>) -> u32 {
     let _e2 = params.dispatch_x;
     let dispatch_wg_x = (_e2 / 64u);
     return (wg_id_2.x + (wg_id_2.y * dispatch_wg_x));
-}
-
-fn read_diagonal(row: u32) -> f32 {
-    var k_1: u32;
-
-    let start = row_offsets[row];
-    let end = row_offsets[(row + 1u)];
-    k_1 = start;
-    loop {
-        let _e10 = k_1;
-        if (_e10 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e13 = k_1;
-            let _e15 = col_indices[_e13];
-            if (_e15 == row) {
-                let _e18 = k_1;
-                let _e20 = matrix_values[_e18];
-                return _e20;
-            }
-        }
-        continuing {
-            let _e22 = k_1;
-            k_1 = (_e22 + 1u);
-        }
-    }
-    return 0f;
 }
 
 @compute @workgroup_size(64, 1, 1) 
@@ -5807,12 +5694,12 @@ fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (_e2 >= _e5) {
         return;
     }
-    let start_1 = row_offsets[_e2];
-    let end_1 = row_offsets[(_e2 + 1u)];
-    k = start_1;
+    let start = row_offsets[_e2];
+    let end = row_offsets[(_e2 + 1u)];
+    k = start;
     loop {
         let _e16 = k;
-        if (_e16 < end_1) {
+        if (_e16 < end) {
         } else {
             break;
         }
@@ -5918,63 +5805,11 @@ fn copy(@builtin(global_invocation_id) global_id_6: vec3<u32>) {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn block_jacobi_precond(@builtin(global_invocation_id) global_id_7: vec3<u32>) {
-    let _e1 = get_global_index(global_id_7);
-    let _e4 = params.num_cells;
-    if (_e1 >= _e4) {
-        return;
-    }
-    let base = (_e1 * 3u);
-    let d_u = diag_u[_e1];
-    if (abs(d_u) > 0.00000000000001f) {
-        let _e22 = vec_x[(base + 0u)];
-        vec_z[(base + 0u)] = (_e22 / d_u);
-    } else {
-        vec_z[(base + 0u)] = 0f;
-    }
-    let d_v = diag_v[_e1];
-    if (abs(d_v) > 0.00000000000001f) {
-        let _e43 = vec_x[(base + 1u)];
-        vec_z[(base + 1u)] = (_e43 / d_v);
-    } else {
-        vec_z[(base + 1u)] = 0f;
-    }
-    let d_p = diag_p[_e1];
-    if (abs(d_p) > 0.00000000000001f) {
-        let _e64 = vec_x[(base + 2u)];
-        vec_z[(base + 2u)] = (_e64 / d_p);
-        return;
-    } else {
-        vec_z[(base + 2u)] = 0f;
-        return;
-    }
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn extract_block_diagonal(@builtin(global_invocation_id) global_id_8: vec3<u32>) {
-    let _e1 = get_global_index(global_id_8);
-    let _e4 = params.num_cells;
-    if (_e1 >= _e4) {
-        return;
-    }
-    let row_u = (_e1 * 3u);
-    let row_v = (row_u + 1u);
-    let row_p = (row_u + 2u);
-    let _e14 = read_diagonal(row_u);
-    diag_u[_e1] = _e14;
-    let _e17 = read_diagonal(row_v);
-    diag_v[_e1] = _e17;
-    let _e20 = read_diagonal(row_p);
-    diag_p[_e1] = _e20;
-    return;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn dot_product_partial(@builtin(global_invocation_id) global_id_9: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) wg_id: vec3<u32>) {
+fn dot_product_partial(@builtin(global_invocation_id) global_id_7: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) wg_id: vec3<u32>) {
     var local_sum: f32 = 0f;
     var stride: u32 = 32u;
 
-    let _e3 = get_global_index(global_id_9);
+    let _e3 = get_global_index(global_id_7);
     let lid = local_id.x;
     let _e7 = get_workgroup_index(wg_id);
     let _e10 = params.n;
@@ -6017,11 +5852,11 @@ fn dot_product_partial(@builtin(global_invocation_id) global_id_9: vec3<u32>, @b
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn norm_sq_partial(@builtin(global_invocation_id) global_id_10: vec3<u32>, @builtin(local_invocation_id) local_id_1: vec3<u32>, @builtin(workgroup_id) wg_id_1: vec3<u32>) {
+fn norm_sq_partial(@builtin(global_invocation_id) global_id_8: vec3<u32>, @builtin(local_invocation_id) local_id_1: vec3<u32>, @builtin(workgroup_id) wg_id_1: vec3<u32>) {
     var local_sum_1: f32 = 0f;
     var stride_1: u32 = 32u;
 
-    let _e3 = get_global_index(global_id_10);
+    let _e3 = get_global_index(global_id_8);
     let lid_1 = local_id_1.x;
     let _e7 = get_workgroup_index(wg_id_1);
     let _e10 = params.n;
@@ -6063,8 +5898,8 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id_10: vec3<u32>, @buil
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn orthogonalize(@builtin(global_invocation_id) global_id_11: vec3<u32>) {
-    let _e1 = get_global_index(global_id_11);
+fn orthogonalize(@builtin(global_invocation_id) global_id_9: vec3<u32>) {
+    let _e1 = get_global_index(global_id_9);
     let _e4 = params.n;
     if (_e1 >= _e4) {
         return;
@@ -6077,7 +5912,7 @@ fn orthogonalize(@builtin(global_invocation_id) global_id_11: vec3<u32>) {
 }
 
 @compute @workgroup_size(1, 1, 1) 
-fn reduce_final(@builtin(global_invocation_id) global_id_12: vec3<u32>) {
+fn reduce_final(@builtin(global_invocation_id) global_id_10: vec3<u32>) {
     var total_sum: f32 = 0f;
     var i: u32 = 0u;
 
@@ -6108,7 +5943,7 @@ fn reduce_final(@builtin(global_invocation_id) global_id_12: vec3<u32>) {
 }
 
 @compute @workgroup_size(1, 1, 1) 
-fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_13: vec3<u32>) {
+fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_11: vec3<u32>) {
     var total_sum_1: f32 = 0f;
     var i_1: u32 = 0u;
 
@@ -6139,572 +5974,6 @@ fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_13: vec
         return;
     } else {
         scalars[0] = 0f;
-        return;
-    }
-}
-"#;
-}
-pub mod gmres_spmv_cgs {
-    use super::{_root, _root::*};
-    #[repr(C, align(4))]
-    #[derive(Debug, PartialEq, Clone, Copy)]
-    pub struct Params {
-        #[doc = "offset: 0, size: 4, type: `u32`"]
-        pub n: u32,
-        #[doc = "offset: 4, size: 4, type: `u32`"]
-        pub num_cells: u32,
-        #[doc = "offset: 8, size: 4, type: `u32`"]
-        pub num_iters: u32,
-        #[doc = "offset: 12, size: 4, type: `f32`"]
-        pub omega: f32,
-        #[doc = "offset: 16, size: 4, type: `u32`"]
-        pub dispatch_x: u32,
-        #[doc = "offset: 20, size: 4, type: `u32`"]
-        pub max_restart: u32,
-        #[doc = "offset: 24, size: 4, type: `u32`"]
-        pub column_offset: u32,
-        #[doc = "offset: 28, size: 4, type: `u32`"]
-        pub pad3: u32,
-    }
-    impl Params {
-        pub const fn new(
-            n: u32,
-            num_cells: u32,
-            num_iters: u32,
-            omega: f32,
-            dispatch_x: u32,
-            max_restart: u32,
-            column_offset: u32,
-            pad3: u32,
-        ) -> Self {
-            Self {
-                n,
-                num_cells,
-                num_iters,
-                omega,
-                dispatch_x,
-                max_restart,
-                column_offset,
-                pad3,
-            }
-        }
-    }
-    pub const WORKGROUP_SIZE: u32 = 64u32;
-    pub mod compute {
-        use super::{_root, _root::*};
-        pub const SPMV_CGS_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_spmv_cgs_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline spmv_cgs"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("spmv_cgs"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-    }
-    pub const ENTRY_SPMV_CGS: &str = "spmv_cgs";
-    #[derive(Debug)]
-    pub struct WgpuBindGroup0EntriesParams<'a> {
-        pub vec_z: wgpu::BufferBinding<'a>,
-        pub vec_w: wgpu::BufferBinding<'a>,
-    }
-    #[derive(Clone, Debug)]
-    pub struct WgpuBindGroup0Entries<'a> {
-        pub vec_z: wgpu::BindGroupEntry<'a>,
-        pub vec_w: wgpu::BindGroupEntry<'a>,
-    }
-    impl<'a> WgpuBindGroup0Entries<'a> {
-        pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-            Self {
-                vec_z: wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(params.vec_z),
-                },
-                vec_w: wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(params.vec_w),
-                },
-            }
-        }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-            [self.vec_z, self.vec_w]
-        }
-        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-            self.into_array().into_iter().collect()
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup0(wgpu::BindGroup);
-    impl WgpuBindGroup0 {
-        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-            wgpu::BindGroupLayoutDescriptor {
-                label: Some("GmresSpmvCgs::BindGroup0::LayoutDescriptor"),
-                entries: &[
-                    #[doc = " @binding(0): \"vec_z\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(1): \"vec_w\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            };
-        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-        }
-        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-            let bind_group_layout = Self::get_bind_group_layout(device);
-            let entries = bindings.into_array();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GmresSpmvCgs::BindGroup0"),
-                layout: &bind_group_layout,
-                entries: &entries,
-            });
-            Self(bind_group)
-        }
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            pass.set_bind_group(0, &self.0, &[]);
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup1EntriesParams<'a> {
-        pub row_offsets: wgpu::BufferBinding<'a>,
-        pub col_indices: wgpu::BufferBinding<'a>,
-        pub matrix_values: wgpu::BufferBinding<'a>,
-    }
-    #[derive(Clone, Debug)]
-    pub struct WgpuBindGroup1Entries<'a> {
-        pub row_offsets: wgpu::BindGroupEntry<'a>,
-        pub col_indices: wgpu::BindGroupEntry<'a>,
-        pub matrix_values: wgpu::BindGroupEntry<'a>,
-    }
-    impl<'a> WgpuBindGroup1Entries<'a> {
-        pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-            Self {
-                row_offsets: wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(params.row_offsets),
-                },
-                col_indices: wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(params.col_indices),
-                },
-                matrix_values: wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Buffer(params.matrix_values),
-                },
-            }
-        }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-            [self.row_offsets, self.col_indices, self.matrix_values]
-        }
-        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-            self.into_array().into_iter().collect()
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup1(wgpu::BindGroup);
-    impl WgpuBindGroup1 {
-        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-            wgpu::BindGroupLayoutDescriptor {
-                label: Some("GmresSpmvCgs::BindGroup1::LayoutDescriptor"),
-                entries: &[
-                    #[doc = " @binding(0): \"row_offsets\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(1): \"col_indices\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(2): \"matrix_values\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            };
-        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-        }
-        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-            let bind_group_layout = Self::get_bind_group_layout(device);
-            let entries = bindings.into_array();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GmresSpmvCgs::BindGroup1"),
-                layout: &bind_group_layout,
-                entries: &entries,
-            });
-            Self(bind_group)
-        }
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            pass.set_bind_group(1, &self.0, &[]);
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup2EntriesParams<'a> {
-        pub params: wgpu::BufferBinding<'a>,
-        pub b_basis: wgpu::BufferBinding<'a>,
-        pub b_dot_partial: wgpu::BufferBinding<'a>,
-    }
-    #[derive(Clone, Debug)]
-    pub struct WgpuBindGroup2Entries<'a> {
-        pub params: wgpu::BindGroupEntry<'a>,
-        pub b_basis: wgpu::BindGroupEntry<'a>,
-        pub b_dot_partial: wgpu::BindGroupEntry<'a>,
-    }
-    impl<'a> WgpuBindGroup2Entries<'a> {
-        pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
-            Self {
-                params: wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(params.params),
-                },
-                b_basis: wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(params.b_basis),
-                },
-                b_dot_partial: wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Buffer(params.b_dot_partial),
-                },
-            }
-        }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-            [self.params, self.b_basis, self.b_dot_partial]
-        }
-        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-            self.into_array().into_iter().collect()
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup2(wgpu::BindGroup);
-    impl WgpuBindGroup2 {
-        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-            wgpu::BindGroupLayoutDescriptor {
-                label: Some("GmresSpmvCgs::BindGroup2::LayoutDescriptor"),
-                entries: &[
-                    #[doc = " @binding(0): \"params\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                                _root::gmres_spmv_cgs::Params,
-                            >(
-                            )
-                                as _),
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(1): \"b_basis\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(2): \"b_dot_partial\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            };
-        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-        }
-        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
-            let bind_group_layout = Self::get_bind_group_layout(device);
-            let entries = bindings.into_array();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GmresSpmvCgs::BindGroup2"),
-                layout: &bind_group_layout,
-                entries: &entries,
-            });
-            Self(bind_group)
-        }
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            pass.set_bind_group(2, &self.0, &[]);
-        }
-    }
-    #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-    #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-    #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-    #[doc = "   - Bind group 1: More frequent updates"]
-    #[doc = "   - Bind group 2: More frequent updates"]
-    #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-    #[derive(Debug, Copy, Clone)]
-    pub struct WgpuBindGroups<'a> {
-        pub bind_group0: &'a WgpuBindGroup0,
-        pub bind_group1: &'a WgpuBindGroup1,
-        pub bind_group2: &'a WgpuBindGroup2,
-    }
-    impl<'a> WgpuBindGroups<'a> {
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            self.bind_group0.set(pass);
-            self.bind_group1.set(pass);
-            self.bind_group2.set(pass);
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuPipelineLayout;
-    impl WgpuPipelineLayout {
-        pub fn bind_group_layout_entries(
-            entries: [wgpu::BindGroupLayout; 3],
-        ) -> [wgpu::BindGroupLayout; 3] {
-            entries
-        }
-    }
-    pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("GmresSpmvCgs::PipelineLayout"),
-            bind_group_layouts: &[
-                &WgpuBindGroup0::get_bind_group_layout(device),
-                &WgpuBindGroup1::get_bind_group_layout(device),
-                &WgpuBindGroup2::get_bind_group_layout(device),
-            ],
-            push_constant_ranges: &[],
-        })
-    }
-    pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-        let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-        device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gmres_spmv_cgs.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(source),
-        })
-    }
-    pub const SHADER_STRING: &str = r#"
-struct Params {
-    n: u32,
-    num_cells: u32,
-    num_iters: u32,
-    omega: f32,
-    dispatch_x: u32,
-    max_restart: u32,
-    column_offset: u32,
-    pad3_: u32,
-}
-
-const WORKGROUP_SIZE: u32 = 64u;
-
-@group(0) @binding(0) 
-var<storage> vec_z: array<f32>;
-@group(0) @binding(1) 
-var<storage, read_write> vec_w: array<f32>;
-@group(1) @binding(0) 
-var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
-var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
-var<storage> matrix_values: array<f32>;
-@group(2) @binding(0) 
-var<uniform> params: Params;
-@group(2) @binding(1) 
-var<storage> b_basis: array<f32>;
-@group(2) @binding(2) 
-var<storage, read_write> b_dot_partial: array<f32>;
-var<workgroup> sdata: array<f32, 3264>;
-
-fn get_global_index(global_id_1: vec3<u32>) -> u32 {
-    let _e5 = params.dispatch_x;
-    return (global_id_1.x + (global_id_1.y * _e5));
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn spmv_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_groups: vec3<u32>) {
-    var val_w: f32 = 0f;
-    var k: u32;
-    var k_1: u32 = 0u;
-    var k_2: u32 = 0u;
-    var s: u32 = 32u;
-    var k_3: u32;
-    var k_4: u32 = 0u;
-
-    let _e4 = get_global_index(global_id);
-    let lid = local_id.x;
-    let j = params.num_iters;
-    let n = params.n;
-    if (_e4 < n) {
-        let start = row_offsets[_e4];
-        let end = row_offsets[(_e4 + 1u)];
-        k = start;
-        loop {
-            let _e23 = k;
-            if (_e23 < end) {
-            } else {
-                break;
-            }
-            {
-                let _e26 = k;
-                let col = col_indices[_e26];
-                let _e30 = k;
-                let val = matrix_values[_e30];
-                let _e36 = vec_z[col];
-                let _e38 = val_w;
-                val_w = (_e38 + (val * _e36));
-            }
-            continuing {
-                let _e41 = k;
-                k = (_e41 + 1u);
-            }
-        }
-        let _e45 = val_w;
-        vec_w[_e4] = _e45;
-    }
-    let stride_bytes = (((n * 4u) + 255u) & 4294967040u);
-    let stride_words = (stride_bytes / 4u);
-    if (_e4 < n) {
-        loop {
-            let _e56 = k_1;
-            if (_e56 <= j) {
-            } else {
-                break;
-            }
-            {
-                let _e59 = k_1;
-                let val_v = b_basis[((_e59 * stride_words) + _e4)];
-                let _e67 = k_1;
-                let _e70 = val_w;
-                sdata[((lid * 51u) + _e67)] = (_e70 * val_v);
-            }
-            continuing {
-                let _e73 = k_1;
-                k_1 = (_e73 + 1u);
-            }
-        }
-    } else {
-        loop {
-            let _e76 = k_2;
-            if (_e76 <= j) {
-            } else {
-                break;
-            }
-            {
-                let _e81 = k_2;
-                sdata[((lid * 51u) + _e81)] = 0f;
-            }
-            continuing {
-                let _e86 = k_2;
-                k_2 = (_e86 + 1u);
-            }
-        }
-    }
-    workgroupBarrier();
-    loop {
-        let _e89 = s;
-        if (_e89 > 0u) {
-        } else {
-            break;
-        }
-        {
-            let _e92 = s;
-            if (lid < _e92) {
-                k_3 = 0u;
-                loop {
-                    let _e96 = k_3;
-                    if (_e96 <= j) {
-                    } else {
-                        break;
-                    }
-                    {
-                        let _e101 = k_3;
-                        let _e104 = s;
-                        let _e109 = k_3;
-                        let _e112 = sdata[(((lid + _e104) * 51u) + _e109)];
-                        let _e113 = sdata[((lid * 51u) + _e101)];
-                        sdata[((lid * 51u) + _e101)] = (_e113 + _e112);
-                    }
-                    continuing {
-                        let _e116 = k_3;
-                        k_3 = (_e116 + 1u);
-                    }
-                }
-            }
-            workgroupBarrier();
-        }
-        continuing {
-            let _e119 = s;
-            s = (_e119 >> 1u);
-        }
-    }
-    if (lid == 0u) {
-        let _e125 = params.dispatch_x;
-        let dispatch_wg_x = (_e125 / 64u);
-        let gid = (group_id.x + (group_id.y * dispatch_wg_x));
-        let total_groups = ((n + 63u) / 64u);
-        loop {
-            let _e138 = k_4;
-            if (_e138 <= j) {
-            } else {
-                break;
-            }
-            {
-                let _e141 = k_4;
-                let _e146 = k_4;
-                let _e148 = sdata[_e146];
-                b_dot_partial[((_e141 * total_groups) + gid)] = _e148;
-            }
-            continuing {
-                let _e150 = k_4;
-                k_4 = (_e150 + 1u);
-            }
-        }
-        return;
-    } else {
         return;
     }
 }
@@ -7483,324 +6752,6 @@ fn cg_update_p(@builtin(global_invocation_id) global_id_6: vec3<u32>) {
 }
 "#;
 }
-pub mod max_diff {
-    use super::{_root, _root::*};
-    #[repr(C, align(4))]
-    #[derive(Debug, PartialEq, Clone, Copy)]
-    pub struct MaxDiffParams {
-        #[doc = "offset: 0, size: 4, type: `u32`"]
-        pub n: u32,
-        #[doc = "offset: 4, size: 4, type: `u32`"]
-        pub _pad1: u32,
-        #[doc = "offset: 8, size: 4, type: `u32`"]
-        pub _pad2: u32,
-        #[doc = "offset: 12, size: 4, type: `u32`"]
-        pub _pad3: u32,
-    }
-    impl MaxDiffParams {
-        pub const fn new(n: u32, _pad1: u32, _pad2: u32, _pad3: u32) -> Self {
-            Self {
-                n,
-                _pad1,
-                _pad2,
-                _pad3,
-            }
-        }
-    }
-    pub mod compute {
-        use super::{_root, _root::*};
-        pub const MAX_REDUCE_FINAL_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
-        pub fn create_max_reduce_final_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline max_reduce_final"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("max_reduce_final"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-    }
-    pub const ENTRY_MAX_REDUCE_FINAL: &str = "max_reduce_final";
-    #[derive(Debug)]
-    pub struct WgpuBindGroup0EntriesParams<'a> {
-        pub vec_a: wgpu::BufferBinding<'a>,
-        pub vec_b: wgpu::BufferBinding<'a>,
-        pub partial_max: wgpu::BufferBinding<'a>,
-    }
-    #[derive(Clone, Debug)]
-    pub struct WgpuBindGroup0Entries<'a> {
-        pub vec_a: wgpu::BindGroupEntry<'a>,
-        pub vec_b: wgpu::BindGroupEntry<'a>,
-        pub partial_max: wgpu::BindGroupEntry<'a>,
-    }
-    impl<'a> WgpuBindGroup0Entries<'a> {
-        pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-            Self {
-                vec_a: wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(params.vec_a),
-                },
-                vec_b: wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(params.vec_b),
-                },
-                partial_max: wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Buffer(params.partial_max),
-                },
-            }
-        }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-            [self.vec_a, self.vec_b, self.partial_max]
-        }
-        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-            self.into_array().into_iter().collect()
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup0(wgpu::BindGroup);
-    impl WgpuBindGroup0 {
-        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-            wgpu::BindGroupLayoutDescriptor {
-                label: Some("MaxDiff::BindGroup0::LayoutDescriptor"),
-                entries: &[
-                    #[doc = " @binding(0): \"vec_a\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(1): \"vec_b\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(2): \"partial_max\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            };
-        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-        }
-        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-            let bind_group_layout = Self::get_bind_group_layout(device);
-            let entries = bindings.into_array();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("MaxDiff::BindGroup0"),
-                layout: &bind_group_layout,
-                entries: &entries,
-            });
-            Self(bind_group)
-        }
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            pass.set_bind_group(0, &self.0, &[]);
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup1EntriesParams<'a> {
-        pub params: wgpu::BufferBinding<'a>,
-        pub result: wgpu::BufferBinding<'a>,
-    }
-    #[derive(Clone, Debug)]
-    pub struct WgpuBindGroup1Entries<'a> {
-        pub params: wgpu::BindGroupEntry<'a>,
-        pub result: wgpu::BindGroupEntry<'a>,
-    }
-    impl<'a> WgpuBindGroup1Entries<'a> {
-        pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-            Self {
-                params: wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(params.params),
-                },
-                result: wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(params.result),
-                },
-            }
-        }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-            [self.params, self.result]
-        }
-        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-            self.into_array().into_iter().collect()
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuBindGroup1(wgpu::BindGroup);
-    impl WgpuBindGroup1 {
-        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-            wgpu::BindGroupLayoutDescriptor {
-                label: Some("MaxDiff::BindGroup1::LayoutDescriptor"),
-                entries: &[
-                    #[doc = " @binding(0): \"params\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                                _root::max_diff::MaxDiffParams,
-                            >(
-                            )
-                                as _),
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(1): \"result\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            };
-        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-        }
-        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-            let bind_group_layout = Self::get_bind_group_layout(device);
-            let entries = bindings.into_array();
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("MaxDiff::BindGroup1"),
-                layout: &bind_group_layout,
-                entries: &entries,
-            });
-            Self(bind_group)
-        }
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            pass.set_bind_group(1, &self.0, &[]);
-        }
-    }
-    #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-    #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-    #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-    #[doc = "   - Bind group 1: More frequent updates"]
-    #[doc = "   - Bind group 2: More frequent updates"]
-    #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-    #[derive(Debug, Copy, Clone)]
-    pub struct WgpuBindGroups<'a> {
-        pub bind_group0: &'a WgpuBindGroup0,
-        pub bind_group1: &'a WgpuBindGroup1,
-    }
-    impl<'a> WgpuBindGroups<'a> {
-        pub fn set(&self, pass: &mut impl SetBindGroup) {
-            self.bind_group0.set(pass);
-            self.bind_group1.set(pass);
-        }
-    }
-    #[derive(Debug)]
-    pub struct WgpuPipelineLayout;
-    impl WgpuPipelineLayout {
-        pub fn bind_group_layout_entries(
-            entries: [wgpu::BindGroupLayout; 2],
-        ) -> [wgpu::BindGroupLayout; 2] {
-            entries
-        }
-    }
-    pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("MaxDiff::PipelineLayout"),
-            bind_group_layouts: &[
-                &WgpuBindGroup0::get_bind_group_layout(device),
-                &WgpuBindGroup1::get_bind_group_layout(device),
-            ],
-            push_constant_ranges: &[],
-        })
-    }
-    pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-        let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-        device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("max_diff.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(source),
-        })
-    }
-    pub const SHADER_STRING: &str = r#"
-struct MaxDiffParams {
-    n: u32,
-    _pad1_: u32,
-    _pad2_: u32,
-    _pad3_: u32,
-}
-
-@group(0) @binding(0) 
-var<storage> vec_a: array<f32>;
-@group(0) @binding(1) 
-var<storage> vec_b: array<f32>;
-@group(0) @binding(2) 
-var<storage, read_write> partial_max: array<f32>;
-@group(1) @binding(0) 
-var<uniform> params: MaxDiffParams;
-@group(1) @binding(1) 
-var<storage, read_write> result: array<f32>;
-
-@compute @workgroup_size(1, 1, 1) 
-fn max_reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var total_max_u: f32 = 0f;
-    var total_max_p: f32 = 0f;
-    var i: u32 = 0u;
-
-    let num_partials = params.n;
-    loop {
-        let _e6 = i;
-        if (_e6 < num_partials) {
-        } else {
-            break;
-        }
-        {
-            let _e9 = total_max_u;
-            let _e11 = i;
-            let _e13 = vec_a[_e11];
-            total_max_u = max(_e9, _e13);
-            let _e16 = total_max_p;
-            let _e18 = i;
-            let _e20 = vec_b[_e18];
-            total_max_p = max(_e16, _e20);
-        }
-        continuing {
-            let _e23 = i;
-            i = (_e23 + 1u);
-        }
-    }
-    let _e27 = total_max_u;
-    result[0] = _e27;
-    let _e30 = total_max_p;
-    result[1] = _e30;
-    return;
-}
-"#;
-}
 pub mod preconditioner {
     use super::{_root, _root::*};
     #[repr(C, align(4))]
@@ -7885,36 +6836,6 @@ pub mod preconditioner {
     }
     pub mod compute {
         use super::{_root, _root::*};
-        pub const EXTRACT_DIAGONAL_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_extract_diagonal_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline extract_diagonal"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("extract_diagonal"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-        pub const PRECOND_VELOCITY_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_precond_velocity_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline precond_velocity"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("precond_velocity"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
         pub const BUILD_SCHUR_RHS_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
         pub fn create_build_schur_rhs_pipeline_embed_source(
             device: &wgpu::Device,
@@ -7975,29 +6896,11 @@ pub mod preconditioner {
                 cache: None,
             })
         }
-        pub const BICGSTAB_PRECOND_UPDATE_X_R_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_bicgstab_precond_update_x_r_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline bicgstab_precond_update_x_r"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("bicgstab_precond_update_x_r"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
     }
-    pub const ENTRY_EXTRACT_DIAGONAL: &str = "extract_diagonal";
-    pub const ENTRY_PRECOND_VELOCITY: &str = "precond_velocity";
     pub const ENTRY_BUILD_SCHUR_RHS: &str = "build_schur_rhs";
     pub const ENTRY_FINALIZE_PRECOND: &str = "finalize_precond";
     pub const ENTRY_SPMV_PHAT_V: &str = "spmv_phat_v";
     pub const ENTRY_SPMV_SHAT_T: &str = "spmv_shat_t";
-    pub const ENTRY_BICGSTAB_PRECOND_UPDATE_X_R: &str = "bicgstab_precond_update_x_r";
     #[derive(Debug)]
     pub struct WgpuBindGroup0EntriesParams<'a> {
         pub x: wgpu::BufferBinding<'a>,
@@ -8614,7 +7517,10 @@ fn safe_inverse(val: f32) -> f32 {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn extract_diagonal(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var rhs: f32;
+    var k: u32;
+
     let total_unknowns = params.n;
     if (total_unknowns < 3u) {
         return;
@@ -8624,71 +7530,8 @@ fn extract_diagonal(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (cell >= num_cells) {
         return;
     }
-    let col_u = ((3u * cell) + 0u);
-    let col_v = (col_u + 1u);
-    let col_p = (col_u + 2u);
-    let _e18 = get_matrix_value(col_u, col_u);
-    let _e19 = get_matrix_value(col_v, col_v);
-    let _e20 = get_matrix_value(col_p, col_p);
-    let offset = (cell * 9u);
-    let _e23 = safe_inverse(_e18);
-    let _e24 = safe_inverse(_e19);
-    let momentum_scale = (0.5f * (abs(_e23) + abs(_e24)));
-    let _e30 = safe_inverse(_e20);
-    let inv_diag_p = (sign(_e30) * min(abs(_e30), ((10f * momentum_scale) + 0.000001f)));
-    block_inv[(offset + 0u)] = _e23;
-    block_inv[(offset + 1u)] = 0f;
-    block_inv[(offset + 2u)] = 0f;
-    block_inv[(offset + 3u)] = 0f;
-    block_inv[(offset + 4u)] = _e24;
-    block_inv[(offset + 5u)] = 0f;
-    block_inv[(offset + 6u)] = 0f;
-    block_inv[(offset + 7u)] = 0f;
-    block_inv[(offset + 8u)] = inv_diag_p;
-    return;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn precond_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
-    let total_unknowns_1 = params.n;
-    if (total_unknowns_1 < 3u) {
-        return;
-    }
-    let num_cells_1 = (total_unknowns_1 / 3u);
-    let cell_1 = global_id_1.x;
-    if (cell_1 >= num_cells_1) {
-        return;
-    }
-    let base = (cell_1 * 3u);
-    let offset_1 = (cell_1 * 9u);
-    let _e16 = read_search_vector((base + 0u));
-    let _e19 = read_search_vector((base + 1u));
-    let _e24 = block_inv[(offset_1 + 0u)];
-    let dst0_ = (_e24 * _e16);
-    let _e30 = block_inv[(offset_1 + 4u)];
-    let dst1_ = (_e30 * _e19);
-    write_hat((base + 0u), dst0_);
-    write_hat((base + 1u), dst1_);
-    write_hat((base + 2u), 0f);
-    return;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn build_schur_rhs(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
-    var rhs: f32;
-    var k: u32;
-
-    let total_unknowns_2 = params.n;
-    if (total_unknowns_2 < 3u) {
-        return;
-    }
-    let num_cells_2 = (total_unknowns_2 / 3u);
-    let cell_2 = global_id_2.x;
-    if (cell_2 >= num_cells_2) {
-        return;
-    }
-    let base_1 = (cell_2 * 3u);
-    let row_1 = (base_1 + 2u);
+    let base = (cell * 3u);
+    let row_1 = (base + 2u);
     let _e14 = read_search_vector(row_1);
     rhs = _e14;
     let start_1 = row_offsets[row_1];
@@ -8716,39 +7559,39 @@ fn build_schur_rhs(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
             k = (_e44 + 1u);
         }
     }
-    write_rhs((base_1 + 0u), 0f);
-    write_rhs((base_1 + 1u), 0f);
+    write_rhs((base + 0u), 0f);
+    write_rhs((base + 1u), 0f);
     let _e54 = rhs;
-    write_rhs((base_1 + 2u), _e54);
+    write_rhs((base + 2u), _e54);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn finalize_precond(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
+fn finalize_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     var vel_u: f32;
     var vel_v: f32;
     var k_1: u32;
     var k_2: u32;
 
-    let total_unknowns_3 = params.n;
-    if (total_unknowns_3 < 3u) {
+    let total_unknowns_1 = params.n;
+    if (total_unknowns_1 < 3u) {
         return;
     }
-    let num_cells_3 = (total_unknowns_3 / 3u);
-    let cell_3 = global_id_3.x;
-    if (cell_3 >= num_cells_3) {
+    let num_cells_1 = (total_unknowns_1 / 3u);
+    let cell_1 = global_id_1.x;
+    if (cell_1 >= num_cells_1) {
         return;
     }
-    let base_2 = (cell_3 * 3u);
-    let offset_2 = (cell_3 * 9u);
-    let row_u = (base_2 + 0u);
-    let row_v = (base_2 + 1u);
+    let base_1 = (cell_1 * 3u);
+    let offset = (cell_1 * 9u);
+    let row_u = (base_1 + 0u);
+    let row_v = (base_1 + 1u);
     let _e18 = read_hat(row_u);
     vel_u = _e18;
     let _e20 = read_hat(row_v);
     vel_v = _e20;
-    let inv_u = block_inv[(offset_2 + 0u)];
-    let inv_v = block_inv[(offset_2 + 4u)];
+    let inv_u = block_inv[(offset + 0u)];
+    let inv_v = block_inv[(offset + 4u)];
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[(row_u + 1u)];
     k_1 = start_u;
@@ -8807,11 +7650,11 @@ fn finalize_precond(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn spmv_phat_v(@builtin(global_invocation_id) global_id_4: vec3<u32>) {
+fn spmv_phat_v(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
     var sum: f32 = 0f;
     var k_3: u32;
 
-    let row_2 = global_id_4.x;
+    let row_2 = global_id_2.x;
     let _e5 = params.n;
     if (row_2 >= _e5) {
         return;
@@ -8845,11 +7688,11 @@ fn spmv_phat_v(@builtin(global_invocation_id) global_id_4: vec3<u32>) {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn spmv_shat_t(@builtin(global_invocation_id) global_id_5: vec3<u32>) {
+fn spmv_shat_t(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
     var sum_1: f32 = 0f;
     var k_4: u32;
 
-    let row_3 = global_id_5.x;
+    let row_3 = global_id_3.x;
     let _e5 = params.n;
     if (row_3 >= _e5) {
         return;
@@ -8879,40 +7722,6 @@ fn spmv_shat_t(@builtin(global_invocation_id) global_id_5: vec3<u32>) {
     }
     let _e38 = sum_1;
     t[row_3] = _e38;
-    return;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn bicgstab_precond_update_x_r(@builtin(global_invocation_id) global_id_6: vec3<u32>) {
-    var omega: f32 = 0f;
-
-    let idx_4 = global_id_6.x;
-    let _e5 = scalars.t_t;
-    if (abs(_e5) >= 0.00000000000000000001f) {
-        let _e11 = scalars.t_s;
-        let _e14 = scalars.t_t;
-        omega = (_e11 / _e14);
-    }
-    if (global_id_6.x == 0u) {
-        let _e22 = omega;
-        scalars.omega = _e22;
-        let _e27 = scalars.rho_new;
-        scalars.rho_old = _e27;
-    }
-    let _e30 = params.n;
-    if (idx_4 >= _e30) {
-        return;
-    }
-    let alpha = scalars.alpha;
-    let _e39 = p_hat[idx_4];
-    let _e41 = omega;
-    let _e44 = s_hat[idx_4];
-    let _e47 = x[idx_4];
-    x[idx_4] = (_e47 + ((alpha * _e39) + (_e41 * _e44)));
-    let _e53 = s[idx_4];
-    let _e54 = omega;
-    let _e57 = t[idx_4];
-    r[idx_4] = (_e53 - (_e54 * _e57));
     return;
 }
 "#;
@@ -11230,51 +10039,6 @@ pub mod scalars {
                 cache: None,
             })
         }
-        pub const UPDATE_BETA_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
-        pub fn create_update_beta_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline update_beta"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("update_beta"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-        pub const UPDATE_ALPHA_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
-        pub fn create_update_alpha_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline update_alpha"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("update_alpha"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-        pub const UPDATE_OMEGA_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
-        pub fn create_update_omega_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline update_omega"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("update_omega"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
         pub const INIT_SCALARS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
         pub fn create_init_scalars_pipeline_embed_source(
             device: &wgpu::Device,
@@ -11354,9 +10118,6 @@ pub mod scalars {
     pub const ENTRY_REDUCE_RHO_NEW_R_R: &str = "reduce_rho_new_r_r";
     pub const ENTRY_REDUCE_R0_V: &str = "reduce_r0_v";
     pub const ENTRY_REDUCE_T_S_T_T: &str = "reduce_t_s_t_t";
-    pub const ENTRY_UPDATE_BETA: &str = "update_beta";
-    pub const ENTRY_UPDATE_ALPHA: &str = "update_alpha";
-    pub const ENTRY_UPDATE_OMEGA: &str = "update_omega";
     pub const ENTRY_INIT_SCALARS: &str = "init_scalars";
     pub const ENTRY_UPDATE_RHO_OLD: &str = "update_rho_old";
     pub const ENTRY_INIT_CG_SCALARS: &str = "init_cg_scalars";
@@ -11753,50 +10514,6 @@ fn reduce_t_s_t_t(@builtin(local_invocation_id) local_id_2: vec3<u32>) {
         scalars.t_t = _e71;
         return;
     } else {
-        return;
-    }
-}
-
-@compute @workgroup_size(1, 1, 1) 
-fn update_beta() {
-    let _e2 = scalars.omega;
-    if (abs(_e2) < 0.00000000000000000001f) {
-        scalars.beta = 0f;
-        return;
-    } else {
-        let _e13 = scalars.rho_new;
-        let _e16 = scalars.rho_old;
-        let _e20 = scalars.alpha;
-        let _e23 = scalars.omega;
-        scalars.beta = ((_e13 / _e16) * (_e20 / _e23));
-        return;
-    }
-}
-
-@compute @workgroup_size(1, 1, 1) 
-fn update_alpha() {
-    let _e2 = scalars.r0_v;
-    if (abs(_e2) < 0.00000000000000000001f) {
-        scalars.alpha = 0f;
-        return;
-    } else {
-        let _e13 = scalars.rho_new;
-        let _e16 = scalars.r0_v;
-        scalars.alpha = (_e13 / _e16);
-        return;
-    }
-}
-
-@compute @workgroup_size(1, 1, 1) 
-fn update_omega() {
-    let _e2 = scalars.t_t;
-    if (abs(_e2) < 0.00000000000000000001f) {
-        scalars.omega = 0f;
-        return;
-    } else {
-        let _e13 = scalars.t_s;
-        let _e16 = scalars.t_t;
-        scalars.omega = (_e13 / _e16);
         return;
     }
 }

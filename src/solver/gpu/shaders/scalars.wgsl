@@ -110,32 +110,6 @@ fn reduce_t_s_t_t(@builtin(local_invocation_id) local_id: vec3<u32>) {
     }
 }
 
-@compute @workgroup_size(1)
-fn update_beta() {
-    if (abs(scalars.omega) < 1e-20) {
-        scalars.beta = 0.0;
-    } else {
-        scalars.beta = (scalars.rho_new / scalars.rho_old) * (scalars.alpha / scalars.omega);
-    }
-}
-
-@compute @workgroup_size(1)
-fn update_alpha() {
-    if (abs(scalars.r0_v) < 1e-20) {
-        scalars.alpha = 0.0;
-    } else {
-        scalars.alpha = scalars.rho_new / scalars.r0_v;
-    }
-}
-
-@compute @workgroup_size(1)
-fn update_omega() {
-    if (abs(scalars.t_t) < 1e-20) {
-        scalars.omega = 0.0;
-    } else {
-        scalars.omega = scalars.t_s / scalars.t_t;
-    }
-}
 
 @compute @workgroup_size(1)
 fn init_scalars() {

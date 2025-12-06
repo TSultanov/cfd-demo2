@@ -103,12 +103,6 @@ fn solve_triangular(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-@compute @workgroup_size(1)
-fn copy_scalar(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    // Copy y_sol[current_idx] to scalars[0] for use in AXPY
-    let idx = iter_params.current_idx;
-    scalars[0] = y_sol[idx];
-}
 
 @compute @workgroup_size(1)
 fn finish_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {

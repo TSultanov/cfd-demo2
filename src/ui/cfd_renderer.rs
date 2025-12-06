@@ -323,18 +323,7 @@ impl CfdRenderResources {
     }
 }
 
-/// Triangulate a polygon (fan triangulation from first vertex)
-pub fn triangulate_polygon(vertices: &[[f64; 2]]) -> Vec<[usize; 3]> {
-    if vertices.len() < 3 {
-        return Vec::new();
-    }
 
-    let mut triangles = Vec::with_capacity(vertices.len() - 2);
-    for i in 1..vertices.len() - 1 {
-        triangles.push([0, i, i + 1]);
-    }
-    triangles
-}
 
 /// Build mesh vertices from cell data for GPU rendering
 pub fn build_mesh_vertices(

@@ -90,45 +90,7 @@ impl GmresState {
         self.y.fill(0.0);
     }
 
-    /// Apply Givens rotation to eliminate H[i+1, i]
-    pub fn apply_givens(&mut self, i: usize) {
-        let m = self.max_restart;
 
-        // Get H[i,i] and H[i+1,i]
-        let h_ii = self.h_matrix[i * (m + 1) + i];
-        let h_i1i = self.h_matrix[i * (m + 1) + i + 1];
-
-        // Compute Givens rotation
-        let r = (h_ii * h_ii + h_i1i * h_i1i).sqrt();
-        if r.abs() < 1e-14 {
-            self.cs[i] = 1.0;
-            self.sn[i] = 0.0;
-        } else {
-            self.cs[i] = h_ii / r;
-            self.sn[i] = h_i1i / r;
-        }
-
-        // Apply to H column i
-        self.h_matrix[i * (m + 1) + i] = r;
-        self.h_matrix[i * (m + 1) + i + 1] = 0.0;
-
-        // Apply to g
-        let g_i = self.g[i];
-        let g_i1 = self.g[i + 1];
-        self.g[i] = self.cs[i] * g_i + self.sn[i] * g_i1;
-        self.g[i + 1] = -self.sn[i] * g_i + self.cs[i] * g_i1;
-    }
-
-    /// Apply all previous Givens rotations to new column j of H
-    pub fn apply_previous_givens(&mut self, j: usize) {
-        let m = self.max_restart;
-        for i in 0..j {
-            let h_ij = self.h_matrix[j * (m + 1) + i];
-            let h_i1j = self.h_matrix[j * (m + 1) + i + 1];
-            self.h_matrix[j * (m + 1) + i] = self.cs[i] * h_ij + self.sn[i] * h_i1j;
-            self.h_matrix[j * (m + 1) + i + 1] = -self.sn[i] * h_ij + self.cs[i] * h_i1j;
-        }
-    }
 
     /// Solve upper triangular system H * y = g for the current basis size
     pub fn solve_triangular(&mut self) {
@@ -150,10 +112,6 @@ impl GmresState {
         }
     }
 
-    /// Get the current residual estimate |g[k]|
-    pub fn residual_estimate(&self) -> f32 {
-        self.g[self.basis_size].abs()
-    }
 }
 
 impl GpuSolver {
@@ -190,20 +148,7 @@ impl GpuSolver {
         result
     }
 
-    /// Compute dot product of two GPU vectors, returning result on CPU
-    pub async fn dot_product_cpu(&self, a: &wgpu::Buffer, b: &wgpu::Buffer, n: u32) -> f32 {
-        // Read both vectors and compute on CPU
-        // (For production, this should be a GPU reduction, but for correctness first...)
-        let a_data = self.read_buffer_f32_async(a, n).await;
-        let b_data = self.read_buffer_f32_async(b, n).await;
-        a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum()
-    }
 
-    /// Compute norm of a GPU vector
-    pub async fn norm_cpu(&self, v: &wgpu::Buffer, n: u32) -> f32 {
-        let data = self.read_buffer_f32_async(v, n).await;
-        data.iter().map(|x| x * x).sum::<f32>().sqrt()
-    }
 
     /// Scale a GPU vector: v = alpha * v
     pub fn scale_vector(&self, v: &wgpu::Buffer, alpha: f32, n: u32) {

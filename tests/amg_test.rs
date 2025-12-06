@@ -49,7 +49,6 @@ fn test_amg_preconditioner() {
                 break;
             }
         }
-        let p_jacobi = solver.get_p().await;
 
         // Reset solver (or create new one)
         let mut solver_amg = GpuSolver::new(&mesh, None, None).await;

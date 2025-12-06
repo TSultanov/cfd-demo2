@@ -201,19 +201,27 @@ fn bench_fine_mesh(c: &mut Criterion) {
 
     let cell_size = 0.00175;
 
-    // Setup solver for AMG
-    let (mut solver_amg, num_cells) = setup_solver(cell_size);
-    solver_amg.set_precond_type(PreconditionerType::Amg);
-    // Warmup AMG (allocates resources)
-    solver_amg.step();
+    let (mut solver_default_order, num_cells) = setup_solver(cell_size);
+    solver_default_order.set_precond_type(PreconditionerType::Amg);
+    solver_default_order.step();
+
+    // let (mut solver_reordered, _) = setup_solver(cell_size, true);
+    // solver_reordered.set_precond_type(PreconditionerType::Amg);
+    // solver_reordered.step();
 
     group.throughput(Throughput::Elements(num_cells as u64));
 
-    group.bench_function(BenchmarkId::new("amg", num_cells), |b| {
+    group.bench_function(BenchmarkId::new("default_order", num_cells), |b| {
         b.iter(|| {
-            solver_amg.step();
+            solver_default_order.step();
         });
     });
+
+    // group.bench_function(BenchmarkId::new("reordered", num_cells), |b| {
+    //     b.iter(|| {
+    //         solver_reordered.step();
+    //     });
+    // });
 
     group.finish();
 }

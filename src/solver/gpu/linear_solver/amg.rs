@@ -667,6 +667,11 @@ impl AmgResources {
             return;
         }
 
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("AMG V-Cycle"),
+            timestamp_writes: None,
+        });
+
         // Downward cycle
         for i in 0..num_levels - 1 {
             let fine = &self.levels[i];
@@ -675,10 +680,7 @@ impl AmgResources {
             let fine_groups = fine.size.div_ceil(64);
             let coarse_groups = coarse.size.div_ceil(64);
 
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some(&format!("AMG Down L{}->L{}", i, i + 1)),
-                timestamp_writes: None,
-            });
+            pass.push_debug_group(&format!("AMG Down L{}->L{}", i, i + 1));
 
             // 1. Pre-smooth
             pass.set_pipeline(&self.pipeline_smooth);
@@ -702,29 +704,26 @@ impl AmgResources {
             }
 
             // Clear coarse solution x (ready for solve at next level)
-            // Ideally should be just write_buffer, but we are inside pass.
-            // But we switching to coarse level's bind groups anyway?
-            // Actually, we can just switch binds and use compute clear.
             pass.set_pipeline(&self.pipeline_clear);
             pass.set_bind_group(0, &coarse.bg_matrix, &[]); // Dummy bind, just for layout
             pass.set_bind_group(1, &coarse.bg_state, &[]); // Binds coarse x
             pass.dispatch_workgroups(coarse_groups, 1, 1);
+
+            pass.pop_debug_group();
         }
 
         // Coarsest solve
         let coarsest = &self.levels[num_levels - 1];
         let coarsest_groups = coarsest.size.div_ceil(64);
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("AMG Coarse Solve"),
-                timestamp_writes: None,
-            });
+            pass.push_debug_group("AMG Coarse Solve");
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &coarsest.bg_matrix, &[]);
             pass.set_bind_group(1, &coarsest.bg_state, &[]);
             for _ in 0..10 {
                 pass.dispatch_workgroups(coarsest_groups, 1, 1);
             }
+            pass.pop_debug_group();
         }
 
         // Upward cycle
@@ -733,10 +732,7 @@ impl AmgResources {
             let _coarse = &self.levels[i + 1];
             let fine_groups = fine.size.div_ceil(64);
 
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some(&format!("AMG Up L{}->L{}", i + 1, i)),
-                timestamp_writes: None,
-            });
+            pass.push_debug_group(&format!("AMG Up L{}->L{}", i + 1, i));
 
             // Prolongate (x_fine += P * x_coarse)
             if let Some(bg_cross) = &fine.bg_prolongate {
@@ -753,6 +749,8 @@ impl AmgResources {
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
             pass.set_bind_group(1, &fine.bg_state, &[]);
             pass.dispatch_workgroups(fine_groups, 1, 1);
+
+            pass.pop_debug_group();
         }
     }
 }

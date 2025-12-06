@@ -23,8 +23,6 @@ struct RuntimeParams {
 enum RenderMode {
     /// Use egui_plot polygons (slow for large meshes)
     EguiPlot,
-    /// Use egui's built-in mesh batching (fast for large meshes)
-    BatchedMesh,
     /// Render directly on GPU (zero-copy)
     GpuDirect,
 }
@@ -262,7 +260,7 @@ impl CFDApp {
             show_mesh_lines: true,
             adaptive_dt: true,
             target_cfl: 0.95,
-            render_mode: RenderMode::BatchedMesh,
+            render_mode: RenderMode::GpuDirect,
             alpha_u: 1.0,
             alpha_p: 1.0,
             time_scheme: TimeScheme::Euler,
@@ -559,126 +557,6 @@ impl CFDApp {
 
     fn update_gpu_preconditioner(&self) {
         self.with_gpu_solver(|solver| solver.set_precond_type(self.selected_preconditioner));
-    }
-
-    /// Render the CFD mesh using egui's batched mesh for maximum performance
-    fn render_batched_mesh(
-        &self,
-        ui: &mut egui::Ui,
-        cells: &[Vec<[f64; 2]>],
-        values: &[f64],
-        min_val: f64,
-        max_val: f64,
-    ) {
-        let (mesh_min_x, mesh_max_x, mesh_min_y, mesh_max_y) = {
-            let mut min_x = f64::MAX;
-            let mut max_x = f64::MIN;
-            let mut min_y = f64::MAX;
-            let mut max_y = f64::MIN;
-            for polygon in cells {
-                for &[x, y] in polygon {
-                    min_x = min_x.min(x);
-                    max_x = max_x.max(x);
-                    min_y = min_y.min(y);
-                    max_y = max_y.max(y);
-                }
-            }
-            (min_x, max_x, min_y, max_y)
-        };
-
-        let mesh_width = mesh_max_x - mesh_min_x;
-        let mesh_height = mesh_max_y - mesh_min_y;
-
-        let available_rect = ui.available_rect_before_wrap();
-        let aspect = mesh_width / mesh_height;
-
-        let (render_width, render_height) =
-            if available_rect.width() / available_rect.height() > aspect as f32 {
-                let h = available_rect.height();
-                let w = h * aspect as f32;
-                (w, h)
-            } else {
-                let w = available_rect.width();
-                let h = w / aspect as f32;
-                (w, h)
-            };
-
-        let (response, painter) = ui.allocate_painter(
-            egui::vec2(render_width, render_height),
-            egui::Sense::hover(),
-        );
-        let rect = response.rect;
-
-        let mut egui_mesh = egui::Mesh::default();
-
-        let range = max_val - min_val;
-        let range = if range.abs() < 1e-10 { 1.0 } else { range };
-
-        for (cell_idx, polygon) in cells.iter().enumerate() {
-            if polygon.len() < 3 {
-                continue;
-            }
-
-            let val = values.get(cell_idx).copied().unwrap_or(0.0);
-            let t = ((val - min_val) / range).clamp(0.0, 1.0);
-            let color = get_color(t);
-
-            let screen_pts: Vec<egui::Pos2> = polygon
-                .iter()
-                .map(|&[x, y]| {
-                    let nx = ((x - mesh_min_x) / mesh_width) as f32;
-                    let ny = 1.0 - ((y - mesh_min_y) / mesh_height) as f32;
-                    egui::pos2(
-                        rect.min.x + nx * rect.width(),
-                        rect.min.y + ny * rect.height(),
-                    )
-                })
-                .collect();
-
-            let base_idx = egui_mesh.vertices.len() as u32;
-            for pt in &screen_pts {
-                egui_mesh.vertices.push(egui::epaint::Vertex {
-                    pos: *pt,
-                    uv: egui::pos2(0.0, 0.0),
-                    color,
-                });
-            }
-
-            for i in 1..screen_pts.len() - 1 {
-                egui_mesh.indices.push(base_idx);
-                egui_mesh.indices.push(base_idx + i as u32);
-                egui_mesh.indices.push(base_idx + i as u32 + 1);
-            }
-        }
-
-        painter.add(egui::Shape::mesh(egui_mesh));
-
-        if self.show_mesh_lines {
-            for polygon in cells {
-                if polygon.len() < 3 {
-                    continue;
-                }
-
-                let screen_pts: Vec<egui::Pos2> = polygon
-                    .iter()
-                    .map(|&[x, y]| {
-                        let nx = ((x - mesh_min_x) / mesh_width) as f32;
-                        let ny = 1.0 - ((y - mesh_min_y) / mesh_height) as f32;
-                        egui::pos2(
-                            rect.min.x + nx * rect.width(),
-                            rect.min.y + ny * rect.height(),
-                        )
-                    })
-                    .collect();
-
-                let mut points = screen_pts.clone();
-                points.push(screen_pts[0]);
-                painter.add(egui::Shape::line(
-                    points,
-                    egui::Stroke::new(0.5, egui::Color32::from_gray(100)),
-                ));
-            }
-        }
     }
 }
 
@@ -1192,13 +1070,8 @@ impl eframe::App for CFDApp {
                 ui.label("Render Mode:");
                 ui.radio_value(
                     &mut self.render_mode,
-                    RenderMode::BatchedMesh,
-                    "Fast (Batched)",
-                );
-                ui.radio_value(
-                    &mut self.render_mode,
                     RenderMode::GpuDirect,
-                    "GPU Direct (Zero Copy)",
+                    "Direct",
                 );
                 ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
             });
@@ -1272,9 +1145,6 @@ impl eframe::App for CFDApp {
 
                             ui.painter().add(cb);
                         }
-                    }
-                    RenderMode::BatchedMesh => {
-                        self.render_batched_mesh(ui, cells, vals, min_val, max_val);
                     }
                     RenderMode::EguiPlot => {
                         Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {

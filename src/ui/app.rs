@@ -1,11 +1,11 @@
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::GpuSolver;
-use crate::ui::cfd_renderer;
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
 };
 use crate::solver::scheme::Scheme;
+use crate::ui::cfd_renderer;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
@@ -199,12 +199,13 @@ impl eframe::egui_wgpu::CallbackTrait for CfdRenderCallback {
                 0.0,
                 1.0,
             );
-            
+
             // SAFETY: The renderer lives in CallbackResources which lives as long as the egui renderer.
             // The render pass is executed synchronously and the resources are valid for the duration.
             // We need to extend the lifetime to 'static to match the RenderPass<'static> signature required by egui_wgpu.
-            let renderer: &'static cfd_renderer::CfdRenderResources = unsafe { std::mem::transmute(renderer) };
-            
+            let renderer: &'static cfd_renderer::CfdRenderResources =
+                unsafe { std::mem::transmute(renderer) };
+
             let pixels_per_point = info.pixels_per_point;
             render_pass.set_viewport(
                 clip_rect.min.x * pixels_per_point,
@@ -214,7 +215,7 @@ impl eframe::egui_wgpu::CallbackTrait for CfdRenderCallback {
                 0.0,
                 1.0,
             );
-            
+
             renderer.paint(render_pass, self.draw_lines);
         }
     }
@@ -222,15 +223,16 @@ impl eframe::egui_wgpu::CallbackTrait for CfdRenderCallback {
 
 impl CFDApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let (wgpu_device, wgpu_queue, target_format) = if let Some(render_state) = &cc.wgpu_render_state {
-            (
-                Some(render_state.device.clone()),
-                Some(render_state.queue.clone()),
-                render_state.target_format,
-            )
-        } else {
-            (None, None, wgpu::TextureFormat::Bgra8Unorm)
-        };
+        let (wgpu_device, wgpu_queue, target_format) =
+            if let Some(render_state) = &cc.wgpu_render_state {
+                (
+                    Some(render_state.device.clone()),
+                    Some(render_state.queue.clone()),
+                    render_state.target_format,
+                )
+            } else {
+                (None, None, wgpu::TextureFormat::Bgra8Unorm)
+            };
 
         Self {
             gpu_solver: None,
@@ -340,7 +342,7 @@ impl CFDApp {
 
             let vertices = cfd_renderer::build_mesh_vertices(&self.cached_cells);
             let line_vertices = cfd_renderer::build_line_vertices(&self.cached_cells);
-            
+
             // Debug: Check for cells in the step region
             let mut cells_in_step = 0;
             for cell in &self.cached_cells {
@@ -352,12 +354,17 @@ impl CFDApp {
                 }
                 cx /= cell.len() as f64;
                 cy /= cell.len() as f64;
-                
+
                 if cx < 0.5 && cy < 0.5 {
                     cells_in_step += 1;
                 }
             }
-            println!("Init Solver: {} cells, {} vertices. Cells in step (x<0.5, y<0.5): {}", self.cached_cells.len(), vertices.len(), cells_in_step);
+            println!(
+                "Init Solver: {} cells, {} vertices. Cells in step (x<0.5, y<0.5): {}",
+                self.cached_cells.len(),
+                vertices.len(),
+                cells_in_step
+            );
 
             if let Some(queue) = &self.wgpu_queue {
                 renderer.update_mesh(queue, &vertices, &line_vertices);
@@ -954,12 +961,10 @@ impl eframe::App for CFDApp {
                         let stats = &self.cached_gpu_stats;
                         ui.label(format!("dt: {:.2e}", stats.dt));
                         ui.label(format!(
-                            "Coupled: {} iters, U:{:.2e} P:{:.2e} ({:.1} ms)",
-                            stats.outer_iterations,
-                            stats.outer_residual_u,
-                            stats.outer_residual_p,
-                            stats.step_time_ms
+                            "Coupled: {} iters, U:{:.2e} P:{:.2e}",
+                            stats.outer_iterations, stats.outer_residual_u, stats.outer_residual_p,
                         ));
+                        ui.label(format!("Step time: {:.1} ms", stats.step_time_ms));
                     }
                 });
         });
@@ -1068,11 +1073,7 @@ impl eframe::App for CFDApp {
 
                 ui.separator();
                 ui.label("Render Mode:");
-                ui.radio_value(
-                    &mut self.render_mode,
-                    RenderMode::GpuDirect,
-                    "Direct",
-                );
+                ui.radio_value(&mut self.render_mode, RenderMode::GpuDirect, "Direct");
                 ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
             });
         });

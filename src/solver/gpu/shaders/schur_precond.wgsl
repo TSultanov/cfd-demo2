@@ -21,6 +21,7 @@ struct PrecondParams {
 @group(0) @binding(1) var<storage, read_write> z_out: array<f32>; // Output preconditioned vector
 @group(0) @binding(2) var<storage, read_write> temp_p: array<f32>; // Temporary pressure vector
 @group(0) @binding(3) var<storage, read_write> p_sol: array<f32>; // Pressure solution (contiguous)
+@group(0) @binding(4) var<storage, read_write> p_prev: array<f32>; // Previous pressure (Chebyshev)
 
 // Group 1: Coupled Matrix (CSR) - for form_schur_rhs and correct_velocity
 @group(1) @binding(0) var<storage, read> row_offsets: array<u32>;
@@ -45,7 +46,9 @@ fn safe_inverse(val: f32) -> f32 {
     return 0.0;
 }
 
-// Kernel 4: Relax Pressure (Jacobi on Scalar Pressure Matrix)
+// Kernel 4: Relax Pressure (Chebyshev / SOR)
+// Reads p_sol (x_k) and p_prev (x_{k-1})
+// Writes x_{k+1} to p_prev (which becomes the new current/next state)
 @compute @workgroup_size(64)
 fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let cell = global_id.x;
@@ -53,29 +56,37 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let z_p_old = p_sol[cell];
-
-    // Compute A_p * z_p (using Scalar Pressure Matrix)
-    // Row index is 'cell'
+    // p_sol is binding 3 (Current, x_k)
+    // p_prev is binding 4 (Previous, x_{k-1}) -> Output Target
+    
+    // In ping-pong:
+    // BG A: B3=Sol, B4=Prev.  (Read Sol/Prev, Write Prev).  Prev becomes x_{k+1}.
+    // BG B: B3=Prev, B4=Sol.  (Read Prev/Sol, Write Sol).  Sol becomes x_{k+2}.
+    
+    // Compute Sigma using p_sol (Current Neighbors)
     let start = p_row_offsets[cell];
     let end = p_row_offsets[cell + 1u];
     
     var sigma = 0.0;
     for (var k = start; k < end; k++) {
-        let col_cell = p_col_indices[k]; // This is a cell index
-        
+        let col_cell = p_col_indices[k];
         if (col_cell != cell) {
-            // Direct access to contiguous buffer
-            let z_p_neighbor = p_sol[col_cell];
-            sigma += p_matrix_values[k] * z_p_neighbor;
+            sigma += p_matrix_values[k] * p_sol[col_cell];
         }
     }
 
     let d_inv = diag_p_inv[cell];
     let rhs = temp_p[cell]; 
-
-    let z_p_new = d_inv * (rhs - sigma);
-    p_sol[cell] = mix(z_p_old, z_p_new, params.omega);
+    
+    let hat_x = d_inv * (rhs - sigma); // Jacobi Prediction
+    let x_prev = p_prev[cell];
+    
+    // Chebyshev / SOR update
+    // x_{k+1} = (1 - omega) * x_{prev} + omega * hat_x
+    // If omega=1, x_{k+1} = hat_x (Jacobi)
+    
+    let x_new = mix(x_prev, hat_x, params.omega);
+    p_prev[cell] = x_new;
 }
 
 // Kernel 5: Correct Velocity
@@ -90,6 +101,10 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let row_u = base + 0u;
     let row_v = base + 1u;
 
+    // Use p_sol (binding 3) as the pressure field.
+    // Ensure the final result of relaxation is in the buffer bound to Binding 3.
+    let p_val = p_sol[cell];
+
     // Correct U (using Coupled Matrix)
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[row_u + 1u];
@@ -97,9 +112,10 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var k = start_u; k < end_u; k++) {
         let col = col_indices[k];
         if (col % 3u == 2u) { 
-            // col is a coupled index (3*cell + 2)
-            // We need to map it to cell index for p_sol
             let p_cell = col / 3u;
+            // correction_u += matrix_values[k] * p_sol[p_cell]; 
+            // We need random access to p_sol. 
+            // Note: p_sol is binding 3.
             correction_u += matrix_values[k] * p_sol[p_cell];
         }
     }
@@ -119,7 +135,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     z_out[row_v] -= diag_v_inv[cell] * correction_v;
     
     // Update z_out pressure component
-    z_out[base + 2u] = p_sol[cell];
+    z_out[base + 2u] = p_val;
 }
 
 // Kernel 6: Merged Predict Velocity + Form Schur RHS
@@ -143,10 +159,6 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let row_p = base + 2u;
     var rhs_p = r_in[row_p];
 
-    // Subtract A_{row_p} * z_out (using Coupled Matrix)
-    // Instead of reading z_out (which is not ready for neighbors), we re-compute it:
-    // z_out[col] = diag[col] * r_in[col]
-    
     let start = row_offsets[row_p];
     let end = row_offsets[row_p + 1u];
 
@@ -162,14 +174,15 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let c = col / 3u;
             z_val = r_in[col] * diag_v_inv[c];
         }
-        // if rem == 2u, z_val is 0.0 (pressure part of z_out is 0)
 
         rhs_p -= matrix_values[k] * z_val;
     }
 
     temp_p[cell] = rhs_p;
     
-    // Initialize p_sol with first Jacobi step (assuming initial p_sol is 0)
-    // p_sol = D^{-1} * rhs
+    // Initialize p_sol with first Jacobi step
     p_sol[cell] = diag_p_inv[cell] * rhs_p;
+    
+    // Initialize p_prev (Binding 4) to 0.0 for Chebyshev start
+    p_prev[cell] = 0.0;
 }

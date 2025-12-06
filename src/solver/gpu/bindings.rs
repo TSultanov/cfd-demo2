@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 02a2617092a125db21aee93502dfa206e4d24532fb9cee289d723509a4e9b794
+// SourceHash: 2c0cf8d1ff9220611f051d6bab51bb738b03d28c327a9d6e423fae49be68668a
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -10656,6 +10656,7 @@ pub mod schur_precond {
         pub z_out: wgpu::BufferBinding<'a>,
         pub temp_p: wgpu::BufferBinding<'a>,
         pub p_sol: wgpu::BufferBinding<'a>,
+        pub p_prev: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
     pub struct WgpuBindGroup0Entries<'a> {
@@ -10663,6 +10664,7 @@ pub mod schur_precond {
         pub z_out: wgpu::BindGroupEntry<'a>,
         pub temp_p: wgpu::BindGroupEntry<'a>,
         pub p_sol: wgpu::BindGroupEntry<'a>,
+        pub p_prev: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup0Entries<'a> {
         pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -10683,10 +10685,14 @@ pub mod schur_precond {
                     binding: 3,
                     resource: wgpu::BindingResource::Buffer(params.p_sol),
                 },
+                p_prev: wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(params.p_prev),
+                },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 4] {
-            [self.r_in, self.z_out, self.temp_p, self.p_sol]
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            [self.r_in, self.z_out, self.temp_p, self.p_sol, self.p_prev]
         }
         pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
             self.into_array().into_iter().collect()
@@ -10735,6 +10741,17 @@ pub mod schur_precond {
                     #[doc = " @binding(3): \"p_sol\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(4): \"p_prev\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -11137,6 +11154,8 @@ var<storage, read_write> z_out: array<f32>;
 var<storage, read_write> temp_p: array<f32>;
 @group(0) @binding(3) 
 var<storage, read_write> p_sol: array<f32>;
+@group(0) @binding(4) 
+var<storage, read_write> p_prev: array<f32>;
 @group(1) @binding(0) 
 var<storage> row_offsets: array<u32>;
 @group(1) @binding(1) 
@@ -11175,38 +11194,39 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (cell >= _e5) {
         return;
     }
-    let z_p_old = p_sol[cell];
     let start = p_row_offsets[cell];
     let end = p_row_offsets[(cell + 1u)];
     k = start;
     loop {
-        let _e19 = k;
-        if (_e19 < end) {
+        let _e16 = k;
+        if (_e16 < end) {
         } else {
             break;
         }
         {
-            let _e22 = k;
-            let col_cell = p_col_indices[_e22];
+            let _e19 = k;
+            let col_cell = p_col_indices[_e19];
             if (col_cell != cell) {
-                let z_p_neighbor = p_sol[col_cell];
-                let _e31 = k;
-                let _e33 = p_matrix_values[_e31];
-                let _e35 = sigma;
-                sigma = (_e35 + (_e33 * z_p_neighbor));
+                let _e24 = k;
+                let _e26 = p_matrix_values[_e24];
+                let _e30 = p_sol[col_cell];
+                let _e32 = sigma;
+                sigma = (_e32 + (_e26 * _e30));
             }
         }
         continuing {
-            let _e38 = k;
-            k = (_e38 + 1u);
+            let _e35 = k;
+            k = (_e35 + 1u);
         }
     }
     let d_inv = diag_p_inv[cell];
     let rhs = temp_p[cell];
-    let _e46 = sigma;
-    let z_p_new = (d_inv * (rhs - _e46));
-    let _e53 = params.omega;
-    p_sol[cell] = mix(z_p_old, z_p_new, _e53);
+    let _e43 = sigma;
+    let hat_x = (d_inv * (rhs - _e43));
+    let x_prev = p_prev[cell];
+    let _e51 = params.omega;
+    let x_new = mix(x_prev, hat_x, _e51);
+    p_prev[cell] = x_new;
     return;
 }
 
@@ -11225,68 +11245,68 @@ fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     let base = (cell_1 * 3u);
     let row_u = (base + 0u);
     let row_v = (base + 1u);
+    let p_val = p_sol[cell_1];
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[(row_u + 1u)];
     k_1 = start_u;
     loop {
-        let _e22 = k_1;
-        if (_e22 < end_u) {
+        let _e25 = k_1;
+        if (_e25 < end_u) {
         } else {
             break;
         }
         {
-            let _e25 = k_1;
-            let col = col_indices[_e25];
+            let _e28 = k_1;
+            let col = col_indices[_e28];
             if ((col % 3u) == 2u) {
                 let p_cell = (col / 3u);
-                let _e35 = k_1;
-                let _e37 = matrix_values[_e35];
-                let _e41 = p_sol[p_cell];
-                let _e43 = correction_u;
-                correction_u = (_e43 + (_e37 * _e41));
+                let _e38 = k_1;
+                let _e40 = matrix_values[_e38];
+                let _e44 = p_sol[p_cell];
+                let _e46 = correction_u;
+                correction_u = (_e46 + (_e40 * _e44));
             }
         }
         continuing {
-            let _e46 = k_1;
-            k_1 = (_e46 + 1u);
+            let _e49 = k_1;
+            k_1 = (_e49 + 1u);
         }
     }
-    let _e52 = diag_u_inv[cell_1];
-    let _e53 = correction_u;
-    let _e55 = z_out[row_u];
-    z_out[row_u] = (_e55 - (_e52 * _e53));
+    let _e55 = diag_u_inv[cell_1];
+    let _e56 = correction_u;
+    let _e58 = z_out[row_u];
+    z_out[row_u] = (_e58 - (_e55 * _e56));
     let start_v = row_offsets[row_v];
     let end_v = row_offsets[(row_v + 1u)];
     k_2 = start_v;
     loop {
-        let _e66 = k_2;
-        if (_e66 < end_v) {
+        let _e69 = k_2;
+        if (_e69 < end_v) {
         } else {
             break;
         }
         {
-            let _e69 = k_2;
-            let col_1 = col_indices[_e69];
+            let _e72 = k_2;
+            let col_1 = col_indices[_e72];
             if ((col_1 % 3u) == 2u) {
                 let p_cell_1 = (col_1 / 3u);
-                let _e79 = k_2;
-                let _e81 = matrix_values[_e79];
-                let _e85 = p_sol[p_cell_1];
-                let _e87 = correction_v;
-                correction_v = (_e87 + (_e81 * _e85));
+                let _e82 = k_2;
+                let _e84 = matrix_values[_e82];
+                let _e88 = p_sol[p_cell_1];
+                let _e90 = correction_v;
+                correction_v = (_e90 + (_e84 * _e88));
             }
         }
         continuing {
-            let _e90 = k_2;
-            k_2 = (_e90 + 1u);
+            let _e93 = k_2;
+            k_2 = (_e93 + 1u);
         }
     }
-    let _e96 = diag_v_inv[cell_1];
-    let _e97 = correction_v;
-    let _e99 = z_out[row_v];
-    z_out[row_v] = (_e99 - (_e96 * _e97));
-    let _e107 = p_sol[cell_1];
-    z_out[(base + 2u)] = _e107;
+    let _e99 = diag_v_inv[cell_1];
+    let _e100 = correction_v;
+    let _e102 = z_out[row_v];
+    z_out[row_v] = (_e102 - (_e99 * _e100));
+    z_out[(base + 2u)] = p_val;
     return;
 }
 
@@ -11355,6 +11375,7 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>)
     let _e104 = diag_p_inv[cell_2];
     let _e105 = rhs_p;
     p_sol[cell_2] = (_e104 * _e105);
+    p_prev[cell_2] = 0f;
     return;
 }
 "#;

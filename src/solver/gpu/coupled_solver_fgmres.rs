@@ -123,6 +123,17 @@ pub struct FgmresResources {
     pub b_staging_scalar: wgpu::Buffer,
 
     pub amg_resources: Option<AmgResources>,
+
+    // Cached BindGroups
+    pub bg_res_spmv: wgpu::BindGroup,
+    pub bg_res_axpby: wgpu::BindGroup,
+    pub bg_norm_w: wgpu::BindGroup,
+    pub bg_reduce_norm: wgpu::BindGroup,
+    pub bg_schur: Vec<wgpu::BindGroup>,
+    pub bg_schur_swap: Vec<wgpu::BindGroup>,
+    pub bg_spmv_z: Vec<wgpu::BindGroup>,
+    pub bg_normalize_basis: Vec<wgpu::BindGroup>,
+    pub bg_axpy_sol: Vec<wgpu::BindGroup>,
 }
 
 #[repr(C)]
@@ -471,6 +482,16 @@ impl GpuSolver {
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false }, // p_sol (read/write)
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // p_prev/aux (read/write)
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -1031,6 +1052,159 @@ impl GpuSolver {
         let pipeline_reduce_dots_cgs = make_cgs_pipeline("CGS Reduce Dots", "reduce_dots_cgs");
         let pipeline_update_w_cgs = make_cgs_pipeline("CGS Update W", "update_w_cgs");
 
+        // Helper closures for local bind group creation
+        let create_vector_bg = |x: wgpu::BindingResource,
+                                y: wgpu::BindingResource,
+                                z: wgpu::BindingResource,
+                                label: &str|
+         -> wgpu::BindGroup {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &bgl_vectors,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: x,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: y,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: z,
+                    },
+                ],
+            })
+        };
+
+        let create_schur_bg = |r: wgpu::BindingResource,
+                               z: wgpu::BindingResource,
+                               tmp: wgpu::BindingResource,
+                               sol: wgpu::BindingResource,
+                               aux: wgpu::BindingResource,
+                               label: &str|
+         -> wgpu::BindGroup {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &bgl_schur_vectors,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: r,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: z,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: tmp,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: sol,
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: aux,
+                    },
+                ],
+            })
+        };
+
+        let basis_binding_local = |idx: usize| -> wgpu::BindingResource {
+            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &b_basis,
+                offset: (idx as u64) * basis_stride,
+                size: std::num::NonZeroU64::new(b_w.size()),
+            })
+        };
+
+        // Initialize cached bind groups
+        // 1. Fixed BindGroups
+        let bg_res_spmv = create_vector_bg(
+            coupled.b_x.as_entire_binding(),
+            b_w.as_entire_binding(),
+            b_temp.as_entire_binding(),
+            "FGMRES Residual SpMV Cached",
+        );
+
+        let bg_res_axpby = create_vector_bg(
+            coupled.b_rhs.as_entire_binding(),
+            b_w.as_entire_binding(),
+            basis_binding_local(0),
+            "FGMRES Residual Axpby Cached",
+        );
+
+        let bg_norm_w = create_vector_bg(
+            b_w.as_entire_binding(),
+            b_temp.as_entire_binding(),
+            b_dot_partial.as_entire_binding(),
+            "FGMRES Norm W Cached",
+        );
+
+        let bg_reduce_norm = create_vector_bg(
+            b_dot_partial.as_entire_binding(),
+            b_temp.as_entire_binding(),
+            b_temp.as_entire_binding(),
+            "FGMRES Reduce Norm Cached",
+        );
+
+        // 2. Per-basis BindGroups
+        let mut bg_schur = Vec::with_capacity(max_restart);
+        let mut bg_schur_swap = Vec::with_capacity(max_restart);
+        let mut bg_spmv_z = Vec::with_capacity(max_restart);
+        let mut bg_normalize_basis = Vec::with_capacity(max_restart);
+        let mut bg_axpy_sol = Vec::with_capacity(max_restart);
+
+        for j in 0..max_restart {
+            // bg_schur[j]: V_j, Z_j, temp_p, p_sol(Curr), b_temp(Prev)
+            bg_schur.push(create_schur_bg(
+                basis_binding_local(j),
+                z_vectors[j].as_entire_binding(),
+                b_temp_p.as_entire_binding(),
+                b_p_sol.as_entire_binding(),
+                b_temp.as_entire_binding(),
+                &format!("FGMRES Schur BG {}", j),
+            ));
+
+            // bg_schur_swap[j]: V_j, Z_j, temp_p, b_temp(Curr), p_sol(Prev)
+            bg_schur_swap.push(create_schur_bg(
+                basis_binding_local(j),
+                z_vectors[j].as_entire_binding(),
+                b_temp_p.as_entire_binding(),
+                b_temp.as_entire_binding(),
+                b_p_sol.as_entire_binding(),
+                &format!("FGMRES Schur Swap BG {}", j),
+            ));
+
+            // bg_spmv_z[j]: Z_j, W, Temp
+            bg_spmv_z.push(create_vector_bg(
+                z_vectors[j].as_entire_binding(),
+                b_w.as_entire_binding(),
+                b_temp.as_entire_binding(),
+                &format!("FGMRES SpMV Z BG {}", j),
+            ));
+
+            // bg_normalize_basis[j]: W, V_{j+1}, Temp
+            // Note: basis indices go up to max_restart (inclusive)
+            bg_normalize_basis.push(create_vector_bg(
+                b_w.as_entire_binding(),
+                basis_binding_local(j + 1),
+                b_temp.as_entire_binding(),
+                &format!("FGMRES Normalize Basis BG {}", j),
+            ));
+
+            // bg_axpy_sol[j]: Z_j, X, Temp
+            bg_axpy_sol.push(create_vector_bg(
+                z_vectors[j].as_entire_binding(),
+                coupled.b_x.as_entire_binding(),
+                b_temp.as_entire_binding(),
+                &format!("FGMRES Solution Update BG {}", j),
+            ));
+        }
+
         FgmresResources {
             b_basis,
             basis_stride,
@@ -1095,6 +1269,15 @@ impl GpuSolver {
                 mapped_at_creation: false,
             }),
             amg_resources: None,
+            bg_res_spmv,
+            bg_res_axpby,
+            bg_norm_w,
+            bg_reduce_norm,
+            bg_schur,
+            bg_schur_swap,
+            bg_spmv_z,
+            bg_normalize_basis,
+            bg_axpy_sol,
         }
     }
 
@@ -1183,41 +1366,6 @@ impl GpuSolver {
             })
     }
 
-    fn create_schur_vector_bind_group<'a>(
-        &self,
-        fgmres: &FgmresResources,
-        r_in: wgpu::BindingResource<'a>,
-        z_out: wgpu::BindingResource<'a>,
-        temp_p: wgpu::BindingResource<'a>,
-        p_sol: wgpu::BindingResource<'a>,
-        label: &str,
-    ) -> wgpu::BindGroup {
-        self.context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(label),
-                layout: &fgmres.bgl_schur_vectors,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: r_in,
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: z_out,
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: temp_p,
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: p_sol,
-                    },
-                ],
-            })
-    }
-
     fn dispatch_vector_pipeline(
         &self,
         pipeline: &wgpu::ComputePipeline,
@@ -1274,34 +1422,6 @@ impl GpuSolver {
         pass.set_bind_group(2, &fgmres.bg_precond, &[]);
         pass.set_bind_group(3, group3_bg, &[]);
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-    }
-
-    fn dispatch_vector_pipeline_batched_with_encoder(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        pipeline: &wgpu::ComputePipeline,
-        fgmres: &FgmresResources,
-        vector_bg: &wgpu::BindGroup,
-        group3_bg: &wgpu::BindGroup,
-        workgroups: u32,
-        iterations: usize,
-        label: &str,
-    ) {
-        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-
-        // Encode all iterations in a single command buffer
-        for _ in 0..iterations {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some(label),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, vector_bg, &[]);
-            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
-            pass.set_bind_group(2, &fgmres.bg_precond, &[]);
-            pass.set_bind_group(3, group3_bg, &[]);
-            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-        }
     }
 
     /// Compute norm of a vector using GPU reduction and async read
@@ -1505,39 +1625,27 @@ impl GpuSolver {
     fn compute_residual_into<'a>(
         &self,
         fgmres: &'a FgmresResources,
-        res: &'a CoupledSolverResources,
+        _res: &'a CoupledSolverResources,
         target: wgpu::BindingResource<'a>,
         workgroups: u32,
         n: u32,
     ) -> f32 {
-        let spmv_bg = self.create_vector_bind_group(
-            fgmres,
-            res.b_x.as_entire_binding(),
-            fgmres.b_w.as_entire_binding(),
-            fgmres.b_temp.as_entire_binding(),
-            "FGMRES Residual SpMV",
-        );
+        /* let spmv_bg = self.create_vector_bind_group(...) */
         self.dispatch_vector_pipeline(
             &fgmres.pipeline_spmv,
             fgmres,
-            &spmv_bg,
+            &fgmres.bg_res_spmv,
             &fgmres.bg_params,
             workgroups,
             "FGMRES Residual SpMV",
         );
 
         self.write_scalars(fgmres, &[1.0, -1.0]);
-        let residual_bg = self.create_vector_bind_group(
-            fgmres,
-            res.b_rhs.as_entire_binding(),
-            fgmres.b_w.as_entire_binding(),
-            target.clone(),
-            "FGMRES Residual Axpby",
-        );
+        /* let residual_bg = self.create_vector_bind_group(...) */
         self.dispatch_vector_pipeline(
             &fgmres.pipeline_axpby,
             fgmres,
-            &residual_bg,
+            &fgmres.bg_res_axpby,
             &fgmres.bg_params,
             workgroups,
             "FGMRES Residual Axpby",
@@ -1649,7 +1757,7 @@ impl GpuSolver {
         let precond_params = PreconditionerParams {
             n: 0,
             num_cells: self.num_cells,
-            omega: 0.7,
+            omega: 1.2,
             precond_type: self.constants.precond_type,
         };
         self.context.queue.write_buffer(
@@ -1731,14 +1839,8 @@ impl GpuSolver {
                 // 1. Predict Velocity
                 // Clear p_sol is now handled by predict_and_form_schur (initializes with first Jacobi step)
 
-                let precond_bg = self.create_schur_vector_bind_group(
-                    fgmres,
-                    self.basis_binding(fgmres, j),
-                    fgmres.z_vectors[j].as_entire_binding(),
-                    fgmres.b_temp_p.as_entire_binding(),
-                    fgmres.b_p_sol.as_entire_binding(),
-                    "FGMRES Schur BG",
-                );
+                let current_bg = &fgmres.bg_schur[j];
+                let swap_bg = &fgmres.bg_schur_swap[j];
 
                 let dispatch_start = Instant::now();
                 let mut encoder =
@@ -1752,17 +1854,27 @@ impl GpuSolver {
                     &mut encoder,
                     &fgmres.pipeline_predict_and_form,
                     fgmres,
-                    &precond_bg,
+                    current_bg,
                     &fgmres.bg_pressure_matrix,
                     workgroups_cells,
                     "Schur Predict & Form",
                 );
 
-                // 3. Relax Pressure
-                if self.constants.precond_type == 1 {
-                    if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
-                        let level0 = &amg.levels[0];
+                // 3. Relax Pressure (Chebyshev)
+                let mut p_result_in_sol = true;
 
+                if self.constants.precond_type == 1 {
+                    // AMG (Unchanged)
+                    if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
+                        // ... Code for AMG (assume unchanged, copy buffer logic might need update if I changed BGs?)
+                        // AMG copies from temp_p to level0.b_b.
+                        // temp_p is B2 in both BGs. Safe.
+                        // AMG copies from level0.b_x to p_sol.
+                        // p_sol is B3 in current_bg.
+                        // If we are using AMG, we aren't doing the loop.
+
+                        let level0 = &amg.levels[0];
+                        // ... (Copied AMG logic)
                         encoder.copy_buffer_to_buffer(
                             &fgmres.b_temp_p,
                             0,
@@ -1777,9 +1889,7 @@ impl GpuSolver {
                             0,
                             (self.num_cells as u64) * 4,
                         );
-
                         amg.v_cycle(&mut encoder, &self.context.device);
-
                         encoder.copy_buffer_to_buffer(
                             &level0.b_x,
                             0,
@@ -1789,33 +1899,47 @@ impl GpuSolver {
                         );
                     }
                 } else {
-                    // Scale iterations with mesh size: Jacobi convergence degrades with larger meshes.
-                    // For a mesh of N cells, we need approximately sqrt(N) iterations for good convergence.
-                    // Use a minimum of 20 and cap at 200 to balance cost vs. quality.
-                    // Reduced by 1 because predict_and_form now does the first iteration
+                    // Chebyshev Relaxation
                     let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2)
                         .min(200)
                         .saturating_sub(1);
+
                     if p_iters > 0 {
-                        self.dispatch_vector_pipeline_batched_with_encoder(
-                            &mut encoder,
-                            &fgmres.pipeline_relax_pressure,
-                            fgmres,
-                            &precond_bg,
-                            &fgmres.bg_pressure_matrix,
-                            workgroups_cells,
-                            p_iters,
-                            "Schur Relax P",
-                        );
+                        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
+
+                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Schur Relax P"),
+                            timestamp_writes: None,
+                        });
+                        pass.set_pipeline(&fgmres.pipeline_relax_pressure);
+                        // Invariant BindGroups
+                        // Group 1: Coupled Matrix (Unused in relax_pressure but bound for consistency?)
+                        // Actually relax_pressure uses p_row_offsets which is in Group 3.
+                        // Does it use Group 1? No. But we bind it just in case Layout requires it (if shared layout).
+                        pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
+                        pass.set_bind_group(2, &fgmres.bg_precond, &[]);
+                        pass.set_bind_group(3, &fgmres.bg_pressure_matrix, &[]);
+
+                        for _ in 0..p_iters {
+                            let bg = if p_result_in_sol { current_bg } else { swap_bg };
+
+                            pass.set_bind_group(0, bg, &[]);
+                            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+
+                            p_result_in_sol = !p_result_in_sol;
+                        }
                     }
                 }
 
                 // 4. Correct Velocity
+                // Use the bind group where binding 3 holds the final result
+                let correct_bg = if p_result_in_sol { current_bg } else { swap_bg };
+
                 self.dispatch_vector_pipeline_with_encoder(
                     &mut encoder,
                     &fgmres.pipeline_correct_vel,
                     fgmres,
-                    &precond_bg,
+                    correct_bg,
                     &fgmres.bg_pressure_matrix,
                     workgroups_cells,
                     "Schur Correct Vel",
@@ -1830,13 +1954,7 @@ impl GpuSolver {
                 );
 
                 // w = A * z_j
-                let spmv_bg = self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.z_vectors[j].as_entire_binding(),
-                    fgmres.b_w.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    "FGMRES SpMV",
-                );
+                let spmv_bg = &fgmres.bg_spmv_z[j];
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_spmv,
                     fgmres,
@@ -1927,13 +2045,7 @@ impl GpuSolver {
                     .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
 
                 // Norm squared partial
-                let norm_bg = self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.b_w.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    fgmres.b_dot_partial.as_entire_binding(),
-                    "FGMRES Norm BG",
-                );
+                let norm_bg = &fgmres.bg_norm_w;
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_norm_sq,
                     fgmres,
@@ -1958,13 +2070,7 @@ impl GpuSolver {
                     .queue
                     .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
 
-                let reduce_bg = self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.b_dot_partial.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    "FGMRES Reduce BG",
-                );
+                let reduce_bg = &fgmres.bg_reduce_norm;
 
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_reduce_final_and_finish_norm,
@@ -1992,13 +2098,7 @@ impl GpuSolver {
 
                 // Normalize w directly into basis[j+1]
                 // basis[j+1] = scalars[0] * w
-                let scale_bg = self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.b_w.as_entire_binding(),
-                    self.basis_binding(fgmres, j + 1),
-                    fgmres.b_temp.as_entire_binding(),
-                    "FGMRES Normalize & Copy",
-                );
+                let scale_bg = &fgmres.bg_normalize_basis[j];
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_scale,
                     fgmres,
@@ -2102,13 +2202,7 @@ impl GpuSolver {
                     .queue
                     .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
 
-                let axpy_bg = self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.z_vectors[i].as_entire_binding(),
-                    res.b_x.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    "FGMRES Solution Update",
-                );
+                let axpy_bg = &fgmres.bg_axpy_sol[i];
                 self.dispatch_vector_pipeline(
                     &fgmres.pipeline_axpy_from_y,
                     fgmres,

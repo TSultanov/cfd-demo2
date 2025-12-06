@@ -26,7 +26,7 @@ fn test_gpu_fine_mesh_obstacle() {
 
     pollster::block_on(async {
         println!("Initializing GPU Solver...");
-        let mut solver = GpuSolver::new(&mesh).await;
+        let mut solver = GpuSolver::new(&mesh, None, None).await;
 
         let dt = 0.0001;
         let density = 1.0;

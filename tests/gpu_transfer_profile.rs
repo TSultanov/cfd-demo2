@@ -41,7 +41,7 @@ fn test_gpu_transfer_profile() {
     println!();
 
     pollster::block_on(async {
-        let mut solver = GpuSolver::new(&mesh).await;
+        let mut solver = GpuSolver::new(&mesh, None, None).await;
         solver.set_dt(0.001);
         solver.set_viscosity(0.001);
         solver.set_density(1.0);
@@ -297,7 +297,7 @@ fn test_gpu_transfer_profile_scaling() {
         println!("{}", "-".repeat(60));
 
         pollster::block_on(async {
-            let mut solver = GpuSolver::new(&mesh).await;
+            let mut solver = GpuSolver::new(&mesh, None, None).await;
             solver.set_dt(0.001);
             solver.set_viscosity(0.001);
             solver.set_density(1.0);

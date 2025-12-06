@@ -25,7 +25,7 @@ fn setup_solver(cell_size: f64) -> (GpuSolver, usize) {
 
     let num_cells = mesh.num_cells();
 
-    let mut solver = pollster::block_on(GpuSolver::new(&mesh));
+    let mut solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
     solver.set_dt(0.001);
     solver.set_viscosity(0.001);
     solver.set_density(1.0);

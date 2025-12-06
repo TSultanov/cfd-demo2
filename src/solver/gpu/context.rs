@@ -4,7 +4,11 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    pub async fn new() -> Self {
+    pub async fn new(device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+        if let (Some(device), Some(queue)) = (device, queue) {
+            return Self { device, queue };
+        }
+
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()

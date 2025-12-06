@@ -16,7 +16,7 @@ fn gpu_solver_step_benchmark(c: &mut Criterion) {
     let mut mesh = generate_cut_cell_mesh(&geo, 0.02, 0.02, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
-    let mut solver = pollster::block_on(GpuSolver::new(&mesh));
+    let mut solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
     solver.set_dt(0.01);
     solver.set_viscosity(0.001);
     solver.set_density(1000.0);

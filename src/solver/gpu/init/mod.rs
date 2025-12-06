@@ -12,8 +12,8 @@ use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
-    pub async fn new(mesh: &Mesh) -> Self {
-        let context = super::context::GpuContext::new().await;
+    pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+        let context = super::context::GpuContext::new(device, queue).await;
 
         let num_cells = mesh.cell_cx.len() as u32;
         let num_faces = mesh.face_owner.len() as u32;

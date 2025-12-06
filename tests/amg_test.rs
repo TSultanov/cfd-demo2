@@ -19,7 +19,7 @@ fn test_amg_preconditioner() {
     mesh.smooth(&geo, 0.3, 50);
 
     pollster::block_on(async {
-        let mut solver = GpuSolver::new(&mesh).await;
+        let mut solver = GpuSolver::new(&mesh, None, None).await;
         solver.set_dt(0.001);
         solver.set_viscosity(0.001);
         solver.set_density(1.0);
@@ -52,7 +52,7 @@ fn test_amg_preconditioner() {
         let p_jacobi = solver.get_p().await;
 
         // Reset solver (or create new one)
-        let mut solver_amg = GpuSolver::new(&mesh).await;
+        let mut solver_amg = GpuSolver::new(&mesh, None, None).await;
         solver_amg.set_dt(0.001);
         solver_amg.set_viscosity(0.001);
         solver_amg.set_density(1.0);

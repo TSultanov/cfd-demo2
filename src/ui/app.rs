@@ -1,5 +1,6 @@
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::GpuSolver;
+use crate::ui::cfd_renderer;
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
@@ -24,6 +25,8 @@ enum RenderMode {
     EguiPlot,
     /// Use egui's built-in mesh batching (fast for large meshes)
     BatchedMesh,
+    /// Render directly on GPU (zero-copy)
+    GpuDirect,
 }
 
 #[derive(PartialEq)]
@@ -39,7 +42,7 @@ enum MeshType {
     Voronoi,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum PlotField {
     Pressure,
     VelocityX,
@@ -155,10 +158,82 @@ pub struct CFDApp {
     inlet_velocity: f32,
     ramp_time: f32,
     selected_preconditioner: PreconditionerType,
+    wgpu_device: Option<wgpu::Device>,
+    wgpu_queue: Option<wgpu::Queue>,
+    target_format: wgpu::TextureFormat,
+    cfd_renderer: Option<Arc<Mutex<cfd_renderer::CfdRenderResources>>>,
+}
+
+struct CfdRenderCallback {
+    renderer: Arc<Mutex<cfd_renderer::CfdRenderResources>>,
+    uniforms: cfd_renderer::CfdUniforms,
+    draw_lines: bool,
+}
+
+impl eframe::egui_wgpu::CallbackTrait for CfdRenderCallback {
+    fn prepare(
+        &self,
+        _device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen_descriptor: &eframe::egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut eframe::egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let renderer = self.renderer.lock().unwrap();
+        renderer.update_uniforms(queue, &self.uniforms);
+        resources.insert(renderer.clone());
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        resources: &eframe::egui_wgpu::CallbackResources,
+    ) {
+        if let Some(renderer) = resources.get::<cfd_renderer::CfdRenderResources>() {
+            let clip_rect = info.clip_rect;
+            render_pass.set_viewport(
+                clip_rect.min.x as f32,
+                clip_rect.min.y as f32,
+                clip_rect.width() as f32,
+                clip_rect.height() as f32,
+                0.0,
+                1.0,
+            );
+            
+            // SAFETY: The renderer lives in CallbackResources which lives as long as the egui renderer.
+            // The render pass is executed synchronously and the resources are valid for the duration.
+            // We need to extend the lifetime to 'static to match the RenderPass<'static> signature required by egui_wgpu.
+            let renderer: &'static cfd_renderer::CfdRenderResources = unsafe { std::mem::transmute(renderer) };
+            
+            let pixels_per_point = info.pixels_per_point;
+            render_pass.set_viewport(
+                clip_rect.min.x * pixels_per_point,
+                clip_rect.min.y * pixels_per_point,
+                clip_rect.width() * pixels_per_point,
+                clip_rect.height() * pixels_per_point,
+                0.0,
+                1.0,
+            );
+            
+            renderer.paint(render_pass, self.draw_lines);
+        }
+    }
 }
 
 impl CFDApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let (wgpu_device, wgpu_queue, target_format) = if let Some(render_state) = &cc.wgpu_render_state {
+            (
+                Some(render_state.device.clone()),
+                Some(render_state.queue.clone()),
+                render_state.target_format,
+            )
+        } else {
+            (None, None, wgpu::TextureFormat::Bgra8Unorm)
+        };
+
         Self {
             gpu_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
@@ -194,6 +269,10 @@ impl CFDApp {
             inlet_velocity: 1.0,
             ramp_time: 0.001,
             selected_preconditioner: PreconditionerType::Jacobi,
+            wgpu_device,
+            wgpu_queue,
+            target_format,
+            cfd_renderer: None,
         }
     }
 
@@ -208,6 +287,19 @@ impl CFDApp {
         }
     }
 
+    fn update_renderer_field(&self) {
+        if let (Some(renderer), Some(solver), Some(device)) =
+            (&self.cfd_renderer, &self.gpu_solver, &self.wgpu_device)
+        {
+            if let (Ok(mut renderer), Ok(solver)) = (renderer.lock(), solver.lock()) {
+                match self.plot_field {
+                    PlotField::Pressure => renderer.update_bind_group(device, &solver.b_p),
+                    _ => renderer.update_bind_group(device, &solver.b_u),
+                }
+            }
+        }
+    }
+
     fn init_solver(&mut self) {
         self.is_running = false;
         self.gpu_solver_running.store(false, Ordering::Relaxed);
@@ -217,7 +309,11 @@ impl CFDApp {
         let initial_u = self.build_initial_velocity(&mesh);
         let initial_p = vec![0.0; n_cells];
 
-        let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh));
+        let mut gpu_solver = pollster::block_on(GpuSolver::new(
+            &mesh,
+            self.wgpu_device.clone(),
+            self.wgpu_queue.clone(),
+        ));
         gpu_solver.set_dt(self.timestep as f32);
         gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
         gpu_solver.set_density(self.current_fluid.density as f32);
@@ -235,6 +331,46 @@ impl CFDApp {
         self.cached_u = initial_u;
         self.cached_p = initial_p;
         self.cached_cells = Self::cache_cells(&mesh);
+
+        // Initialize renderer
+        if let Some(device) = &self.wgpu_device {
+            let mut renderer = cfd_renderer::CfdRenderResources::new(
+                device,
+                self.target_format,
+                mesh.num_cells() * 10,
+            );
+
+            let vertices = cfd_renderer::build_mesh_vertices(&self.cached_cells);
+            let line_vertices = cfd_renderer::build_line_vertices(&self.cached_cells);
+            
+            // Debug: Check for cells in the step region
+            let mut cells_in_step = 0;
+            for cell in &self.cached_cells {
+                let mut cx = 0.0;
+                let mut cy = 0.0;
+                for p in cell {
+                    cx += p[0];
+                    cy += p[1];
+                }
+                cx /= cell.len() as f64;
+                cy /= cell.len() as f64;
+                
+                if cx < 0.5 && cy < 0.5 {
+                    cells_in_step += 1;
+                }
+            }
+            println!("Init Solver: {} cells, {} vertices. Cells in step (x<0.5, y<0.5): {}", self.cached_cells.len(), vertices.len(), cells_in_step);
+
+            if let Some(queue) = &self.wgpu_queue {
+                renderer.update_mesh(queue, &vertices, &line_vertices);
+                // Set initial bind group based on selected field
+                match self.plot_field {
+                    PlotField::Pressure => renderer.update_bind_group(device, &gpu_solver.b_p),
+                    _ => renderer.update_bind_group(device, &gpu_solver.b_u),
+                }
+            }
+            self.cfd_renderer = Some(Arc::new(Mutex::new(renderer)));
+        }
 
         // Compute actual min cell size
         self.actual_min_cell_size = mesh
@@ -1040,10 +1176,14 @@ impl eframe::App for CFDApp {
         egui::TopBottomPanel::bottom("plot_controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Plot Field:");
+                let old_field = self.plot_field;
                 ui.radio_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
                 ui.radio_value(&mut self.plot_field, PlotField::VelocityX, "Velocity X");
                 ui.radio_value(&mut self.plot_field, PlotField::VelocityY, "Velocity Y");
                 ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
+                if old_field != self.plot_field {
+                    self.update_renderer_field();
+                }
 
                 ui.separator();
                 ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
@@ -1054,6 +1194,11 @@ impl eframe::App for CFDApp {
                     &mut self.render_mode,
                     RenderMode::BatchedMesh,
                     "Fast (Batched)",
+                );
+                ui.radio_value(
+                    &mut self.render_mode,
+                    RenderMode::GpuDirect,
+                    "GPU Direct (Zero Copy)",
                 );
                 ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
             });
@@ -1072,6 +1217,62 @@ impl eframe::App for CFDApp {
 
             if let (Some(cells), Some(vals)) = (cells, &values) {
                 match self.render_mode {
+                    RenderMode::GpuDirect => {
+                        let rect = ui.available_rect_before_wrap();
+                        let (rect, _response) =
+                            ui.allocate_exact_size(rect.size(), egui::Sense::drag());
+
+                        if let Some(renderer) = &self.cfd_renderer {
+                            let renderer = renderer.clone();
+                            let min_val = min_val as f32;
+                            let max_val = max_val as f32;
+                            let viewport_size = [rect.width(), rect.height()];
+
+                            // Compute bounds
+                            let (min_x, max_x, min_y, max_y) = cfd_renderer::compute_bounds(cells);
+                            let mesh_width = max_x - min_x;
+                            let mesh_height = max_y - min_y;
+
+                            // Fit to screen preserving aspect ratio
+                            let s = (rect.width() / mesh_width as f32)
+                                .min(rect.height() / mesh_height as f32);
+
+                            let scale_x = s / rect.width();
+                            let scale_y = s / rect.height();
+
+                            let mesh_center_x = (min_x + max_x) / 2.0;
+                            let mesh_center_y = (min_y + max_y) / 2.0;
+
+                            let tx = 0.5 - mesh_center_x as f32 * scale_x;
+                            let ty = 0.5 - mesh_center_y as f32 * scale_y;
+
+                            let (stride, offset, mode) = match self.plot_field {
+                                PlotField::Pressure => (1, 0, 0),
+                                PlotField::VelocityX => (2, 0, 0),
+                                PlotField::VelocityY => (2, 1, 0),
+                                PlotField::VelocityMag => (2, 0, 1),
+                            };
+
+                            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+                                rect,
+                                CfdRenderCallback {
+                                    renderer: renderer.clone(),
+                                    uniforms: cfd_renderer::CfdUniforms {
+                                        transform: [scale_x, scale_y, tx, ty],
+                                        viewport_size,
+                                        range: [min_val, max_val],
+                                        stride,
+                                        offset,
+                                        mode,
+                                        _padding: 0,
+                                    },
+                                    draw_lines: self.show_mesh_lines,
+                                },
+                            );
+
+                            ui.painter().add(cb);
+                        }
+                    }
                     RenderMode::BatchedMesh => {
                         self.render_batched_mesh(ui, cells, vals, min_val, max_val);
                     }

@@ -25,7 +25,7 @@ async fn run_coupled_solver(
     mesh.smooth(&geo, 0.3, 50);
 
     // Initialize Solver
-    let mut solver = GpuSolver::new(&mesh).await;
+    let mut solver = GpuSolver::new(&mesh, None, None).await;
 
     // Initial Conditions
     let init_u: Vec<(f64, f64)> = (0..mesh.num_cells()).map(|_| (0.1, 0.0)).collect();

@@ -6,14 +6,23 @@ struct Uniforms {
     transform: vec4<f32>,
     // Viewport size in pixels
     viewport_size: vec2<f32>,
-    _padding: vec2<f32>,
+    // Value range [min, max]
+    range: vec2<f32>,
+    // Stride between elements
+    stride: u32,
+    // Offset to start reading
+    offset: u32,
+    // Mode: 0=value, 1=magnitude
+    mode: u32,
+    _padding: u32,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var<storage, read> field_data: array<f32>;
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
-    @location(1) field_value: f32,
+    @location(1) cell_index: u32,
 };
 
 struct VertexOutput {
@@ -33,7 +42,25 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     let clip_pos = world_pos * 2.0 - vec2<f32>(1.0, 1.0);
     
     out.clip_position = vec4<f32>(clip_pos.x, clip_pos.y, 0.0, 1.0);
-    out.field_value = in.field_value;
+    
+    var val: f32;
+    if (uniforms.mode == 1u) {
+        // Magnitude (assume stride=2)
+        let idx = in.cell_index * 2u;
+        let vx = field_data[idx];
+        let vy = field_data[idx + 1u];
+        val = sqrt(vx * vx + vy * vy);
+    } else {
+        let idx = in.cell_index * uniforms.stride + uniforms.offset;
+        val = field_data[idx];
+    }
+
+    let range = uniforms.range.y - uniforms.range.x;
+    // Avoid division by zero
+    let safe_range = select(range, 1.0, abs(range) < 1e-10);
+    
+    let normalized = clamp((val - uniforms.range.x) / safe_range, 0.0, 1.0);
+    out.field_value = normalized;
     
     return out;
 }
@@ -66,4 +93,9 @@ fn colormap(t: f32) -> vec4<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return colormap(in.field_value);
+}
+
+@fragment
+fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0, 0.0, 0.0, 0.3); // Semi-transparent black
 }

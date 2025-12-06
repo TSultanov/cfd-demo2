@@ -17,7 +17,7 @@ fn test_gpu_profile() {
     mesh.smooth(&geo, 0.3, 50);
 
     pollster::block_on(async {
-        let mut solver = GpuSolver::new(&mesh).await;
+        let mut solver = GpuSolver::new(&mesh, None, None).await;
         solver.set_dt(0.01);
         solver.set_viscosity(0.001);
         solver.set_density(1000.0);

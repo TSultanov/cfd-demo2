@@ -24,7 +24,7 @@ fn test_reproduce_divergence() {
     println!("Mesh generated with {} cells", mesh.num_cells());
 
     // Solver Setup
-    let mut solver = pollster::block_on(GpuSolver::new(&mesh));
+    let mut solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
 
     // Fluid: Water
     solver.set_density(1000.0);

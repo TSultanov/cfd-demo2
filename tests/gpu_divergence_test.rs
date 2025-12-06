@@ -28,7 +28,7 @@ fn test_gpu_divergence_channel_obstacle() {
 
     // GPU Init
     println!("Initializing GPU solver...");
-    let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh));
+    let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
     gpu_solver.set_dt(timestep as f32);
     gpu_solver.set_viscosity(viscosity as f32);
     gpu_solver.set_density(density as f32);

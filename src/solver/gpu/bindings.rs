@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: e6222a8b2a49c590984598b74e9490ac6104700144da858aba1053093c36110e
+// SourceHash: bb407b8292687a1780046ff045a49b4dccb815e145a39cf2641814808e146719
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -14,7 +14,6 @@ pub enum ShaderEntry {
     FluxRhieChow,
     GmresCgs,
     GmresLogic,
-    GmresMerged,
     GmresOps,
     GmresSpmvCgs,
     LinearSolver,
@@ -37,7 +36,6 @@ impl ShaderEntry {
             Self::FluxRhieChow => flux_rhie_chow::create_pipeline_layout(device),
             Self::GmresCgs => gmres_cgs::create_pipeline_layout(device),
             Self::GmresLogic => gmres_logic::create_pipeline_layout(device),
-            Self::GmresMerged => gmres_merged::create_pipeline_layout(device),
             Self::GmresOps => gmres_ops::create_pipeline_layout(device),
             Self::GmresSpmvCgs => gmres_spmv_cgs::create_pipeline_layout(device),
             Self::LinearSolver => linear_solver::create_pipeline_layout(device),
@@ -64,7 +62,6 @@ impl ShaderEntry {
             Self::FluxRhieChow => flux_rhie_chow::create_shader_module_embed_source(device),
             Self::GmresCgs => gmres_cgs::create_shader_module_embed_source(device),
             Self::GmresLogic => gmres_logic::create_shader_module_embed_source(device),
-            Self::GmresMerged => gmres_merged::create_shader_module_embed_source(device),
             Self::GmresOps => gmres_ops::create_shader_module_embed_source(device),
             Self::GmresSpmvCgs => gmres_spmv_cgs::create_shader_module_embed_source(device),
             Self::LinearSolver => linear_solver::create_shader_module_embed_source(device),
@@ -4978,34 +4975,6 @@ fn finish_norm(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
         return;
     }
 }
-"#;
-}
-pub mod gmres_merged {
-    use super::{_root, _root::*};
-    #[derive(Debug)]
-    pub struct WgpuPipelineLayout;
-    impl WgpuPipelineLayout {
-        pub fn bind_group_layout_entries(
-            entries: [wgpu::BindGroupLayout; 0],
-        ) -> [wgpu::BindGroupLayout; 0] {
-            entries
-        }
-    }
-    pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("GmresMerged::PipelineLayout"),
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        })
-    }
-    pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-        let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-        device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gmres_merged.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(source),
-        })
-    }
-    pub const SHADER_STRING: &str = r#"
 "#;
 }
 pub mod gmres_ops {

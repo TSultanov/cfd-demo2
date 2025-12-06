@@ -17,6 +17,7 @@
 // - Only scalar values (dot products, norms) are read to CPU
 // - Preconditioner sweep
 use super::async_buffer::AsyncScalarReader;
+use super::bindings;
 use super::linear_solver::amg::{AmgResources, CsrMatrix};
 use super::profiling::ProfileCategory;
 use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
@@ -854,20 +855,11 @@ impl GpuSolver {
                 push_constant_ranges: &[],
             });
 
-        let shader_ops = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("FGMRES Ops Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_ops.wgsl").into()),
-        });
+        let shader_ops = bindings::gmres_ops::create_shader_module_embed_source(device);
 
-        let shader_schur = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Schur Precond Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/schur_precond.wgsl").into()),
-        });
+        let shader_schur = bindings::schur_precond::create_shader_module_embed_source(device);
 
-        let shader_logic = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("FGMRES Logic Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_logic.wgsl").into()),
-        });
+        let shader_logic = bindings::gmres_logic::create_shader_module_embed_source(device);
 
         let make_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -1016,10 +1008,7 @@ impl GpuSolver {
             ],
         });
 
-        let shader_cgs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("FGMRES CGS Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gmres_cgs.wgsl").into()),
-        });
+        let shader_cgs = bindings::gmres_cgs::create_shader_module_embed_source(device);
 
         let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("FGMRES CGS Pipeline Layout"),

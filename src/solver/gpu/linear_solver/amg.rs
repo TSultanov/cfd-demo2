@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
+use crate::solver::gpu::bindings;
 
 #[derive(Debug, Clone)]
 pub struct CsrMatrix {
@@ -645,10 +646,7 @@ impl AmgResources {
         }
 
         // Pipelines
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("AMG Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/amg.wgsl").into()),
-        });
+        let shader = bindings::amg::create_shader_module_embed_source(device);
 
         // Layouts
         // bgl_cross moved up

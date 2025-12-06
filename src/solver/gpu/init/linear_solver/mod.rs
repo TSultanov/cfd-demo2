@@ -3,6 +3,7 @@ pub mod pipelines;
 pub mod state;
 
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
+use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::coupled_assembly_merged;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use crate::solver::mesh::Mesh;
@@ -684,12 +685,7 @@ fn init_coupled_resources(
     });
 
     // Create preconditioner shader and pipelines
-    let shader_precond = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Preconditioner Shader"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../shaders/preconditioner.wgsl"
-        ))),
-    });
+    let shader_precond = bindings::preconditioner::create_shader_module_embed_source(device);
 
     let pl_precond = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Preconditioner Pipeline Layout"),

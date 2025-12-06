@@ -10,8 +10,7 @@ struct AmgParams {
 
 @group(1) @binding(0) var<storage, read_write> x: array<f32>;
 @group(1) @binding(1) var<storage, read_write> b: array<f32>;
-@group(1) @binding(2) var<storage, read_write> r: array<f32>;
-@group(1) @binding(3) var<uniform> params: AmgParams;
+@group(1) @binding(2) var<uniform> params: AmgParams;
 
 // For restriction/prolongation
 @group(2) @binding(0) var<storage, read> op_row_offsets: array<u32>;
@@ -50,52 +49,7 @@ fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>) {
     x[i] = mix(x[i], x_new, params.omega);
 }
 
-@compute @workgroup_size(64)
-fn residual(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let i = global_id.x;
-    if (i >= params.n) {
-        return;
-    }
 
-    let start = row_offsets[i];
-    let end = row_offsets[i + 1u];
-    
-    var ax = 0.0;
-    for (var k = start; k < end; k++) {
-        ax += values[k] * x[col_indices[k]];
-    }
-    
-    r[i] = b[i] - ax;
-}
-
-// r_coarse = R * r_fine
-// Run on coarse threads (one per coarse row)
-@compute @workgroup_size(64)
-fn restrict_op(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let i = global_id.x; // Coarse row index
-    if (i >= params.n) { // params.n is coarse size here
-        return;
-    }
-
-    let start = op_row_offsets[i];
-    let end = op_row_offsets[i + 1u];
-    
-    var sum = 0.0;
-    for (var k = start; k < end; k++) {
-        let fine_idx = op_col_indices[k];
-        let val = op_values[k];
-        // Read from fine residual (bound as 'r' in group 1? No, need flexible binding)
-        // We assume group 1 is FINE level state, group 3 is COARSE level state.
-        // Wait, if we run on coarse threads, we write to coarse vector.
-        // Input is fine vector.
-        // Let's assume:
-        // Group 1: Fine vector (source) - bound as 'r'
-        // Group 3: Coarse vector (dest) - bound as 'coarse_vec'
-        sum += val * r[fine_idx];
-    }
-    
-    coarse_vec[i] = sum;
-}
 
 // x_fine += P * x_coarse
 // Run on fine threads (one per fine row)
@@ -118,6 +72,42 @@ fn prolongate_op(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     
     x[i] += correction;
+}
+
+// r_coarse = R * (b - A * x)
+// Run on coarse threads (one per coarse row)
+@compute @workgroup_size(64)
+fn restrict_residual(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let i = global_id.x; // Coarse row index
+    if (i >= params.n) { // params.n is COLUMNS of R (coarse size)
+        return;
+    }
+
+    let start = op_row_offsets[i];
+    let end = op_row_offsets[i + 1u];
+    
+    var sum = 0.0;
+    for (var k = start; k < end; k++) {
+        let fine_idx = op_col_indices[k]; // Row of A
+        let r_val = op_values[k];
+        
+        // Compute residual for fine_idx directly here
+        // r_fine = b[fine_idx] - A * x
+        
+        // A row for fine_idx
+        let a_start = row_offsets[fine_idx];
+        let a_end = row_offsets[fine_idx + 1u];
+        
+        var ax = 0.0;
+        for (var j = a_start; j < a_end; j++) {
+            ax += values[j] * x[col_indices[j]];
+        }
+        
+        let fine_r = b[fine_idx] - ax;
+        sum += r_val * fine_r;
+    }
+    
+    coarse_vec[i] = sum;
 }
 
 @compute @workgroup_size(64)

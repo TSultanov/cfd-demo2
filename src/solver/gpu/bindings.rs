@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 25263b8332208bea62fc4cb4d3bf2549fd1fe4d42518ac0b12b918b9e9d59b55
+// SourceHash: 02a2617092a125db21aee93502dfa206e4d24532fb9cee289d723509a4e9b794
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -345,36 +345,6 @@ pub mod amg {
                 cache: None,
             })
         }
-        pub const RESIDUAL_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_residual_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline residual"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("residual"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
-        pub const RESTRICT_OP_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-        pub fn create_restrict_op_pipeline_embed_source(
-            device: &wgpu::Device,
-        ) -> wgpu::ComputePipeline {
-            let module = super::create_shader_module_embed_source(device);
-            let layout = super::create_pipeline_layout(device);
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("Compute Pipeline restrict_op"),
-                layout: Some(&layout),
-                module: &module,
-                entry_point: Some("restrict_op"),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        }
         pub const PROLONGATE_OP_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
         pub fn create_prolongate_op_pipeline_embed_source(
             device: &wgpu::Device,
@@ -386,6 +356,21 @@ pub mod amg {
                 layout: Some(&layout),
                 module: &module,
                 entry_point: Some("prolongate_op"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+        pub const RESTRICT_RESIDUAL_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_restrict_residual_pipeline_embed_source(
+            device: &wgpu::Device,
+        ) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline restrict_residual"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("restrict_residual"),
                 compilation_options: Default::default(),
                 cache: None,
             })
@@ -405,9 +390,8 @@ pub mod amg {
         }
     }
     pub const ENTRY_SMOOTH_OP: &str = "smooth_op";
-    pub const ENTRY_RESIDUAL: &str = "residual";
-    pub const ENTRY_RESTRICT_OP: &str = "restrict_op";
     pub const ENTRY_PROLONGATE_OP: &str = "prolongate_op";
+    pub const ENTRY_RESTRICT_RESIDUAL: &str = "restrict_residual";
     pub const ENTRY_CLEAR: &str = "clear";
     #[derive(Debug)]
     pub struct WgpuBindGroup0EntriesParams<'a> {
@@ -508,14 +492,12 @@ pub mod amg {
     pub struct WgpuBindGroup1EntriesParams<'a> {
         pub x: wgpu::BufferBinding<'a>,
         pub b: wgpu::BufferBinding<'a>,
-        pub r: wgpu::BufferBinding<'a>,
         pub params: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
     pub struct WgpuBindGroup1Entries<'a> {
         pub x: wgpu::BindGroupEntry<'a>,
         pub b: wgpu::BindGroupEntry<'a>,
-        pub r: wgpu::BindGroupEntry<'a>,
         pub params: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup1Entries<'a> {
@@ -529,18 +511,14 @@ pub mod amg {
                     binding: 1,
                     resource: wgpu::BindingResource::Buffer(params.b),
                 },
-                r: wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Buffer(params.r),
-                },
                 params: wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: wgpu::BindingResource::Buffer(params.params),
                 },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 4] {
-            [self.x, self.b, self.r, self.params]
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+            [self.x, self.b, self.params]
         }
         pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
             self.into_array().into_iter().collect()
@@ -575,20 +553,9 @@ pub mod amg {
                         },
                         count: None,
                     },
-                    #[doc = " @binding(2): \"r\""]
+                    #[doc = " @binding(2): \"params\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(3): \"params\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -843,8 +810,6 @@ var<storage, read_write> x: array<f32>;
 @group(1) @binding(1) 
 var<storage, read_write> b: array<f32>;
 @group(1) @binding(2) 
-var<storage, read_write> r: array<f32>;
-@group(1) @binding(3) 
 var<uniform> params: AmgParams;
 @group(2) @binding(0) 
 var<storage> op_row_offsets: array<u32>;
@@ -908,8 +873,8 @@ fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn residual(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
-    var ax: f32 = 0f;
+fn prolongate_op(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+    var correction: f32 = 0f;
     var k_1: u32;
 
     let i_1 = global_id_1.x;
@@ -917,8 +882,8 @@ fn residual(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     if (i_1 >= _e5) {
         return;
     }
-    let start_1 = row_offsets[i_1];
-    let end_1 = row_offsets[(i_1 + 1u)];
+    let start_1 = op_row_offsets[i_1];
+    let end_1 = op_row_offsets[(i_1 + 1u)];
     k_1 = start_1;
     loop {
         let _e16 = k_1;
@@ -928,28 +893,30 @@ fn residual(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
         }
         {
             let _e19 = k_1;
-            let _e21 = values[_e19];
-            let _e25 = k_1;
-            let _e27 = col_indices[_e25];
-            let _e29 = x[_e27];
-            let _e31 = ax;
-            ax = (_e31 + (_e21 * _e29));
+            let coarse_idx = op_col_indices[_e19];
+            let _e23 = k_1;
+            let val_1 = op_values[_e23];
+            let _e29 = coarse_vec[coarse_idx];
+            let _e31 = correction;
+            correction = (_e31 + (val_1 * _e29));
         }
         continuing {
             let _e34 = k_1;
             k_1 = (_e34 + 1u);
         }
     }
-    let _e40 = b[i_1];
-    let _e41 = ax;
-    r[i_1] = (_e40 - _e41);
+    let _e38 = correction;
+    let _e39 = x[i_1];
+    x[i_1] = (_e39 + _e38);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn restrict_op(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn restrict_residual(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
     var sum: f32 = 0f;
     var k_2: u32;
+    var ax: f32;
+    var j: u32;
 
     let i_2 = global_id_2.x;
     let _e5 = params.n;
@@ -969,68 +936,55 @@ fn restrict_op(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
             let _e19 = k_2;
             let fine_idx = op_col_indices[_e19];
             let _e23 = k_2;
-            let val_1 = op_values[_e23];
-            let _e29 = r[fine_idx];
-            let _e31 = sum;
-            sum = (_e31 + (val_1 * _e29));
+            let r_val = op_values[_e23];
+            let a_start = row_offsets[fine_idx];
+            let a_end = row_offsets[(fine_idx + 1u)];
+            ax = 0f;
+            j = a_start;
+            loop {
+                let _e37 = j;
+                if (_e37 < a_end) {
+                } else {
+                    break;
+                }
+                {
+                    let _e40 = j;
+                    let _e42 = values[_e40];
+                    let _e45 = j;
+                    let _e47 = col_indices[_e45];
+                    let _e49 = x[_e47];
+                    let _e51 = ax;
+                    ax = (_e51 + (_e42 * _e49));
+                }
+                continuing {
+                    let _e54 = j;
+                    j = (_e54 + 1u);
+                }
+            }
+            let _e58 = b[fine_idx];
+            let _e59 = ax;
+            let fine_r = (_e58 - _e59);
+            let _e63 = sum;
+            sum = (_e63 + (r_val * fine_r));
         }
         continuing {
-            let _e34 = k_2;
-            k_2 = (_e34 + 1u);
+            let _e66 = k_2;
+            k_2 = (_e66 + 1u);
         }
     }
-    let _e38 = sum;
-    coarse_vec[i_2] = _e38;
+    let _e70 = sum;
+    coarse_vec[i_2] = _e70;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn prolongate_op(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
-    var correction: f32 = 0f;
-    var k_3: u32;
-
+fn clear(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
     let i_3 = global_id_3.x;
-    let _e5 = params.n;
-    if (i_3 >= _e5) {
-        return;
-    }
-    let start_3 = op_row_offsets[i_3];
-    let end_3 = op_row_offsets[(i_3 + 1u)];
-    k_3 = start_3;
-    loop {
-        let _e16 = k_3;
-        if (_e16 < end_3) {
-        } else {
-            break;
-        }
-        {
-            let _e19 = k_3;
-            let coarse_idx = op_col_indices[_e19];
-            let _e23 = k_3;
-            let val_2 = op_values[_e23];
-            let _e29 = coarse_vec[coarse_idx];
-            let _e31 = correction;
-            correction = (_e31 + (val_2 * _e29));
-        }
-        continuing {
-            let _e34 = k_3;
-            k_3 = (_e34 + 1u);
-        }
-    }
-    let _e38 = correction;
-    let _e39 = x[i_3];
-    x[i_3] = (_e39 + _e38);
-    return;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn clear(@builtin(global_invocation_id) global_id_4: vec3<u32>) {
-    let i_4 = global_id_4.x;
     let _e4 = params.n;
-    if (i_4 >= _e4) {
+    if (i_3 >= _e4) {
         return;
     }
-    x[i_4] = 0f;
+    x[i_3] = 0f;
     return;
 }
 "#;

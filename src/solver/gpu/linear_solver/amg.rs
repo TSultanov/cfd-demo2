@@ -1,6 +1,6 @@
+use crate::solver::gpu::bindings;
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
-use crate::solver::gpu::bindings;
 
 #[derive(Debug, Clone)]
 pub struct CsrMatrix {
@@ -54,7 +54,6 @@ pub struct AmgLevel {
     // State vectors
     pub b_x: wgpu::Buffer, // Solution
     pub b_b: wgpu::Buffer, // RHS
-    pub b_r: wgpu::Buffer, // Residual
 
     // Bind groups
     pub bg_matrix: wgpu::BindGroup,
@@ -70,10 +69,8 @@ pub struct AmgLevel {
 pub struct AmgResources {
     pub levels: Vec<AmgLevel>,
     pub pipeline_smooth: wgpu::ComputePipeline,
-    pub pipeline_residual: wgpu::ComputePipeline,
-    pub pipeline_restrict: wgpu::ComputePipeline,
+    pub pipeline_restrict_residual: wgpu::ComputePipeline,
     pub pipeline_prolongate: wgpu::ComputePipeline,
-    pub pipeline_update: wgpu::ComputePipeline, // x = x + correction
     pub pipeline_clear: wgpu::ComputePipeline,
 
     pub bgl_matrix: wgpu::BindGroupLayout,
@@ -313,16 +310,6 @@ impl AmgResources {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -422,14 +409,6 @@ impl AmgResources {
                     | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
-            let b_r = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("AMG L{} r", level_idx)),
-                size: (n as u64) * 4,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
 
             // Bind Groups
             let bg_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -477,10 +456,6 @@ impl AmgResources {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: b_r.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
                         resource: b_params.as_entire_binding(),
                     },
                 ],
@@ -604,7 +579,6 @@ impl AmgResources {
                 b_r_values: b_r_val,
                 b_x,
                 b_b,
-                b_r,
                 bg_matrix,
                 bg_p,
                 bg_r,
@@ -677,10 +651,8 @@ impl AmgResources {
         AmgResources {
             levels,
             pipeline_smooth: make_pipeline("smooth_op", &layout_smooth),
-            pipeline_residual: make_pipeline("residual", &layout_smooth),
-            pipeline_restrict: make_pipeline("restrict_op", &layout_op),
+            pipeline_restrict_residual: make_pipeline("restrict_residual", &layout_op),
             pipeline_prolongate: make_pipeline("prolongate_op", &layout_op),
-            pipeline_update: make_pipeline("smooth_op", &layout_smooth),
             pipeline_clear: make_pipeline("clear", &layout_smooth),
             bgl_matrix,
             bgl_op,
@@ -703,61 +675,46 @@ impl AmgResources {
             let fine_groups = fine.size.div_ceil(64);
             let coarse_groups = coarse.size.div_ceil(64);
 
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("AMG Down L{}->L{}", i, i + 1)),
+                timestamp_writes: None,
+            });
+
             // 1. Pre-smooth
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("AMG Pre-smooth"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipeline_smooth);
-                pass.set_bind_group(0, &fine.bg_matrix, &[]);
-                pass.set_bind_group(1, &fine.bg_state, &[]);
-                pass.dispatch_workgroups(fine_groups, 1, 1);
-            }
+            pass.set_pipeline(&self.pipeline_smooth);
+            pass.set_bind_group(0, &fine.bg_matrix, &[]);
+            pass.set_bind_group(1, &fine.bg_state, &[]);
+            pass.dispatch_workgroups(fine_groups, 1, 1);
 
-            // 2. Compute Residual
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("AMG Residual"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipeline_residual);
-                pass.set_bind_group(0, &fine.bg_matrix, &[]);
-                pass.set_bind_group(1, &fine.bg_state, &[]);
-                pass.dispatch_workgroups(fine_groups, 1, 1);
-            }
-
-            // 3. Restrict (r_fine -> b_coarse)
+            // 2. Fused Residual + Restrict (r_fine implicit, r_coarse = R * (b - Ax))
             if let Some(bg_cross) = &fine.bg_restrict {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("AMG Restrict"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipeline_restrict);
+                pass.set_pipeline(&self.pipeline_restrict_residual);
+                // Bind groups used:
+                // 0: Matrix (Fine)
+                // 1: State (Fine x, b)
+                // 2: Op (R)
+                // 3: Cross (Coarse b)
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
                 pass.set_bind_group(1, &fine.bg_state, &[]);
-                pass.set_bind_group(2, &fine.bg_r, &[]);
+                pass.set_bind_group(2, &fine.bg_r, &[]); // bg_r contains R op buffers
                 pass.set_bind_group(3, bg_cross, &[]);
                 pass.dispatch_workgroups(coarse_groups, 1, 1);
             }
 
-            // Clear coarse solution x
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("AMG Clear Coarse"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipeline_clear);
-                pass.set_bind_group(0, &coarse.bg_matrix, &[]);
-                pass.set_bind_group(1, &coarse.bg_state, &[]);
-                pass.dispatch_workgroups(coarse_groups, 1, 1);
-            }
+            // Clear coarse solution x (ready for solve at next level)
+            // Ideally should be just write_buffer, but we are inside pass.
+            // But we switching to coarse level's bind groups anyway?
+            // Actually, we can just switch binds and use compute clear.
+            pass.set_pipeline(&self.pipeline_clear);
+            pass.set_bind_group(0, &coarse.bg_matrix, &[]); // Dummy bind, just for layout
+            pass.set_bind_group(1, &coarse.bg_state, &[]); // Binds coarse x
+            pass.dispatch_workgroups(coarse_groups, 1, 1);
         }
 
         // Coarsest solve
         let coarsest = &self.levels[num_levels - 1];
         let coarsest_groups = coarsest.size.div_ceil(64);
-        for _ in 0..10 {
+        {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("AMG Coarse Solve"),
                 timestamp_writes: None,
@@ -765,7 +722,9 @@ impl AmgResources {
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &coarsest.bg_matrix, &[]);
             pass.set_bind_group(1, &coarsest.bg_state, &[]);
-            pass.dispatch_workgroups(coarsest_groups, 1, 1);
+            for _ in 0..10 {
+                pass.dispatch_workgroups(coarsest_groups, 1, 1);
+            }
         }
 
         // Upward cycle
@@ -774,31 +733,26 @@ impl AmgResources {
             let _coarse = &self.levels[i + 1];
             let fine_groups = fine.size.div_ceil(64);
 
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(&format!("AMG Up L{}->L{}", i + 1, i)),
+                timestamp_writes: None,
+            });
+
             // Prolongate (x_fine += P * x_coarse)
             if let Some(bg_cross) = &fine.bg_prolongate {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("AMG Prolongate"),
-                    timestamp_writes: None,
-                });
                 pass.set_pipeline(&self.pipeline_prolongate);
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
                 pass.set_bind_group(1, &fine.bg_state, &[]);
-                pass.set_bind_group(2, &fine.bg_p, &[]);
-                pass.set_bind_group(3, bg_cross, &[]);
+                pass.set_bind_group(2, &fine.bg_p, &[]); // P op
+                pass.set_bind_group(3, bg_cross, &[]); // Coarse x
                 pass.dispatch_workgroups(fine_groups, 1, 1);
             }
 
             // Post-smooth
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("AMG Post-smooth"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.pipeline_smooth);
-                pass.set_bind_group(0, &fine.bg_matrix, &[]);
-                pass.set_bind_group(1, &fine.bg_state, &[]);
-                pass.dispatch_workgroups(fine_groups, 1, 1);
-            }
+            pass.set_pipeline(&self.pipeline_smooth);
+            pass.set_bind_group(0, &fine.bg_matrix, &[]);
+            pass.set_bind_group(1, &fine.bg_state, &[]);
+            pass.dispatch_workgroups(fine_groups, 1, 1);
         }
     }
 }

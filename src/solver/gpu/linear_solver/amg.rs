@@ -54,6 +54,7 @@ pub struct AmgLevel {
     // State vectors
     pub b_x: wgpu::Buffer, // Solution
     pub b_b: wgpu::Buffer, // RHS
+    pub b_params: wgpu::Buffer,
 
     // Bind groups
     pub bg_matrix: wgpu::BindGroup,
@@ -579,6 +580,7 @@ impl AmgResources {
                 b_r_values: b_r_val,
                 b_x,
                 b_b,
+                b_params,
                 bg_matrix,
                 bg_p,
                 bg_r,
@@ -661,11 +663,24 @@ impl AmgResources {
         }
     }
 
-    pub fn v_cycle(&self, encoder: &mut wgpu::CommandEncoder, _device: &wgpu::Device) {
+    pub fn v_cycle(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        level0_state_override: Option<&wgpu::BindGroup>,
+    ) {
         let num_levels = self.levels.len();
         if num_levels == 0 {
             return;
         }
+
+        let level0_state = level0_state_override.unwrap_or(&self.levels[0].bg_state);
+        let state_bg = |idx: usize| -> &wgpu::BindGroup {
+            if idx == 0 {
+                level0_state
+            } else {
+                &self.levels[idx].bg_state
+            }
+        };
 
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("AMG V-Cycle"),
@@ -685,7 +700,7 @@ impl AmgResources {
             // 1. Pre-smooth
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
-            pass.set_bind_group(1, &fine.bg_state, &[]);
+            pass.set_bind_group(1, state_bg(i), &[]);
             pass.dispatch_workgroups(fine_groups, 1, 1);
 
             // 2. Fused Residual + Restrict (r_fine implicit, r_coarse = R * (b - Ax))
@@ -697,7 +712,7 @@ impl AmgResources {
                 // 2: Op (R)
                 // 3: Cross (Coarse b)
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
-                pass.set_bind_group(1, &fine.bg_state, &[]);
+                pass.set_bind_group(1, state_bg(i), &[]);
                 pass.set_bind_group(2, &fine.bg_r, &[]); // bg_r contains R op buffers
                 pass.set_bind_group(3, bg_cross, &[]);
                 pass.dispatch_workgroups(coarse_groups, 1, 1);
@@ -706,7 +721,7 @@ impl AmgResources {
             // Clear coarse solution x (ready for solve at next level)
             pass.set_pipeline(&self.pipeline_clear);
             pass.set_bind_group(0, &coarse.bg_matrix, &[]); // Dummy bind, just for layout
-            pass.set_bind_group(1, &coarse.bg_state, &[]); // Binds coarse x
+            pass.set_bind_group(1, state_bg(i + 1), &[]); // Binds coarse x
             pass.dispatch_workgroups(coarse_groups, 1, 1);
 
             pass.pop_debug_group();
@@ -719,7 +734,7 @@ impl AmgResources {
             pass.push_debug_group("AMG Coarse Solve");
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &coarsest.bg_matrix, &[]);
-            pass.set_bind_group(1, &coarsest.bg_state, &[]);
+            pass.set_bind_group(1, state_bg(num_levels - 1), &[]);
             for _ in 0..10 {
                 pass.dispatch_workgroups(coarsest_groups, 1, 1);
             }
@@ -738,7 +753,7 @@ impl AmgResources {
             if let Some(bg_cross) = &fine.bg_prolongate {
                 pass.set_pipeline(&self.pipeline_prolongate);
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
-                pass.set_bind_group(1, &fine.bg_state, &[]);
+                pass.set_bind_group(1, state_bg(i), &[]);
                 pass.set_bind_group(2, &fine.bg_p, &[]); // P op
                 pass.set_bind_group(3, bg_cross, &[]); // Coarse x
                 pass.dispatch_workgroups(fine_groups, 1, 1);
@@ -747,7 +762,7 @@ impl AmgResources {
             // Post-smooth
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
-            pass.set_bind_group(1, &fine.bg_state, &[]);
+            pass.set_bind_group(1, state_bg(i), &[]);
             pass.dispatch_workgroups(fine_groups, 1, 1);
 
             pass.pop_debug_group();

@@ -1743,6 +1743,35 @@ impl GpuSolver {
         let workgroups_dofs = self.workgroups_for_size(n);
         let workgroups_cells = self.workgroups_for_size(num_cells);
 
+        // Reuse FGMRES pressure buffers directly in AMG level 0 to avoid copy-buffer hops.
+        let amg_level0_state_override = if self.constants.precond_type == 1 {
+            fgmres.amg_resources.as_ref().map(|amg| {
+                let level0 = &amg.levels[0];
+                self.context
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("AMG Level0 State Override"),
+                        layout: &amg.bgl_state,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: fgmres.b_p_sol.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: fgmres.b_temp_p.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: level0.b_params.as_entire_binding(),
+                            },
+                        ],
+                    })
+            })
+        } else {
+            None
+        };
+
         // Initialize IterParams
         let mut iter_params = IterParams {
             current_idx: 0,
@@ -1866,37 +1895,7 @@ impl GpuSolver {
                 if self.constants.precond_type == 1 {
                     // AMG (Unchanged)
                     if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
-                        // ... Code for AMG (assume unchanged, copy buffer logic might need update if I changed BGs?)
-                        // AMG copies from temp_p to level0.b_b.
-                        // temp_p is B2 in both BGs. Safe.
-                        // AMG copies from level0.b_x to p_sol.
-                        // p_sol is B3 in current_bg.
-                        // If we are using AMG, we aren't doing the loop.
-
-                        let level0 = &amg.levels[0];
-                        // ... (Copied AMG logic)
-                        encoder.copy_buffer_to_buffer(
-                            &fgmres.b_temp_p,
-                            0,
-                            &level0.b_b,
-                            0,
-                            (self.num_cells as u64) * 4,
-                        );
-                        encoder.copy_buffer_to_buffer(
-                            &fgmres.b_p_sol,
-                            0,
-                            &level0.b_x,
-                            0,
-                            (self.num_cells as u64) * 4,
-                        );
-                        amg.v_cycle(&mut encoder, &self.context.device);
-                        encoder.copy_buffer_to_buffer(
-                            &level0.b_x,
-                            0,
-                            &fgmres.b_p_sol,
-                            0,
-                            (self.num_cells as u64) * 4,
-                        );
+                        amg.v_cycle(&mut encoder, amg_level0_state_override.as_ref());
                     }
                 } else {
                     // Chebyshev Relaxation

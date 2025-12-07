@@ -52,9 +52,11 @@ pub struct CoupledSolverResources {
     // Gradient buffers for higher order schemes
     pub b_grad_u: wgpu::Buffer,
     pub b_grad_v: wgpu::Buffer,
+    pub b_grad_e: wgpu::Buffer,
 
     // Convergence check buffers (GPU max-diff)
-    pub b_max_diff_result: wgpu::Buffer, // Final max-diff result (2 floats: max_u, max_p)
+    // Convergence check buffers (GPU max-diff)
+    pub b_max_diff_result: wgpu::Buffer, // Final max-diff result (now 4 floats: max_u, max_p, max_e, max_rho)
     pub num_max_diff_groups: u32,        // Number of workgroups for max-diff reduction
 
     pub bg_solver: wgpu::BindGroup,
@@ -98,6 +100,13 @@ pub struct GpuConstants {
     pub inlet_velocity: f32,
     pub ramp_time: f32,
     pub precond_type: u32, // 0: Jacobi, 1: AMG
+    pub gamma: f32,        // Heat capacity ratio
+    pub r_gas: f32,        // Gas constant
+    pub is_compressible: u32,
+    pub gravity_x: f32,
+    pub gravity_y: f32,
+    pub pad0: f32,
+    pub pad1: f32, // 0: Incompressible, 1: Compressible
 }
 
 #[repr(C)]
@@ -149,8 +158,8 @@ pub struct GpuSolver {
 
     // Field buffers
     pub b_u: wgpu::Buffer,
-    pub b_u_old: wgpu::Buffer,     // For velocity under-relaxation
-    pub b_u_old_old: wgpu::Buffer, // For 2nd order time stepping
+    pub b_u_old: wgpu::Buffer,        // For velocity under-relaxation
+    pub b_u_old_old: wgpu::Buffer,    // For 2nd order time stepping
     pub u_buffers: Vec<wgpu::Buffer>, // Pool of 3 buffers for ping-pong
     pub u_step_index: usize,          // Current step index for ping-pong
     pub bg_fields_ping_pong: Vec<wgpu::BindGroup>, // 3 bind groups for ping-pong
@@ -160,6 +169,12 @@ pub struct GpuSolver {
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_p: wgpu::Buffer,
     pub b_grad_component: wgpu::Buffer,
+
+    // New Compressible Flow Buffers
+    pub b_temperature: wgpu::Buffer,
+    pub b_energy: wgpu::Buffer,
+    pub b_density: wgpu::Buffer, // Variable density field
+    pub b_grad_e: wgpu::Buffer,  // Gradient of energy/temperature for higher order schemes
 
     // Matrix Structure (CSR)
     pub b_row_offsets: wgpu::Buffer,
@@ -233,6 +248,8 @@ pub struct GpuSolver {
     pub stats_ux: Mutex<LinearSolverStats>,
     pub stats_uy: Mutex<LinearSolverStats>,
     pub stats_p: Mutex<LinearSolverStats>,
+    pub stats_e: Mutex<LinearSolverStats>, // Stats for energy equation
+
     pub outer_residual_u: Mutex<f32>,
     pub outer_residual_p: Mutex<f32>,
     pub outer_iterations: Mutex<u32>,

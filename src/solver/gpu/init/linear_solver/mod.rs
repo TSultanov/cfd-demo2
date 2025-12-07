@@ -178,7 +178,7 @@ fn init_coupled_resources(
     b_scalar_matrix_values: &wgpu::Buffer,
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
-    let num_coupled_cells = num_cells * 3;
+    let num_coupled_cells = num_cells * 4;
     let mut row_offsets = vec![0u32; num_coupled_cells as usize + 1];
     let mut col_indices = Vec::new();
 
@@ -201,16 +201,18 @@ fn init_coupled_resources(
     for i in 0..num_cells as usize {
         let neighbors = &adj[i];
         // For each of the 3 rows for cell i
-        for _row_sub in 0..3 {
-            row_offsets[3 * i + _row_sub] = current_offset;
+        // For each of the 4 rows for cell i
+        for _row_sub in 0..4 {
+            row_offsets[4 * i + _row_sub] = current_offset;
             // For each neighbor cell j (including i itself)
             for &j in neighbors {
-                // Add 3 columns: 3*j, 3*j+1, 3*j+2
-                col_indices.push((3 * j) as u32);
-                col_indices.push((3 * j + 1) as u32);
-                col_indices.push((3 * j + 2) as u32);
+                // Add 4 columns: 4*j, 4*j+1, 4*j+2, 4*j+3
+                col_indices.push((4 * j) as u32);
+                col_indices.push((4 * j + 1) as u32);
+                col_indices.push((4 * j + 2) as u32);
+                col_indices.push((4 * j + 3) as u32);
             }
-            current_offset += (neighbors.len() * 3) as u32;
+            current_offset += (neighbors.len() * 4) as u32;
         }
     }
     row_offsets[num_coupled_cells as usize] = current_offset;
@@ -233,13 +235,20 @@ fn init_coupled_resources(
         mapped_at_creation: false,
     });
 
+    let b_grad_e = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Coupled Grad E"),
+        size: (num_cells as u64) * 8, // Vector2<f32>
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     // Init Max-Diff Convergence Check Buffers
     let workgroup_size = 64u32;
     let num_max_diff_groups = num_cells.div_ceil(workgroup_size);
 
     let b_max_diff_result = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Max Diff Result"),
-        size: 8, // 2 floats: max_u, max_p
+        size: 16, // 4 floats: max_u, max_p, max_e, max_rho
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_SRC
             | wgpu::BufferUsages::COPY_DST,
@@ -252,7 +261,7 @@ fn init_coupled_resources(
     // Create preconditioner buffers (Moved up for bg_solver)
     let b_diag_inv = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Coupled Block Inverse"),
-        size: (num_cells as u64) * 9 * 4,
+        size: (num_cells as u64) * 16 * 4, // 4x4 blocks = 16 floats
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
@@ -760,6 +769,7 @@ fn init_coupled_resources(
         b_precond_params,
         b_grad_u,
         b_grad_v,
+        b_grad_e,
         // Max-diff convergence check
         b_max_diff_result,
         num_max_diff_groups,
@@ -781,6 +791,6 @@ fn init_coupled_resources(
         pipeline_finalize_precond,
         pipeline_spmv_phat_v,
         pipeline_spmv_shat_t,
-        async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device, 8)),
+        async_scalar_reader: std::cell::RefCell::new(AsyncScalarReader::new(device, 16)),
     }
 }

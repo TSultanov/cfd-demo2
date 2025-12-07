@@ -17,6 +17,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    gamma: f32,
+    r_gas: f32,
+    is_compressible: u32,
+    gravity_x: f32,
+    gravity_y: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 // Group 0: Mesh
@@ -39,6 +46,10 @@ struct Constants {
 @group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 @group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
 @group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+@group(1) @binding(9) var<storage, read_write> temperature: array<f32>;
+@group(1) @binding(10) var<storage, read_write> energy: array<f32>;
+@group(1) @binding(11) var<storage, read_write> density: array<f32>;
+@group(1) @binding(12) var<storage, read_write> grad_e: array<Vector2>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -66,12 +77,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var u_face = u[owner];
     var d_p_face = d_p[owner];
     var grad_p_avg = grad_p[owner];
+    var rho_face = density[owner];
     
     if (neighbor != -1) {
         let neigh_idx = u32(neighbor);
         let u_neigh = u[neigh_idx];
         let d_p_neigh = d_p[neigh_idx];
         let grad_p_neigh = grad_p[neigh_idx];
+        let rho_neigh = density[neigh_idx];
         
         let c_neigh = cell_centers[neigh_idx];
         
@@ -96,8 +109,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // d_p interpolation: use distance weighting to match pressure assembly
         d_p_face = lambda * d_p_face + (1.0 - lambda) * d_p_neigh;
         
+        // grad_p interpolation
         grad_p_avg.x = lambda * grad_p_avg.x + (1.0 - lambda) * grad_p_neigh.x;
         grad_p_avg.y = lambda * grad_p_avg.y + (1.0 - lambda) * grad_p_neigh.y;
+        
+        // density interpolation
+        rho_face = lambda * rho_face + (1.0 - lambda) * rho_neigh;
         
         let dx = c_neigh.x - c_owner.x;
         let dy = c_neigh.y - c_owner.y;
@@ -115,7 +132,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let rc_term = d_p_face * area * (grad_p_n - p_grad_f);
         
         let u_n = u_face.x * normal.x + u_face.y * normal.y;
-        fluxes[idx] = constants.density * (u_n * area + rc_term);
+        fluxes[idx] = rho_face * (u_n * area + rc_term);
         
     } else {
         // Boundary
@@ -123,6 +140,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
              // Fixed U with Ramp
              let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
              let u_bc = Vector2(constants.inlet_velocity * ramp, 0.0);
+             // Use density at boundary cell (or fixed inlet density?)
+             // For compressible, inlet boundary should define density or T/p.
+             // For now use owner density (Neumann approx) or constants.density (Fixed)
+             // Using rho_face (owner) is safer for start. Or constants.density.
+             // Let's use constants.density as "Inlet Density".
              fluxes[idx] = constants.density * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
         } else if (boundary_type == 3u) { // Wall
              fluxes[idx] = 0.0;
@@ -134,10 +156,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                  vec2<f32>(face_center.x, face_center.y),
              );
              if (dist_face > 1e-6) {
-                 // Disable Rhie-Chow at outlet to prevent instability
                  rc_term = 0.0;
              }
-             let raw_flux = constants.density * (u_n * area + rc_term);
+             let raw_flux = rho_face * (u_n * area + rc_term);
              // Prevent backflow (inflow) at outlet for stability
              fluxes[idx] = max(0.0, raw_flux);
         } else {

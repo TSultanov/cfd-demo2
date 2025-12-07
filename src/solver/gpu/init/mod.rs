@@ -12,7 +12,11 @@ use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
-    pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+    pub async fn new(
+        mesh: &Mesh,
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    ) -> Self {
         let context = super::context::GpuContext::new(device, queue).await;
 
         let num_cells = mesh.cell_cx.len() as u32;
@@ -77,6 +81,10 @@ impl GpuSolver {
             b_fluxes: fields_res.b_fluxes,
             b_grad_p: fields_res.b_grad_p,
             b_grad_component: fields_res.b_grad_component,
+            b_temperature: fields_res.b_temperature,
+            b_energy: fields_res.b_energy,
+            b_density: fields_res.b_density,
+            b_grad_e: fields_res.b_grad_e,
             b_constants: fields_res.b_constants,
             bg_fields: fields_res.bg_fields,
             constants: fields_res.constants,
@@ -137,6 +145,7 @@ impl GpuSolver {
             stats_ux: Mutex::new(Default::default()),
             stats_uy: Mutex::new(Default::default()),
             stats_p: Mutex::new(Default::default()),
+            stats_e: Mutex::new(Default::default()),
             outer_residual_u: Mutex::new(0.0),
             outer_residual_p: Mutex::new(0.0),
             outer_iterations: Mutex::new(0),

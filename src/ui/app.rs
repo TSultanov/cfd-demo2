@@ -40,12 +40,15 @@ enum MeshType {
     Voronoi,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum PlotField {
     Pressure,
     VelocityX,
     VelocityY,
     VelocityMag,
+    Temperature,
+    Density,
+    Energy,
 }
 
 #[derive(Clone, PartialEq)]
@@ -53,9 +56,12 @@ struct Fluid {
     name: String,
     density: f64,
     viscosity: f64,
+    gamma: f64,
+    r_gas: f64,
 }
 
-type SharedResults = Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>;
+// U, P, T, E, Rho
+type SharedResults = Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)>>>;
 
 impl Fluid {
     fn presets() -> Vec<Fluid> {
@@ -64,31 +70,43 @@ impl Fluid {
                 name: "Water".into(),
                 density: 1000.0,
                 viscosity: 0.001,
+                gamma: 1.0, // Liquids are incompressible approx
+                r_gas: 0.0,
             },
             Fluid {
                 name: "Air".into(),
                 density: 1.225,
                 viscosity: 1.81e-5,
+                gamma: 1.4,
+                r_gas: 287.058,
             },
             Fluid {
                 name: "Alcohol".into(),
                 density: 789.0,
                 viscosity: 0.0012,
+                gamma: 1.0,
+                r_gas: 0.0,
             },
             Fluid {
                 name: "Kerosene".into(),
                 density: 820.0,
                 viscosity: 0.00164,
+                gamma: 1.0,
+                r_gas: 0.0,
             },
             Fluid {
                 name: "Mercury".into(),
                 density: 13546.0,
                 viscosity: 0.001526,
+                gamma: 1.0,
+                r_gas: 0.0,
             },
             Fluid {
                 name: "Custom".into(),
                 density: 1.0,
                 viscosity: 0.01,
+                gamma: 1.4,
+                r_gas: 287.058,
             },
         ]
     }
@@ -132,6 +150,9 @@ pub struct CFDApp {
     shared_params: Arc<Mutex<RuntimeParams>>,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
+    cached_t: Vec<f64>,
+    cached_e: Vec<f64>,
+    cached_rho: Vec<f64>,
     cached_gpu_stats: CachedGpuStats,
     mesh: Option<Mesh>,
     cached_cells: Vec<Vec<[f64; 2]>>,
@@ -160,6 +181,9 @@ pub struct CFDApp {
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
     cfd_renderer: Option<Arc<Mutex<cfd_renderer::CfdRenderResources>>>,
+    // Compressible Flow Params
+    is_compressible: bool,
+    gravity: [f32; 2],
 }
 
 struct CfdRenderCallback {
@@ -245,6 +269,9 @@ impl CFDApp {
             })),
             cached_u: Vec::new(),
             cached_p: Vec::new(),
+            cached_t: Vec::new(),
+            cached_e: Vec::new(),
+            cached_rho: Vec::new(),
             cached_gpu_stats: CachedGpuStats::default(),
             mesh: None,
             cached_cells: Vec::new(),
@@ -273,6 +300,8 @@ impl CFDApp {
             wgpu_queue,
             target_format,
             cfd_renderer: None,
+            is_compressible: false,
+            gravity: [0.0, -9.81],
         }
     }
 
@@ -294,6 +323,11 @@ impl CFDApp {
             if let (Ok(mut renderer), Ok(solver)) = (renderer.lock(), solver.lock()) {
                 match self.plot_field {
                     PlotField::Pressure => renderer.update_bind_group(device, &solver.b_p),
+                    PlotField::Temperature => {
+                        renderer.update_bind_group(device, &solver.b_temperature)
+                    }
+                    PlotField::Density => renderer.update_bind_group(device, &solver.b_density),
+                    PlotField::Energy => renderer.update_bind_group(device, &solver.b_energy),
                     _ => renderer.update_bind_group(device, &solver.b_u),
                 }
             }
@@ -326,6 +360,10 @@ impl CFDApp {
         gpu_solver.set_inlet_velocity(self.inlet_velocity);
         gpu_solver.set_ramp_time(self.ramp_time);
         gpu_solver.set_precond_type(self.selected_preconditioner);
+        gpu_solver.set_is_compressible(self.is_compressible);
+        gpu_solver.set_gravity(self.gravity[0], self.gravity[1]);
+        gpu_solver.set_gamma(self.current_fluid.gamma as f32);
+        gpu_solver.set_r_gas(self.current_fluid.r_gas as f32);
         gpu_solver.initialize_history();
 
         self.cached_u = initial_u;
@@ -531,7 +569,17 @@ impl CFDApp {
         self.with_gpu_solver(|solver| {
             solver.set_density(self.current_fluid.density as f32);
             solver.set_viscosity(self.current_fluid.viscosity as f32);
+            solver.set_gamma(self.current_fluid.gamma as f32);
+            solver.set_r_gas(self.current_fluid.r_gas as f32);
         });
+    }
+
+    fn update_gpu_is_compressible(&self) {
+        self.with_gpu_solver(|solver| solver.set_is_compressible(self.is_compressible));
+    }
+
+    fn update_gpu_gravity(&self) {
+        self.with_gpu_solver(|solver| solver.set_gravity(self.gravity[0], self.gravity[1]));
     }
 
     fn update_gpu_dt(&self) {
@@ -798,6 +846,57 @@ impl eframe::App for CFDApp {
                         }
 
                         ui.separator();
+                        ui.label("Compressible Flow / Physics");
+                        if ui
+                            .checkbox(&mut self.is_compressible, "Compressible Flow")
+                            .changed()
+                        {
+                            self.update_gpu_is_compressible();
+                        }
+
+                        if self.is_compressible {
+                            ui.label("Gravity (m/s²)");
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut self.gravity[0], -20.0..=20.0)
+                                        .text("Gx"),
+                                )
+                                .changed()
+                            {
+                                self.update_gpu_gravity();
+                            }
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut self.gravity[1], -20.0..=20.0)
+                                        .text("Gy"),
+                                )
+                                .changed()
+                            {
+                                self.update_gpu_gravity();
+                            }
+
+                            ui.label("Thermodynamics");
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut self.current_fluid.gamma, 1.0..=2.0)
+                                        .text("Gamma"),
+                                )
+                                .changed()
+                            {
+                                self.update_gpu_fluid();
+                            }
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut self.current_fluid.r_gas, 0.0..=500.0)
+                                        .text("R Gas"),
+                                )
+                                .changed()
+                            {
+                                self.update_gpu_fluid();
+                            }
+                        }
+
+                        ui.separator();
                         ui.label("Under-Relaxation Factors");
                         if ui
                             .add(
@@ -881,6 +980,9 @@ impl eframe::App for CFDApp {
                                             let step_time = start.elapsed().as_secs_f32() * 1000.0;
                                             let u = pollster::block_on(solver.get_u());
                                             let p = pollster::block_on(solver.get_p());
+                                            let t = pollster::block_on(solver.get_temperature());
+                                            let e = pollster::block_on(solver.get_energy());
+                                            let rho = pollster::block_on(solver.get_density());
 
                                             let (adaptive_dt, target_cfl) =
                                                 if let Ok(params) = shared_params.lock() {
@@ -935,7 +1037,7 @@ impl eframe::App for CFDApp {
                                             };
 
                                             if let Ok(mut results) = shared_results.lock() {
-                                                *results = Some((u, p));
+                                                *results = Some((u, p, t, e, rho));
                                             }
                                             if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
                                                 *gpu_stats = stats;
@@ -971,9 +1073,12 @@ impl eframe::App for CFDApp {
 
         let (min_val, max_val, values) = if self.gpu_solver.is_some() {
             if let Ok(mut results) = self.shared_results.lock() {
-                if let Some((u, p)) = results.take() {
+                if let Some((u, p, t, e, rho)) = results.take() {
                     self.cached_u = u;
                     self.cached_p = p;
+                    self.cached_t = t;
+                    self.cached_e = e;
+                    self.cached_rho = rho;
                 }
             }
 
@@ -991,6 +1096,9 @@ impl eframe::App for CFDApp {
                         PlotField::VelocityX => u[i].0,
                         PlotField::VelocityY => u[i].1,
                         PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
+                        PlotField::Temperature => self.cached_t.get(i).cloned().unwrap_or(0.0),
+                        PlotField::Density => self.cached_rho.get(i).cloned().unwrap_or(0.0),
+                        PlotField::Energy => self.cached_e.get(i).cloned().unwrap_or(0.0),
                     };
                     min_val = min_val.min(val);
                     max_val = max_val.max(val);
@@ -1059,11 +1167,37 @@ impl eframe::App for CFDApp {
         egui::TopBottomPanel::bottom("plot_controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Plot Field:");
+                ui.label("Plot Field:");
                 let old_field = self.plot_field;
-                ui.radio_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
-                ui.radio_value(&mut self.plot_field, PlotField::VelocityX, "Velocity X");
-                ui.radio_value(&mut self.plot_field, PlotField::VelocityY, "Velocity Y");
-                ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
+
+                egui::ComboBox::from_id_salt("plot_field")
+                    .selected_text(format!("{:?}", self.plot_field))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
+                        ui.selectable_value(
+                            &mut self.plot_field,
+                            PlotField::VelocityX,
+                            "Velocity X",
+                        );
+                        ui.selectable_value(
+                            &mut self.plot_field,
+                            PlotField::VelocityY,
+                            "Velocity Y",
+                        );
+                        ui.selectable_value(
+                            &mut self.plot_field,
+                            PlotField::VelocityMag,
+                            "Velocity Mag",
+                        );
+                        ui.selectable_value(
+                            &mut self.plot_field,
+                            PlotField::Temperature,
+                            "Temperature",
+                        );
+                        ui.selectable_value(&mut self.plot_field, PlotField::Density, "Density");
+                        ui.selectable_value(&mut self.plot_field, PlotField::Energy, "Energy");
+                    });
+
                 if old_field != self.plot_field {
                     self.update_renderer_field();
                 }
@@ -1125,6 +1259,9 @@ impl eframe::App for CFDApp {
                                 PlotField::VelocityX => (2, 0, 0),
                                 PlotField::VelocityY => (2, 1, 0),
                                 PlotField::VelocityMag => (2, 0, 1),
+                                PlotField::Temperature => (1, 0, 0),
+                                PlotField::Density => (1, 0, 0),
+                                PlotField::Energy => (1, 0, 0),
                             };
 
                             let cb = eframe::egui_wgpu::Callback::new_paint_callback(

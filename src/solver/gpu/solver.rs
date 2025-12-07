@@ -1,8 +1,8 @@
 // Force recompile 2
 use std::sync::Arc;
 
-use super::profiling::ProfilingStats;
 use super::coupled_solver_fgmres::FgmresResources;
+use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
@@ -19,7 +19,6 @@ impl GpuSolver {
             .queue
             .write_buffer(&self.b_p, 0, bytemuck::cast_slice(&p_f32));
     }
-
 
     pub fn set_dt(&mut self, dt: f32) {
         if self.constants.dt > 0.0 {
@@ -76,6 +75,26 @@ impl GpuSolver {
         self.update_constants();
     }
 
+    pub fn set_gamma(&mut self, gamma: f32) {
+        self.constants.gamma = gamma;
+        self.update_constants();
+    }
+
+    pub fn set_r_gas(&mut self, r_gas: f32) {
+        self.constants.r_gas = r_gas;
+        self.update_constants();
+    }
+
+    pub fn set_is_compressible(&mut self, is_compressible: bool) {
+        self.constants.is_compressible = if is_compressible { 1 } else { 0 };
+        self.update_constants();
+    }
+
+    pub fn set_gravity(&mut self, g_x: f32, g_y: f32) {
+        self.constants.gravity_x = g_x;
+        self.constants.gravity_y = g_y;
+        self.update_constants();
+    }
 
     pub fn update_constants(&self) {
         self.context
@@ -94,9 +113,6 @@ impl GpuSolver {
             .collect()
     }
 
-
-
-
     pub async fn get_p(&self) -> Vec<f64> {
         let data = self
             .read_buffer(&self.b_p, (self.num_cells as u64) * 4)
@@ -104,11 +120,6 @@ impl GpuSolver {
         let p_f32: &[f32] = bytemuck::cast_slice(&data);
         p_f32.iter().map(|&x| x as f64).collect()
     }
-
-
-
-
-
 
     pub async fn get_d_p(&self) -> Vec<f64> {
         let data = self
@@ -118,6 +129,22 @@ impl GpuSolver {
         vals_f32.iter().map(|&x| x as f64).collect()
     }
 
+    pub async fn get_temperature(&self) -> Vec<f64> {
+        let vals = self
+            .read_buffer_f32(&self.b_temperature, self.num_cells)
+            .await;
+        vals.iter().map(|&x| x as f64).collect()
+    }
+
+    pub async fn get_density(&self) -> Vec<f64> {
+        let vals = self.read_buffer_f32(&self.b_density, self.num_cells).await;
+        vals.iter().map(|&x| x as f64).collect()
+    }
+
+    pub async fn get_energy(&self) -> Vec<f64> {
+        let vals = self.read_buffer_f32(&self.b_energy, self.num_cells).await;
+        vals.iter().map(|&x| x as f64).collect()
+    }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
         use super::profiling::ProfileCategory;
@@ -135,8 +162,7 @@ impl GpuSolver {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                self
-                    .profiling_stats
+                self.profiling_stats
                     .record_gpu_alloc("read_buffer:staging", size);
                 self.profiling_stats.record_location(
                     "read_buffer:create_staging",
@@ -236,8 +262,6 @@ impl GpuSolver {
         self.step_coupled();
     }
 
-
-
     /// Get a reference to the detailed profiling statistics
     pub fn get_profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.profiling_stats)
@@ -296,9 +320,7 @@ impl GpuSolver {
         }
 
         let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
-            solver
-                .profiling_stats
-                .record_gpu_alloc(label, buf.size());
+            solver.profiling_stats.record_gpu_alloc(label, buf.size());
         };
 
         // Mesh
@@ -312,7 +334,11 @@ impl GpuSolver {
         record(self, "mesh:cell_vols", &self.b_cell_vols);
         record(self, "mesh:cell_face_offsets", &self.b_cell_face_offsets);
         record(self, "mesh:cell_faces", &self.b_cell_faces);
-        record(self, "mesh:cell_face_matrix_indices", &self.b_cell_face_matrix_indices);
+        record(
+            self,
+            "mesh:cell_face_matrix_indices",
+            &self.b_cell_face_matrix_indices,
+        );
         record(self, "mesh:diagonal_indices", &self.b_diagonal_indices);
 
         // Fields
@@ -327,6 +353,10 @@ impl GpuSolver {
         record(self, "fields:fluxes", &self.b_fluxes);
         record(self, "fields:grad_p", &self.b_grad_p);
         record(self, "fields:grad_component", &self.b_grad_component);
+        record(self, "fields:temperature", &self.b_temperature);
+        record(self, "fields:energy", &self.b_energy);
+        record(self, "fields:density", &self.b_density);
+        record(self, "fields:grad_e", &self.b_grad_e);
         record(self, "fields:constants", &self.b_constants);
 
         // Matrix / linear solver
@@ -376,9 +406,7 @@ impl GpuSolver {
         }
 
         let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
-            solver
-                .profiling_stats
-                .record_gpu_alloc(label, buf.size());
+            solver.profiling_stats.record_gpu_alloc(label, buf.size());
         };
 
         record(self, "fgmres:basis", &fgmres.b_basis);

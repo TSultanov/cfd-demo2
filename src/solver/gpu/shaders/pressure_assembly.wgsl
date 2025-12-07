@@ -17,6 +17,13 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     padding: u32,
+    gamma: f32,
+    r_gas: f32,
+    is_compressible: u32,
+    gravity_x: f32,
+    gravity_y: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 // Group 0: Mesh
@@ -43,6 +50,10 @@ struct Constants {
 @group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 @group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
 @group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+@group(1) @binding(9) var<storage, read_write> temperature: array<f32>;
+@group(1) @binding(10) var<storage, read_write> energy: array<f32>;
+@group(1) @binding(11) var<storage, read_write> density: array<f32>;
+@group(1) @binding(12) var<storage, read_write> grad_e: array<Vector2>;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;

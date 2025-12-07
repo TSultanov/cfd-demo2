@@ -104,81 +104,100 @@ fn safe_inverse(val: f32) -> f32 {
 
 
 // Stage 2: build Schur RHS g' = g - D * y_u for current mode
+// Stage 2: build Schur RHS g' = g - D * y_u for current mode
 @compute @workgroup_size(64)
 fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let total_unknowns = params.n;
-    if (total_unknowns < 3u) {
+    if (total_unknowns < 4u) {
         return;
     }
-    let num_cells = total_unknowns / 3u;
+    let num_cells = total_unknowns / 4u;
     let cell = global_id.x;
     if (cell >= num_cells) {
         return;
     }
 
-    let base = cell * 3u;
-    let row = base + 2u;
+    let base = cell * 4u;
+    let row = base + 3u; // P row index is 3
     var rhs = read_search_vector(row);
 
     let start = row_offsets[row];
     let end = row_offsets[row + 1u];
     for (var k = start; k < end; k++) {
         let col = col_indices[k];
-        if (col % 3u != 2u) {
+        if (col % 4u != 3u) { // If not P col (subtract contribution from U, V, E)
             rhs -= matrix_values[k] * read_hat(col);
         }
     }
 
-    write_rhs(base + 0u, 0.0);
-    write_rhs(base + 1u, 0.0);
-    write_rhs(base + 2u, rhs);
+    write_hat(base + 0u, 0.0); // Dummy writes? No, these are likely unused or cleared.
+    write_hat(base + 1u, 0.0);
+    write_hat(base + 2u, 0.0);
+    write_rhs(base + 3u, rhs); // Write to precond_rhs[P_idx]
 }
 
 // Stage 3: apply velocity correction y_u - A^{-1} * G * y_p after AMG solve
 @compute @workgroup_size(64)
 fn finalize_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let total_unknowns = params.n;
-    if (total_unknowns < 3u) {
+    if (total_unknowns < 4u) {
         return;
     }
-    let num_cells = total_unknowns / 3u;
+    let num_cells = total_unknowns / 4u;
     let cell = global_id.x;
     if (cell >= num_cells) {
         return;
     }
 
-    let base = cell * 3u;
-    let offset = cell * 9u;
+    let base = cell * 4u;
+    let offset = cell * 16u; // 4x4 block
 
     let row_u = base + 0u;
     let row_v = base + 1u;
+    let row_e = base + 2u;
 
     var vel_u = read_hat(row_u);
     var vel_v = read_hat(row_v);
+    var val_e = read_hat(row_e);
 
-    let inv_u = block_inv[offset + 0u];
-    let inv_v = block_inv[offset + 4u];
+    // Diagonal inverses
+    let inv_u = block_inv[offset + 0u]; // (0,0)
+    let inv_v = block_inv[offset + 5u]; // (1,1) -> 1*4+1=5
+    let inv_e = block_inv[offset + 10u]; // (2,2) -> 2*4+2=10
 
+    // Correct U
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[row_u + 1u];
     for (var k = start_u; k < end_u; k++) {
         let col = col_indices[k];
-        if (col % 3u == 2u) {
+        if (col % 4u == 3u) { // P col
             vel_u -= inv_u * matrix_values[k] * read_hat(col);
         }
     }
 
+    // Correct V
     let start_v = row_offsets[row_v];
     let end_v = row_offsets[row_v + 1u];
     for (var k = start_v; k < end_v; k++) {
         let col = col_indices[k];
-        if (col % 3u == 2u) {
+        if (col % 4u == 3u) { // P col
             vel_v -= inv_v * matrix_values[k] * read_hat(col);
+        }
+    }
+    
+    // Correct E
+    let start_e = row_offsets[row_e];
+    let end_e = row_offsets[row_e + 1u];
+    for (var k = start_e; k < end_e; k++) {
+        let col = col_indices[k];
+        if (col % 4u == 3u) { // P col
+            val_e -= inv_e * matrix_values[k] * read_hat(col);
         }
     }
 
     write_hat(row_u, vel_u);
     write_hat(row_v, vel_v);
+    write_hat(row_e, val_e);
 }
 
 // Preconditioned SpMV: v = A * p_hat (where p_hat = M^{-1} * p)

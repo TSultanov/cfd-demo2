@@ -16,7 +16,15 @@ struct Constants {
     stride_x: u32,
     time_scheme: u32,
     inlet_velocity: f32,
+
     ramp_time: f32,
+    gamma: f32,
+    r_gas: f32,
+    is_compressible: u32,
+    gravity_x: f32,
+    gravity_y: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 // Group 0: Mesh
@@ -43,6 +51,10 @@ struct Constants {
 @group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 @group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
 @group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+@group(1) @binding(9) var<storage, read_write> temperature: array<f32>;
+@group(1) @binding(10) var<storage, read_write> energy: array<f32>;
+@group(1) @binding(11) var<storage, read_write> density: array<f32>;
+@group(1) @binding(12) var<storage, read_write> grad_e: array<Vector2>;
 
 // Group 2: Coupled Solver Resources
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -94,6 +106,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     var g_u = Vector2(0.0, 0.0);
     var g_v = Vector2(0.0, 0.0);
+    
+    // Variables for energy gradient
+    let val_c_e = energy[idx];
+    var g_e = Vector2(0.0, 0.0);
 
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
@@ -317,6 +333,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         g_v.x += val_f_v * normal.x * area;
         g_v.y += val_f_v * normal.y * area;
+        
+        // --- Energy Gradient Calculation ---
+        var val_f_e = 0.0;
+        if (!is_boundary) {
+             let val_other_e = energy[other_idx];
+             let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
+             let d_o = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+             let total_dist = d_c + d_o;
+             if (total_dist > 1e-6) {
+                 let lambda = d_o / total_dist;
+                 val_f_e = lambda * val_c_e + (1.0 - lambda) * val_other_e;
+             } else {
+                 val_f_e = 0.5 * (val_c_e + val_other_e);
+             }
+        } else {
+             if (boundary_type == 1u) { // Inlet
+                 let e_bc = 220000.0; // Consistent placeholder
+                 val_f_e = e_bc;
+             } else { // Wall, Outlet (Zero Gradient)
+                 val_f_e = val_c_e; 
+             }
+        }
+        g_e.x += val_f_e * normal.x * area;
+        g_e.y += val_f_e * normal.y * area;
     }
     
     // Write d_p
@@ -340,4 +380,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     grad_u[idx] = g_u;
     grad_v[idx] = g_v;
+    
+    g_e.x /= vol;
+    g_e.y /= vol;
+    grad_e[idx] = g_e;
 }

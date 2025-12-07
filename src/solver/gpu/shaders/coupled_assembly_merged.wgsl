@@ -17,6 +17,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    gamma: f32,
+    r_gas: f32,
+    is_compressible: u32,
+    gravity_x: f32,
+    gravity_y: f32,
+    pad0: f32,
+    pad1: f32,
 }
 
 // Group 0: Mesh
@@ -43,6 +50,10 @@ struct Constants {
 @group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
 @group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
 @group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+@group(1) @binding(9) var<storage, read_write> temperature: array<f32>;
+@group(1) @binding(10) var<storage, read_write> energy: array<f32>;
+@group(1) @binding(11) var<storage, read_write> density: array<f32>;
+@group(1) @binding(12) var<storage, read_write> grad_e: array<Vector2>;
 
 // Group 2: Solver (Coupled)
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -74,27 +85,35 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start = cell_face_offsets[idx];
     let end = cell_face_offsets[idx + 1];
     
-    // Calculate base indices for coupled matrix
+    // Calculate base indices for coupled matrix (4x4 blocks)
     let scalar_offset = scalar_row_offsets[idx];
     let num_neighbors = scalar_row_offsets[idx + 1] - scalar_offset;
-    let start_row_0 = 9u * scalar_offset;
-    let start_row_1 = start_row_0 + 3u * num_neighbors;
-    let start_row_2 = start_row_0 + 6u * num_neighbors;
+    // 4x4 = 16 elements per block
+    let start_row_0 = 16u * scalar_offset; // U
+    let start_row_1 = start_row_0 + 4u * num_neighbors; // V
+    let start_row_2 = start_row_0 + 8u * num_neighbors; // E
+    let start_row_3 = start_row_0 + 12u * num_neighbors; // P
     
     // Initialize diagonal coefficients
     var diag_u: f32 = 0.0;
     var diag_v: f32 = 0.0;
+    var diag_e: f32 = 0.0;
     var diag_p: f32 = 0.0;
     
     // Diagonal accumulators for coupled terms
     var sum_diag_up: f32 = 0.0;
     var sum_diag_vp: f32 = 0.0;
+    var sum_diag_ep: f32 = 0.0; // Energy-Pressure coupling? (Usually analytical or zero)
+    
     var sum_diag_pu: f32 = 0.0;
     var sum_diag_pv: f32 = 0.0;
+    var sum_diag_pe: f32 = 0.0; // Pressure-Energy coupling? (EOS related?)
+    
     var sum_diag_pp: f32 = 0.0;
     
     var rhs_u: f32 = 0.0;
     var rhs_v: f32 = 0.0;
+    var rhs_e: f32 = 0.0;
     var rhs_p: f32 = 0.0;
 
     // Scalar pressure diagonal
@@ -102,29 +121,47 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     // Time derivative
     let u_n = u_old[idx];
-    var coeff_time = vol * constants.density / constants.dt;
+    let rho = density[idx];
+    var coeff_time = vol * rho / constants.dt;
     var rhs_time_u = coeff_time * u_n.x;
     var rhs_time_v = coeff_time * u_n.y;
+    
+    // Energy Transient (Euler)
+    let e_n = energy[idx];
+    var rhs_time_e = coeff_time * e_n;
+    let diag_e_time = coeff_time;
 
     if (constants.time_scheme == 1u) {
-        // BDF2
+        // BDF2 (Only for Momentum, as we lack old energy buffers)
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
         let u_nm1 = u_old_old[idx];
         
-        coeff_time = vol * constants.density / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        coeff_time = vol * rho / dt * (1.0 + 2.0 * r) / (1.0 + r);
         let factor_n = (1.0 + r);
         let factor_nm1 = (r * r) / (1.0 + r);
         
-        rhs_time_u = (vol * constants.density / dt) * (factor_n * u_n.x - factor_nm1 * u_nm1.x);
-        rhs_time_v = (vol * constants.density / dt) * (factor_n * u_n.y - factor_nm1 * u_nm1.y);
+        rhs_time_u = (vol * rho / dt) * (factor_n * u_n.x - factor_nm1 * u_nm1.x);
+        rhs_time_v = (vol * rho / dt) * (factor_n * u_n.y - factor_nm1 * u_nm1.y);
     }
 
     diag_u += coeff_time;
     diag_v += coeff_time;
+    diag_e += diag_e_time;
     rhs_u += rhs_time_u;
     rhs_v += rhs_time_v;
+    rhs_e += rhs_time_e;
+    
+    // Buoyancy Source Term (Gravity)
+    // F_buoy = vol * rho * g
+    let g_x = constants.gravity_x;
+    let g_y = constants.gravity_y;
+    let buoy_u = vol * rho * g_x;
+    let buoy_v = vol * rho * g_y;
+    
+    rhs_u += buoy_u;
+    rhs_v += buoy_v;
 
     // Loop over faces
     for (var k = start; k < end; k++) {
@@ -151,6 +188,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var is_boundary = false;
         var other_idx = 0u;
         var d_p_neigh: f32 = 0.0;
+        var rho_neigh: f32 = 0.0;
         
         if (neigh_idx != -1) {
             other_idx = u32(neigh_idx);
@@ -159,10 +197,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             other_center = cell_centers[other_idx];
             d_p_neigh = d_p[other_idx];
+            rho_neigh = density[other_idx];
         } else {
             is_boundary = true;
             other_center = f_center;
             d_p_neigh = d_p[idx]; // Placeholder
+            rho_neigh = rho; // Neumann for density at boundary (except Inlet/Outlet specific handling)
         }
         
         let d_vec_x = other_center.x - center.x;
@@ -196,32 +236,57 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             neighbor_rank = scalar_mat_idx - scalar_offset;
         }
         
-        let idx_0_0 = start_row_0 + 3u * neighbor_rank + 0u;
-        let idx_0_1 = start_row_0 + 3u * neighbor_rank + 1u;
-        let idx_0_2 = start_row_0 + 3u * neighbor_rank + 2u;
+        let idx_0_0 = start_row_0 + 4u * neighbor_rank + 0u;
+        let idx_0_1 = start_row_0 + 4u * neighbor_rank + 1u;
+        let idx_0_2 = start_row_0 + 4u * neighbor_rank + 2u;
+        let idx_0_3 = start_row_0 + 4u * neighbor_rank + 3u;
 
-        let idx_1_0 = start_row_1 + 3u * neighbor_rank + 0u;
-        let idx_1_1 = start_row_1 + 3u * neighbor_rank + 1u;
-        let idx_1_2 = start_row_1 + 3u * neighbor_rank + 2u;
+        let idx_1_0 = start_row_1 + 4u * neighbor_rank + 0u;
+        let idx_1_1 = start_row_1 + 4u * neighbor_rank + 1u;
+        let idx_1_2 = start_row_1 + 4u * neighbor_rank + 2u;
+        let idx_1_3 = start_row_1 + 4u * neighbor_rank + 3u;
         
-        let idx_2_0 = start_row_2 + 3u * neighbor_rank + 0u;
-        let idx_2_1 = start_row_2 + 3u * neighbor_rank + 1u;
-        let idx_2_2 = start_row_2 + 3u * neighbor_rank + 2u;
+        // E-Row
+        let idx_2_0 = start_row_2 + 4u * neighbor_rank + 0u;
+        let idx_2_1 = start_row_2 + 4u * neighbor_rank + 1u;
+        let idx_2_2 = start_row_2 + 4u * neighbor_rank + 2u;
+        let idx_2_3 = start_row_2 + 4u * neighbor_rank + 3u;
+        
+        // P-Row (Continuity)
+        let idx_3_0 = start_row_3 + 4u * neighbor_rank + 0u;
+        let idx_3_1 = start_row_3 + 4u * neighbor_rank + 1u;
+        let idx_3_2 = start_row_3 + 4u * neighbor_rank + 2u;
+        let idx_3_3 = start_row_3 + 4u * neighbor_rank + 3u;
         
         if (!is_boundary) {
-            // --- Momentum Equations ---
+            // --- Momentum Equations (Rows 0, 1) ---
             let coeff = -diff_coeff + conv_coeff_off;
             
-            // Off-diagonal U-U and V-V
+            // Row 0: U equation
             matrix_values[idx_0_0] = coeff; // A_uu
             matrix_values[idx_0_1] = 0.0;   // A_uv
+            matrix_values[idx_0_2] = 0.0;   // A_ue
+            // matrix_values[idx_0_3] set later (P-grad)
+            
+            // Row 1: V equation
             matrix_values[idx_1_0] = 0.0;   // A_vu
             matrix_values[idx_1_1] = coeff; // A_vv
+            matrix_values[idx_1_2] = 0.0;   // A_ve
+            // matrix_values[idx_1_3] set later (P-grad)
             
             diag_u += diff_coeff + conv_coeff_diag;
             diag_v += diff_coeff + conv_coeff_diag;
             
-            // Deferred Correction for Higher Order Schemes
+            // Row 2: Energy Equation (assuming Pr=1 -> same coeff)
+            // If Pr != 1, diff_coeff_e = diff_coeff / Pr
+            matrix_values[idx_2_0] = 0.0;   // A_eu
+            matrix_values[idx_2_1] = 0.0;   // A_ev
+            matrix_values[idx_2_2] = coeff; // A_ee
+            matrix_values[idx_2_3] = 0.0;   // A_ep
+            
+            diag_e += diff_coeff + conv_coeff_diag;
+            
+            // Deferred Correction for Higher Order Schemes (Momentum)
             if (constants.scheme != 0u) {
                 // Get current values (from latest iteration) for deferred correction
                 let u_own = u[idx];
@@ -285,6 +350,48 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 
                 rhs_u -= correction_u;
                 rhs_v -= correction_v;
+                
+                // Deferred Correction for Energy
+                let e_own = energy[idx];
+                let e_neigh = energy[other_idx];
+                
+                var phi_upwind_e = e_own;
+                if (flux < 0.0) {
+                    phi_upwind_e = e_neigh;
+                }
+                
+                var phi_ho_e = phi_upwind_e;
+                
+                if (constants.scheme == 1u) { // Second Order Upwind
+                    if (flux > 0.0) {
+                        let grad_e_own = grad_e[idx];
+                        let r_x = f_center.x - center.x;
+                        let r_y = f_center.y - center.y;
+                        phi_ho_e = e_own + (grad_e_own.x * r_x + grad_e_own.y * r_y);
+                    } else {
+                        let grad_e_neigh = grad_e[other_idx];
+                        let r_x = f_center.x - other_center.x;
+                        let r_y = f_center.y - other_center.y;
+                        phi_ho_e = e_neigh + (grad_e_neigh.x * r_x + grad_e_neigh.y * r_y);
+                    }
+                } else if (constants.scheme == 2u) { // QUICK
+                    if (flux > 0.0) {
+                        let grad_e_own = grad_e[idx];
+                        let d_cd_x = other_center.x - center.x;
+                        let d_cd_y = other_center.y - center.y;
+                        let grad_term_e = grad_e_own.x * d_cd_x + grad_e_own.y * d_cd_y;
+                        phi_ho_e = 0.625 * e_own + 0.375 * e_neigh + 0.125 * grad_term_e;
+                    } else {
+                        let grad_e_neigh = grad_e[other_idx];
+                        let d_cd_x = center.x - other_center.x;
+                        let d_cd_y = center.y - other_center.y;
+                        let grad_term_e = grad_e_neigh.x * d_cd_x + grad_e_neigh.y * d_cd_y;
+                        phi_ho_e = 0.625 * e_neigh + 0.375 * e_own + 0.125 * grad_term_e;
+                    }
+                }
+                
+                let correction_e = flux * (phi_ho_e - phi_upwind_e);
+                rhs_e -= correction_e;
             }
             
             // Pressure Gradient (Cell to Face)
@@ -296,25 +403,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if (total_dist > 1e-6) {
                 lambda = d_neigh / total_dist;
             }
+
+            // Interpolate density to face
+            let rho_face = lambda * rho + (1.0 - lambda) * rho_neigh;
             
             let pg_force_x = area * normal.x;
             let pg_force_y = area * normal.y;
             
-            // Off-diagonal U-P and V-P (Neighbor P)
-            matrix_values[idx_0_2] = (1.0 - lambda) * pg_force_x; // A_up
-            matrix_values[idx_1_2] = (1.0 - lambda) * pg_force_y; // A_vp
+            // Off-diagonal U-P and V-P (Neighbor P) -> Col 3
+            matrix_values[idx_0_3] = (1.0 - lambda) * pg_force_x; // A_up
+            matrix_values[idx_1_3] = (1.0 - lambda) * pg_force_y; // A_vp
             
             // Diagonal U-P and V-P (Own P) - accumulated
             sum_diag_up += lambda * pg_force_x;
             sum_diag_vp += lambda * pg_force_y;
             
-            // --- Continuity Equation ---
+            // --- Continuity Equation (Row 3) ---
             let div_coeff_x = normal.x * area;
             let div_coeff_y = normal.y * area;
             
             // Off-diagonal P-U and P-V (Neighbor U, V)
-            matrix_values[idx_2_0] = (1.0 - lambda) * div_coeff_x; // A_pu
-            matrix_values[idx_2_1] = (1.0 - lambda) * div_coeff_y; // A_pv
+            matrix_values[idx_3_0] = (1.0 - lambda) * div_coeff_x; // A_pu
+            matrix_values[idx_3_1] = (1.0 - lambda) * div_coeff_y; // A_pv
+            matrix_values[idx_3_2] = 0.0; // A_pe
             
             // Diagonal P-U and P-V (Own U, V)
             sum_diag_pu += lambda * div_coeff_x;
@@ -325,7 +436,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let lapl_coeff = dp_f * area / dist;
             
             // Off-diagonal P-P (Neighbor P)
-            matrix_values[idx_2_2] = -lapl_coeff; // A_pp (Negative for diffusion)
+            matrix_values[idx_3_3] = -lapl_coeff; // A_pp (Negative for diffusion)
             
             // Diagonal P-P (Own P)
             sum_diag_pp += lapl_coeff; // Positive for diffusion
@@ -336,7 +447,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_p_own = d_p[idx];
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             
-            let scalar_coeff = constants.density * d_p_face * area / dist;
+            let scalar_coeff = rho_face * d_p_face * area / dist;
             
             if (scalar_mat_idx != 4294967295u) {
                 scalar_matrix_values[scalar_mat_idx] = -scalar_coeff;
@@ -350,19 +461,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
                 let u_bc_x = constants.inlet_velocity * ramp;
                 let u_bc_y = 0.0;
+                let e_bc = 220000.0; // Placeholder for Inlet Energy (Approx T=300K, Cv=718)
                 
                 diag_u += diff_coeff;
                 diag_v += diff_coeff;
+                diag_e += diff_coeff; // Dirichlet for Energy
                 
                 rhs_u += diff_coeff * u_bc_x;
                 rhs_v += diff_coeff * u_bc_y;
+                rhs_e += diff_coeff * e_bc;
                 
                 if (flux > 0.0) {
                     diag_u += flux;
                     diag_v += flux;
+                    diag_e += flux;
                 } else {
                     rhs_u -= flux * u_bc_x;
                     rhs_v -= flux * u_bc_y;
+                    rhs_e -= flux * e_bc;
                 }
                 
                 // Pressure Gradient: Zero Gradient (p_f = p_P)
@@ -380,6 +496,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // No slip: u = 0
                 diag_u += diff_coeff;
                 diag_v += diff_coeff;
+                // Adiabatic Wall: No diffusion flux for Energy (Nu=0) -> Do nothing for diag_e
                 
                 // Pressure Gradient: Zero Gradient (p_f = p_P)
                 let pg_force_x = area * normal.x;
@@ -392,6 +509,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (flux > 0.0) {
                     diag_u += flux;
                     diag_v += flux;
+                    diag_e += flux;
                 }
                 
                 // Continuity:
@@ -408,7 +526,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
                 // Scalar Pressure Matrix at Outlet (Dirichlet p=0)
                 let d_p_own = d_p[idx];
-                let scalar_coeff = constants.density * d_p_own * area / dist;
+                let scalar_coeff = rho * d_p_own * area / dist;
                 scalar_diag_p += scalar_coeff;
             }
         }
@@ -418,41 +536,78 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = scalar_diag_idx - scalar_offset;
     
-    let d_0_0 = start_row_0 + 3u * diag_rank + 0u;
-    let d_0_1 = start_row_0 + 3u * diag_rank + 1u;
-    let d_0_2 = start_row_0 + 3u * diag_rank + 2u;
+    // 4x4 block indices
+    let d_0_0 = start_row_0 + 4u * diag_rank + 0u;
+    let d_0_1 = start_row_0 + 4u * diag_rank + 1u;
+    let d_0_2 = start_row_0 + 4u * diag_rank + 2u; // U-E
+    let d_0_3 = start_row_0 + 4u * diag_rank + 3u; // U-P
     
-    let d_1_0 = start_row_1 + 3u * diag_rank + 0u;
-    let d_1_1 = start_row_1 + 3u * diag_rank + 1u;
-    let d_1_2 = start_row_1 + 3u * diag_rank + 2u;
+    let d_1_0 = start_row_1 + 4u * diag_rank + 0u;
+    let d_1_1 = start_row_1 + 4u * diag_rank + 1u;
+    let d_1_2 = start_row_1 + 4u * diag_rank + 2u; // V-E
+    let d_1_3 = start_row_1 + 4u * diag_rank + 3u; // V-P
     
-    let d_2_0 = start_row_2 + 3u * diag_rank + 0u;
-    let d_2_1 = start_row_2 + 3u * diag_rank + 1u;
-    let d_2_2 = start_row_2 + 3u * diag_rank + 2u;
+    let d_2_0 = start_row_2 + 4u * diag_rank + 0u; // E-U
+    let d_2_1 = start_row_2 + 4u * diag_rank + 1u; // E-V
+    let d_2_2 = start_row_2 + 4u * diag_rank + 2u; // E-E
+    let d_2_3 = start_row_2 + 4u * diag_rank + 3u; // E-P
     
+    let d_3_0 = start_row_3 + 4u * diag_rank + 0u; // P-U
+    let d_3_1 = start_row_3 + 4u * diag_rank + 1u; // P-V
+    let d_3_2 = start_row_3 + 4u * diag_rank + 2u; // P-E
+    let d_3_3 = start_row_3 + 4u * diag_rank + 3u; // P-P
+    
+    // Row 0 (U)
     matrix_values[d_0_0] = diag_u;
     matrix_values[d_0_1] = 0.0;
-    matrix_values[d_0_2] = sum_diag_up;
+    matrix_values[d_0_2] = 0.0;
+    matrix_values[d_0_3] = sum_diag_up;
     
+    // Row 1 (V)
     matrix_values[d_1_0] = 0.0;
     matrix_values[d_1_1] = diag_v;
-    matrix_values[d_1_2] = sum_diag_vp;
+    matrix_values[d_1_2] = 0.0;
+    matrix_values[d_1_3] = sum_diag_vp;
     
-    matrix_values[d_2_0] = sum_diag_pu;
-    matrix_values[d_2_1] = sum_diag_pv;
-    matrix_values[d_2_2] = diag_p + sum_diag_pp;
+    // Row 2 (E)
+    matrix_values[d_2_0] = 0.0;
+    matrix_values[d_2_1] = 0.0;
+    matrix_values[d_2_2] = diag_e;
+    matrix_values[d_2_3] = 0.0; // sum_diag_ep if any
     
-    // Write RHS
-    rhs[3u * idx + 0u] = rhs_u;
-    rhs[3u * idx + 1u] = rhs_v;
-    rhs[3u * idx + 2u] = rhs_p;
+    // Row 3 (P)
+    matrix_values[d_3_0] = sum_diag_pu;
+    matrix_values[d_3_1] = sum_diag_pv;
+    matrix_values[d_3_2] = 0.0; // sum_diag_pe
+    matrix_values[d_3_3] = diag_p + sum_diag_pp;
+    
+    // Write RHS (4x4)
+    rhs[4u * idx + 0u] = rhs_u;
+    rhs[4u * idx + 1u] = rhs_v;
+    rhs[4u * idx + 2u] = rhs_e;
+    rhs[4u * idx + 3u] = rhs_p;
 
     // Write Scalar Pressure Diagonal
     scalar_matrix_values[scalar_diag_idx] = scalar_diag_p;
 
     // Write Diagonal Inverses
+    // For Block Jacobi, this shader computes diagonal inverses.
+    // Assuming 4x4 block inversion is handled separately or we invoke a separate kernel?
+    // Current code: computes scalar diag inverses?
+    // Lines 461-463: diag_u_inv[idx] = safe_inverse(diag_u).
+    // This assumes simple diagonal scaling.
+    // For 4x4 coupled, we might need full block inverse.
+    // `coupled_assembly_merged.wgsl` only computes DIAGONAL entries for simple Jacobi?
+    // Let's verify what `diag_u_inv` is used for.
+    // Used in Smoother loop maybe?
+    // If we switch to full Coupled, `b_diag_inv` (block inverse) is computed by `preconditioner.wgsl`.
+    // `coupled_assembly` writes `matrix_values`.
+    // The `diag_u_inv` outputs here seem to be for simple relaxation or scalar stages.
+    
     diag_u_inv[idx] = safe_inverse(diag_u);
     diag_v_inv[idx] = safe_inverse(diag_v);
     diag_p_inv[idx] = safe_inverse(scalar_diag_p);
+    // Maybe add diag_e_inv?
+    // But let's leave as is for now, standard fields.
 
 }

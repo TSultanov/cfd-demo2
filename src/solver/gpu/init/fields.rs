@@ -6,6 +6,8 @@ pub struct FieldResources {
     pub b_u: wgpu::Buffer,
     pub b_u_old: wgpu::Buffer,
     pub b_u_old_old: wgpu::Buffer,
+    pub u_buffers: Vec<wgpu::Buffer>,
+    pub bg_fields_ping_pong: Vec<wgpu::BindGroup>,
     pub b_p: wgpu::Buffer,
     pub b_d_p: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
@@ -108,29 +110,64 @@ pub fn init_fields(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> Fie
     let bgl_fields =
         device.create_bind_group_layout(&prepare_coupled::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
 
-    let bg_fields = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Fields Bind Group"),
-        layout: &bgl_fields,
-        entries: &prepare_coupled::WgpuBindGroup1Entries::new(
-            prepare_coupled::WgpuBindGroup1EntriesParams {
-                u: b_u.as_entire_buffer_binding(),
-                p: b_p.as_entire_buffer_binding(),
-                fluxes: b_fluxes.as_entire_buffer_binding(),
-                constants: b_constants.as_entire_buffer_binding(),
-                grad_p: b_grad_p.as_entire_buffer_binding(),
-                d_p: b_d_p.as_entire_buffer_binding(),
-                grad_component: b_grad_component.as_entire_buffer_binding(),
-                u_old: b_u_old.as_entire_buffer_binding(),
-                u_old_old: b_u_old_old.as_entire_buffer_binding(),
-            },
-        )
-        .into_array(),
-    });
+    // Create 3 bind groups for ping-pong
+    // Buffers: [b_u, b_u_old, b_u_old_old] -> [0, 1, 2]
+    // BG0: u=0, u_old=1, u_old_old=2
+    // BG1: u=2, u_old=0, u_old_old=1
+    // BG2: u=1, u_old=2, u_old_old=0
+
+    let u_buffers_vec = vec![b_u.clone(), b_u_old.clone(), b_u_old_old.clone()];
+    let mut bg_fields_ping_pong = Vec::new();
+
+    for i in 0..3 {
+        let idx_u = match i {
+            0 => 0,
+            1 => 2,
+            2 => 1,
+            _ => 0,
+        };
+        let idx_u_old = match i {
+            0 => 1,
+            1 => 0,
+            2 => 2,
+            _ => 0,
+        };
+        let idx_u_old_old = match i {
+            0 => 2,
+            1 => 1,
+            2 => 0,
+            _ => 0,
+        };
+
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Fields Bind Group {}", i)),
+            layout: &bgl_fields,
+            entries: &prepare_coupled::WgpuBindGroup1Entries::new(
+                prepare_coupled::WgpuBindGroup1EntriesParams {
+                    u: u_buffers_vec[idx_u].as_entire_buffer_binding(),
+                    p: b_p.as_entire_buffer_binding(),
+                    fluxes: b_fluxes.as_entire_buffer_binding(),
+                    constants: b_constants.as_entire_buffer_binding(),
+                    grad_p: b_grad_p.as_entire_buffer_binding(),
+                    d_p: b_d_p.as_entire_buffer_binding(),
+                    grad_component: b_grad_component.as_entire_buffer_binding(),
+                    u_old: u_buffers_vec[idx_u_old].as_entire_buffer_binding(),
+                    u_old_old: u_buffers_vec[idx_u_old_old].as_entire_buffer_binding(),
+                },
+            )
+            .into_array(),
+        });
+        bg_fields_ping_pong.push(bg);
+    }
+
+    let bg_fields = bg_fields_ping_pong[0].clone();
 
     FieldResources {
         b_u,
         b_u_old,
         b_u_old_old,
+        u_buffers: u_buffers_vec,
+        bg_fields_ping_pong,
         b_p,
         b_d_p,
         b_fluxes,

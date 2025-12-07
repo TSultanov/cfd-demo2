@@ -40,8 +40,35 @@ impl GpuSolver {
             return;
         }
 
-        // Save old velocity for under-relaxation and time derivative
-        self.copy_u_to_u_old();
+        // Ping-pong rotation
+        self.u_step_index = (self.u_step_index + 1) % 3;
+
+        // Update bind group
+        self.bg_fields = self.bg_fields_ping_pong[self.u_step_index].clone();
+
+        // Update buffer references
+        let idx_u = match self.u_step_index {
+            0 => 0,
+            1 => 2,
+            2 => 1,
+            _ => 0,
+        };
+        let idx_u_old = match self.u_step_index {
+            0 => 1,
+            1 => 0,
+            2 => 2,
+            _ => 0,
+        };
+        let idx_u_old_old = match self.u_step_index {
+            0 => 2,
+            1 => 1,
+            2 => 0,
+            _ => 0,
+        };
+
+        self.b_u = self.u_buffers[idx_u].clone();
+        self.b_u_old = self.u_buffers[idx_u_old].clone();
+        self.b_u_old_old = self.u_buffers[idx_u_old_old].clone();
 
         // Initialize fluxes and d_p (and gradients)
         {

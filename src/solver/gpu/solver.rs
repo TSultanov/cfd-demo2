@@ -230,33 +230,7 @@ impl GpuSolver {
         self.step_coupled();
     }
 
-    /// Copy current velocity to u_old buffer for under-relaxation
-    pub(crate) fn copy_u_to_u_old(&self) {
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Copy U to U_old Encoder"),
-                });
 
-        // Copy u_old to u_old_old first
-        encoder.copy_buffer_to_buffer(
-            &self.b_u_old,
-            0,
-            &self.b_u_old_old,
-            0,
-            (self.num_cells as u64) * 8,
-        );
-
-        encoder.copy_buffer_to_buffer(
-            &self.b_u,
-            0,
-            &self.b_u_old,
-            0,
-            (self.num_cells as u64) * 8, // 2 floats per cell
-        );
-        self.context.queue.submit(Some(encoder.finish()));
-    }
 
     /// Get a reference to the detailed profiling statistics
     pub fn get_profiling_stats(&self) -> Arc<ProfilingStats> {

@@ -72,6 +72,7 @@ impl GpuSolver {
 
         // Initialize fluxes and d_p (and gradients)
         {
+            let init_dispatch_start = Instant::now();
             let mut encoder =
                 self.context
                     .device
@@ -98,6 +99,12 @@ impl GpuSolver {
             }
 
             self.context.queue.submit(Some(encoder.finish()));
+            self.profiling_stats.record_location(
+                "coupled:init_prepare",
+                ProfileCategory::GpuDispatch,
+                init_dispatch_start.elapsed(),
+                0,
+            );
         }
 
         // Coupled iteration loop - use more iterations for robustness
@@ -115,7 +122,14 @@ impl GpuSolver {
 
         for iter in 0..max_coupled_iters {
             self.profiling_stats.increment_iteration();
+            let io_start = Instant::now();
             println!("Coupled Iteration: {}", iter + 1);
+            self.profiling_stats.record_location(
+                "coupled:println_iteration",
+                ProfileCategory::CpuCompute,
+                io_start.elapsed(),
+                0,
+            );
 
             // Debug: Check d_p values on first iteration - DEBUG READ
             if DEBUG_READS_ENABLED && iter == 0 {
@@ -153,7 +167,14 @@ impl GpuSolver {
                     // Ensure component is 0 for d_p calculation (if needed)
                     if iter > 0 {
                         self.constants.component = 0;
+                        let update_const_start = Instant::now();
                         self.update_constants();
+                        self.profiling_stats.record_location(
+                            "coupled:update_constants",
+                            ProfileCategory::GpuWrite,
+                            update_const_start.elapsed(),
+                            std::mem::size_of_val(&self.constants) as u64,
+                        );
                     }
 
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -308,9 +329,16 @@ impl GpuSolver {
             // 3. Solve Coupled System using FGMRES-based coupled solver (CPU-side Krylov, GPU SpMV/precond)
             let stats = self.solve_coupled_system();
             *self.stats_p.lock().unwrap() = stats;
+            let io_start = Instant::now();
             println!(
                 "Coupled linear solve: {} iterations, residual {:.2e}, converged={}",
                 stats.iterations, stats.residual, stats.converged
+            );
+            self.profiling_stats.record_location(
+                "coupled:println_linear_solve",
+                ProfileCategory::CpuCompute,
+                io_start.elapsed(),
+                0,
             );
 
             if stats.residual.is_nan() {
@@ -323,9 +351,16 @@ impl GpuSolver {
 
                 // Clear max diff result buffer before update (using atomics in shader)
                 if iter > 0 {
+                    let clear_write_start = Instant::now();
                     self.context
                         .queue
                         .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
+                    self.profiling_stats.record_location(
+                        "coupled:clear_max_diff",
+                        ProfileCategory::GpuWrite,
+                        clear_write_start.elapsed(),
+                        8,
+                    );
                 }
 
                 let dispatch_start = Instant::now();
@@ -361,6 +396,7 @@ impl GpuSolver {
             if iter > 0 {
                 if let Some(res) = self.coupled_resources.as_ref() {
                     // Start async read for CURRENT iteration
+                    let async_start = Instant::now();
                     let mut reader = res.async_scalar_reader.borrow_mut();
                     reader.start_read(
                         &self.context.device,
@@ -370,6 +406,12 @@ impl GpuSolver {
                     );
 
                     reader.poll(); // Poll for completion of previous reads
+                    self.profiling_stats.record_location(
+                        "coupled:async_convergence_check",
+                        ProfileCategory::Other,
+                        async_start.elapsed(),
+                        0,
+                    );
 
                     // Check if we have a result available
                     if let Some(results) = reader.get_last_value_vec(2) {
@@ -388,9 +430,16 @@ impl GpuSolver {
                         *self.outer_residual_p.lock().unwrap() = max_diff_p as f32;
                         *self.outer_iterations.lock().unwrap() = iter + 1;
 
+                        let io_start = Instant::now();
                         println!(
                             "Coupled Residuals - U: {:.2e}, P: {:.2e}",
                             max_diff_u, max_diff_p
+                        );
+                        self.profiling_stats.record_location(
+                            "coupled:println_residuals",
+                            ProfileCategory::CpuCompute,
+                            io_start.elapsed(),
+                            0,
                         );
 
                         // Converged if both U and P are below tolerance

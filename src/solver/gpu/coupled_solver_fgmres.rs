@@ -1344,7 +1344,8 @@ impl GpuSolver {
         z: wgpu::BindingResource<'a>,
         label: &str,
     ) -> wgpu::BindGroup {
-        self.context
+        let start = Instant::now();
+        let bg = self.context
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label),
@@ -1363,7 +1364,14 @@ impl GpuSolver {
                         resource: z,
                     },
                 ],
-            })
+            });
+        self.profiling_stats.record_location(
+            "create_vector_bind_group",
+            ProfileCategory::CpuCompute,
+            start.elapsed(),
+            0,
+        );
+        bg
     }
 
     fn dispatch_vector_pipeline(
@@ -1744,6 +1752,7 @@ impl GpuSolver {
         let workgroups_cells = self.workgroups_for_size(num_cells);
 
         // Reuse FGMRES pressure buffers directly in AMG level 0 to avoid copy-buffer hops.
+        let bg_create_start = Instant::now();
         let amg_level0_state_override = if self.constants.precond_type == 1 {
             fgmres.amg_resources.as_ref().map(|amg| {
                 let level0 = &amg.levels[0];
@@ -1771,6 +1780,12 @@ impl GpuSolver {
         } else {
             None
         };
+        self.profiling_stats.record_location(
+            "fgmres:create_amg_override_bg",
+            ProfileCategory::GpuResourceCreation,
+            bg_create_start.elapsed(),
+            0,
+        );
 
         // Initialize IterParams
         let mut iter_params = IterParams {
@@ -1779,9 +1794,16 @@ impl GpuSolver {
             _pad1: 0,
             _pad2: 0,
         };
+        let init_write_start = Instant::now();
         self.context
             .queue
             .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+        self.profiling_stats.record_location(
+            "fgmres:write_iter_params_init",
+            ProfileCategory::GpuWrite,
+            init_write_start.elapsed(),
+            std::mem::size_of::<IterParams>() as u64,
+        );
 
         let precond_params = PreconditionerParams {
             n: 0,
@@ -1789,10 +1811,17 @@ impl GpuSolver {
             omega: 1.2,
             precond_type: self.constants.precond_type,
         };
+        let precond_write_start = Instant::now();
         self.context.queue.write_buffer(
             &fgmres.b_precond_params,
             0,
             bytemuck::bytes_of(&precond_params),
+        );
+        self.profiling_stats.record_location(
+            "fgmres:write_precond_params",
+            ProfileCategory::GpuWrite,
+            precond_write_start.elapsed(),
+            std::mem::size_of::<PreconditionerParams>() as u64,
         );
 
         // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
@@ -1845,15 +1874,29 @@ impl GpuSolver {
         ); // Initialize g on GPU
         let mut g_initial = vec![0.0f32; max_restart + 1];
         g_initial[0] = residual_norm;
+        let g_init_write_start = Instant::now();
         self.context
             .queue
             .write_buffer(&fgmres.b_g, 0, cast_slice(&g_initial));
+        self.profiling_stats.record_location(
+            "fgmres:write_g_init",
+            ProfileCategory::GpuWrite,
+            g_init_write_start.elapsed(),
+            (g_initial.len() * 4) as u64,
+        );
 
         let mut total_iters = 0u32;
         let mut final_resid = residual_norm;
         let mut converged = false;
 
+        let io_start = Instant::now();
         println!("FGMRES: Initial residual = {:.2e}", residual_norm);
+        self.profiling_stats.record_location(
+            "fgmres:println",
+            ProfileCategory::CpuCompute,
+            io_start.elapsed(),
+            0,
+        );
 
         let mut stagnation_count = 0;
         let mut prev_resid_norm = residual_norm;
@@ -1975,11 +2018,19 @@ impl GpuSolver {
                     column_offset: 0,
                     _pad3: 0,
                 };
+                let cgs_write_start = Instant::now();
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_params, 0, bytes_of(&cgs_params));
+                self.profiling_stats.record_location(
+                    "fgmres:write_cgs_params",
+                    ProfileCategory::GpuWrite,
+                    cgs_write_start.elapsed(),
+                    std::mem::size_of::<RawFgmresParams>() as u64,
+                );
 
                 {
+                    let cgs_dispatch_start = Instant::now();
                     let mut encoder = self.context.device.create_command_encoder(
                         &wgpu::CommandEncoderDescriptor {
                             label: Some("CGS Step"),
@@ -2020,6 +2071,12 @@ impl GpuSolver {
                     }
 
                     self.context.queue.submit(Some(encoder.finish()));
+                    self.profiling_stats.record_location(
+                        "FGMRES CGS Step",
+                        ProfileCategory::GpuDispatch,
+                        cgs_dispatch_start.elapsed(),
+                        0,
+                    );
                 }
 
                 // Restore params.n
@@ -2033,15 +2090,29 @@ impl GpuSolver {
                     column_offset: 0,
                     _pad3: 0,
                 };
+                let restore_write_start = Instant::now();
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
+                self.profiling_stats.record_location(
+                    "fgmres:write_restore_params",
+                    ProfileCategory::GpuWrite,
+                    restore_write_start.elapsed(),
+                    std::mem::size_of::<RawFgmresParams>() as u64,
+                );
 
                 // Compute norm of w (H[j+1, j])
                 iter_params.current_idx = h_idx(j + 1, j) as u32;
+                let iter_write_start = Instant::now();
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+                self.profiling_stats.record_location(
+                    "fgmres:write_iter_params_norm",
+                    ProfileCategory::GpuWrite,
+                    iter_write_start.elapsed(),
+                    std::mem::size_of::<IterParams>() as u64,
+                );
 
                 // Norm squared partial
                 let norm_bg = &fgmres.bg_norm_w;
@@ -2065,9 +2136,16 @@ impl GpuSolver {
                     column_offset: 0,
                     _pad3: 0,
                 };
+                let reduce_write_start = Instant::now();
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+                self.profiling_stats.record_location(
+                    "fgmres:write_reduce_params",
+                    ProfileCategory::GpuWrite,
+                    reduce_write_start.elapsed(),
+                    std::mem::size_of::<RawFgmresParams>() as u64,
+                );
 
                 let reduce_bg = &fgmres.bg_reduce_norm;
 
@@ -2081,7 +2159,7 @@ impl GpuSolver {
                 );
 
                 // Restore params.n
-                let restore_params = RawFgmresParams {
+                let restore_params2 = RawFgmresParams {
                     n,
                     num_cells: self.num_cells,
                     num_iters: 2,
@@ -2091,9 +2169,16 @@ impl GpuSolver {
                     column_offset: 0,
                     _pad3: 0,
                 };
+                let restore2_write_start = Instant::now();
                 self.context
                     .queue
-                    .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
+                    .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params2));
+                self.profiling_stats.record_location(
+                    "fgmres:write_restore_params2",
+                    ProfileCategory::GpuWrite,
+                    restore2_write_start.elapsed(),
+                    std::mem::size_of::<RawFgmresParams>() as u64,
+                );
 
                 // Normalize w directly into basis[j+1]
                 // basis[j+1] = scalars[0] * w
@@ -2129,7 +2214,14 @@ impl GpuSolver {
 
                 // Async convergence checking - use non-blocking poll
                 // Poll the device without waiting (allows GPU work to continue)
+                let poll_start = Instant::now();
                 let _ = self.context.device.poll(wgpu::PollType::Poll);
+                self.profiling_stats.record_location(
+                    "fgmres:device_poll_nonblocking",
+                    ProfileCategory::Other,
+                    poll_start.elapsed(),
+                    0,
+                );
 
                 // Check convergence every few iterations to balance early termination vs overhead.
                 // Lower values detect convergence earlier but have slightly more overhead.
@@ -2164,11 +2256,18 @@ impl GpuSolver {
                     // This allows GPU work to continue while we wait
                     if let Some(resid_est) = async_reader.get_last_value() {
                         if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
+                            let io_start = Instant::now();
                             println!(
                                 "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
                                 total_iters,
                                 resid_est,
                                 tol * rhs_norm
+                            );
+                            self.profiling_stats.record_location(
+                                "fgmres:println",
+                                ProfileCategory::CpuCompute,
+                                io_start.elapsed(),
+                                0,
                             );
                         }
 
@@ -2182,9 +2281,16 @@ impl GpuSolver {
 
             // Solve upper triangular system (GPU)
             iter_params.current_idx = basis_size as u32;
+            let tri_write_start = Instant::now();
             self.context
                 .queue
                 .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+            self.profiling_stats.record_location(
+                "fgmres:write_iter_params_triangular",
+                ProfileCategory::GpuWrite,
+                tri_write_start.elapsed(),
+                std::mem::size_of::<IterParams>() as u64,
+            );
 
             self.dispatch_logic_pipeline(
                 &fgmres.pipeline_solve_triangular,
@@ -2197,9 +2303,16 @@ impl GpuSolver {
             for i in 0..basis_size {
                 // Set current index for y[i] access
                 iter_params.current_idx = i as u32;
+                let sol_write_start = Instant::now();
                 self.context
                     .queue
                     .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+                self.profiling_stats.record_location(
+                    "fgmres:write_iter_params_sol",
+                    ProfileCategory::GpuWrite,
+                    sol_write_start.elapsed(),
+                    std::mem::size_of::<IterParams>() as u64,
+                );
 
                 let axpy_bg = &fgmres.bg_axpy_sol[i];
                 self.dispatch_vector_pipeline(
@@ -2215,8 +2328,15 @@ impl GpuSolver {
             // If already converged from estimated residual, skip true residual computation
             if converged {
                 // Read the estimated residual for reporting
+                let flush_start = Instant::now();
                 let mut async_reader = fgmres.async_scalar_reader.borrow_mut();
                 async_reader.flush(&self.context.device);
+                self.profiling_stats.record_location(
+                    "fgmres:async_reader_flush",
+                    ProfileCategory::GpuSync,
+                    flush_start.elapsed(),
+                    0,
+                );
                 let resid_est = async_reader.get_last_value().unwrap_or(0.0);
                 final_resid = resid_est;
                 println!(
@@ -2251,9 +2371,16 @@ impl GpuSolver {
             // Reset g on GPU
             let mut g_initial = vec![0.0f32; max_restart + 1];
             g_initial[0] = residual_norm;
+            let g_write_start = Instant::now();
             self.context
                 .queue
                 .write_buffer(&fgmres.b_g, 0, cast_slice(&g_initial));
+            self.profiling_stats.record_location(
+                "fgmres:write_g_restart",
+                ProfileCategory::GpuWrite,
+                g_write_start.elapsed(),
+                (g_initial.len() * 4) as u64,
+            );
 
             if residual_norm <= 0.0 {
                 println!("FGMRES: residual vanished at restart {}", outer_iter + 1);
@@ -2295,9 +2422,16 @@ impl GpuSolver {
             );
         }
 
+        let io_start = Instant::now();
         println!(
             "FGMRES finished: {} iterations, residual = {:.2e}, converged = {}",
             total_iters, final_resid, converged
+        );
+        self.profiling_stats.record_location(
+            "fgmres:println",
+            ProfileCategory::CpuCompute,
+            io_start.elapsed(),
+            0,
         );
 
         LinearSolverStats {

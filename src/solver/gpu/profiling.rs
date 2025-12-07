@@ -3,6 +3,7 @@
 // This module provides detailed profiling of GPU-CPU data transfers and synchronization
 // to identify performance bottlenecks and opportunities for GPU offloading.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -24,6 +25,49 @@ pub enum ProfileCategory {
     GpuResourceCreation,
     /// Other overhead
     Other,
+}
+
+/// Memory domains for allocation profiling
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryDomain {
+    Cpu,
+    Gpu,
+}
+
+impl MemoryDomain {
+    pub fn name(&self) -> &'static str {
+        match self {
+            MemoryDomain::Cpu => "CPU",
+            MemoryDomain::Gpu => "GPU",
+        }
+    }
+}
+
+/// Allocation / deallocation statistics
+#[derive(Debug, Default, Clone)]
+pub struct MemoryStats {
+    pub alloc_bytes: u64,
+    pub alloc_count: u64,
+    pub free_bytes: u64,
+    pub free_count: u64,
+    pub max_alloc_request: u64,
+}
+
+impl MemoryStats {
+    pub fn record_alloc(&mut self, bytes: u64) {
+        self.alloc_bytes += bytes;
+        self.alloc_count += 1;
+        self.max_alloc_request = self.max_alloc_request.max(bytes);
+    }
+
+    pub fn record_free(&mut self, bytes: u64) {
+        self.free_bytes += bytes;
+        self.free_count += 1;
+    }
+
+    pub fn net_bytes(&self) -> i64 {
+        self.alloc_bytes as i64 - self.free_bytes as i64
+    }
 }
 
 impl ProfileCategory {
@@ -100,6 +144,14 @@ pub struct ProfilingStats {
     iteration_count: AtomicU64,
     /// Per-location profiling for identifying hotspots
     location_stats: Mutex<Vec<(String, CategoryStats)>>,
+    /// CPU memory profiling stats
+    memory_cpu: Mutex<MemoryStats>,
+    /// GPU memory profiling stats
+    memory_gpu: Mutex<MemoryStats>,
+    /// Per-location CPU memory profiling
+    memory_locations_cpu: Mutex<HashMap<String, MemoryStats>>,
+    /// Per-location GPU memory profiling
+    memory_locations_gpu: Mutex<HashMap<String, MemoryStats>>,
 }
 
 impl Default for ProfilingStats {
@@ -125,6 +177,10 @@ impl ProfilingStats {
             session_total: Mutex::new(Duration::ZERO),
             iteration_count: AtomicU64::new(0),
             location_stats: Mutex::new(Vec::new()),
+            memory_cpu: Mutex::new(MemoryStats::default()),
+            memory_gpu: Mutex::new(MemoryStats::default()),
+            memory_locations_cpu: Mutex::new(HashMap::new()),
+            memory_locations_gpu: Mutex::new(HashMap::new()),
         }
     }
 
@@ -158,6 +214,10 @@ impl ProfilingStats {
         }
         self.iteration_count.store(0, Ordering::Relaxed);
         self.location_stats.lock().unwrap().clear();
+        *self.memory_cpu.lock().unwrap() = MemoryStats::default();
+        *self.memory_gpu.lock().unwrap() = MemoryStats::default();
+        self.memory_locations_cpu.lock().unwrap().clear();
+        self.memory_locations_gpu.lock().unwrap().clear();
     }
 
     pub fn increment_iteration(&self) {
@@ -218,6 +278,81 @@ impl ProfilingStats {
 
     pub fn get_location_stats(&self) -> Vec<(String, CategoryStats)> {
         self.location_stats.lock().unwrap().clone()
+    }
+
+    pub fn record_memory_event(&self, domain: MemoryDomain, location: &str, bytes: u64, is_alloc: bool) {
+        if !self.is_enabled() {
+            return;
+        }
+
+        let (totals, locations) = match domain {
+            MemoryDomain::Cpu => (
+                &self.memory_cpu,
+                &self.memory_locations_cpu,
+            ),
+            MemoryDomain::Gpu => (
+                &self.memory_gpu,
+                &self.memory_locations_gpu,
+            ),
+        };
+
+        {
+            let mut guard = totals.lock().unwrap();
+            if is_alloc {
+                guard.record_alloc(bytes);
+            } else {
+                guard.record_free(bytes);
+            }
+        }
+
+        let mut map = locations.lock().unwrap();
+        let entry = map.entry(location.to_string()).or_insert_with(MemoryStats::default);
+        if is_alloc {
+            entry.record_alloc(bytes);
+        } else {
+            entry.record_free(bytes);
+        }
+    }
+
+    pub fn record_cpu_alloc(&self, location: &str, bytes: u64) {
+        self.record_memory_event(MemoryDomain::Cpu, location, bytes, true);
+    }
+
+    pub fn record_cpu_free(&self, location: &str, bytes: u64) {
+        self.record_memory_event(MemoryDomain::Cpu, location, bytes, false);
+    }
+
+    pub fn record_gpu_alloc(&self, location: &str, bytes: u64) {
+        self.record_memory_event(MemoryDomain::Gpu, location, bytes, true);
+    }
+
+    pub fn record_gpu_free(&self, location: &str, bytes: u64) {
+        self.record_memory_event(MemoryDomain::Gpu, location, bytes, false);
+    }
+
+    pub fn get_memory_stats(&self) -> (MemoryStats, MemoryStats) {
+        let cpu = self.memory_cpu.lock().unwrap().clone();
+        let gpu = self.memory_gpu.lock().unwrap().clone();
+        (cpu, gpu)
+    }
+
+    pub fn get_memory_location_stats(&self, domain: MemoryDomain) -> Vec<(String, MemoryStats)> {
+        match domain {
+            MemoryDomain::Cpu => self
+                .memory_locations_cpu
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            MemoryDomain::Gpu => self
+                .memory_locations_gpu
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        }
     }
 
     pub fn get_session_total(&self) -> Duration {
@@ -315,8 +450,68 @@ impl ProfilingStats {
 
         println!();
 
+        // Memory usage summary
+        self.print_memory_report();
+
         // Optimization suggestions
         self.print_optimization_suggestions();
+    }
+
+    fn print_memory_report(&self) {
+        println!("Memory Allocation / Deallocation:");
+        println!("{}", "-".repeat(50));
+
+        let (cpu, gpu) = self.get_memory_stats();
+        println!(
+            "{:<6} {:>14} {:>14} {:>14} {:>14} {:>14}",
+            "Domain", "Alloc Bytes", "Alloc Count", "Free Bytes", "Free Count", "Net Bytes",
+        );
+        println!(
+            "{:<6} {:>14} {:>14} {:>14} {:>14} {:>14}",
+            "CPU",
+            cpu.alloc_bytes,
+            cpu.alloc_count,
+            cpu.free_bytes,
+            cpu.free_count,
+            cpu.net_bytes(),
+        );
+        println!(
+            "{:<6} {:>14} {:>14} {:>14} {:>14} {:>14}",
+            "GPU",
+            gpu.alloc_bytes,
+            gpu.alloc_count,
+            gpu.free_bytes,
+            gpu.free_count,
+            gpu.net_bytes(),
+        );
+
+        // Top memory hotspots by location
+        for domain in [MemoryDomain::Cpu, MemoryDomain::Gpu] {
+            let mut locations = self.get_memory_location_stats(domain);
+            locations.sort_by(|a, b| b.1.alloc_bytes.cmp(&a.1.alloc_bytes));
+            if locations.is_empty() {
+                continue;
+            }
+
+            println!("\nTop 10 {} allocations:", domain.name());
+            println!(
+                "{:<50} {:>14} {:>12} {:>14}",
+                "Location", "Alloc Bytes", "Alloc Cnt", "Max Request"
+            );
+            println!("{}", "-".repeat(96));
+
+            for (loc, stats) in locations.into_iter().take(10) {
+                println!(
+                    "{:<50} {:>14} {:>12} {:>14}",
+                    loc,
+                    stats.alloc_bytes,
+                    stats.alloc_count,
+                    stats.max_alloc_request,
+                );
+            }
+        }
+
+        println!();
     }
 
     fn print_optimization_suggestions(&self) {

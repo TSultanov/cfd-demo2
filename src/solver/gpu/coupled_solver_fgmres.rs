@@ -1205,7 +1205,7 @@ impl GpuSolver {
             ));
         }
 
-        FgmresResources {
+        let resources = FgmresResources {
             b_basis,
             basis_stride,
             z_vectors,
@@ -1278,7 +1278,11 @@ impl GpuSolver {
             bg_spmv_z,
             bg_normalize_basis,
             bg_axpy_sol,
-        }
+        };
+
+        self.record_fgmres_allocations(&resources);
+
+        resources
     }
 
     const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;

@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use super::profiling::ProfilingStats;
+use super::coupled_solver_fgmres::FgmresResources;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
@@ -134,6 +135,9 @@ impl GpuSolver {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
+                self
+                    .profiling_stats
+                    .record_gpu_alloc("read_buffer:staging", size);
                 self.profiling_stats.record_location(
                     "read_buffer:create_staging",
                     ProfileCategory::GpuResourceCreation,
@@ -200,6 +204,8 @@ impl GpuSolver {
         let result = data.to_vec();
         drop(data);
         staging_buffer.unmap();
+        self.profiling_stats
+            .record_cpu_alloc("read_buffer:cpu_copy", size);
         self.profiling_stats.record_location(
             "read_buffer:memcpy",
             ProfileCategory::Other,
@@ -249,6 +255,7 @@ impl GpuSolver {
     /// Start a profiling session
     pub fn start_profiling_session(&self) {
         self.profiling_stats.start_session();
+        self.record_initial_allocations();
     }
 
     /// End a profiling session and get the report
@@ -281,5 +288,116 @@ impl GpuSolver {
             (self.num_cells as u64) * 8,
         );
         self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    fn record_initial_allocations(&self) {
+        if !self.profiling_stats.is_enabled() {
+            return;
+        }
+
+        let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
+            solver
+                .profiling_stats
+                .record_gpu_alloc(label, buf.size());
+        };
+
+        // Mesh
+        record(self, "mesh:face_owner", &self.b_face_owner);
+        record(self, "mesh:face_neighbor", &self.b_face_neighbor);
+        record(self, "mesh:face_boundary", &self.b_face_boundary);
+        record(self, "mesh:face_areas", &self.b_face_areas);
+        record(self, "mesh:face_normals", &self.b_face_normals);
+        record(self, "mesh:face_centers", &self.b_face_centers);
+        record(self, "mesh:cell_centers", &self.b_cell_centers);
+        record(self, "mesh:cell_vols", &self.b_cell_vols);
+        record(self, "mesh:cell_face_offsets", &self.b_cell_face_offsets);
+        record(self, "mesh:cell_faces", &self.b_cell_faces);
+        record(self, "mesh:cell_face_matrix_indices", &self.b_cell_face_matrix_indices);
+        record(self, "mesh:diagonal_indices", &self.b_diagonal_indices);
+
+        // Fields
+        record(self, "fields:u", &self.b_u);
+        record(self, "fields:u_old", &self.b_u_old);
+        record(self, "fields:u_old_old", &self.b_u_old_old);
+        for (i, buf) in self.u_buffers.iter().enumerate() {
+            record(self, &format!("fields:u_buffer_{}", i), buf);
+        }
+        record(self, "fields:p", &self.b_p);
+        record(self, "fields:d_p", &self.b_d_p);
+        record(self, "fields:fluxes", &self.b_fluxes);
+        record(self, "fields:grad_p", &self.b_grad_p);
+        record(self, "fields:grad_component", &self.b_grad_component);
+        record(self, "fields:constants", &self.b_constants);
+
+        // Matrix / linear solver
+        record(self, "linear:row_offsets", &self.b_row_offsets);
+        record(self, "linear:col_indices", &self.b_col_indices);
+        record(self, "linear:matrix_values", &self.b_matrix_values);
+        record(self, "linear:rhs", &self.b_rhs);
+        record(self, "linear:x", &self.b_x);
+        record(self, "linear:r", &self.b_r);
+        record(self, "linear:r0", &self.b_r0);
+        record(self, "linear:p_solver", &self.b_p_solver);
+        record(self, "linear:v", &self.b_v);
+        record(self, "linear:s", &self.b_s);
+        record(self, "linear:t", &self.b_t);
+        record(self, "linear:dot_result", &self.b_dot_result);
+        record(self, "linear:dot_result_2", &self.b_dot_result_2);
+        record(self, "linear:scalars", &self.b_scalars);
+        record(self, "linear:staging_scalar", &self.b_staging_scalar);
+        record(self, "linear:solver_params", &self.b_solver_params);
+
+        if let Some(c) = &self.coupled_resources {
+            for (label, buf) in [
+                ("coupled:diag_inv", &c.b_diag_inv),
+                ("coupled:diag_u", &c.b_diag_u),
+                ("coupled:diag_v", &c.b_diag_v),
+                ("coupled:diag_p", &c.b_diag_p),
+                ("coupled:p_hat", &c.b_p_hat),
+                ("coupled:s_hat", &c.b_s_hat),
+                ("coupled:precond_rhs", &c.b_precond_rhs),
+                ("coupled:precond_params", &c.b_precond_params),
+                ("coupled:grad_u", &c.b_grad_u),
+                ("coupled:grad_v", &c.b_grad_v),
+                ("coupled:max_diff_result", &c.b_max_diff_result),
+            ] {
+                record(self, label, buf);
+            }
+        }
+
+        if let Some(fgmres) = &self.fgmres_resources {
+            self.record_fgmres_allocations(fgmres);
+        }
+    }
+
+    pub(crate) fn record_fgmres_allocations(&self, fgmres: &FgmresResources) {
+        if !self.profiling_stats.is_enabled() {
+            return;
+        }
+
+        let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
+            solver
+                .profiling_stats
+                .record_gpu_alloc(label, buf.size());
+        };
+
+        record(self, "fgmres:basis", &fgmres.b_basis);
+        for (i, buf) in fgmres.z_vectors.iter().enumerate() {
+            record(self, &format!("fgmres:z_{}", i), buf);
+        }
+        record(self, "fgmres:w", &fgmres.b_w);
+        record(self, "fgmres:temp", &fgmres.b_temp);
+        record(self, "fgmres:dot_partial", &fgmres.b_dot_partial);
+        record(self, "fgmres:scalars", &fgmres.b_scalars);
+        record(self, "fgmres:temp_p", &fgmres.b_temp_p);
+        record(self, "fgmres:p_sol", &fgmres.b_p_sol);
+        record(self, "fgmres:params", &fgmres.b_params);
+        record(self, "fgmres:precond_params", &fgmres.b_precond_params);
+        record(self, "fgmres:hessenberg", &fgmres.b_hessenberg);
+        record(self, "fgmres:givens", &fgmres.b_givens);
+        record(self, "fgmres:g", &fgmres.b_g);
+        record(self, "fgmres:y", &fgmres.b_y);
+        record(self, "fgmres:iter_params", &fgmres.b_iter_params);
+        record(self, "fgmres:staging_scalar", &fgmres.b_staging_scalar);
     }
 }

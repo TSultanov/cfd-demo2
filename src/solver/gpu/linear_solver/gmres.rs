@@ -124,6 +124,8 @@ impl GpuSolver {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        self.profiling_stats
+            .record_gpu_alloc("gmres:staging", size);
 
         let mut encoder = self
             .context
@@ -143,6 +145,8 @@ impl GpuSolver {
 
         let data = buffer_slice.get_mapped_range();
         let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        self.profiling_stats
+            .record_cpu_alloc("gmres:cpu_copy", size);
         drop(data);
         staging.unmap();
         result

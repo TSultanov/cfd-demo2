@@ -19,6 +19,15 @@ struct Constants {
     padding: u32,
 }
 
+// Consolidated FluidState struct per cell (32 bytes, aligned)
+struct FluidState {
+    u: vec2<f32>,           // velocity (8 bytes)
+    p: f32,                 // pressure (4 bytes)
+    d_p: f32,               // pressure correction coefficient (4 bytes)
+    grad_p: vec2<f32>,      // pressure gradient (8 bytes)
+    grad_component: vec2<f32>, // velocity gradient component (8 bytes)
+}
+
 // Group 0: Mesh
 @group(0) @binding(0) var<storage, read> face_owner: array<u32>;
 @group(0) @binding(1) var<storage, read> face_neighbor: array<i32>;
@@ -33,16 +42,12 @@ struct Constants {
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 
-// Group 1: Fields
-@group(1) @binding(0) var<storage, read_write> u: array<Vector2>;
-@group(1) @binding(1) var<storage, read_write> p: array<f32>;
-@group(1) @binding(2) var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(3) var<uniform> constants: Constants;
-@group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
-@group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
-@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
-@group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
-@group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+// Group 1: Fields (consolidated FluidState buffers)
+@group(1) @binding(0) var<storage, read_write> state: array<FluidState>;
+@group(1) @binding(1) var<storage, read> state_old: array<FluidState>;
+@group(1) @binding(2) var<storage, read> state_old_old: array<FluidState>;
+@group(1) @binding(3) var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) var<uniform> constants: Constants;
 
 // Group 2: Solver
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -104,11 +109,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 other_idx = owner;
             }
             other_center = cell_centers[other_idx];
-            d_p_neigh = d_p[other_idx];
+            d_p_neigh = state[other_idx].d_p;
         } else {
             is_boundary = true;
             other_center = f_center;
-            d_p_neigh = d_p[idx]; // Placeholder
+            d_p_neigh = state[idx].d_p; // Placeholder
         }
         
         if (!is_boundary) {
@@ -126,7 +131,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lambda = d_neigh / total_dist;
             }
 
-            let d_p_own = d_p[idx];
+            let d_p_own = state[idx].d_p;
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             
             let coeff = constants.density * d_p_face * area / dist;
@@ -163,8 +168,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if (owner != idx) {
                 other_idx_p = owner;
             }
-            let grad_p_own = grad_p[idx];
-            let grad_p_neigh = grad_p[other_idx_p];
+            let grad_p_own = state[idx].grad_p;
+            let grad_p_neigh = state[other_idx_p].grad_p;
             
             // Distance-weighted interpolation
             var interp_f = 0.5;
@@ -188,7 +193,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let dy = center.y - f_center.y;
                 let dist = sqrt(dx*dx + dy*dy);
                 
-                let d_p_own = d_p[idx];
+                let d_p_own = state[idx].d_p;
                 let coeff = constants.density * d_p_own * area / dist;
                 
                 diag_coeff += coeff;

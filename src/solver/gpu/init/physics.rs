@@ -12,14 +12,7 @@ pub struct PhysicsPipelines {
     pub pipeline_prepare_coupled: wgpu::ComputePipeline,
 }
 
-pub fn init_physics_pipelines(
-    device: &wgpu::Device,
-    _bgl_mesh: &wgpu::BindGroupLayout,
-    _bgl_fields: &wgpu::BindGroupLayout,
-    _bgl_solver: &wgpu::BindGroupLayout,
-    _bgl_coupled_solver: &wgpu::BindGroupLayout,
-    _bgl_coupled_solution: &wgpu::BindGroupLayout,
-) -> PhysicsPipelines {
+pub fn init_physics_pipelines(device: &wgpu::Device) -> PhysicsPipelines {
     // Shaders
     let pipeline_pressure_assembly =
         pressure_assembly::compute::create_main_pipeline_embed_source(device);

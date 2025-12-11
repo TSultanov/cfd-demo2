@@ -12,7 +12,11 @@ use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
-    pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+    pub async fn new(
+        mesh: &Mesh,
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    ) -> Self {
         let context = super::context::GpuContext::new(device, queue).await;
 
         let num_cells = mesh.cell_cx.len() as u32;
@@ -21,8 +25,8 @@ impl GpuSolver {
         // 1. Initialize Mesh
         let mesh_res = mesh::init_mesh(&context.device, mesh);
 
-        // 2. Initialize Fields
-        let fields_res = fields::init_fields(&context.device, num_cells, num_faces);
+        // 2. Initialize Field Buffers (phase 1 - before pipelines)
+        let field_buffers = fields::init_field_buffers(&context.device, num_cells, num_faces);
 
         // 3. Initialize Linear Solver
         let linear_res =
@@ -37,15 +41,15 @@ impl GpuSolver {
             &linear_res.b_solver_params,
         );
 
-        // 5. Initialize Physics Pipelines
-        let physics_res = physics::init_physics_pipelines(
-            &context.device,
-            &mesh_res.bgl_mesh,
-            &fields_res.bgl_fields,
-            &linear_res.bgl_solver,
-            &linear_res.coupled_resources.bgl_coupled_solver,
-            &linear_res.coupled_resources.bgl_coupled_solution, // Pass the solution layout
-        );
+        // 5. Initialize Physics Pipelines (creates pipelines with shader-derived layouts)
+        let physics_res = physics::init_physics_pipelines(&context.device);
+
+        // 6. Extract bind group layout from pipeline and create bind groups (phase 2)
+        let bgl_fields = physics_res
+            .pipeline_pressure_assembly
+            .get_bind_group_layout(1);
+        let fields_res =
+            fields::create_field_bind_groups(&context.device, field_buffers, &bgl_fields);
 
         // Misc
         Self {
@@ -65,18 +69,14 @@ impl GpuSolver {
             b_diagonal_indices: mesh_res.b_diagonal_indices,
             bg_mesh: mesh_res.bg_mesh,
 
-            // Fields
-            b_u: fields_res.b_u,
-            b_u_old: fields_res.b_u_old,
-            b_u_old_old: fields_res.b_u_old_old,
-            u_buffers: fields_res.u_buffers,
-            u_step_index: 0,
+            // Fields (consolidated FluidState buffers)
+            b_state: fields_res.b_state,
+            b_state_old: fields_res.b_state_old,
+            b_state_old_old: fields_res.b_state_old_old,
+            state_buffers: fields_res.state_buffers,
+            state_step_index: 0,
             bg_fields_ping_pong: fields_res.bg_fields_ping_pong,
-            b_p: fields_res.b_p,
-            b_d_p: fields_res.b_d_p,
             b_fluxes: fields_res.b_fluxes,
-            b_grad_p: fields_res.b_grad_p,
-            b_grad_component: fields_res.b_grad_component,
             b_constants: fields_res.b_constants,
             bg_fields: fields_res.bg_fields,
             constants: fields_res.constants,

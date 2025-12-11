@@ -19,17 +19,21 @@ struct Constants {
     ramp_time: f32,
 }
 
-// Constants are at group(1) binding(3) in the bg_fields layout
-@group(0) @binding(3) var<uniform> constants: Constants;
+// Consolidated FluidState struct per cell (32 bytes, aligned)
+struct FluidState {
+    u: vec2<f32>,           // velocity (8 bytes)
+    p: f32,                 // pressure (4 bytes)
+    d_p: f32,               // pressure correction coefficient (4 bytes)
+    grad_p: vec2<f32>,      // pressure gradient (8 bytes)
+    grad_component: vec2<f32>, // velocity gradient component (8 bytes)
+}
 
-@group(0) @binding(0) var<storage, read_write> u: array<Vector2>;
-@group(0) @binding(1) var<storage, read_write> p: array<f32>;
-@group(0) @binding(2) var<storage, read_write> fluxes: array<f32>;
-@group(0) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
-@group(0) @binding(5) var<storage, read_write> d_p: array<f32>;
-@group(0) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
-@group(0) @binding(7) var<storage, read> u_old: array<Vector2>;
-@group(0) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+// Group 0: Fields (consolidated FluidState buffers)
+@group(0) @binding(0) var<storage, read_write> state: array<FluidState>;
+@group(0) @binding(1) var<storage, read> state_old: array<FluidState>;
+@group(0) @binding(2) var<storage, read> state_old_old: array<FluidState>;
+@group(0) @binding(3) var<storage, read_write> fluxes: array<f32>;
+@group(0) @binding(4) var<uniform> constants: Constants;
 
 @group(1) @binding(0) var<storage, read> x: array<f32>;
 // Replaced snapshots with partial max diff outputs
@@ -48,30 +52,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>,
     var diff_u = 0.0;
     var diff_p = 0.0;
 
-    if (idx < arrayLength(&p)) {
+    if (idx < arrayLength(&state)) {
         let u_new_val = x[3u * idx + 0u];
         let v_new_val = x[3u * idx + 1u];
         let p_new_val = x[3u * idx + 2u];
         
         // Under-relaxation for stability
         // U_updated = U_old + alpha * (U_new - U_old) = (1-alpha)*U_old + alpha*U_new
-        let u_old = u[idx];
-        let p_old = p[idx];
+        let u_old_val = state[idx].u;
+        let p_old_val = state[idx].p;
         
         // Use relaxation factors
         let alpha_u = constants.alpha_u;
         let alpha_p = constants.alpha_p;
         
-        let u_updated_x = u_old.x + alpha_u * (u_new_val - u_old.x);
-        let u_updated_y = u_old.y + alpha_u * (v_new_val - u_old.y);
-        let p_updated = p_old + alpha_p * (p_new_val - p_old);
+        let u_updated_x = u_old_val.x + alpha_u * (u_new_val - u_old_val.x);
+        let u_updated_y = u_old_val.y + alpha_u * (v_new_val - u_old_val.y);
+        let p_updated = p_old_val + alpha_p * (p_new_val - p_old_val);
 
-        u[idx] = Vector2(u_updated_x, u_updated_y);
-        p[idx] = p_updated;
+        state[idx].u = vec2<f32>(u_updated_x, u_updated_y);
+        state[idx].p = p_updated;
 
         // Compute diffs for convergence check
-        diff_u = max(abs(u_updated_x - u_old.x), abs(u_updated_y - u_old.y));
-        diff_p = abs(p_updated - p_old);
+        diff_u = max(abs(u_updated_x - u_old_val.x), abs(u_updated_y - u_old_val.y));
+        diff_p = abs(p_updated - p_old_val);
     }
     
     // Workgroup Reduction

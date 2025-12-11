@@ -292,10 +292,8 @@ impl CFDApp {
             (&self.cfd_renderer, &self.gpu_solver, &self.wgpu_device)
         {
             if let (Ok(mut renderer), Ok(solver)) = (renderer.lock(), solver.lock()) {
-                match self.plot_field {
-                    PlotField::Pressure => renderer.update_bind_group(device, &solver.b_p),
-                    _ => renderer.update_bind_group(device, &solver.b_u),
-                }
+                // Use consolidated FluidState buffer for all fields
+                renderer.update_bind_group(device, &solver.b_state);
             }
         }
     }
@@ -369,10 +367,8 @@ impl CFDApp {
             if let Some(queue) = &self.wgpu_queue {
                 renderer.update_mesh(queue, &vertices, &line_vertices);
                 // Set initial bind group based on selected field
-                match self.plot_field {
-                    PlotField::Pressure => renderer.update_bind_group(device, &gpu_solver.b_p),
-                    _ => renderer.update_bind_group(device, &gpu_solver.b_u),
-                }
+                // Use consolidated FluidState buffer for all fields
+                renderer.update_bind_group(device, &gpu_solver.b_state);
             }
             self.cfd_renderer = Some(Arc::new(Mutex::new(renderer)));
         }
@@ -1120,11 +1116,14 @@ impl eframe::App for CFDApp {
                             let tx = 0.5 - mesh_center_x as f32 * scale_x;
                             let ty = 0.5 - mesh_center_y as f32 * scale_y;
 
+                            // FluidState layout (8 floats per cell):
+                            // [0]: u.x, [1]: u.y, [2]: p, [3]: d_p,
+                            // [4]: grad_p.x, [5]: grad_p.y, [6]: gc.x, [7]: gc.y
                             let (stride, offset, mode) = match self.plot_field {
-                                PlotField::Pressure => (1, 0, 0),
-                                PlotField::VelocityX => (2, 0, 0),
-                                PlotField::VelocityY => (2, 1, 0),
-                                PlotField::VelocityMag => (2, 0, 1),
+                                PlotField::Pressure => (8, 2, 0),    // p at offset 2
+                                PlotField::VelocityX => (8, 0, 0),   // u.x at offset 0
+                                PlotField::VelocityY => (8, 1, 0),   // u.y at offset 1
+                                PlotField::VelocityMag => (8, 0, 1), // magnitude mode, u at offset 0,1
                             };
 
                             let cb = eframe::egui_wgpu::Callback::new_paint_callback(

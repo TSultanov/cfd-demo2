@@ -147,19 +147,15 @@ pub struct GpuSolver {
     pub b_cell_face_matrix_indices: wgpu::Buffer,
     pub b_diagonal_indices: wgpu::Buffer,
 
-    // Field buffers
-    pub b_u: wgpu::Buffer,
-    pub b_u_old: wgpu::Buffer,     // For velocity under-relaxation
-    pub b_u_old_old: wgpu::Buffer, // For 2nd order time stepping
-    pub u_buffers: Vec<wgpu::Buffer>, // Pool of 3 buffers for ping-pong
-    pub u_step_index: usize,          // Current step index for ping-pong
+    // Field buffers (consolidated FluidState)
+    pub b_state: wgpu::Buffer,            // Current FluidState (read/write)
+    pub b_state_old: wgpu::Buffer,        // Previous timestep FluidState (read)
+    pub b_state_old_old: wgpu::Buffer,    // Two timesteps ago FluidState (read, for BDF2)
+    pub state_buffers: Vec<wgpu::Buffer>, // Pool of 3 buffers for ping-pong
+    pub state_step_index: usize,          // Current step index for ping-pong
     pub bg_fields_ping_pong: Vec<wgpu::BindGroup>, // 3 bind groups for ping-pong
 
-    pub b_p: wgpu::Buffer,
-    pub b_d_p: wgpu::Buffer,
-    pub b_fluxes: wgpu::Buffer,
-    pub b_grad_p: wgpu::Buffer,
-    pub b_grad_component: wgpu::Buffer,
+    pub b_fluxes: wgpu::Buffer, // Face-based mass fluxes (per face)
 
     // Matrix Structure (CSR)
     pub b_row_offsets: wgpu::Buffer,

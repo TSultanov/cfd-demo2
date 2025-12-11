@@ -19,6 +19,15 @@ struct Constants {
     ramp_time: f32,
 }
 
+// Consolidated FluidState struct per cell (32 bytes, aligned)
+struct FluidState {
+    u: vec2<f32>,           // velocity (8 bytes)
+    p: f32,                 // pressure (4 bytes)
+    d_p: f32,               // pressure correction coefficient (4 bytes)
+    grad_p: vec2<f32>,      // pressure gradient (8 bytes)
+    grad_component: vec2<f32>, // velocity gradient component (8 bytes)
+}
+
 // Group 0: Mesh
 @group(0) @binding(0) var<storage, read> face_owner: array<u32>;
 @group(0) @binding(1) var<storage, read> face_neighbor: array<i32>;
@@ -33,16 +42,12 @@ struct Constants {
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 
-// Group 1: Fields
-@group(1) @binding(0) var<storage, read_write> u: array<Vector2>;
-@group(1) @binding(1) var<storage, read_write> p: array<f32>;
-@group(1) @binding(2) var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(3) var<uniform> constants: Constants;
-@group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
-@group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
-@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
-@group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
-@group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+// Group 1: Fields (consolidated FluidState buffers)
+@group(1) @binding(0) var<storage, read_write> state: array<FluidState>;
+@group(1) @binding(1) var<storage, read> state_old: array<FluidState>;
+@group(1) @binding(2) var<storage, read> state_old_old: array<FluidState>;
+@group(1) @binding(3) var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) var<uniform> constants: Constants;
 
 // Group 2: Solver (Coupled)
 @group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
@@ -101,7 +106,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var scalar_diag_p: f32 = 0.0;
     
     // Time derivative
-    let u_n = u_old[idx];
+    let u_n = state_old[idx].u;
     var coeff_time = vol * constants.density / constants.dt;
     var rhs_time_u = coeff_time * u_n.x;
     var rhs_time_v = coeff_time * u_n.y;
@@ -111,7 +116,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
-        let u_nm1 = u_old_old[idx];
+        let u_nm1 = state_old_old[idx].u;
         
         coeff_time = vol * constants.density / dt * (1.0 + 2.0 * r) / (1.0 + r);
         let factor_n = (1.0 + r);
@@ -158,11 +163,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 other_idx = owner;
             }
             other_center = cell_centers[other_idx];
-            d_p_neigh = d_p[other_idx];
+            d_p_neigh = state[other_idx].d_p;
         } else {
             is_boundary = true;
             other_center = f_center;
-            d_p_neigh = d_p[idx]; // Placeholder
+            d_p_neigh = state[idx].d_p; // Placeholder
         }
         
         let d_vec_x = other_center.x - center.x;
@@ -224,8 +229,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Deferred Correction for Higher Order Schemes
             if (constants.scheme != 0u) {
                 // Get current values (from latest iteration) for deferred correction
-                let u_own = u[idx];
-                let u_neigh = u[other_idx];
+                let u_own = state[idx].u;
+                let u_neigh = state[other_idx].u;
                 
                 var phi_upwind_u = u_own.x;
                 var phi_upwind_v = u_own.y;
@@ -321,7 +326,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             sum_diag_pv += lambda * div_coeff_y;
             
             // Rhie-Chow Pressure Laplacian
-            let dp_f = lambda * d_p[idx] + (1.0 - lambda) * d_p[other_idx];
+            let dp_f = lambda * state[idx].d_p + (1.0 - lambda) * state[other_idx].d_p;
             let lapl_coeff = dp_f * area / dist;
             
             // Off-diagonal P-P (Neighbor P)
@@ -333,7 +338,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // --- Scalar Pressure Matrix Assembly ---
             // Calculate scalar pressure matrix coefficient
             // Use same distance and lambda as above
-            let d_p_own = d_p[idx];
+            let d_p_own = state[idx].d_p;
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             
             let scalar_coeff = constants.density * d_p_face * area / dist;
@@ -402,12 +407,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 sum_diag_pv += div_coeff_y;
                 
                 // Rhie-Chow at outlet
-                let dp_f = d_p[idx];
+                let dp_f = state[idx].d_p;
                 let lapl_coeff = dp_f * area / dist; // dist here is d_own
                 sum_diag_pp += lapl_coeff;
 
                 // Scalar Pressure Matrix at Outlet (Dirichlet p=0)
-                let d_p_own = d_p[idx];
+                let d_p_own = state[idx].d_p;
                 let scalar_coeff = constants.density * d_p_own * area / dist;
                 scalar_diag_p += scalar_coeff;
             }

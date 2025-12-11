@@ -19,6 +19,15 @@ struct Constants {
     ramp_time: f32,
 }
 
+// Consolidated FluidState struct per cell (32 bytes, aligned)
+struct FluidState {
+    u: vec2<f32>,           // velocity (8 bytes)
+    p: f32,                 // pressure (4 bytes)
+    d_p: f32,               // pressure correction coefficient (4 bytes)
+    grad_p: vec2<f32>,      // pressure gradient (8 bytes)
+    grad_component: vec2<f32>, // velocity gradient component (8 bytes)
+}
+
 // Group 0: Mesh
 @group(0) @binding(0) var<storage, read> face_owner: array<u32>;
 @group(0) @binding(1) var<storage, read> face_neighbor: array<i32>;
@@ -33,27 +42,23 @@ struct Constants {
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 
-// Group 1: Fields
-@group(1) @binding(0) var<storage, read_write> u: array<Vector2>;
-@group(1) @binding(1) var<storage, read_write> p: array<f32>;
-@group(1) @binding(2) var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(3) var<uniform> constants: Constants;
-@group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
-@group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
-@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
-@group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
-@group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+// Group 1: Fields (consolidated FluidState buffers)
+@group(1) @binding(0) var<storage, read_write> state: array<FluidState>;
+@group(1) @binding(1) var<storage, read> state_old: array<FluidState>;
+@group(1) @binding(2) var<storage, read> state_old_old: array<FluidState>;
+@group(1) @binding(3) var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) var<uniform> constants: Constants;
 
-// Group 2: Coupled Solver Resources
-@group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) var<storage, read> scalar_row_offsets: array<u32>;
+// Group 2: Solver (Coupled) - Must match coupled_assembly_merged.wgsl layout
+@group(2) @binding(0) var<storage, read_write> matrix_values: array<f32>;  // unused but needed for layout compatibility
+@group(2) @binding(1) var<storage, read_write> rhs: array<f32>;  // unused but needed for layout compatibility
+@group(2) @binding(2) var<storage, read> scalar_row_offsets: array<u32>;  // read-only in both shaders
 @group(2) @binding(3) var<storage, read_write> grad_u: array<Vector2>;
 @group(2) @binding(4) var<storage, read_write> grad_v: array<Vector2>;
-@group(2) @binding(5) var<storage, read_write> scalar_matrix_values: array<f32>;
-@group(2) @binding(6) var<storage, read_write> diag_u_inv: array<f32>;
-@group(2) @binding(7) var<storage, read_write> diag_v_inv: array<f32>;
-@group(2) @binding(8) var<storage, read_write> diag_p_inv: array<f32>;
+@group(2) @binding(5) var<storage, read_write> scalar_matrix_values: array<f32>;  // unused but needed for layout compatibility
+@group(2) @binding(6) var<storage, read_write> diag_u_inv: array<f32>;  // unused but needed for layout compatibility
+@group(2) @binding(7) var<storage, read_write> diag_v_inv: array<f32>;  // unused but needed for layout compatibility
+@group(2) @binding(8) var<storage, read_write> diag_p_inv: array<f32>;  // unused but needed for layout compatibility
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -72,7 +77,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var diag_coeff: f32 = 0.0;
     
     // Time derivative
-    let u_n = u_old[idx];
+    let u_n_val = state_old[idx].u;
     
     var time_coeff = vol * constants.density / constants.dt;
     if (constants.time_scheme == 1u) {
@@ -84,11 +89,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     diag_coeff += time_coeff;
 
     // Variables for gradient calculation (fused)
-    let val_c_p = p[idx];
+    let val_c_p = state[idx].p;
     var grad_p_accum = Vector2(0.0, 0.0);
 
     // Variables for velocity gradient calculation
-    let u_val = u[idx];
+    let u_val = state[idx].u;
     let val_c_u = u_val.x;
     let val_c_v = u_val.y;
     
@@ -130,14 +135,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let n_idx = u32(neigh_idx);
             let c_neigh = cell_centers[n_idx];
             
-            let u_own = u[owner];
-            let u_ngh = u[n_idx];
-            let dp_own = d_p[owner];
-            let dp_ngh = d_p[n_idx];
-            let gp_own = grad_p[owner];
-            let gp_ngh = grad_p[n_idx];
-            let p_own = p[owner];
-            let p_ngh = p[n_idx];
+            let u_own = state[owner].u;
+            let u_ngh = state[n_idx].u;
+            let dp_own = state[owner].d_p;
+            let dp_ngh = state[n_idx].d_p;
+            let gp_own = state[owner].grad_p;
+            let gp_ngh = state[n_idx].grad_p;
+            let p_own = state[owner].p;
+            let p_ngh = state[n_idx].p;
             
             let d_own = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(f_center.x, f_center.y));
             let d_ngh = distance(vec2<f32>(c_neigh.x, c_neigh.y), vec2<f32>(f_center.x, f_center.y));
@@ -182,7 +187,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             } else if (boundary_type == 3u) { // Wall
                  flux = 0.0;
             } else if (boundary_type == 2u) { // Outlet
-                 let u_own = u[owner];
+                 let u_own = state[owner].u;
                  let u_n = u_own.x * normal_flux.x + u_own.y * normal_flux.y;
                  let raw_flux = constants.density * u_n * area;
                  flux = max(0.0, raw_flux);
@@ -259,7 +264,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                  lambda_p = d_o / total_dist_p;
              }
              
-             let val_other_p = p[other_idx];
+             let val_other_p = state[other_idx].p;
              let val_f_p = lambda_p * val_c_p + (1.0 - lambda_p) * val_other_p;
              
              grad_p_accum.x += val_f_p * normal.x * area;
@@ -280,7 +285,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         if (!is_boundary) {
             // Internal Face
-            let u_other = u[other_idx];
+            let u_other = state[other_idx].u;
             let val_other_u = u_other.x;
             let val_other_v = u_other.y;
             
@@ -321,15 +326,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     // Write d_p
     if (abs(diag_coeff) > 1e-20) {
-        d_p[idx] = vol / diag_coeff;
+        state[idx].d_p = vol / diag_coeff;
     } else {
-        d_p[idx] = 0.0;
+        state[idx].d_p = 0.0;
     }
     
     // Write grad_p
     grad_p_accum.x /= vol;
     grad_p_accum.y /= vol;
-    grad_p[idx] = grad_p_accum;
+    state[idx].grad_p = vec2<f32>(grad_p_accum.x, grad_p_accum.y);
 
     // Write grad_u, grad_v
     g_u.x /= vol;

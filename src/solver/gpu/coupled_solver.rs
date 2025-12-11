@@ -41,34 +41,34 @@ impl GpuSolver {
         }
 
         // Ping-pong rotation
-        self.u_step_index = (self.u_step_index + 1) % 3;
+        self.state_step_index = (self.state_step_index + 1) % 3;
 
         // Update bind group
-        self.bg_fields = self.bg_fields_ping_pong[self.u_step_index].clone();
+        self.bg_fields = self.bg_fields_ping_pong[self.state_step_index].clone();
 
         // Update buffer references
-        let idx_u = match self.u_step_index {
+        let idx_state = match self.state_step_index {
             0 => 0,
             1 => 2,
             2 => 1,
             _ => 0,
         };
-        let idx_u_old = match self.u_step_index {
+        let idx_state_old = match self.state_step_index {
             0 => 1,
             1 => 0,
             2 => 2,
             _ => 0,
         };
-        let idx_u_old_old = match self.u_step_index {
+        let idx_state_old_old = match self.state_step_index {
             0 => 2,
             1 => 1,
             2 => 0,
             _ => 0,
         };
 
-        self.b_u = self.u_buffers[idx_u].clone();
-        self.b_u_old = self.u_buffers[idx_u_old].clone();
-        self.b_u_old_old = self.u_buffers[idx_u_old_old].clone();
+        self.b_state = self.state_buffers[idx_state].clone();
+        self.b_state_old = self.state_buffers[idx_state_old].clone();
+        self.b_state_old_old = self.state_buffers[idx_state_old_old].clone();
 
         // Initialize fluxes and d_p (and gradients)
         {
@@ -501,7 +501,7 @@ impl GpuSolver {
     fn check_evolution(&mut self) {
         // Read velocity field to check for evolution and variance
         // This involves a GPU->CPU read, so it has some overhead.
-        let u_data = pollster::block_on(self.read_buffer_f32(&self.b_u, self.num_cells * 2));
+        let u_data = pollster::block_on(self.read_buffer_f32(&self.b_state, self.num_cells * 8)); // FluidState is 8 f32s = 32 bytes
 
         // 1. Calculate Variance
         let mut sum_u = 0.0;

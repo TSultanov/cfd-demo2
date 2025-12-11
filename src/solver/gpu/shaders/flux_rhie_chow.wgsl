@@ -19,6 +19,15 @@ struct Constants {
     ramp_time: f32,
 }
 
+// Consolidated FluidState struct per cell (32 bytes, aligned)
+struct FluidState {
+    u: vec2<f32>,           // velocity (8 bytes)
+    p: f32,                 // pressure (4 bytes)
+    d_p: f32,               // pressure correction coefficient (4 bytes)
+    grad_p: vec2<f32>,      // pressure gradient (8 bytes)
+    grad_component: vec2<f32>, // velocity gradient component (8 bytes)
+}
+
 // Group 0: Mesh
 @group(0) @binding(0) var<storage, read> face_owner: array<u32>;
 @group(0) @binding(1) var<storage, read> face_neighbor: array<i32>;
@@ -29,16 +38,12 @@ struct Constants {
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 
-// Group 1: Fields
-@group(1) @binding(0) var<storage, read_write> u: array<Vector2>;
-@group(1) @binding(1) var<storage, read_write> p: array<f32>;
-@group(1) @binding(2) var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(3) var<uniform> constants: Constants;
-@group(1) @binding(4) var<storage, read_write> grad_p: array<Vector2>;
-@group(1) @binding(5) var<storage, read_write> d_p: array<f32>;
-@group(1) @binding(6) var<storage, read_write> grad_component: array<Vector2>;
-@group(1) @binding(7) var<storage, read> u_old: array<Vector2>;
-@group(1) @binding(8) var<storage, read> u_old_old: array<Vector2>;
+// Group 1: Fields (consolidated FluidState buffers)
+@group(1) @binding(0) var<storage, read_write> state: array<FluidState>;
+@group(1) @binding(1) var<storage, read> state_old: array<FluidState>;
+@group(1) @binding(2) var<storage, read> state_old_old: array<FluidState>;
+@group(1) @binding(3) var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) var<uniform> constants: Constants;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -63,15 +68,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         normal.y = -normal.y;
     }
 
-    var u_face = u[owner];
-    var d_p_face = d_p[owner];
-    var grad_p_avg = grad_p[owner];
+    var u_face = state[owner].u;
+    var d_p_face = state[owner].d_p;
+    var grad_p_avg = state[owner].grad_p;
     
     if (neighbor != -1) {
         let neigh_idx = u32(neighbor);
-        let u_neigh = u[neigh_idx];
-        let d_p_neigh = d_p[neigh_idx];
-        let grad_p_neigh = grad_p[neigh_idx];
+        let u_neigh = state[neigh_idx].u;
+        let d_p_neigh = state[neigh_idx].d_p;
+        let grad_p_neigh = state[neigh_idx].grad_p;
         
         let c_neigh = cell_centers[neigh_idx];
         
@@ -106,8 +111,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dist_proj = abs(dx * normal.x + dy * normal.y);
         let dist = max(dist_proj, 1e-6);
         
-        let p_own = p[owner];
-        let p_neigh = p[neigh_idx];
+        let p_own = state[owner].p;
+        let p_neigh = state[neigh_idx].p;
         
         let grad_p_n = grad_p_avg.x * normal.x + grad_p_avg.y * normal.y;
         let p_grad_f = (p_neigh - p_own) / dist;

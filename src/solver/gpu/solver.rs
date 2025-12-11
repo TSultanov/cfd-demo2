@@ -1,25 +1,37 @@
 // Force recompile 2
 use std::sync::Arc;
 
-use super::profiling::ProfilingStats;
 use super::coupled_solver_fgmres::FgmresResources;
+use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
 
 impl GpuSolver {
     pub fn set_u(&self, u: &[(f64, f64)]) {
-        let u_f32: Vec<[f32; 2]> = u.iter().map(|&(x, y)| [x as f32, y as f32]).collect();
+        use super::init::fields::FluidState;
+        // Read existing state, update u, write back
+        // FluidState is 32 bytes per cell: u(8), p(4), d_p(4), grad_p(8), grad_component(8)
+        let mut states = vec![FluidState::default(); self.num_cells as usize];
+        for (i, &(ux, uy)) in u.iter().enumerate() {
+            states[i].u = [ux as f32, uy as f32];
+        }
+        // Write full state buffer (for initialization)
         self.context
             .queue
-            .write_buffer(&self.b_u, 0, bytemuck::cast_slice(&u_f32));
+            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&states));
     }
 
     pub fn set_p(&self, p: &[f64]) {
-        let p_f32: Vec<f32> = p.iter().map(|&x| x as f32).collect();
+        use super::init::fields::FluidState;
+        // Read existing state, update p, write back
+        let mut states = vec![FluidState::default(); self.num_cells as usize];
+        for (i, &pval) in p.iter().enumerate() {
+            states[i].p = pval as f32;
+        }
+        // Write full state buffer (for initialization)
         self.context
             .queue
-            .write_buffer(&self.b_p, 0, bytemuck::cast_slice(&p_f32));
+            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&states));
     }
-
 
     pub fn set_dt(&mut self, dt: f32) {
         if self.constants.dt > 0.0 {
@@ -76,7 +88,6 @@ impl GpuSolver {
         self.update_constants();
     }
 
-
     pub fn update_constants(&self) {
         self.context
             .queue
@@ -84,40 +95,37 @@ impl GpuSolver {
     }
 
     pub async fn get_u(&self) -> Vec<(f64, f64)> {
+        use super::init::fields::FluidState;
+        // FluidState is 32 bytes per cell
         let data = self
-            .read_buffer(&self.b_u, (self.num_cells as u64) * 8)
-            .await; // 2 floats * 4 bytes = 8
-        let u_f32: &[f32] = bytemuck::cast_slice(&data);
-        u_f32
-            .chunks(2)
-            .map(|c| (c[0] as f64, c[1] as f64))
+            .read_buffer(&self.b_state, (self.num_cells as u64) * 32)
+            .await;
+        let states: &[FluidState] = bytemuck::cast_slice(&data);
+        states
+            .iter()
+            .map(|s| (s.u[0] as f64, s.u[1] as f64))
             .collect()
     }
 
-
-
-
     pub async fn get_p(&self) -> Vec<f64> {
+        use super::init::fields::FluidState;
+        // FluidState is 32 bytes per cell
         let data = self
-            .read_buffer(&self.b_p, (self.num_cells as u64) * 4)
+            .read_buffer(&self.b_state, (self.num_cells as u64) * 32)
             .await;
-        let p_f32: &[f32] = bytemuck::cast_slice(&data);
-        p_f32.iter().map(|&x| x as f64).collect()
+        let states: &[FluidState] = bytemuck::cast_slice(&data);
+        states.iter().map(|s| s.p as f64).collect()
     }
-
-
-
-
-
 
     pub async fn get_d_p(&self) -> Vec<f64> {
+        use super::init::fields::FluidState;
+        // FluidState is 32 bytes per cell
         let data = self
-            .read_buffer(&self.b_d_p, (self.num_cells as u64) * 4)
+            .read_buffer(&self.b_state, (self.num_cells as u64) * 32)
             .await;
-        let vals_f32: &[f32] = bytemuck::cast_slice(&data);
-        vals_f32.iter().map(|&x| x as f64).collect()
+        let states: &[FluidState] = bytemuck::cast_slice(&data);
+        states.iter().map(|s| s.d_p as f64).collect()
     }
-
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
         use super::profiling::ProfileCategory;
@@ -135,8 +143,7 @@ impl GpuSolver {
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                self
-                    .profiling_stats
+                self.profiling_stats
                     .record_gpu_alloc("read_buffer:staging", size);
                 self.profiling_stats.record_location(
                     "read_buffer:create_staging",
@@ -236,8 +243,6 @@ impl GpuSolver {
         self.step_coupled();
     }
 
-
-
     /// Get a reference to the detailed profiling statistics
     pub fn get_profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.profiling_stats)
@@ -276,17 +281,15 @@ impl GpuSolver {
                     label: Some("Initialize History Encoder"),
                 });
 
-        // Copy u to u_old
-        encoder.copy_buffer_to_buffer(&self.b_u, 0, &self.b_u_old, 0, (self.num_cells as u64) * 8);
+        // FluidState is 32 bytes per cell
+        let state_size = (self.num_cells as u64) * 32;
 
-        // Copy u to u_old_old
-        encoder.copy_buffer_to_buffer(
-            &self.b_u,
-            0,
-            &self.b_u_old_old,
-            0,
-            (self.num_cells as u64) * 8,
-        );
+        // Copy state to state_old
+        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old, 0, state_size);
+
+        // Copy state to state_old_old
+        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old_old, 0, state_size);
+
         self.context.queue.submit(Some(encoder.finish()));
     }
 
@@ -296,9 +299,7 @@ impl GpuSolver {
         }
 
         let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
-            solver
-                .profiling_stats
-                .record_gpu_alloc(label, buf.size());
+            solver.profiling_stats.record_gpu_alloc(label, buf.size());
         };
 
         // Mesh
@@ -312,21 +313,21 @@ impl GpuSolver {
         record(self, "mesh:cell_vols", &self.b_cell_vols);
         record(self, "mesh:cell_face_offsets", &self.b_cell_face_offsets);
         record(self, "mesh:cell_faces", &self.b_cell_faces);
-        record(self, "mesh:cell_face_matrix_indices", &self.b_cell_face_matrix_indices);
+        record(
+            self,
+            "mesh:cell_face_matrix_indices",
+            &self.b_cell_face_matrix_indices,
+        );
         record(self, "mesh:diagonal_indices", &self.b_diagonal_indices);
 
-        // Fields
-        record(self, "fields:u", &self.b_u);
-        record(self, "fields:u_old", &self.b_u_old);
-        record(self, "fields:u_old_old", &self.b_u_old_old);
-        for (i, buf) in self.u_buffers.iter().enumerate() {
-            record(self, &format!("fields:u_buffer_{}", i), buf);
+        // Fields (consolidated FluidState buffers)
+        record(self, "fields:state", &self.b_state);
+        record(self, "fields:state_old", &self.b_state_old);
+        record(self, "fields:state_old_old", &self.b_state_old_old);
+        for (i, buf) in self.state_buffers.iter().enumerate() {
+            record(self, &format!("fields:state_buffer_{}", i), buf);
         }
-        record(self, "fields:p", &self.b_p);
-        record(self, "fields:d_p", &self.b_d_p);
         record(self, "fields:fluxes", &self.b_fluxes);
-        record(self, "fields:grad_p", &self.b_grad_p);
-        record(self, "fields:grad_component", &self.b_grad_component);
         record(self, "fields:constants", &self.b_constants);
 
         // Matrix / linear solver
@@ -376,9 +377,7 @@ impl GpuSolver {
         }
 
         let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
-            solver
-                .profiling_stats
-                .record_gpu_alloc(label, buf.size());
+            solver.profiling_stats.record_gpu_alloc(label, buf.size());
         };
 
         record(self, "fgmres:basis", &fgmres.b_basis);

@@ -38,7 +38,8 @@ mod solver {
         };
         #[allow(unused_imports)]
         pub use definitions::{
-            incompressible_momentum_model, incompressible_momentum_system, ModelSpec,
+            incompressible_momentum_model, incompressible_momentum_system,
+            IncompressibleMomentumFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use scheme::{SchemeRegistry, TermKey};

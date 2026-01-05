@@ -199,3 +199,10 @@ discretization automatically, with modular swapping of schemes and boundary cond
   system, keeping the generated kernels aligned with the model definition (`src/solver/codegen/emit.rs`).
 - **2025-02-10:** Verified codegen unit tests after model-driven prepare/flux updates
   (`cargo test codegen --lib`).
+- **2025-02-10:** Exposed incompressible field metadata on `ModelSpec` and re-used it across
+  codegen generators so field names come from the high-level model rather than hardcoded
+  constants (`src/solver/model/definitions.rs`, `src/solver/codegen/*`).
+- **2025-02-10:** Updated codegen emit/tests + build-script model exports to pass the new
+  model field metadata into all generators (`build.rs`, `src/solver/codegen/emit.rs`).
+- **2025-02-10:** Verified codegen unit tests after wiring model field metadata
+  (`cargo test codegen --lib`).

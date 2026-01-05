@@ -8,22 +8,23 @@ use super::state_layout::StateLayout;
 pub struct ModelSpec {
     pub system: EquationSystem,
     pub state_layout: StateLayout,
+    pub fields: IncompressibleMomentumFields,
 }
 
 #[derive(Debug, Clone)]
-struct IncompressibleMomentumFields {
-    u: FieldRef,
-    p: FieldRef,
-    phi: FluxRef,
-    nu: FieldRef,
-    rho: FieldRef,
-    d_p: FieldRef,
-    grad_p: FieldRef,
-    grad_component: FieldRef,
+pub struct IncompressibleMomentumFields {
+    pub u: FieldRef,
+    pub p: FieldRef,
+    pub phi: FluxRef,
+    pub nu: FieldRef,
+    pub rho: FieldRef,
+    pub d_p: FieldRef,
+    pub grad_p: FieldRef,
+    pub grad_component: FieldRef,
 }
 
 impl IncompressibleMomentumFields {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             u: vol_vector("U"),
             p: vol_scalar("p"),
@@ -84,6 +85,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     ModelSpec {
         system,
         state_layout: layout,
+        fields,
     }
 }
 

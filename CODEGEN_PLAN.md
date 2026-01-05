@@ -206,3 +206,9 @@ discretization automatically, with modular swapping of schemes and boundary cond
   model field metadata into all generators (`build.rs`, `src/solver/codegen/emit.rs`).
 - **2025-02-10:** Verified codegen unit tests after wiring model field metadata
   (`cargo test codegen --lib`).
+- **2025-02-10:** Derived the coupled-solver update-kernel indexing from model field
+  component counts (removed hardcoded `3u` stride) and added `FieldKind::component_count`
+  to support model-driven component sizing (`src/solver/codegen/update_fields_from_coupled.rs`,
+  `src/solver/model/ast.rs`).
+- **2025-02-10:** Verified codegen unit tests after coupled-stride derivation
+  (`cargo test codegen --lib`).

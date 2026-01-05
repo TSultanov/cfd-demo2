@@ -14,6 +14,13 @@ impl FieldKind {
             FieldKind::Vector2 => "vector2",
         }
     }
+
+    pub fn component_count(self) -> usize {
+        match self {
+            FieldKind::Scalar => 1,
+            FieldKind::Vector2 => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

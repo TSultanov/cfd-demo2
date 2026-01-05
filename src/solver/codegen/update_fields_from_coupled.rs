@@ -189,6 +189,25 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     let stride = layout.stride();
     let u_field = fields.u.name();
     let p_field = fields.p.name();
+    let u_components = fields.u.kind().component_count();
+    let p_components = fields.p.kind().component_count();
+    if u_components != 2 {
+        panic!(
+            "expected vector2 velocity field, got {} components",
+            u_components
+        );
+    }
+    if p_components != 1 {
+        panic!(
+            "expected scalar pressure field, got {} components",
+            p_components
+        );
+    }
+    let coupled_stride = u_components + p_components;
+    let p_offset = u_components;
+    let u_new_expr = format!("x[{coupled_stride}u * idx + 0u]");
+    let v_new_expr = format!("x[{coupled_stride}u * idx + 1u]");
+    let p_new_expr = format!("x[{coupled_stride}u * idx + {p_offset}u]");
 
     stmts.push(dsl::let_("idx", "global_id.x"));
     stmts.push(dsl::let_("lid", "local_id.x"));
@@ -209,9 +228,9 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     stmts.push(dsl::if_block(
         "idx < num_cells",
         dsl::block(vec![
-            dsl::let_("u_new_val", "x[3u * idx + 0u]"),
-            dsl::let_("v_new_val", "x[3u * idx + 1u]"),
-            dsl::let_("p_new_val", "x[3u * idx + 2u]"),
+            dsl::let_("u_new_val", &u_new_expr),
+            dsl::let_("v_new_val", &v_new_expr),
+            dsl::let_("p_new_val", &p_new_expr),
             dsl::let_("u_old_val", &u_old_expr),
             dsl::let_("p_old_val", &p_old_expr),
             dsl::let_("alpha_u", "constants.alpha_u"),

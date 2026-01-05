@@ -1,3 +1,7 @@
+pub mod compressible_assembly;
+pub mod compressible_apply;
+pub mod compressible_flux_kt;
+pub mod compressible_update;
 pub mod coupled_assembly;
 pub mod emit;
 pub mod flux_rhie_chow;
@@ -11,6 +15,10 @@ pub mod wgsl;
 pub mod wgsl_ast;
 pub mod wgsl_dsl;
 
+pub use compressible_assembly::generate_compressible_assembly_wgsl;
+pub use compressible_apply::generate_compressible_apply_wgsl;
+pub use compressible_flux_kt::generate_compressible_flux_kt_wgsl;
+pub use compressible_update::generate_compressible_update_wgsl;
 pub use coupled_assembly::generate_coupled_assembly_wgsl;
 pub use flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 pub use emit::write_wgsl_file;

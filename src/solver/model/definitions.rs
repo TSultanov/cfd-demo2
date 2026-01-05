@@ -9,8 +9,30 @@ use super::kernel::{KernelKind, KernelPlan};
 pub struct ModelSpec {
     pub system: EquationSystem,
     pub state_layout: StateLayout,
-    pub fields: IncompressibleMomentumFields,
+    pub fields: ModelFields,
     pub kernel_plan: KernelPlan,
+}
+
+#[derive(Debug, Clone)]
+pub enum ModelFields {
+    Incompressible(IncompressibleMomentumFields),
+    Compressible(CompressibleFields),
+}
+
+impl ModelFields {
+    pub fn incompressible(&self) -> Option<&IncompressibleMomentumFields> {
+        match self {
+            ModelFields::Incompressible(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
+    pub fn compressible(&self) -> Option<&CompressibleFields> {
+        match self {
+            ModelFields::Compressible(fields) => Some(fields),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +58,35 @@ impl IncompressibleMomentumFields {
             d_p: vol_scalar("d_p"),
             grad_p: vol_vector("grad_p"),
             grad_component: vol_vector("grad_component"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompressibleFields {
+    pub rho: FieldRef,
+    pub rho_u: FieldRef,
+    pub rho_e: FieldRef,
+    pub p: FieldRef,
+    pub u: FieldRef,
+    pub mu: FieldRef,
+    pub phi_rho: FluxRef,
+    pub phi_rho_u: FluxRef,
+    pub phi_rho_e: FluxRef,
+}
+
+impl CompressibleFields {
+    pub fn new() -> Self {
+        Self {
+            rho: vol_scalar("rho"),
+            rho_u: vol_vector("rho_u"),
+            rho_e: vol_scalar("rho_e"),
+            p: vol_scalar("p"),
+            u: vol_vector("u"),
+            mu: vol_scalar("mu"),
+            phi_rho: surface_scalar("phi_rho"),
+            phi_rho_u: surface_scalar("phi_rho_u"),
+            phi_rho_e: surface_scalar("phi_rho_e"),
         }
     }
 }
@@ -69,9 +120,41 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
     system
 }
 
+fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
+    let rho_eqn =
+        (fvm::ddt(fields.rho) + fvm::div(fields.phi_rho, fields.rho)).eqn(fields.rho);
+    let rho_u_eqn =
+        (fvm::ddt(fields.rho_u)
+            + fvm::div(fields.phi_rho_u, fields.rho_u)
+            + fvm::laplacian(
+                Coefficient::field(fields.mu).expect("mu must be scalar"),
+                fields.rho_u,
+            ))
+            .eqn(fields.rho_u);
+    let rho_e_eqn =
+        (fvm::ddt(fields.rho_e)
+            + fvm::div(fields.phi_rho_e, fields.rho_e)
+            + fvm::laplacian(
+                Coefficient::field(fields.mu).expect("mu must be scalar"),
+                fields.rho_e,
+            ))
+            .eqn(fields.rho_e);
+
+    let mut system = EquationSystem::new();
+    system.add_equation(rho_eqn);
+    system.add_equation(rho_u_eqn);
+    system.add_equation(rho_e_eqn);
+    system
+}
+
 pub fn incompressible_momentum_system() -> EquationSystem {
     let fields = IncompressibleMomentumFields::new();
     build_incompressible_momentum_system(&fields)
+}
+
+pub fn compressible_system() -> EquationSystem {
+    let fields = CompressibleFields::new();
+    build_compressible_system(&fields)
 }
 
 pub fn incompressible_momentum_model() -> ModelSpec {
@@ -94,7 +177,25 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     ModelSpec {
         system,
         state_layout: layout,
-        fields,
+        fields: ModelFields::Incompressible(fields),
+        kernel_plan,
+    }
+}
+
+pub fn compressible_model() -> ModelSpec {
+    let fields = CompressibleFields::new();
+    let system = build_compressible_system(&fields);
+    let layout = StateLayout::new(vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.u]);
+    let kernel_plan = KernelPlan::new(vec![
+        KernelKind::CompressibleFluxKt,
+        KernelKind::CompressibleAssembly,
+        KernelKind::CompressibleApply,
+        KernelKind::CompressibleUpdate,
+    ]);
+    ModelSpec {
+        system,
+        state_layout: layout,
+        fields: ModelFields::Compressible(fields),
         kernel_plan,
     }
 }
@@ -141,5 +242,16 @@ mod tests {
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
         assert!(model.kernel_plan.contains(KernelKind::CoupledAssembly));
+        assert!(matches!(model.fields, ModelFields::Incompressible(_)));
+    }
+
+    #[test]
+    fn compressible_model_defines_conservative_equations() {
+        let model = compressible_model();
+        assert_eq!(model.system.equations().len(), 3);
+        assert_eq!(model.system.equations()[1].terms().len(), 3);
+        assert_eq!(model.system.equations()[2].terms().len(), 3);
+        assert!(model.kernel_plan.contains(KernelKind::CompressibleFluxKt));
+        assert!(matches!(model.fields, ModelFields::Compressible(_)));
     }
 }

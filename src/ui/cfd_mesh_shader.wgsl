@@ -45,11 +45,10 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     
     var val: f32;
     if (uniforms.mode == 1u) {
-        // Magnitude mode: read velocity from FluidState at offset 0,1
-        // stride is the total size per cell (8 for FluidState)
-        let base_idx = in.cell_index * uniforms.stride;
-        let vx = field_data[base_idx];       // u.x at offset 0
-        let vy = field_data[base_idx + 1u];  // u.y at offset 1
+        // Magnitude mode: read vector at [offset, offset+1]
+        let base_idx = in.cell_index * uniforms.stride + uniforms.offset;
+        let vx = field_data[base_idx];
+        let vy = field_data[base_idx + 1u];
         val = sqrt(vx * vx + vy * vy);
     } else {
         // Value mode: read single field at stride*cell + offset

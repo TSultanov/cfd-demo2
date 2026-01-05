@@ -198,6 +198,171 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Updated codegen emit + tests for prepare/flux shaders to pass the discrete
   system, keeping the generated kernels aligned with the model definition (`src/solver/codegen/emit.rs`).
 - **2025-02-10:** Verified codegen unit tests after model-driven prepare/flux updates
+- **2025-02-10:** Reworked compressible assembly codegen to build an implicit 4x4 block matrix
+  with KT flux Jacobians (including viscous terms), scalar CSR offsets, and RHS formation for
+  Euler/BDF2 time schemes (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Added a compressible apply kernel generator to write solved updates back into
+  the packed state buffer before the compressible update pass (`src/solver/codegen/compressible_apply.rs`).
+- **2025-02-10:** Registered the compressible apply generator in the codegen module exports
+  (`src/solver/codegen/mod.rs`).
+- **2025-02-10:** Added `CompressibleApply` to the kernel kind enum for codegen kernel planning
+  (`src/solver/model/kernel.rs`).
+- **2025-02-10:** Wired `CompressibleApply` into the compressible model kernel plan so it is
+  generated alongside assembly/update kernels (`src/solver/model/definitions.rs`).
+- **2025-02-10:** Added compressible-apply WGSL emission and output naming in the codegen
+  emitter (`src/solver/codegen/emit.rs`).
+- **2025-02-10:** Included the compressible-apply generator in the build script for
+  build-time WGSL emission (`build.rs`).
+- **2025-02-10:** Added a dedicated GPU compressible FGMRES module stub to keep solver and
+  linear-solve logic separated (`src/solver/gpu/mod.rs`).
+- **2025-02-10:** Implemented a standalone GPU FGMRES resource builder and solve loop for the
+  compressible solver, including GMRES ops/logic/CGS pipelines and vector helpers
+  (`src/solver/gpu/compressible_fgmres.rs`).
+- **2025-02-10:** Fixed binding reuse in the compressible FGMRES path to avoid moved-value
+  errors when reusing basis bindings (`src/solver/gpu/compressible_fgmres.rs`).
+- **2025-02-10:** Avoided move errors in FGMRES scale-in-place by rebuilding basis bindings
+  when the same buffer is bound twice (`src/solver/gpu/compressible_fgmres.rs`).
+- **2025-02-10:** Hooked the compressible solver module up to the new apply kernel and FGMRES
+  resource types (`src/solver/gpu/compressible_solver.rs` imports).
+- **2025-02-10:** Extended the compressible solver state to carry block-CSR buffers, apply
+  bind groups, and FGMRES resources needed for the implicit path
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Initialized compressible block-CSR buffers, apply bind groups, and new
+  solver pipelines (assembly/apply) during GPU solver construction
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Switched the compressible step loop to assemble an implicit system, solve
+  it with FGMRES, then apply + update fields (dropping the explicit KT flux pass)
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added block-CSR expansion helper for the 4x4 compressible system layout
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Kept compressible stride bookkeeping intact after switching to implicit
+  assembly to avoid unused constants in shared uniforms (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Fixed acoustic debug indexing closure in the compressible validation test to keep test builds green (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Initialized acoustic pulse tests with isentropic density perturbations to avoid a stationary entropy mode and better validate wave propagation (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Added a right-going acoustic pulse initialization and a weighted-mean travel check to validate compressible wave propagation (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Added debug instrumentation for acoustic pulse peak location to help diagnose slow wave propagation (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Switched acoustic pulse travel assertions to use the peak location with a stricter shift threshold (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Wired compressible codegen modules into the codegen module surface
+  for reuse (`src/solver/codegen/mod.rs`).
+- **2025-02-10:** Hooked compressible kernel WGSL generation into the codegen emitter,
+  with field-type validation (`src/solver/codegen/emit.rs`).
+- **2025-02-10:** Extended build-time codegen includes and hooks to emit compressible
+  kernels alongside incompressible ones (`build.rs`).
+- **2025-02-10:** Added emitter coverage for compressible model kernels in codegen tests
+  (`src/solver/codegen/emit.rs`).
+- **2025-02-10:** Verified codegen unit tests after adding compressible kernel emission
+  (`cargo test codegen --lib`).
+- **2025-02-10:** Expanded KT compressible flux codegen to emit full Euler fluxes with
+  central-upwind wave speeds, plus mesh-layout-aligned bindings (`src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Implemented compressible assembly codegen to apply flux divergence,
+  explicit Euler/BDF2 updates, and packed-state writes (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Tightened KT flux codegen tests to assert wave-speed and energy-flux
+  emission (`src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Extended compressible assembly codegen tests to cover explicit update
+  symbols (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Fixed Rust literal suffixes for compressible flux/assembly stride constants
+  to keep codegen building (`src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Corrected compressible assembly stride literal suffix to keep build
+  script codegen compiling (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Verified codegen unit tests after KT flux + assembly updates
+  (`cargo test codegen --lib`).
+- **2025-02-10:** Added packed-state field buffer initialization + bind-group plumbing for
+  compressible kernels (`src/solver/gpu/init/compressible_fields.rs`).
+- **2025-02-10:** Registered compressible field init module in GPU init namespace
+  (`src/solver/gpu/init/mod.rs`).
+- **2025-02-10:** Added a new GPU compressible solver skeleton that dispatches the
+  generated KT/assembly/update kernels and manages packed-state buffers
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Exported `GpuCompressibleSolver` from the GPU module surface
+  (`src/solver/gpu/mod.rs`).
+- **2025-02-10:** Added a GPU compressible solver test that checks a uniform state
+  remains stable over several steps (`tests/gpu_compressible_solver_test.rs`).
+- **2025-02-10:** Adjusted compressible solver test mesh resolution to avoid empty meshes
+  (`tests/gpu_compressible_solver_test.rs`).
+- **2025-02-10:** Removed a redundant `drop` in compressible readback to silence warnings
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Aligned compressible assembly flux binding access with the KT flux kernel
+  to keep bind-group layouts compatible (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Updated compressible update kernel bindings to keep field layouts
+  consistent across compressible pipelines (`src/solver/codegen/compressible_update.rs`).
+- **2025-02-10:** Re-verified codegen tests after compressible binding layout updates
+  (`cargo test codegen --lib`).
+- **2025-02-10:** Verified the compressible solver smoke test for uniform-state stability
+  (`cargo test --test gpu_compressible_solver_test`).
+- **2025-02-10:** Added viscosity into the high-level compressible model with laplacian
+  terms for momentum and energy (`src/solver/model/definitions.rs`).
+- **2025-02-10:** Added viscous momentum/energy diffusion to the KT compressible flux
+  codegen using per-face velocity gradients (`src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Tightened KT flux codegen tests to assert viscous emission symbols
+  (`src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Switched KT flux variables to mutable bindings for viscous adjustments
+  (`src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Verified codegen unit tests after adding viscous terms
+  (`cargo test codegen --lib`).
+- **2025-02-10:** Verified compressible solver smoke test after viscous KT updates
+  (`cargo test --test gpu_compressible_solver_test`).
+- **2025-02-10:** Updated the mesh shader to use the configured vector offset for
+  magnitude rendering (supports packed layouts) (`src/ui/cfd_mesh_shader.wgsl`).
+- **2025-02-10:** Imported the compressible GPU solver into the UI module
+  (`src/ui/app.rs`).
+- **2025-02-10:** Added a solver kind enum to drive UI solver selection
+  (`src/ui/app.rs`).
+- **2025-02-10:** Plumbed compressible solver storage and solver-kind state into the
+  UI app struct (`src/ui/app.rs`).
+- **2025-02-10:** Initialized solver-kind and compressible solver state in UI app
+  construction (`src/ui/app.rs`).
+- **2025-02-10:** Added a UI helper to access the compressible solver handle
+  (`src/ui/app.rs`).
+- **2025-02-10:** Updated renderer binding refresh logic to support the selected solver
+  type (`src/ui/app.rs`).
+- **2025-02-10:** Branched solver initialization in the UI to build either an
+  incompressible or compressible GPU solver, wiring the renderer accordingly
+  (`src/ui/app.rs`).
+- **2025-02-10:** Added density/viscosity setters to the compressible GPU solver
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Routed UI parameter updates to the selected solver type
+  (`src/ui/app.rs`).
+- **2025-02-10:** Refactored the UI run loop to dispatch either incompressible or
+  compressible solver steps and stats (`src/ui/app.rs`).
+- **2025-02-10:** Added a render-layout helper so UI plotting can map packed state
+  offsets for each solver kind (`src/ui/app.rs`).
+- **2025-02-10:** Switched UI plot data/legend/render selection checks to use the
+  active solver and packed-layout offsets (`src/ui/app.rs`).
+- **2025-02-10:** Gated incompressible-only scheme/preconditioner/relaxation controls
+  in the UI when the compressible solver is selected (`src/ui/app.rs`).
+- **2025-02-10:** Added a solver selection combo box that reinitializes with the
+  chosen solver (`src/ui/app.rs`).
+- **2025-02-10:** Cleaned the UI init path to avoid stale incompressible solver
+  assignments after branching init logic (`src/ui/app.rs`).
+- **2025-02-10:** Verified the compressible solver test after UI solver selection changes
+  (`cargo test --test gpu_compressible_solver_test`).
+- **2025-02-10:** Added a compressible solver API to set per-cell rho/u/p fields for
+  validation tests (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added shock-tube and acoustic-pulse validation tests for the
+  compressible solver (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Cleaned up unused mutability in compressible validation tests
+  (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Verified compressible validation tests after cleanup
+  (`cargo test --test gpu_compressible_validation_test`).
+- **2025-02-10:** Added a compressibility model enum to the UI fluid metadata
+  (`src/ui/app.rs`).
+- **2025-02-10:** Updated fluid presets to use ideal-gas vs linear-compressibility
+  models and added a pressure helper (`src/ui/app.rs`).
+- **2025-02-10:** Used fluid compressibility models to derive compressible solver
+  initial pressure in the UI (`src/ui/app.rs`).
+- **2025-02-10:** Synced custom linear-compressibility reference density with the
+  density slider changes (`src/ui/app.rs`).
+- **2025-02-10:** Re-verified compressible validation tests after fluid-model updates
+  (`cargo test --test gpu_compressible_validation_test`).
+- **2025-02-10:** Added analytical checks to compressible validation tests (mass/energy
+  conservation, acoustic wave travel and impedance estimates)
+  (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Fixed numeric type annotations in the compressible analytical tests
+  (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Explicitly typed acoustic base-state constants in validation tests
+  to resolve float inference (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Verified compressible analytical validation tests with new checks
+  (`cargo test --test gpu_compressible_validation_test`).
   (`cargo test codegen --lib`).
 - **2025-02-10:** Exposed incompressible field metadata on `ModelSpec` and re-used it across
   codegen generators so field names come from the high-level model rather than hardcoded
@@ -232,3 +397,60 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Added a codegen emit test for model kernel plans and verified codegen
   unit tests after the dispatch refactor (`src/solver/codegen/emit.rs`,
   `cargo test codegen --lib`).
+- **2025-02-10:** Added a low-Mach equivalence test (ignored by default) that runs
+  incompressible vs compressible solvers on the obstacle channel, checks probe
+  unsteadiness/RMS, and can dump vorticity/speed plots (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added `image` as a dev-dependency for plot dumping in low-Mach tests
+  (`Cargo.toml`).
+- **2025-02-10:** Seeded the low-Mach equivalence test with a small velocity perturbation,
+  added a base-pressure knob, switched compressible to BDF2, and ensured plots are dumped
+  before assertions (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Fixed low-Mach equivalence test initialization types to use f64 for the
+  incompressible solver field setters (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Wrote compressible initial states to all ping-pong buffers so the first
+  step uses the seeded state rather than zeroed buffers (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Adjusted low-Mach equivalence defaults to reduce CFL (lower base pressure,
+  smaller dt) to avoid NaNs while still targeting low-Mach behavior
+  (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Retuned low-Mach equivalence defaults (more steps, higher inlet velocity,
+  stronger perturbation) and added a configurable `CFD2_LOW_MACH_UIN` knob to encourage
+  vortex shedding (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Lowered the low-Mach test timestep default to `0.001` and trimmed the
+  default step count to 600 to keep the compressible run stable without extra runtime
+  (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added a plot fill radius option for low-Mach images to avoid sparse
+  point-only renderings and make vortex structures easier to see (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Tightened compressible validation tolerances for shock-tube conservation
+  and acoustic pulse propagation/impedance checks (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Increased the acoustic pulse run length to let the wave separate before
+  checking travel distance (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Refined the acoustic pulse validation to a finer mesh and smaller dt
+  to improve wave propagation fidelity before applying tighter travel checks
+  (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Switched low-Mach plot output to polygon rasterization with UI-matching
+  sequential colormap and raised the default step count to 1200 for clearer vortex
+  development in saved images (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Fixed FGMRES scale-in-place binding to avoid using the same temp buffer
+  as both read-only and read-write in a single dispatch (`src/solver/gpu/compressible_fgmres.rs`).
+- **2025-02-10:** Corrected compressible RHS time term to use the current state (not the
+  old state) so the implicit residual matches the time discretization
+  (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Switched compressible flux/Jacobian evaluation to use the current
+  state instead of lagged `state_old` while keeping time terms on old history
+  (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Initialize the implicit solve state each step by copying
+  `state_old` into the active `state` buffer before assembly so residuals and
+  updates are consistent (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added optional FGMRES convergence logging behind
+  `CFD2_DEBUG_FGMRES=1` to help diagnose implicit solve accuracy
+  (`src/solver/gpu/compressible_fgmres.rs`).
+- **2025-02-10:** Updated compressible apply to use the current `state` as the
+  base for delta updates so future nonlinear outer iterations can accumulate
+  corrections (`src/solver/codegen/compressible_apply.rs`).
+- **2025-02-10:** Added configurable compressible outer iterations and looped
+  assembly/solve/apply before a final derived-field update
+  (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Set compressible validation tests to use 3 nonlinear outer
+  iterations for improved acoustic accuracy (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Refined the acoustic pulse validation mesh to improve wave
+  resolution (`tests/gpu_compressible_validation_test.rs`).

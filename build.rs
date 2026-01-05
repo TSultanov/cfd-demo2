@@ -50,13 +50,38 @@ mod solver {
         }
         #[allow(unused_imports)]
         pub use definitions::{
-            incompressible_momentum_model, incompressible_momentum_system,
-            IncompressibleMomentumFields, ModelSpec,
+            compressible_model, compressible_system, incompressible_momentum_model,
+            incompressible_momentum_system, CompressibleFields, IncompressibleMomentumFields,
+            ModelFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
     }
     pub mod codegen {
+        pub mod compressible_assembly {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/compressible_assembly.rs"
+            ));
+        }
+        pub mod compressible_apply {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/compressible_apply.rs"
+            ));
+        }
+        pub mod compressible_flux_kt {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/compressible_flux_kt.rs"
+            ));
+        }
+        pub mod compressible_update {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/compressible_update.rs"
+            ));
+        }
         pub mod coupled_assembly {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -172,6 +197,14 @@ fn main() {
     if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
         &manifest_dir,
         &model,
+        &schemes,
+    ) {
+        panic!("codegen failed: {}", err);
+    }
+    let compressible_model = solver::model::compressible_model();
+    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
+        &manifest_dir,
+        &compressible_model,
         &schemes,
     ) {
         panic!("codegen failed: {}", err);

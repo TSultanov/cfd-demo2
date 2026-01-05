@@ -25,6 +25,7 @@ ahash = "0.8.12"
 
 [dev-dependencies]
 criterion = "0.5"
+image = "0.25"
 
 [build-dependencies]
 wgsl_bindgen = "0.21.2"

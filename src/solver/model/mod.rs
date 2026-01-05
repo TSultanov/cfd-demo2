@@ -4,7 +4,8 @@ mod definitions;
 pub mod kernel;
 
 pub use definitions::{
-    incompressible_momentum_model, incompressible_momentum_system, IncompressibleMomentumFields,
+    compressible_model, compressible_system, incompressible_momentum_model,
+    incompressible_momentum_system, CompressibleFields, IncompressibleMomentumFields, ModelFields,
     ModelSpec,
 };
 pub use kernel::{KernelKind, KernelPlan};

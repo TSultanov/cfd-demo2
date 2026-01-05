@@ -153,3 +153,4 @@ impl GpuSolver {
         }
     }
 }
+pub mod compressible_fields;

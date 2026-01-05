@@ -7,6 +7,7 @@ pub enum KernelKind {
     FluxRhieChow,
     IncompressibleMomentum,
     CompressibleAssembly,
+    CompressibleApply,
     CompressibleUpdate,
     CompressibleFluxKt,
 }

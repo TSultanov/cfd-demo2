@@ -1,0 +1,1341 @@
+use super::bindings;
+use super::compressible_solver::GpuCompressibleSolver;
+use super::structs::LinearSolverStats;
+use bytemuck::{bytes_of, Pod, Zeroable};
+
+pub struct CompressibleFgmresResources {
+    pub max_restart: usize,
+    pub num_unknowns: u32,
+    pub num_dot_groups: u32,
+    pub basis_stride: u64,
+    pub b_basis: wgpu::Buffer,
+    pub z_vectors: Vec<wgpu::Buffer>,
+    pub b_w: wgpu::Buffer,
+    pub b_temp: wgpu::Buffer,
+    pub b_dot_partial: wgpu::Buffer,
+    pub b_scalars: wgpu::Buffer,
+    pub b_params: wgpu::Buffer,
+    pub b_iter_params: wgpu::Buffer,
+    pub b_hessenberg: wgpu::Buffer,
+    pub b_givens: wgpu::Buffer,
+    pub b_g: wgpu::Buffer,
+    pub b_y: wgpu::Buffer,
+    pub b_staging_scalar: wgpu::Buffer,
+    pub b_diag_u: wgpu::Buffer,
+    pub b_diag_v: wgpu::Buffer,
+    pub b_diag_p: wgpu::Buffer,
+    pub bgl_vectors: wgpu::BindGroupLayout,
+    pub bgl_matrix: wgpu::BindGroupLayout,
+    pub bgl_precond: wgpu::BindGroupLayout,
+    pub bgl_params: wgpu::BindGroupLayout,
+    pub bgl_logic: wgpu::BindGroupLayout,
+    pub bgl_logic_params: wgpu::BindGroupLayout,
+    pub bgl_cgs: wgpu::BindGroupLayout,
+    pub bg_matrix: wgpu::BindGroup,
+    pub bg_precond: wgpu::BindGroup,
+    pub bg_params: wgpu::BindGroup,
+    pub bg_logic: wgpu::BindGroup,
+    pub bg_logic_params: wgpu::BindGroup,
+    pub bg_cgs: wgpu::BindGroup,
+    pub pipeline_spmv: wgpu::ComputePipeline,
+    pub pipeline_axpy: wgpu::ComputePipeline,
+    pub pipeline_axpy_from_y: wgpu::ComputePipeline,
+    pub pipeline_axpby: wgpu::ComputePipeline,
+    pub pipeline_scale: wgpu::ComputePipeline,
+    pub pipeline_scale_in_place: wgpu::ComputePipeline,
+    pub pipeline_copy: wgpu::ComputePipeline,
+    pub pipeline_dot_partial: wgpu::ComputePipeline,
+    pub pipeline_norm_sq: wgpu::ComputePipeline,
+    pub pipeline_reduce_final: wgpu::ComputePipeline,
+    pub pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
+    pub pipeline_update_hessenberg: wgpu::ComputePipeline,
+    pub pipeline_solve_triangular: wgpu::ComputePipeline,
+    pub pipeline_calc_dots_cgs: wgpu::ComputePipeline,
+    pub pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
+    pub pipeline_update_w_cgs: wgpu::ComputePipeline,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct RawFgmresParams {
+    n: u32,
+    num_cells: u32,
+    num_iters: u32,
+    omega: f32,
+    dispatch_x: u32,
+    max_restart: u32,
+    column_offset: u32,
+    _pad3: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct IterParams {
+    current_idx: u32,
+    max_restart: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+impl GpuCompressibleSolver {
+    const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
+    const WORKGROUP_SIZE: u32 = 64;
+
+    pub(crate) fn ensure_fgmres_resources(&mut self, max_restart: usize) {
+        let n = self.num_unknowns;
+        let rebuild = match &self.fgmres_resources {
+            Some(existing) => existing.max_restart < max_restart || existing.num_unknowns != n,
+            None => true,
+        };
+        if rebuild {
+            let resources = self.init_fgmres_resources(max_restart);
+            self.fgmres_resources = Some(resources);
+        }
+    }
+
+    fn init_fgmres_resources(&self, max_restart: usize) -> CompressibleFgmresResources {
+        let device = &self.context.device;
+        let n = self.num_unknowns;
+        let workgroups = self.workgroups_for_size(n);
+        let num_dot_groups = workgroups;
+
+        let stride_bytes = ((n as u64 * 4 + 255) / 256) * 256;
+        let basis_stride = stride_bytes;
+        let basis_size = stride_bytes * (max_restart as u64 + 1);
+
+        let b_basis = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES basis"),
+            size: basis_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let mut z_vectors = Vec::with_capacity(max_restart);
+        for i in 0..max_restart {
+            z_vectors.push(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Compressible FGMRES Z {}", i)),
+                size: n as u64 * 4,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }));
+        }
+
+        let b_w = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES w"),
+            size: n as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_temp = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES temp"),
+            size: n as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_dot_partial = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES dot partial"),
+            size: (num_dot_groups as u64) * ((max_restart + 1) as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_scalars = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES scalars"),
+            size: 16 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES params"),
+            size: std::mem::size_of::<RawFgmresParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let b_iter_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES iter params"),
+            size: std::mem::size_of::<IterParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let hessenberg_len = (max_restart + 1) * max_restart;
+        let b_hessenberg = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES hessenberg"),
+            size: (hessenberg_len as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_givens = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES givens"),
+            size: (max_restart as u64) * 2 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_g = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES g"),
+            size: (max_restart as u64 + 1) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_y = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES y"),
+            size: (max_restart as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_staging_scalar = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES staging scalar"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let b_diag_u = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES diag u"),
+            size: n as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let b_diag_v = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES diag v"),
+            size: n as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let b_diag_p = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Compressible FGMRES diag p"),
+            size: n as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        let bgl_vectors = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES vectors BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_matrix = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES matrix BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_precond = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES precond BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES params BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_logic = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES logic BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_logic_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES logic params BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_cgs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Compressible FGMRES cgs BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compressible FGMRES matrix BG"),
+            layout: &bgl_matrix,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.b_row_offsets.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.b_col_indices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.b_matrix_values.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_precond = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compressible FGMRES precond BG"),
+            layout: &bgl_precond,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_diag_u.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_diag_v.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_diag_p.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compressible FGMRES params BG"),
+            layout: &bgl_params,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_iter_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_y.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_logic = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compressible FGMRES logic BG"),
+            layout: &bgl_logic,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_givens.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_g.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_y.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_logic_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compressible FGMRES logic params BG"),
+            layout: &bgl_logic_params,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_iter_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_cgs = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compressible FGMRES CGS BG"),
+            layout: &bgl_cgs,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_basis.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_w.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_dot_partial.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+            ],
+        });
+
+        let pipeline_layout_gmres = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Compressible FGMRES pipeline layout"),
+            bind_group_layouts: &[&bgl_vectors, &bgl_matrix, &bgl_precond, &bgl_params],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline_layout_logic =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compressible FGMRES logic pipeline layout"),
+                bind_group_layouts: &[&bgl_logic, &bgl_logic_params],
+                push_constant_ranges: &[],
+            });
+
+        let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Compressible FGMRES CGS pipeline layout"),
+            bind_group_layouts: &[&bgl_cgs],
+            push_constant_ranges: &[],
+        });
+
+        let shader_ops = bindings::gmres_ops::create_shader_module_embed_source(device);
+        let shader_logic = bindings::gmres_logic::create_shader_module_embed_source(device);
+        let shader_cgs = bindings::gmres_cgs::create_shader_module_embed_source(device);
+
+        let make_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_gmres),
+                module: &shader_ops,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let make_logic_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_logic),
+                module: &shader_logic,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let make_cgs_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_cgs),
+                module: &shader_cgs,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let pipeline_spmv = make_pipeline("Compressible FGMRES SpMV", "spmv");
+        let pipeline_axpy = make_pipeline("Compressible FGMRES AXPY", "axpy");
+        let pipeline_axpy_from_y = make_pipeline("Compressible FGMRES AXPY from Y", "axpy_from_y");
+        let pipeline_axpby = make_pipeline("Compressible FGMRES AXPBY", "axpby");
+        let pipeline_scale = make_pipeline("Compressible FGMRES Scale", "scale");
+        let pipeline_scale_in_place =
+            make_pipeline("Compressible FGMRES Scale In Place", "scale_in_place");
+        let pipeline_copy = make_pipeline("Compressible FGMRES Copy", "copy");
+        let pipeline_dot_partial =
+            make_pipeline("Compressible FGMRES Dot Partial", "dot_product_partial");
+        let pipeline_norm_sq =
+            make_pipeline("Compressible FGMRES Norm Partial", "norm_sq_partial");
+        let pipeline_reduce_final =
+            make_pipeline("Compressible FGMRES Reduce Final", "reduce_final");
+        let pipeline_reduce_final_and_finish_norm = make_pipeline(
+            "Compressible FGMRES Reduce Final & Finish Norm",
+            "reduce_final_and_finish_norm",
+        );
+
+        let pipeline_update_hessenberg = make_logic_pipeline(
+            "Compressible FGMRES Update Hessenberg",
+            "update_hessenberg_givens",
+        );
+        let pipeline_solve_triangular =
+            make_logic_pipeline("Compressible FGMRES Solve Triangular", "solve_triangular");
+
+        let pipeline_calc_dots_cgs =
+            make_cgs_pipeline("Compressible FGMRES CGS Calc", "calc_dots_cgs");
+        let pipeline_reduce_dots_cgs =
+            make_cgs_pipeline("Compressible FGMRES CGS Reduce", "reduce_dots_cgs");
+        let pipeline_update_w_cgs =
+            make_cgs_pipeline("Compressible FGMRES CGS Update W", "update_w_cgs");
+
+        CompressibleFgmresResources {
+            max_restart,
+            num_unknowns: n,
+            num_dot_groups,
+            basis_stride,
+            b_basis,
+            z_vectors,
+            b_w,
+            b_temp,
+            b_dot_partial,
+            b_scalars,
+            b_params,
+            b_iter_params,
+            b_hessenberg,
+            b_givens,
+            b_g,
+            b_y,
+            b_staging_scalar,
+            b_diag_u,
+            b_diag_v,
+            b_diag_p,
+            bgl_vectors,
+            bgl_matrix,
+            bgl_precond,
+            bgl_params,
+            bgl_logic,
+            bgl_logic_params,
+            bgl_cgs,
+            bg_matrix,
+            bg_precond,
+            bg_params,
+            bg_logic,
+            bg_logic_params,
+            bg_cgs,
+            pipeline_spmv,
+            pipeline_axpy,
+            pipeline_axpy_from_y,
+            pipeline_axpby,
+            pipeline_scale,
+            pipeline_scale_in_place,
+            pipeline_copy,
+            pipeline_dot_partial,
+            pipeline_norm_sq,
+            pipeline_reduce_final,
+            pipeline_reduce_final_and_finish_norm,
+            pipeline_update_hessenberg,
+            pipeline_solve_triangular,
+            pipeline_calc_dots_cgs,
+            pipeline_reduce_dots_cgs,
+            pipeline_update_w_cgs,
+        }
+    }
+
+    pub(crate) fn solve_compressible_fgmres(
+        &mut self,
+        max_restart: usize,
+        tol: f32,
+    ) -> LinearSolverStats {
+        let start = std::time::Instant::now();
+        self.ensure_fgmres_resources(max_restart);
+        let Some(fgmres) = &self.fgmres_resources else {
+            return LinearSolverStats::default();
+        };
+
+        let n = self.num_unknowns;
+        let workgroups = self.workgroups_for_size(n);
+        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
+        let dispatch_x_threads = self.dispatch_x_threads(workgroups);
+
+        self.zero_buffer(&self.b_x, n);
+
+        let rhs_norm = self.gpu_norm(fgmres, self.b_rhs.as_entire_binding(), n);
+        if rhs_norm <= tol {
+            let stats = LinearSolverStats {
+                iterations: 0,
+                residual: rhs_norm,
+                converged: true,
+                diverged: false,
+                time: start.elapsed(),
+            };
+            if std::env::var("CFD2_DEBUG_FGMRES").ok().as_deref() == Some("1") {
+                eprintln!(
+                    "fgmres: iters=0 rhs_norm={:.3e} residual={:.3e} converged=true",
+                    rhs_norm, rhs_norm
+                );
+            }
+            return stats;
+        }
+
+        let mut params = RawFgmresParams {
+            n,
+            num_cells: self.num_cells,
+            num_iters: 0,
+            omega: 1.0,
+            dispatch_x: dispatch_x_threads,
+            max_restart: fgmres.max_restart as u32,
+            column_offset: 0,
+            _pad3: 0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+
+        let mut iter_params = IterParams {
+            current_idx: 0,
+            max_restart: fgmres.max_restart as u32,
+            _pad1: 0,
+            _pad2: 0,
+        };
+
+        self.write_zeros(&fgmres.b_hessenberg);
+        self.write_zeros(&fgmres.b_givens);
+        self.write_zeros(&fgmres.b_y);
+        let mut g_init = vec![0.0f32; fgmres.max_restart + 1];
+        g_init[0] = rhs_norm;
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_g, 0, bytemuck::cast_slice(&g_init));
+
+        let basis0 = self.basis_binding(fgmres, 0);
+        self.dispatch_vector_pipeline(
+            &fgmres.pipeline_copy,
+            fgmres,
+            &self.create_vector_bind_group(
+                fgmres,
+                self.b_rhs.as_entire_binding(),
+                basis0,
+                fgmres.b_temp.as_entire_binding(),
+            ),
+            &fgmres.bg_params,
+            dispatch_x,
+            dispatch_y,
+        );
+
+        self.write_scalars(fgmres, &[1.0 / rhs_norm]);
+        let basis0_y = self.basis_binding(fgmres, 0);
+        self.dispatch_vector_pipeline(
+            &fgmres.pipeline_scale_in_place,
+            fgmres,
+            &self.create_vector_bind_group(
+                fgmres,
+                fgmres.b_w.as_entire_binding(),
+                basis0_y,
+                fgmres.b_temp.as_entire_binding(),
+            ),
+            &fgmres.bg_params,
+            dispatch_x,
+            dispatch_y,
+        );
+
+        let mut converged = false;
+        let mut final_residual = rhs_norm;
+        let mut basis_size = 0usize;
+
+        for j in 0..fgmres.max_restart {
+            basis_size = j + 1;
+
+            let z_buf = &fgmres.z_vectors[j];
+            let vj = self.basis_binding(fgmres, j);
+            self.dispatch_vector_pipeline(
+                &fgmres.pipeline_copy,
+                fgmres,
+                &self.create_vector_bind_group(
+                    fgmres,
+                    vj,
+                    z_buf.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                ),
+                &fgmres.bg_params,
+                dispatch_x,
+                dispatch_y,
+            );
+
+            self.dispatch_vector_pipeline(
+                &fgmres.pipeline_spmv,
+                fgmres,
+                &self.create_vector_bind_group(
+                    fgmres,
+                    z_buf.as_entire_binding(),
+                    fgmres.b_w.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                ),
+                &fgmres.bg_params,
+                dispatch_x,
+                dispatch_y,
+            );
+
+            params.num_iters = j as u32;
+            params.dispatch_x = fgmres.num_dot_groups;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+
+            {
+                let mut encoder =
+                    self.context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Compressible FGMRES CGS"),
+                        });
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Compressible FGMRES CGS Calc"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&fgmres.pipeline_calc_dots_cgs);
+                    pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
+                    pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
+                }
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Compressible FGMRES CGS Reduce"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&fgmres.pipeline_reduce_dots_cgs);
+                    pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
+                    pass.dispatch_workgroups((j + 1) as u32, 1, 1);
+                }
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Compressible FGMRES CGS Update W"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&fgmres.pipeline_update_w_cgs);
+                    pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
+                    pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
+                }
+                self.context.queue.submit(Some(encoder.finish()));
+            }
+
+            params.dispatch_x = dispatch_x_threads;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+
+            let h_idx = (j as u32) * (fgmres.max_restart as u32 + 1) + (j as u32 + 1);
+            iter_params.current_idx = h_idx;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+
+            self.dispatch_vector_pipeline(
+                &fgmres.pipeline_norm_sq,
+                fgmres,
+                &self.create_vector_bind_group(
+                    fgmres,
+                    fgmres.b_w.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                    fgmres.b_dot_partial.as_entire_binding(),
+                ),
+                &fgmres.bg_params,
+                dispatch_x,
+                dispatch_y,
+            );
+
+            params.n = fgmres.num_dot_groups;
+            params.dispatch_x = Self::WORKGROUP_SIZE;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+            self.dispatch_vector_pipeline(
+                &fgmres.pipeline_reduce_final_and_finish_norm,
+                fgmres,
+                &self.create_vector_bind_group(
+                    fgmres,
+                    fgmres.b_dot_partial.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                ),
+                &fgmres.bg_params,
+                1,
+                1,
+            );
+
+            params.n = n;
+            params.dispatch_x = dispatch_x_threads;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+
+            let v_next = self.basis_binding(fgmres, j + 1);
+            self.dispatch_vector_pipeline(
+                &fgmres.pipeline_scale,
+                fgmres,
+                &self.create_vector_bind_group(
+                    fgmres,
+                    fgmres.b_w.as_entire_binding(),
+                    v_next,
+                    fgmres.b_temp.as_entire_binding(),
+                ),
+                &fgmres.bg_params,
+                dispatch_x,
+                dispatch_y,
+            );
+
+            iter_params.current_idx = j as u32;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+            self.dispatch_logic_pipeline(
+                &fgmres.pipeline_update_hessenberg,
+                fgmres,
+                1,
+            );
+
+            final_residual = self.read_scalar(fgmres);
+            if final_residual <= tol * rhs_norm {
+                converged = true;
+                break;
+            }
+        }
+
+        iter_params.current_idx = basis_size as u32;
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+        self.dispatch_logic_pipeline(&fgmres.pipeline_solve_triangular, fgmres, 1);
+
+        self.zero_buffer(&self.b_x, n);
+        for i in 0..basis_size {
+            iter_params.current_idx = i as u32;
+            self.context
+                .queue
+                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+            self.dispatch_vector_pipeline(
+                &fgmres.pipeline_axpy_from_y,
+                fgmres,
+                &self.create_vector_bind_group(
+                    fgmres,
+                    fgmres.z_vectors[i].as_entire_binding(),
+                    self.b_x.as_entire_binding(),
+                    fgmres.b_temp.as_entire_binding(),
+                ),
+                &fgmres.bg_params,
+                dispatch_x,
+                dispatch_y,
+            );
+        }
+
+        let stats = LinearSolverStats {
+            iterations: basis_size as u32,
+            residual: final_residual,
+            converged,
+            diverged: false,
+            time: start.elapsed(),
+        };
+        if std::env::var("CFD2_DEBUG_FGMRES").ok().as_deref() == Some("1") {
+            eprintln!(
+                "fgmres: iters={} rhs_norm={:.3e} residual={:.3e} converged={}",
+                stats.iterations, rhs_norm, stats.residual, stats.converged
+            );
+        }
+        stats
+    }
+
+    fn basis_binding<'a>(
+        &self,
+        fgmres: &'a CompressibleFgmresResources,
+        idx: usize,
+    ) -> wgpu::BindingResource<'a> {
+        let stride = fgmres.basis_stride;
+        let vector_size = fgmres.b_w.size();
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &fgmres.b_basis,
+            offset: (idx as u64) * stride,
+            size: std::num::NonZeroU64::new(vector_size),
+        })
+    }
+
+    fn create_vector_bind_group<'a>(
+        &self,
+        fgmres: &CompressibleFgmresResources,
+        x: wgpu::BindingResource<'a>,
+        y: wgpu::BindingResource<'a>,
+        z: wgpu::BindingResource<'a>,
+    ) -> wgpu::BindGroup {
+        self.context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compressible FGMRES vector BG"),
+                layout: &fgmres.bgl_vectors,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: x },
+                    wgpu::BindGroupEntry { binding: 1, resource: y },
+                    wgpu::BindGroupEntry { binding: 2, resource: z },
+                ],
+            })
+    }
+
+    fn dispatch_vector_pipeline(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        fgmres: &CompressibleFgmresResources,
+        vector_bg: &wgpu::BindGroup,
+        group3_bg: &wgpu::BindGroup,
+        dispatch_x: u32,
+        dispatch_y: u32,
+    ) {
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Compressible FGMRES vector pass"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compressible FGMRES vector"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, vector_bg, &[]);
+            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
+            pass.set_bind_group(2, &fgmres.bg_precond, &[]);
+            pass.set_bind_group(3, group3_bg, &[]);
+            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    fn dispatch_logic_pipeline(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        fgmres: &CompressibleFgmresResources,
+        workgroups: u32,
+    ) {
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Compressible FGMRES logic pass"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compressible FGMRES logic"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &fgmres.bg_logic, &[]);
+            pass.set_bind_group(1, &fgmres.bg_logic_params, &[]);
+            pass.dispatch_workgroups(workgroups, 1, 1);
+        }
+        self.context.queue.submit(Some(encoder.finish()));
+    }
+
+    fn workgroups_for_size(&self, n: u32) -> u32 {
+        n.div_ceil(Self::WORKGROUP_SIZE)
+    }
+
+    fn dispatch_2d(&self, workgroups: u32) -> (u32, u32) {
+        if workgroups <= Self::MAX_WORKGROUPS_PER_DIMENSION {
+            (workgroups, 1)
+        } else {
+            let dispatch_y = workgroups.div_ceil(Self::MAX_WORKGROUPS_PER_DIMENSION);
+            let dispatch_x = workgroups.div_ceil(dispatch_y);
+            (dispatch_x, dispatch_y)
+        }
+    }
+
+    fn dispatch_x_threads(&self, workgroups: u32) -> u32 {
+        let (dispatch_x, _) = self.dispatch_2d(workgroups);
+        dispatch_x * Self::WORKGROUP_SIZE
+    }
+
+    fn write_scalars(&self, fgmres: &CompressibleFgmresResources, scalars: &[f32]) {
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_scalars, 0, bytemuck::cast_slice(scalars));
+    }
+
+    fn zero_buffer(&self, buffer: &wgpu::Buffer, n: u32) {
+        let zeros = vec![0.0f32; n as usize];
+        self.context
+            .queue
+            .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
+    }
+
+    fn write_zeros(&self, buffer: &wgpu::Buffer) {
+        let size = buffer.size();
+        let zeros = vec![0u8; size as usize];
+        self.context.queue.write_buffer(buffer, 0, &zeros);
+    }
+
+    fn read_scalar(&self, fgmres: &CompressibleFgmresResources) -> f32 {
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Compressible FGMRES read scalar"),
+                });
+        encoder.copy_buffer_to_buffer(&fgmres.b_scalars, 0, &fgmres.b_staging_scalar, 0, 4);
+        self.context.queue.submit(Some(encoder.finish()));
+
+        let slice = fgmres.b_staging_scalar.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |v| {
+            let _ = tx.send(v);
+        });
+        let _ = self
+            .context
+            .device
+            .poll(wgpu::PollType::wait_indefinitely());
+        rx.recv().ok().and_then(|v| v.ok()).unwrap();
+        let data = slice.get_mapped_range();
+        let value = f32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
+        drop(data);
+        fgmres.b_staging_scalar.unmap();
+        value
+    }
+
+    fn gpu_norm<'a>(
+        &self,
+        fgmres: &CompressibleFgmresResources,
+        x: wgpu::BindingResource<'a>,
+        n: u32,
+    ) -> f32 {
+        let workgroups = self.workgroups_for_size(n);
+        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
+
+        let vector_bg = self.create_vector_bind_group(
+            fgmres,
+            x,
+            fgmres.b_temp.as_entire_binding(),
+            fgmres.b_dot_partial.as_entire_binding(),
+        );
+
+        let reduce_bg = self.create_vector_bind_group(
+            fgmres,
+            fgmres.b_dot_partial.as_entire_binding(),
+            fgmres.b_temp.as_entire_binding(),
+            fgmres.b_temp.as_entire_binding(),
+        );
+
+        let params = RawFgmresParams {
+            n,
+            num_cells: self.num_cells,
+            num_iters: 0,
+            omega: 1.0,
+            dispatch_x: self.dispatch_x_threads(workgroups),
+            max_restart: fgmres.max_restart as u32,
+            column_offset: 0,
+            _pad3: 0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+        let iter_params = IterParams {
+            current_idx: 0,
+            max_restart: fgmres.max_restart as u32,
+            _pad1: 0,
+            _pad2: 0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+
+        self.dispatch_vector_pipeline(
+            &fgmres.pipeline_norm_sq,
+            fgmres,
+            &vector_bg,
+            &fgmres.bg_params,
+            dispatch_x,
+            dispatch_y,
+        );
+
+        let reduce_params = RawFgmresParams {
+            n: fgmres.num_dot_groups,
+            num_cells: 0,
+            num_iters: 0,
+            omega: 0.0,
+            dispatch_x: Self::WORKGROUP_SIZE,
+            max_restart: 0,
+            column_offset: 0,
+            _pad3: 0,
+        };
+        self.context
+            .queue
+            .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+
+        self.dispatch_vector_pipeline(
+            &fgmres.pipeline_reduce_final,
+            fgmres,
+            &reduce_bg,
+            &fgmres.bg_params,
+            1,
+            1,
+        );
+
+        let norm_sq = self.read_scalar(fgmres);
+        norm_sq.sqrt()
+    }
+}

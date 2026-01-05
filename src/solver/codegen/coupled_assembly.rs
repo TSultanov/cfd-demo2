@@ -1,5 +1,6 @@
 use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
-use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
+use super::ir::DiscreteSystem;
+use super::plan::{momentum_plan, MomentumPlan};
 use super::state_access::{state_scalar_expr, state_vec2_expr};
 use crate::solver::model::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
@@ -21,7 +22,13 @@ pub fn generate_coupled_assembly_wgsl(system: &DiscreteSystem, layout: &StateLay
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
     module.extend(generate_wgsl_library_items(system));
-    let plan = momentum_plan(system);
+    let plan = {
+        let plan = momentum_plan(system, FIELD_U, FIELD_P);
+        if plan.pressure_diffusion.is_none() {
+            panic!("missing pressure diffusion term for field '{}'", FIELD_P);
+        }
+        plan
+    };
     module.push(Item::Function(main_fn(layout, &plan)));
     module.to_wgsl()
 }
@@ -299,68 +306,6 @@ fn safe_inverse_fn() -> Function {
         Stmt::Return(Some(dsl::expr("0.0"))),
     ]);
     Function::new("safe_inverse", params, Some(Type::F32), Vec::new(), body)
-}
-
-#[derive(Debug, Clone)]
-struct MomentumPlan {
-    ddt: Option<DiscreteOp>,
-    convection: Option<DiscreteOp>,
-    diffusion: Option<DiscreteOp>,
-    gradient: Option<DiscreteOp>,
-    pressure_diffusion: Option<DiscreteOp>,
-}
-
-fn momentum_plan(system: &DiscreteSystem) -> MomentumPlan {
-    let mut plan = MomentumPlan {
-        ddt: None,
-        convection: None,
-        diffusion: None,
-        gradient: None,
-        pressure_diffusion: None,
-    };
-
-    let mut found = false;
-    for equation in &system.equations {
-        if equation.target.name() != FIELD_U {
-            continue;
-        }
-        found = true;
-        for op in &equation.ops {
-            match op.kind {
-                DiscreteOpKind::TimeDerivative => plan.ddt = Some(op.clone()),
-                DiscreteOpKind::Convection => {
-                    if plan.convection.is_none() {
-                        plan.convection = Some(op.clone());
-                    }
-                }
-                DiscreteOpKind::Diffusion => plan.diffusion = Some(op.clone()),
-                DiscreteOpKind::Gradient => plan.gradient = Some(op.clone()),
-                DiscreteOpKind::Source => {}
-            }
-        }
-    }
-
-    if !found {
-        panic!("missing momentum equation for field '{}'", FIELD_U);
-    }
-
-    for equation in &system.equations {
-        if equation.target.name() != FIELD_P {
-            continue;
-        }
-        for op in &equation.ops {
-            if op.kind == DiscreteOpKind::Diffusion {
-                plan.pressure_diffusion = Some(op.clone());
-                break;
-            }
-        }
-    }
-
-    if plan.pressure_diffusion.is_none() {
-        panic!("missing pressure diffusion term for field '{}'", FIELD_P);
-    }
-
-    plan
 }
 
 fn main_fn(layout: &StateLayout, plan: &MomentumPlan) -> Function {

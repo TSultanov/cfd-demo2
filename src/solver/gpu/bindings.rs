@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 33d18e36b7770a7acb500b949f0c0787b3011fbed59fe4bf2ba60fe1be091f95
+// SourceHash: b2d8f6d110522c9367b5e307e98260f8d5b8f703f0e0b6b7112d247c06bc5fb4
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -3752,6 +3752,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var u_face: vec2<f32>;
     var d_p_face: f32;
     var grad_p_avg: vec2<f32>;
+    var rho_face: f32;
     var lambda: f32 = 0.5f;
     var u_central: vec2<f32>;
     var rc_term: f32 = 0f;
@@ -3787,15 +3788,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e88 = state[((owner * 8u) + 4u)];
     let _e95 = state[((owner * 8u) + 5u)];
     grad_p_avg = vec2<f32>(_e88, _e95);
+    let _e100 = constants.density;
+    rho_face = _e100;
     if (neighbor != -1i) {
         let neigh_idx = u32(neighbor);
-        let _e107 = state[((neigh_idx * 8u) + 0u)];
-        let _e114 = state[((neigh_idx * 8u) + 1u)];
-        let u_neigh = vec2<f32>(_e107, _e114);
+        let _e111 = state[((neigh_idx * 8u) + 0u)];
+        let _e118 = state[((neigh_idx * 8u) + 1u)];
+        let u_neigh = vec2<f32>(_e111, _e118);
         let d_p_neigh = state[((neigh_idx * 8u) + 3u)];
-        let _e129 = state[((neigh_idx * 8u) + 4u)];
-        let _e136 = state[((neigh_idx * 8u) + 5u)];
-        let grad_p_neigh = vec2<f32>(_e129, _e136);
+        let _e133 = state[((neigh_idx * 8u) + 4u)];
+        let _e140 = state[((neigh_idx * 8u) + 5u)];
+        let grad_p_neigh = vec2<f32>(_e133, _e140);
         let c_neigh = cell_centers[neigh_idx];
         let d_own = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(face_center.x, face_center.y));
         let d_neigh = distance(vec2<f32>(c_neigh.x, c_neigh.y), vec2<f32>(face_center.x, face_center.y));
@@ -3803,65 +3806,67 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (total_dist > 0.000001f) {
             lambda = (d_neigh / total_dist);
         }
-        let _e160 = u_face;
-        u_central = _e160;
-        let _e163 = lambda;
-        let _e165 = u_face.x;
-        let _e167 = lambda;
-        u_central.x = ((_e163 * _e165) + ((1f - _e167) * u_neigh.x));
+        let _e166 = constants.density;
+        rho_face = _e166;
+        let _e167 = u_face;
+        u_central = _e167;
+        let _e170 = lambda;
+        let _e172 = u_face.x;
         let _e174 = lambda;
-        let _e176 = u_face.y;
-        let _e178 = lambda;
-        u_central.y = ((_e174 * _e176) + ((1f - _e178) * u_neigh.y));
-        let _e184 = u_central;
-        u_face = _e184;
+        u_central.x = ((_e170 * _e172) + ((1f - _e174) * u_neigh.x));
+        let _e181 = lambda;
+        let _e183 = u_face.y;
         let _e185 = lambda;
-        let _e186 = d_p_face;
-        let _e188 = lambda;
-        d_p_face = ((_e185 * _e186) + ((1f - _e188) * d_p_neigh));
-        let _e194 = lambda;
-        let _e196 = grad_p_avg.x;
-        let _e198 = lambda;
-        grad_p_avg.x = ((_e194 * _e196) + ((1f - _e198) * grad_p_neigh.x));
+        u_central.y = ((_e181 * _e183) + ((1f - _e185) * u_neigh.y));
+        let _e191 = u_central;
+        u_face = _e191;
+        let _e192 = lambda;
+        let _e193 = d_p_face;
+        let _e195 = lambda;
+        d_p_face = ((_e192 * _e193) + ((1f - _e195) * d_p_neigh));
+        let _e201 = lambda;
+        let _e203 = grad_p_avg.x;
         let _e205 = lambda;
-        let _e207 = grad_p_avg.y;
-        let _e209 = lambda;
-        grad_p_avg.y = ((_e205 * _e207) + ((1f - _e209) * grad_p_neigh.y));
+        grad_p_avg.x = ((_e201 * _e203) + ((1f - _e205) * grad_p_neigh.x));
+        let _e212 = lambda;
+        let _e214 = grad_p_avg.y;
+        let _e216 = lambda;
+        grad_p_avg.y = ((_e212 * _e214) + ((1f - _e216) * grad_p_neigh.y));
         let dx = (c_neigh.x - c_owner.x);
         let dy = (c_neigh.y - c_owner.y);
-        let _e222 = normal.x;
-        let _e225 = normal.y;
-        let dist_proj = abs(((dx * _e222) + (dy * _e225)));
+        let _e229 = normal.x;
+        let _e232 = normal.y;
+        let dist_proj = abs(((dx * _e229) + (dy * _e232)));
         let dist = max(dist_proj, 0.000001f);
         let p_own = state[((owner * 8u) + 2u)];
         let p_neigh = state[((neigh_idx * 8u) + 2u)];
-        let _e246 = grad_p_avg.x;
-        let _e248 = normal.x;
-        let _e251 = grad_p_avg.y;
-        let _e253 = normal.y;
-        let grad_p_n = ((_e246 * _e248) + (_e251 * _e253));
+        let _e253 = grad_p_avg.x;
+        let _e255 = normal.x;
+        let _e258 = grad_p_avg.y;
+        let _e260 = normal.y;
+        let grad_p_n = ((_e253 * _e255) + (_e258 * _e260));
         let p_grad_f = ((p_neigh - p_own) / dist);
-        let _e258 = d_p_face;
-        let rc_term_1 = ((_e258 * area) * (grad_p_n - p_grad_f));
-        let _e263 = u_face.x;
-        let _e265 = normal.x;
-        let _e268 = u_face.y;
-        let _e270 = normal.y;
-        let u_n = ((_e263 * _e265) + (_e268 * _e270));
-        let _e277 = constants.density;
-        fluxes[idx] = (_e277 * ((u_n * area) + rc_term_1));
+        let _e265 = d_p_face;
+        let rc_term_1 = ((_e265 * area) * (grad_p_n - p_grad_f));
+        let _e270 = u_face.x;
+        let _e272 = normal.x;
+        let _e275 = u_face.y;
+        let _e277 = normal.y;
+        let u_n = ((_e270 * _e272) + (_e275 * _e277));
+        let _e282 = rho_face;
+        fluxes[idx] = (_e282 * ((u_n * area) + rc_term_1));
         return;
     } else {
         if (boundary_type == 1u) {
-            let _e285 = constants.ramp_time;
-            let _e288 = constants.time;
-            let ramp = smoothstep(0f, _e285, _e288);
-            let _e293 = constants.inlet_velocity;
-            let u_bc = Vector2_((_e293 * ramp), 0f);
-            let _e301 = constants.density;
-            let _e304 = normal.x;
-            let _e308 = normal.y;
-            fluxes[idx] = ((_e301 * ((u_bc.x * _e304) + (u_bc.y * _e308))) * area);
+            let _e290 = constants.ramp_time;
+            let _e293 = constants.time;
+            let ramp = smoothstep(0f, _e290, _e293);
+            let _e298 = constants.inlet_velocity;
+            let u_bc = Vector2_((_e298 * ramp), 0f);
+            let _e304 = rho_face;
+            let _e307 = normal.x;
+            let _e311 = normal.y;
+            fluxes[idx] = ((_e304 * ((u_bc.x * _e307) + (u_bc.y * _e311))) * area);
             return;
         } else {
             if (boundary_type == 3u) {
@@ -3869,18 +3874,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 return;
             } else {
                 if (boundary_type == 2u) {
-                    let _e321 = u_face.x;
-                    let _e323 = normal.x;
-                    let _e326 = u_face.y;
-                    let _e328 = normal.y;
-                    let u_n_1 = ((_e321 * _e323) + (_e326 * _e328));
+                    let _e324 = u_face.x;
+                    let _e326 = normal.x;
+                    let _e329 = u_face.y;
+                    let _e331 = normal.y;
+                    let u_n_1 = ((_e324 * _e326) + (_e329 * _e331));
                     let dist_face = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(face_center.x, face_center.y));
                     if (dist_face > 0.000001f) {
                         rc_term = 0f;
                     }
-                    let _e344 = constants.density;
-                    let _e346 = rc_term;
-                    let raw_flux = (_e344 * ((u_n_1 * area) + _e346));
+                    let _e345 = rho_face;
+                    let _e347 = rc_term;
+                    let raw_flux = (_e345 * ((u_n_1 * area) + _e347));
                     fluxes[idx] = max(0f, raw_flux);
                     return;
                 } else {
@@ -4860,6 +4865,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var normal_sign: f32;
     var normal_flux: Vector2_;
     var flux: f32;
+    var rho_face: f32;
     var lambda: f32;
     var flux_out: f32;
     var other_center: Vector2_;
@@ -4882,82 +4888,82 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e27 = state_old[((idx * 8u) + 0u)];
     let _e34 = state_old[((idx * 8u) + 1u)];
     let u_n_val = vec2<f32>(_e27, _e34);
-    let _e38 = constants.density;
+    let rho_cell = constants.density;
     let _e42 = constants.dt;
-    time_coeff = ((vol * _e38) / _e42);
+    time_coeff = ((vol * rho_cell) / _e42);
     let _e47 = constants.time_scheme;
     if (_e47 == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = (dt / dt_old);
-        let _e59 = constants.density;
-        time_coeff = ((((vol * _e59) / dt) * (1f + (2f * r))) / (1f + r));
+        time_coeff = ((((vol * rho_cell) / dt) * (1f + (2f * r))) / (1f + r));
     }
-    let _e71 = time_coeff;
-    let _e72 = diag_coeff;
-    diag_coeff = (_e72 + _e71);
+    let _e68 = time_coeff;
+    let _e69 = diag_coeff;
+    diag_coeff = (_e69 + _e68);
     let val_c_p = state[((idx * 8u) + 2u)];
-    let _e87 = state[((idx * 8u) + 0u)];
-    let _e94 = state[((idx * 8u) + 1u)];
-    let u_val = vec2<f32>(_e87, _e94);
+    let _e84 = state[((idx * 8u) + 0u)];
+    let _e91 = state[((idx * 8u) + 1u)];
+    let u_val = vec2<f32>(_e84, _e91);
     let val_c_u = u_val.x;
     let val_c_v = u_val.y;
     k = start;
     loop {
-        let _e99 = k;
-        if (_e99 < end) {
+        let _e96 = k;
+        if (_e96 < end) {
         } else {
             break;
         }
         {
-            let _e102 = k;
-            let face_idx = cell_faces[_e102];
+            let _e99 = k;
+            let face_idx = cell_faces[_e99];
             let owner = face_owner[face_idx];
             let neigh_idx = face_neighbor[face_idx];
             let boundary_type = face_boundary[face_idx];
-            let _e116 = face_normals[face_idx];
-            normal = _e116;
+            let _e113 = face_normals[face_idx];
+            normal = _e113;
             let area = face_areas[face_idx];
             let f_center = face_centers[face_idx];
             normal_sign = 1f;
             if (owner != idx) {
-                let _e129 = normal.x;
-                normal.x = -(_e129);
-                let _e133 = normal.y;
-                normal.y = -(_e133);
+                let _e126 = normal.x;
+                normal.x = -(_e126);
+                let _e130 = normal.y;
+                normal.y = -(_e130);
                 normal_sign = -1f;
             }
             let c_owner = cell_centers[owner];
-            let _e141 = face_normals[face_idx];
-            normal_flux = _e141;
+            let _e138 = face_normals[face_idx];
+            normal_flux = _e138;
             let dx_vec = (f_center.x - c_owner.x);
             let dy_vec = (f_center.y - c_owner.y);
-            let _e150 = normal_flux.x;
-            let _e153 = normal_flux.y;
-            if (((dx_vec * _e150) + (dy_vec * _e153)) < 0f) {
-                let _e160 = normal_flux.x;
-                normal_flux.x = -(_e160);
-                let _e164 = normal_flux.y;
-                normal_flux.y = -(_e164);
+            let _e147 = normal_flux.x;
+            let _e150 = normal_flux.y;
+            if (((dx_vec * _e147) + (dy_vec * _e150)) < 0f) {
+                let _e157 = normal_flux.x;
+                normal_flux.x = -(_e157);
+                let _e161 = normal_flux.y;
+                normal_flux.y = -(_e161);
             }
             flux = 0f;
+            rho_face = rho_cell;
             if (neigh_idx != -1i) {
                 let n_idx = u32(neigh_idx);
                 let c_neigh = cell_centers[n_idx];
-                let _e180 = state[((owner * 8u) + 0u)];
-                let _e187 = state[((owner * 8u) + 1u)];
-                let u_own = vec2<f32>(_e180, _e187);
-                let _e195 = state[((n_idx * 8u) + 0u)];
-                let _e202 = state[((n_idx * 8u) + 1u)];
-                let u_ngh = vec2<f32>(_e195, _e202);
+                let _e178 = state[((owner * 8u) + 0u)];
+                let _e185 = state[((owner * 8u) + 1u)];
+                let u_own = vec2<f32>(_e178, _e185);
+                let _e193 = state[((n_idx * 8u) + 0u)];
+                let _e200 = state[((n_idx * 8u) + 1u)];
+                let u_ngh = vec2<f32>(_e193, _e200);
                 let dp_own = state[((owner * 8u) + 3u)];
                 let dp_ngh = state[((n_idx * 8u) + 3u)];
-                let _e224 = state[((owner * 8u) + 4u)];
-                let _e231 = state[((owner * 8u) + 5u)];
-                let gp_own = vec2<f32>(_e224, _e231);
-                let _e239 = state[((n_idx * 8u) + 4u)];
-                let _e246 = state[((n_idx * 8u) + 5u)];
-                let gp_ngh = vec2<f32>(_e239, _e246);
+                let _e222 = state[((owner * 8u) + 4u)];
+                let _e229 = state[((owner * 8u) + 5u)];
+                let gp_own = vec2<f32>(_e222, _e229);
+                let _e237 = state[((n_idx * 8u) + 4u)];
+                let _e244 = state[((n_idx * 8u) + 5u)];
+                let gp_ngh = vec2<f32>(_e237, _e244);
                 let p_own = state[((owner * 8u) + 2u)];
                 let p_ngh = state[((n_idx * 8u) + 2u)];
                 let d_own = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(f_center.x, f_center.y));
@@ -4967,75 +4973,77 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (total_dist > 0.000001f) {
                     lambda = (d_ngh / total_dist);
                 }
-                let _e282 = lambda;
-                let _e285 = lambda;
-                let u_face_x = ((_e282 * u_own.x) + ((1f - _e285) * u_ngh.x));
-                let _e291 = lambda;
-                let _e294 = lambda;
-                let u_face_y = ((_e291 * u_own.y) + ((1f - _e294) * u_ngh.y));
-                let _e300 = lambda;
-                let _e302 = lambda;
-                let dp_face = ((_e300 * dp_own) + ((1f - _e302) * dp_ngh));
-                let _e307 = lambda;
-                let _e310 = lambda;
-                let gp_face_x = ((_e307 * gp_own.x) + ((1f - _e310) * gp_ngh.x));
-                let _e316 = lambda;
-                let _e319 = lambda;
-                let gp_face_y = ((_e316 * gp_own.y) + ((1f - _e319) * gp_ngh.y));
+                let _e282 = constants.density;
+                rho_face = _e282;
+                let _e283 = lambda;
+                let _e286 = lambda;
+                let u_face_x = ((_e283 * u_own.x) + ((1f - _e286) * u_ngh.x));
+                let _e292 = lambda;
+                let _e295 = lambda;
+                let u_face_y = ((_e292 * u_own.y) + ((1f - _e295) * u_ngh.y));
+                let _e301 = lambda;
+                let _e303 = lambda;
+                let dp_face = ((_e301 * dp_own) + ((1f - _e303) * dp_ngh));
+                let _e308 = lambda;
+                let _e311 = lambda;
+                let gp_face_x = ((_e308 * gp_own.x) + ((1f - _e311) * gp_ngh.x));
+                let _e317 = lambda;
+                let _e320 = lambda;
+                let gp_face_y = ((_e317 * gp_own.y) + ((1f - _e320) * gp_ngh.y));
                 let dx = (c_neigh.x - c_owner.x);
                 let dy = (c_neigh.y - c_owner.y);
-                let _e332 = normal_flux.x;
-                let _e335 = normal_flux.y;
-                let dist_proj = abs(((dx * _e332) + (dy * _e335)));
+                let _e333 = normal_flux.x;
+                let _e336 = normal_flux.y;
+                let dist_proj = abs(((dx * _e333) + (dy * _e336)));
                 let dist = max(dist_proj, 0.000001f);
-                let _e342 = normal_flux.x;
-                let _e345 = normal_flux.y;
-                let grad_p_n = ((gp_face_x * _e342) + (gp_face_y * _e345));
+                let _e343 = normal_flux.x;
+                let _e346 = normal_flux.y;
+                let grad_p_n = ((gp_face_x * _e343) + (gp_face_y * _e346));
                 let p_grad_f = ((p_ngh - p_own) / dist);
                 let rc_term = ((dp_face * area) * (grad_p_n - p_grad_f));
-                let _e354 = normal_flux.x;
-                let _e357 = normal_flux.y;
-                let u_n = ((u_face_x * _e354) + (u_face_y * _e357));
-                let _e362 = constants.density;
-                flux = (_e362 * ((u_n * area) + rc_term));
+                let _e355 = normal_flux.x;
+                let _e358 = normal_flux.y;
+                let u_n = ((u_face_x * _e355) + (u_face_y * _e358));
+                let _e361 = rho_face;
+                flux = (_e361 * ((u_n * area) + rc_term));
             } else {
                 if (boundary_type == 1u) {
-                    let _e370 = constants.ramp_time;
-                    let _e373 = constants.time;
-                    let ramp = smoothstep(0f, _e370, _e373);
-                    let _e378 = constants.inlet_velocity;
-                    let u_bc = Vector2_((_e378 * ramp), 0f);
-                    let _e384 = constants.density;
-                    let _e387 = normal_flux.x;
-                    let _e391 = normal_flux.y;
-                    flux = ((_e384 * ((u_bc.x * _e387) + (u_bc.y * _e391))) * area);
+                    let _e369 = constants.ramp_time;
+                    let _e372 = constants.time;
+                    let ramp = smoothstep(0f, _e369, _e372);
+                    let _e377 = constants.inlet_velocity;
+                    let u_bc = Vector2_((_e377 * ramp), 0f);
+                    let _e381 = rho_face;
+                    let _e384 = normal_flux.x;
+                    let _e388 = normal_flux.y;
+                    flux = ((_e381 * ((u_bc.x * _e384) + (u_bc.y * _e388))) * area);
                 } else {
                     if (boundary_type == 3u) {
                         flux = 0f;
                     } else {
                         if (boundary_type == 2u) {
-                            let _e407 = state[((owner * 8u) + 0u)];
-                            let _e414 = state[((owner * 8u) + 1u)];
-                            let u_own_1 = vec2<f32>(_e407, _e414);
-                            let _e418 = normal_flux.x;
-                            let _e422 = normal_flux.y;
-                            let u_n_1 = ((u_own_1.x * _e418) + (u_own_1.y * _e422));
-                            let _e427 = constants.density;
-                            let raw_flux = ((_e427 * u_n_1) * area);
+                            let _e404 = state[((owner * 8u) + 0u)];
+                            let _e411 = state[((owner * 8u) + 1u)];
+                            let u_own_1 = vec2<f32>(_e404, _e411);
+                            let _e415 = normal_flux.x;
+                            let _e419 = normal_flux.y;
+                            let u_n_1 = ((u_own_1.x * _e415) + (u_own_1.y * _e419));
+                            let _e422 = rho_face;
+                            let raw_flux = ((_e422 * u_n_1) * area);
                             flux = max(0f, raw_flux);
                         }
                     }
                 }
             }
             if (owner == idx) {
-                let _e435 = flux;
-                fluxes[face_idx] = _e435;
+                let _e430 = flux;
+                fluxes[face_idx] = _e430;
             }
-            let _e436 = flux;
-            flux_out = _e436;
+            let _e431 = flux;
+            flux_out = _e431;
             if (owner != idx) {
-                let _e439 = flux;
-                flux_out = -(_e439);
+                let _e434 = flux;
+                flux_out = -(_e434);
             }
             is_boundary = false;
             other_idx = 0u;
@@ -5044,114 +5052,114 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (owner != idx) {
                     other_idx = owner;
                 }
-                let _e450 = other_idx;
-                let _e452 = cell_centers[_e450];
-                other_center = _e452;
+                let _e445 = other_idx;
+                let _e447 = cell_centers[_e445];
+                other_center = _e447;
             } else {
                 is_boundary = true;
                 other_center = f_center;
             }
-            let _e456 = other_center.x;
-            let d_vec_x = (_e456 - center.x);
-            let _e460 = other_center.y;
-            let d_vec_y = (_e460 - center.y);
+            let _e451 = other_center.x;
+            let d_vec_x = (_e451 - center.x);
+            let _e455 = other_center.y;
+            let d_vec_y = (_e455 - center.y);
             let dist_1 = sqrt(((d_vec_x * d_vec_x) + (d_vec_y * d_vec_y)));
-            let mu = constants.viscosity;
-            let diff_coeff = ((mu * area) / dist_1);
+            let _e464 = constants.viscosity;
+            let diff_coeff = ((_e464 * area) / dist_1);
             conv_coeff_diag = 0f;
-            let _e474 = flux_out;
-            if (_e474 > 0f) {
-                let _e477 = flux_out;
-                conv_coeff_diag = _e477;
+            let _e469 = flux_out;
+            if (_e469 > 0f) {
+                let _e472 = flux_out;
+                conv_coeff_diag = _e472;
             }
-            let _e478 = is_boundary;
-            if !(_e478) {
-                let _e480 = conv_coeff_diag;
-                let _e482 = diag_coeff;
-                diag_coeff = (_e482 + (diff_coeff + _e480));
+            let _e473 = is_boundary;
+            if !(_e473) {
+                let _e475 = conv_coeff_diag;
+                let _e477 = diag_coeff;
+                diag_coeff = (_e477 + (diff_coeff + _e475));
             } else {
                 if (boundary_type == 1u) {
-                    let _e486 = diag_coeff;
-                    diag_coeff = (_e486 + diff_coeff);
-                    let _e488 = flux_out;
-                    if (_e488 > 0f) {
-                        let _e491 = flux_out;
-                        let _e492 = diag_coeff;
-                        diag_coeff = (_e492 + _e491);
+                    let _e481 = diag_coeff;
+                    diag_coeff = (_e481 + diff_coeff);
+                    let _e483 = flux_out;
+                    if (_e483 > 0f) {
+                        let _e486 = flux_out;
+                        let _e487 = diag_coeff;
+                        diag_coeff = (_e487 + _e486);
                     }
                 } else {
                     if (boundary_type == 3u) {
-                        let _e496 = diag_coeff;
-                        diag_coeff = (_e496 + diff_coeff);
-                        let _e498 = flux_out;
-                        if (_e498 > 0f) {
-                            let _e501 = flux_out;
-                            let _e502 = diag_coeff;
-                            diag_coeff = (_e502 + _e501);
+                        let _e491 = diag_coeff;
+                        diag_coeff = (_e491 + diff_coeff);
+                        let _e493 = flux_out;
+                        if (_e493 > 0f) {
+                            let _e496 = flux_out;
+                            let _e497 = diag_coeff;
+                            diag_coeff = (_e497 + _e496);
                         }
                     } else {
                         if (boundary_type == 2u) {
-                            let _e506 = flux_out;
-                            if (_e506 > 0f) {
-                                let _e509 = flux_out;
-                                let _e510 = diag_coeff;
-                                diag_coeff = (_e510 + _e509);
+                            let _e501 = flux_out;
+                            if (_e501 > 0f) {
+                                let _e504 = flux_out;
+                                let _e505 = diag_coeff;
+                                diag_coeff = (_e505 + _e504);
                             }
                         }
                     }
                 }
             }
-            let _e512 = is_boundary;
-            if !(_e512) {
+            let _e507 = is_boundary;
+            if !(_e507) {
                 let d_c = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
-                let _e522 = other_center.x;
-                let _e524 = other_center.y;
-                let d_o = distance(vec2<f32>(_e522, _e524), vec2<f32>(f_center.x, f_center.y));
+                let _e517 = other_center.x;
+                let _e519 = other_center.y;
+                let d_o = distance(vec2<f32>(_e517, _e519), vec2<f32>(f_center.x, f_center.y));
                 let total_dist_p = (d_c + d_o);
                 lambda_p = 0.5f;
                 if (total_dist_p > 0.000001f) {
                     lambda_p = (d_o / total_dist_p);
                 }
-                let _e536 = other_idx;
-                let val_other_p = state[((_e536 * 8u) + 2u)];
-                let _e544 = lambda_p;
-                let _e546 = lambda_p;
-                let val_f_p_1 = ((_e544 * val_c_p) + ((1f - _e546) * val_other_p));
-                let _e554 = normal.x;
-                let _e557 = grad_p_accum.x;
-                grad_p_accum.x = (_e557 + ((val_f_p_1 * _e554) * area));
-                let _e561 = normal.y;
-                let _e564 = grad_p_accum.y;
-                grad_p_accum.y = (_e564 + ((val_f_p_1 * _e561) * area));
+                let _e531 = other_idx;
+                let val_other_p = state[((_e531 * 8u) + 2u)];
+                let _e539 = lambda_p;
+                let _e541 = lambda_p;
+                let val_f_p_1 = ((_e539 * val_c_p) + ((1f - _e541) * val_other_p));
+                let _e549 = normal.x;
+                let _e552 = grad_p_accum.x;
+                grad_p_accum.x = (_e552 + ((val_f_p_1 * _e549) * area));
+                let _e556 = normal.y;
+                let _e559 = grad_p_accum.y;
+                grad_p_accum.y = (_e559 + ((val_f_p_1 * _e556) * area));
             } else {
                 val_f_p = val_c_p;
                 if (boundary_type == 2u) {
                     val_f_p = 0f;
                 }
-                let _e571 = val_f_p;
-                let _e573 = normal.x;
-                let _e576 = grad_p_accum.x;
-                grad_p_accum.x = (_e576 + ((_e571 * _e573) * area));
-                let _e579 = val_f_p;
-                let _e581 = normal.y;
-                let _e584 = grad_p_accum.y;
-                grad_p_accum.y = (_e584 + ((_e579 * _e581) * area));
+                let _e566 = val_f_p;
+                let _e568 = normal.x;
+                let _e571 = grad_p_accum.x;
+                grad_p_accum.x = (_e571 + ((_e566 * _e568) * area));
+                let _e574 = val_f_p;
+                let _e576 = normal.y;
+                let _e579 = grad_p_accum.y;
+                grad_p_accum.y = (_e579 + ((_e574 * _e576) * area));
             }
             val_f_u = 0f;
             val_f_v = 0f;
-            let _e590 = is_boundary;
-            if !(_e590) {
-                let _e592 = other_idx;
-                let _e599 = state[((_e592 * 8u) + 0u)];
-                let _e600 = other_idx;
-                let _e607 = state[((_e600 * 8u) + 1u)];
-                let u_other = vec2<f32>(_e599, _e607);
+            let _e585 = is_boundary;
+            if !(_e585) {
+                let _e587 = other_idx;
+                let _e594 = state[((_e587 * 8u) + 0u)];
+                let _e595 = other_idx;
+                let _e602 = state[((_e595 * 8u) + 1u)];
+                let u_other = vec2<f32>(_e594, _e602);
                 let val_other_u = u_other.x;
                 let val_other_v = u_other.y;
                 let d_c_1 = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
-                let _e619 = other_center.x;
-                let _e621 = other_center.y;
-                let d_o_1 = distance(vec2<f32>(_e619, _e621), vec2<f32>(f_center.x, f_center.y));
+                let _e614 = other_center.x;
+                let _e616 = other_center.y;
+                let d_o_1 = distance(vec2<f32>(_e614, _e616), vec2<f32>(f_center.x, f_center.y));
                 let total_dist_1 = (d_c_1 + d_o_1);
                 if (total_dist_1 > 0.000001f) {
                     let lambda_1 = (d_o_1 / total_dist_1);
@@ -5163,11 +5171,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             } else {
                 if (boundary_type == 1u) {
-                    let _e651 = constants.ramp_time;
-                    let _e654 = constants.time;
-                    let ramp_1 = smoothstep(0f, _e651, _e654);
-                    let _e659 = constants.inlet_velocity;
-                    val_f_u = (_e659 * ramp_1);
+                    let _e646 = constants.ramp_time;
+                    let _e649 = constants.time;
+                    let ramp_1 = smoothstep(0f, _e646, _e649);
+                    let _e654 = constants.inlet_velocity;
+                    val_f_u = (_e654 * ramp_1);
                     val_f_v = 0f;
                 } else {
                     if (boundary_type == 3u) {
@@ -5179,55 +5187,55 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
-            let _e668 = val_f_u;
-            let _e670 = normal.x;
-            let _e673 = g_u.x;
-            g_u.x = (_e673 + ((_e668 * _e670) * area));
-            let _e676 = val_f_u;
-            let _e678 = normal.y;
-            let _e681 = g_u.y;
-            g_u.y = (_e681 + ((_e676 * _e678) * area));
-            let _e685 = val_f_v;
-            let _e687 = normal.x;
-            let _e690 = g_v.x;
-            g_v.x = (_e690 + ((_e685 * _e687) * area));
-            let _e693 = val_f_v;
-            let _e695 = normal.y;
-            let _e698 = g_v.y;
-            g_v.y = (_e698 + ((_e693 * _e695) * area));
+            let _e663 = val_f_u;
+            let _e665 = normal.x;
+            let _e668 = g_u.x;
+            g_u.x = (_e668 + ((_e663 * _e665) * area));
+            let _e671 = val_f_u;
+            let _e673 = normal.y;
+            let _e676 = g_u.y;
+            g_u.y = (_e676 + ((_e671 * _e673) * area));
+            let _e680 = val_f_v;
+            let _e682 = normal.x;
+            let _e685 = g_v.x;
+            g_v.x = (_e685 + ((_e680 * _e682) * area));
+            let _e688 = val_f_v;
+            let _e690 = normal.y;
+            let _e693 = g_v.y;
+            g_v.y = (_e693 + ((_e688 * _e690) * area));
         }
         continuing {
-            let _e701 = k;
-            k = (_e701 + 1u);
+            let _e696 = k;
+            k = (_e696 + 1u);
         }
     }
-    let _e703 = diag_coeff;
-    if (abs(_e703) > 0.00000000000000000001f) {
-        let _e713 = diag_coeff;
-        state[((idx * 8u) + 3u)] = (vol / _e713);
+    let _e698 = diag_coeff;
+    if (abs(_e698) > 0.00000000000000000001f) {
+        let _e708 = diag_coeff;
+        state[((idx * 8u) + 3u)] = (vol / _e708);
     } else {
         state[((idx * 8u) + 3u)] = 0f;
     }
-    let _e724 = grad_p_accum.x;
-    grad_p_accum.x = (_e724 / vol);
-    let _e728 = grad_p_accum.y;
-    grad_p_accum.y = (_e728 / vol);
-    let _e737 = grad_p_accum.x;
-    state[((idx * 8u) + 4u)] = _e737;
-    let _e745 = grad_p_accum.y;
-    state[((idx * 8u) + 5u)] = _e745;
-    let _e748 = g_u.x;
-    g_u.x = (_e748 / vol);
-    let _e752 = g_u.y;
-    g_u.y = (_e752 / vol);
-    let _e756 = g_v.x;
-    g_v.x = (_e756 / vol);
-    let _e760 = g_v.y;
-    g_v.y = (_e760 / vol);
-    let _e764 = g_u;
-    grad_u[idx] = _e764;
-    let _e767 = g_v;
-    grad_v[idx] = _e767;
+    let _e719 = grad_p_accum.x;
+    grad_p_accum.x = (_e719 / vol);
+    let _e723 = grad_p_accum.y;
+    grad_p_accum.y = (_e723 / vol);
+    let _e732 = grad_p_accum.x;
+    state[((idx * 8u) + 4u)] = _e732;
+    let _e740 = grad_p_accum.y;
+    state[((idx * 8u) + 5u)] = _e740;
+    let _e743 = g_u.x;
+    g_u.x = (_e743 / vol);
+    let _e747 = g_u.y;
+    g_u.y = (_e747 / vol);
+    let _e751 = g_v.x;
+    g_v.x = (_e751 / vol);
+    let _e755 = g_v.y;
+    g_v.y = (_e755 / vol);
+    let _e759 = g_u;
+    grad_u[idx] = _e759;
+    let _e762 = g_v;
+    grad_v[idx] = _e762;
     return;
 }
 "#;

@@ -2,6 +2,7 @@ pub mod coupled_assembly;
 pub mod emit;
 pub mod flux_rhie_chow;
 pub mod ir;
+pub mod plan;
 pub mod prepare_coupled;
 pub mod pressure_assembly;
 pub mod update_fields_from_coupled;

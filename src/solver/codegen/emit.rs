@@ -87,7 +87,9 @@ pub fn emit_coupled_assembly_codegen_wgsl_with_schemes(
 pub fn emit_prepare_coupled_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let wgsl = generate_prepare_coupled_wgsl(&model.state_layout);
+    let schemes = SchemeRegistry::new(Scheme::Upwind);
+    let discrete = lower_system(&model.system, &schemes);
+    let wgsl = generate_prepare_coupled_wgsl(&discrete, &model.state_layout);
 
     let output_path = generated_dir_for(base_dir).join("prepare_coupled.wgsl");
     if let Ok(existing) = fs::read_to_string(&output_path) {
@@ -145,7 +147,9 @@ pub fn emit_update_fields_from_coupled_codegen_wgsl(
 pub fn emit_flux_rhie_chow_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let wgsl = generate_flux_rhie_chow_wgsl(&model.state_layout);
+    let schemes = SchemeRegistry::new(Scheme::Upwind);
+    let discrete = lower_system(&model.system, &schemes);
+    let wgsl = generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout);
 
     let output_path = generated_dir_for(base_dir).join("flux_rhie_chow.wgsl");
     if let Ok(existing) = fs::read_to_string(&output_path) {

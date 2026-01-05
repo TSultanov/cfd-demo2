@@ -101,6 +101,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var u_face = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
     var d_p_face = state[owner * 8u + 3u];
     var grad_p_avg = vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]);
+    var rho_face = constants.density;
     if (neighbor != -1) {
         let neigh_idx = u32(neighbor);
         let u_neigh = vec2<f32>(state[neigh_idx * 8u + 0u], state[neigh_idx * 8u + 1u]);
@@ -114,6 +115,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (total_dist > 1e-6) {
             lambda = d_neigh / total_dist;
         }
+        rho_face = constants.density;
         var u_central = u_face;
         u_central.x = lambda * u_face.x + (1.0 - lambda) * u_neigh.x;
         u_central.y = lambda * u_face.y + (1.0 - lambda) * u_neigh.y;
@@ -131,12 +133,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let p_grad_f = (p_neigh - p_own) / dist;
         let rc_term = d_p_face * area * (grad_p_n - p_grad_f);
         let u_n = u_face.x * normal.x + u_face.y * normal.y;
-        fluxes[idx] = constants.density * (u_n * area + rc_term);
+        fluxes[idx] = rho_face * (u_n * area + rc_term);
     } else {
         if (boundary_type == 1u) {
             let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
             let u_bc = Vector2(constants.inlet_velocity * ramp, 0.0);
-            fluxes[idx] = constants.density * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
+            fluxes[idx] = rho_face * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
         } else {
             if (boundary_type == 3u) {
                 fluxes[idx] = 0.0;
@@ -148,7 +150,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     if (dist_face > 1e-6) {
                         rc_term = 0.0;
                     }
-                    let raw_flux = constants.density * (u_n * area + rc_term);
+                    let raw_flux = rho_face * (u_n * area + rc_term);
                     fluxes[idx] = max(0.0, raw_flux);
                 } else {
                     fluxes[idx] = 0.0;

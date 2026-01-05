@@ -88,6 +88,12 @@ mod solver {
                 "/src/solver/codegen/ir.rs"
             ));
         }
+        pub mod plan {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/plan.rs"
+            ));
+        }
         pub mod state_access {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

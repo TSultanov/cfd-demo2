@@ -189,3 +189,13 @@ discretization automatically, with modular swapping of schemes and boundary cond
   interpolation (`src/solver/codegen/pressure_assembly.rs`).
 - **2025-02-10:** Verified codegen unit tests after coefficient-expression refactor
   (`cargo test codegen --lib`).
+- **2025-02-10:** Added a shared momentum-plan helper for codegen modules and wired coupled
+  assembly to use it (`src/solver/codegen/plan.rs`, `src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Prepare-coupled + Rhie-Chow flux codegen now derives density/viscosity
+  coefficients from the high-level model (ddt/diffusion terms) instead of hardcoding
+  `constants.density`/`constants.viscosity` (`src/solver/codegen/prepare_coupled.rs`,
+  `src/solver/codegen/flux_rhie_chow.rs`).
+- **2025-02-10:** Updated codegen emit + tests for prepare/flux shaders to pass the discrete
+  system, keeping the generated kernels aligned with the model definition (`src/solver/codegen/emit.rs`).
+- **2025-02-10:** Verified codegen unit tests after model-driven prepare/flux updates
+  (`cargo test codegen --lib`).

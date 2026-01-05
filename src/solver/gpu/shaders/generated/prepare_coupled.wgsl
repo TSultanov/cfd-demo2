@@ -120,12 +120,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let end = cell_face_offsets[idx + 1];
     var diag_coeff: f32 = 0.0;
     let u_n_val = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
-    var time_coeff = vol * constants.density / constants.dt;
+    let rho_cell = constants.density;
+    var time_coeff = vol * rho_cell / constants.dt;
     if (constants.time_scheme == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
-        time_coeff = vol * constants.density / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        time_coeff = vol * rho_cell / dt * (1.0 + 2.0 * r) / (1.0 + r);
     }
     diag_coeff += time_coeff;
     let val_c_p = state[idx * 8u + 2u];
@@ -158,6 +159,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             normal_flux.y = -normal_flux.y;
         }
         var flux: f32 = 0.0;
+        var rho_face: f32 = rho_cell;
         if (neigh_idx != -1) {
             let n_idx = u32(neigh_idx);
             let c_neigh = cell_centers[n_idx];
@@ -176,6 +178,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if (total_dist > 1e-6) {
                 lambda = d_ngh / total_dist;
             }
+            rho_face = constants.density;
             let u_face_x = lambda * u_own.x + (1.0 - lambda) * u_ngh.x;
             let u_face_y = lambda * u_own.y + (1.0 - lambda) * u_ngh.y;
             let dp_face = lambda * dp_own + (1.0 - lambda) * dp_ngh;
@@ -189,12 +192,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let p_grad_f = (p_ngh - p_own) / dist;
             let rc_term = dp_face * area * (grad_p_n - p_grad_f);
             let u_n = u_face_x * normal_flux.x + u_face_y * normal_flux.y;
-            flux = constants.density * (u_n * area + rc_term);
+            flux = rho_face * (u_n * area + rc_term);
         } else {
             if (boundary_type == 1u) {
                 let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
                 let u_bc = Vector2(constants.inlet_velocity * ramp, 0.0);
-                flux = constants.density * (u_bc.x * normal_flux.x + u_bc.y * normal_flux.y) * area;
+                flux = rho_face * (u_bc.x * normal_flux.x + u_bc.y * normal_flux.y) * area;
             } else {
                 if (boundary_type == 3u) {
                     flux = 0.0;
@@ -202,7 +205,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     if (boundary_type == 2u) {
                         let u_own = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
                         let u_n = u_own.x * normal_flux.x + u_own.y * normal_flux.y;
-                        let raw_flux = constants.density * u_n * area;
+                        let raw_flux = rho_face * u_n * area;
                         flux = max(0.0, raw_flux);
                     }
                 }
@@ -231,8 +234,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d_vec_x = other_center.x - center.x;
         let d_vec_y = other_center.y - center.y;
         let dist = sqrt(d_vec_x * d_vec_x + d_vec_y * d_vec_y);
-        let mu = constants.viscosity;
-        let diff_coeff = mu * area / dist;
+        let diff_coeff = constants.viscosity * area / dist;
         var conv_coeff_diag: f32 = 0.0;
         if (flux_out > 0.0) {
             conv_coeff_diag = flux_out;

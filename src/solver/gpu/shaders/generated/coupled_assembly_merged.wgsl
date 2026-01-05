@@ -178,9 +178,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dist_proj = abs(d_vec_x * normal.x + d_vec_y * normal.y);
         let dist = max(dist_proj, 1e-6); // Avoid division by zero
         
-        // Diffusion: mu * A / dist
-        let mu = constants.viscosity;
-        let diff_coeff = mu * area / dist;
+        // Diffusion: mu * A / dist (codegen)
+        let diff_coeff = codegen_diff_coeff(constants.viscosity, area, dist);
         
         // Convection: Upwind (codegen)
         let conv_coeff = codegen_conv_coeff(flux);
@@ -509,4 +508,7 @@ fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
         conv_coeff_off = flux;
     }
     return vec2<f32>(conv_coeff_diag, conv_coeff_off);
+}
+fn codegen_diff_coeff(mu: f32, area: f32, dist: f32) -> f32 {
+    return mu * area / dist;
 }

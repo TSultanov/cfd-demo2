@@ -4,7 +4,11 @@ pub mod state;
 
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::gpu::bindings;
-use crate::solver::gpu::bindings::generated::coupled_assembly_merged;
+use crate::solver::gpu::bindings::{
+    coupled_assembly_merged as manual_coupled_assembly,
+    generated::coupled_assembly_merged as generated_coupled_assembly,
+};
+use crate::solver::gpu::init::ShaderVariant;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
@@ -63,6 +67,7 @@ pub fn init_linear_solver(
     mesh: &Mesh,
     num_cells: u32,
     bgl_mesh: &wgpu::BindGroupLayout,
+    shader_variant: ShaderVariant,
 ) -> LinearSolverResources {
     // 1. Initialize Matrix Resources (Buffers)
     // We recalculate the CSR structure here to ensure it matches the mesh connectivity.
@@ -112,6 +117,7 @@ pub fn init_linear_solver(
         &pipeline_res,
         &matrix_res.b_row_offsets,
         &matrix_res.b_matrix_values,
+        shader_variant,
     );
 
     LinearSolverResources {
@@ -176,6 +182,7 @@ fn init_coupled_resources(
     pipeline_res: &pipelines::PipelineResources,
     scalar_row_offsets_buffer: &wgpu::Buffer,
     b_scalar_matrix_values: &wgpu::Buffer,
+    shader_variant: ShaderVariant,
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
     let num_coupled_cells = num_cells * 3;
@@ -324,27 +331,56 @@ fn init_coupled_resources(
     // Reuse layouts from pipeline_res
 
     // Create custom layout for coupled solver assembly
-    let bgl_coupled_solver = device
-        .create_bind_group_layout(&coupled_assembly_merged::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
-
-    let bg_solver = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Coupled Solver Bind Group"),
-        layout: &bgl_coupled_solver,
-        entries: &coupled_assembly_merged::WgpuBindGroup2Entries::new(
-            coupled_assembly_merged::WgpuBindGroup2EntriesParams {
-                matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
-                rhs: state_res.b_rhs.as_entire_buffer_binding(),
-                scalar_row_offsets: scalar_row_offsets_buffer.as_entire_buffer_binding(),
-                grad_u: b_grad_u.as_entire_buffer_binding(),
-                grad_v: b_grad_v.as_entire_buffer_binding(),
-                scalar_matrix_values: b_scalar_matrix_values.as_entire_buffer_binding(),
-                diag_u_inv: b_diag_u.as_entire_buffer_binding(),
-                diag_v_inv: b_diag_v.as_entire_buffer_binding(),
-                diag_p_inv: b_diag_p.as_entire_buffer_binding(),
-            },
-        )
-        .into_array(),
-    });
+    let (bgl_coupled_solver, bg_solver) = match shader_variant {
+        ShaderVariant::Generated => {
+            let layout = device.create_bind_group_layout(
+                &generated_coupled_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR,
+            );
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Coupled Solver Bind Group"),
+                layout: &layout,
+                entries: &generated_coupled_assembly::WgpuBindGroup2Entries::new(
+                    generated_coupled_assembly::WgpuBindGroup2EntriesParams {
+                        matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
+                        rhs: state_res.b_rhs.as_entire_buffer_binding(),
+                        scalar_row_offsets: scalar_row_offsets_buffer.as_entire_buffer_binding(),
+                        grad_u: b_grad_u.as_entire_buffer_binding(),
+                        grad_v: b_grad_v.as_entire_buffer_binding(),
+                        scalar_matrix_values: b_scalar_matrix_values.as_entire_buffer_binding(),
+                        diag_u_inv: b_diag_u.as_entire_buffer_binding(),
+                        diag_v_inv: b_diag_v.as_entire_buffer_binding(),
+                        diag_p_inv: b_diag_p.as_entire_buffer_binding(),
+                    },
+                )
+                .into_array(),
+            });
+            (layout, bind_group)
+        }
+        ShaderVariant::Manual => {
+            let layout = device.create_bind_group_layout(
+                &manual_coupled_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR,
+            );
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Coupled Solver Bind Group"),
+                layout: &layout,
+                entries: &manual_coupled_assembly::WgpuBindGroup2Entries::new(
+                    manual_coupled_assembly::WgpuBindGroup2EntriesParams {
+                        matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
+                        rhs: state_res.b_rhs.as_entire_buffer_binding(),
+                        scalar_row_offsets: scalar_row_offsets_buffer.as_entire_buffer_binding(),
+                        grad_u: b_grad_u.as_entire_buffer_binding(),
+                        grad_v: b_grad_v.as_entire_buffer_binding(),
+                        scalar_matrix_values: b_scalar_matrix_values.as_entire_buffer_binding(),
+                        diag_u_inv: b_diag_u.as_entire_buffer_binding(),
+                        diag_v_inv: b_diag_v.as_entire_buffer_binding(),
+                        diag_p_inv: b_diag_p.as_entire_buffer_binding(),
+                    },
+                )
+                .into_array(),
+            });
+            (layout, bind_group)
+        }
+    };
 
     let bg_linear_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Coupled Linear Matrix Bind Group"),

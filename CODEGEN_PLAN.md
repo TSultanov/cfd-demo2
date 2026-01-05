@@ -100,3 +100,5 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified codegen unit tests after generating packed-state prepare/pressure/update shaders via build hooks (`cargo test codegen --lib`).
 - **2025-02-10:** Added codegen for Rhie-Chow flux kernel with packed state arrays and wired generated shader into physics pipelines (`src/solver/codegen/flux_rhie_chow.rs`, `src/solver/gpu/init/physics.rs`).
 - **2025-02-10:** Verified codegen unit tests after adding flux kernel generator (`cargo test codegen --lib`).
+- **2025-02-10:** Added `ShaderVariant` plumbing so GPU init can switch between manual and generated kernels; added a solver-level comparison test (`src/solver/gpu/init/*.rs`, `tests/gpu_codegen_matches_manual_test.rs`).
+- **2025-02-10:** Verified manual vs generated solver comparison test (`cargo test --test gpu_codegen_matches_manual_test`).

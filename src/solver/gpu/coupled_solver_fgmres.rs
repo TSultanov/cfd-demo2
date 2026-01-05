@@ -1738,8 +1738,11 @@ impl GpuSolver {
     /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
     pub fn solve_coupled_fgmres(&mut self) -> LinearSolverStats {
         let start_time = Instant::now();
+        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
         if self.coupled_resources.is_none() {
-            println!("Coupled resources not initialized!");
+            if !quiet {
+                println!("Coupled resources not initialized!");
+            }
             return LinearSolverStats::default();
         }
 
@@ -1866,10 +1869,12 @@ impl GpuSolver {
         let target_resid = (tol * rhs_norm).max(abstol);
 
         if residual_norm < target_resid {
-            println!(
-                "FGMRES: Initial guess already converged (||r|| = {:.2e} < {:.2e})",
-                residual_norm, target_resid
-            );
+            if !quiet {
+                println!(
+                    "FGMRES: Initial guess already converged (||r|| = {:.2e} < {:.2e})",
+                    residual_norm, target_resid
+                );
+            }
             return LinearSolverStats {
                 iterations: 0,
                 residual: residual_norm,
@@ -1905,7 +1910,9 @@ impl GpuSolver {
         let mut converged = false;
 
         let io_start = Instant::now();
-        println!("FGMRES: Initial residual = {:.2e}", residual_norm);
+        if !quiet {
+            println!("FGMRES: Initial residual = {:.2e}", residual_norm);
+        }
         self.profiling_stats.record_location(
             "fgmres:println",
             ProfileCategory::CpuCompute,
@@ -2270,7 +2277,7 @@ impl GpuSolver {
                     // Check the result from PREVIOUS async read (if available)
                     // This allows GPU work to continue while we wait
                     if let Some(resid_est) = async_reader.get_last_value() {
-                        if total_iters % 10 == 0 || resid_est < tol * rhs_norm {
+                        if (total_iters % 10 == 0 || resid_est < tol * rhs_norm) && !quiet {
                             let io_start = Instant::now();
                             println!(
                                 "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
@@ -2354,11 +2361,13 @@ impl GpuSolver {
                 );
                 let resid_est = async_reader.get_last_value().unwrap_or(0.0);
                 final_resid = resid_est;
-                println!(
-                    "FGMRES restart {}: estimated residual = {:.2e}",
-                    outer_iter + 1,
-                    resid_est
-                );
+                if !quiet {
+                    println!(
+                        "FGMRES restart {}: estimated residual = {:.2e}",
+                        outer_iter + 1,
+                        resid_est
+                    );
+                }
                 break 'outer;
             }
 
@@ -2374,11 +2383,13 @@ impl GpuSolver {
 
             if residual_norm < tol * rhs_norm {
                 converged = true;
-                println!(
-                    "FGMRES restart {}: true residual = {:.2e} (converged)",
-                    outer_iter + 1,
-                    residual_norm
-                );
+                if !quiet {
+                    println!(
+                        "FGMRES restart {}: true residual = {:.2e} (converged)",
+                        outer_iter + 1,
+                        residual_norm
+                    );
+                }
                 break 'outer;
             }
 
@@ -2398,7 +2409,9 @@ impl GpuSolver {
             );
 
             if residual_norm <= 0.0 {
-                println!("FGMRES: residual vanished at restart {}", outer_iter + 1);
+                if !quiet {
+                    println!("FGMRES: residual vanished at restart {}", outer_iter + 1);
+                }
                 converged = true;
                 break;
             }
@@ -2416,11 +2429,13 @@ impl GpuSolver {
             if improvement < 1e-3 {
                 stagnation_count += 1;
                 if stagnation_count >= 3 {
-                    println!(
-                        "FGMRES: Stagnation detected at restart {} (residual {:.2e})",
-                        outer_iter + 1,
-                        residual_norm
-                    );
+                    if !quiet {
+                        println!(
+                            "FGMRES: Stagnation detected at restart {} (residual {:.2e})",
+                            outer_iter + 1,
+                            residual_norm
+                        );
+                    }
                     converged = true;
                     break 'outer;
                 }
@@ -2429,19 +2444,23 @@ impl GpuSolver {
             }
             prev_resid_norm = residual_norm;
 
-            println!(
-                "FGMRES restart {}: residual = {:.2e} (target {:.2e})",
-                outer_iter + 1,
-                residual_norm,
-                tol * rhs_norm
-            );
+            if !quiet {
+                println!(
+                    "FGMRES restart {}: residual = {:.2e} (target {:.2e})",
+                    outer_iter + 1,
+                    residual_norm,
+                    tol * rhs_norm
+                );
+            }
         }
 
         let io_start = Instant::now();
-        println!(
-            "FGMRES finished: {} iterations, residual = {:.2e}, converged = {}",
-            total_iters, final_resid, converged
-        );
+        if !quiet {
+            println!(
+                "FGMRES finished: {} iterations, residual = {:.2e}, converged = {}",
+                total_iters, final_resid, converged
+            );
+        }
         self.profiling_stats.record_location(
             "fgmres:println",
             ProfileCategory::CpuCompute,

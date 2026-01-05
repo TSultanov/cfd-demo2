@@ -182,10 +182,20 @@ fn save_scalar_image(
         min_val = min_val.min(val);
         max_val = max_val.max(val);
     }
+    if (max_val - min_val).abs() < 1e-6 {
+        max_val = min_val + 1.0;
+    }
 
     let (min_x, max_x, min_y, max_y) = mesh_bounds(mesh);
-    let scale_x = (width as f64 - 1.0) / (max_x - min_x).max(1e-12);
-    let scale_y = (height as f64 - 1.0) / (max_y - min_y).max(1e-12);
+    let mesh_w = (max_x - min_x).max(1e-12);
+    let mesh_h = (max_y - min_y).max(1e-12);
+    let scale_x = (width as f64 - 1.0) / mesh_w;
+    let scale_y = (height as f64 - 1.0) / mesh_h;
+    let scale = scale_x.min(scale_y);
+    let center_x = 0.5 * (min_x + max_x);
+    let center_y = 0.5 * (min_y + max_y);
+    let offset_x = (width as f64 - 1.0) * 0.5;
+    let offset_y = (height as f64 - 1.0) * 0.5;
 
     let mut sum = vec![0.0; width * height];
     let mut count = vec![0u32; width * height];
@@ -201,8 +211,8 @@ fn save_scalar_image(
         let mut min_py = f64::INFINITY;
         let mut max_py = f64::NEG_INFINITY;
         for p in &poly {
-            let x = (p[0] - min_x) * scale_x;
-            let y = (max_y - p[1]) * scale_y;
+            let x = (p[0] - center_x) * scale + offset_x;
+            let y = (center_y - p[1]) * scale + offset_y;
             min_px = min_px.min(x);
             max_px = max_px.max(x);
             min_py = min_py.min(y);
@@ -270,6 +280,8 @@ fn low_mach_equivalence_vortex_street() {
     let smooth_iters = env_usize("CFD2_LOW_MACH_SMOOTH_ITERS", 40);
     let base_pressure = env_f64("CFD2_LOW_MACH_BASE_P", 25.0);
     let perturb_amp = env_f64("CFD2_LOW_MACH_PERTURB", 5e-3);
+    let incomp_iters = env_usize("CFD2_LOW_MACH_INCOMP_ITERS", 20);
+    let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 20);
     let probe_stride = env_usize("CFD2_LOW_MACH_PROBE_STRIDE", 10);
     let plot_width = env_usize("CFD2_PLOT_WIDTH", 480);
     let plot_height = env_usize("CFD2_PLOT_HEIGHT", 160);
@@ -288,7 +300,7 @@ fn low_mach_equivalence_vortex_street() {
     incomp.set_scheme(2);
     incomp.set_inlet_velocity(u_in);
     incomp.set_ramp_time(0.1);
-    incomp.n_outer_correctors = 20;
+    incomp.n_outer_correctors = incomp_iters as u32;
     let mut u_seed = vec![(0.0f64, 0.0f64); mesh.num_cells()];
     let length = 3.0;
     for i in 0..mesh.num_cells() {
@@ -305,6 +317,8 @@ fn low_mach_equivalence_vortex_street() {
     comp.set_density(density);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
+    comp.set_scheme(2);
+    comp.set_outer_iters(comp_iters);
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure as f32; mesh.num_cells()];
     let mut u_init = vec![[0.0f32, 0.0f32]; mesh.num_cells()];
@@ -317,6 +331,9 @@ fn low_mach_equivalence_vortex_street() {
 
     let mut probe_incomp = Vec::new();
     let mut probe_comp = Vec::new();
+    let mut best_probe = 0.0f64;
+    let mut best_u_incomp: Option<Vec<(f64, f64)>> = None;
+    let mut best_u_comp: Option<Vec<(f64, f64)>> = None;
 
     for step in 0..steps {
         incomp.step();
@@ -326,12 +343,18 @@ fn low_mach_equivalence_vortex_street() {
             let u_comp = pollster::block_on(comp.get_u());
             probe_incomp.push(u_incomp[probe_idx].1);
             probe_comp.push(u_comp[probe_idx].1);
+            let probe_abs = u_incomp[probe_idx].1.abs();
+            if probe_abs > best_probe {
+                best_probe = probe_abs;
+                best_u_incomp = Some(u_incomp.clone());
+                best_u_comp = Some(u_comp.clone());
+            }
         }
     }
 
-    let u_incomp = pollster::block_on(incomp.get_u());
+    let u_incomp = best_u_incomp.unwrap_or_else(|| pollster::block_on(incomp.get_u()));
     let _p_incomp = pollster::block_on(incomp.get_p());
-    let u_comp = pollster::block_on(comp.get_u());
+    let u_comp = best_u_comp.unwrap_or_else(|| pollster::block_on(comp.get_u()));
     let _p_comp = pollster::block_on(comp.get_p());
 
     let rms_num = u_incomp
@@ -359,6 +382,15 @@ fn low_mach_equivalence_vortex_street() {
         let _ = fs::create_dir_all(&out_dir);
         let vort_incomp = vorticity(&mesh, &u_incomp);
         let vort_comp = vorticity(&mesh, &u_comp);
+        let speed_diff: Vec<f64> = u_incomp
+            .iter()
+            .zip(u_comp.iter())
+            .map(|(a, b)| {
+                let s_in = (a.0 * a.0 + a.1 * a.1).sqrt();
+                let s_comp = (b.0 * b.0 + b.1 * b.1).sqrt();
+                s_comp - s_in
+            })
+            .collect();
         let speed_incomp: Vec<f64> = u_incomp
             .iter()
             .map(|val| (val.0 * val.0 + val.1 * val.1).sqrt())
@@ -395,11 +427,51 @@ fn low_mach_equivalence_vortex_street() {
             plot_width,
             plot_height,
         );
+        save_scalar_image(
+            &out_dir.join("low_mach_speed_diff.png"),
+            &mesh,
+            &speed_diff,
+            plot_width,
+            plot_height,
+        );
+
+        let gamma = 1.4;
+        let mut nu_num_sum = 0.0f64;
+        let mut nu_num_count = 0usize;
+        let mut nu_num_max = 0.0f64;
+        for (i, (u_val, p_val)) in u_comp.iter().zip(_p_comp.iter()).enumerate() {
+            if !p_val.is_finite() {
+                continue;
+            }
+            let speed = (u_val.0 * u_val.0 + u_val.1 * u_val.1).sqrt();
+            let c = (gamma * p_val / density as f64).sqrt();
+            if !c.is_finite() || c <= 0.0 {
+                continue;
+            }
+            let mach = speed / c;
+            let c_eff = c * mach.max(0.01);
+            let h = mesh.cell_vol[i].sqrt();
+            let nu_num = 0.5 * (speed + c_eff) * h;
+            if nu_num.is_finite() {
+                nu_num_sum += nu_num;
+                nu_num_count += 1;
+                nu_num_max = nu_num_max.max(nu_num);
+            }
+        }
+        let nu_num_mean = if nu_num_count > 0 {
+            nu_num_sum / nu_num_count as f64
+        } else {
+            f64::NAN
+        };
 
         let mut summary = String::new();
         summary.push_str(&format!(
             "probe_std_incomp={:.3e}\nprobe_std_comp={:.3e}\nrel_rms={:.3}\n",
             std_incomp, std_comp, rel_rms
+        ));
+        summary.push_str(&format!(
+            "nu_num_mean={:.3e}\nnu_num_max={:.3e}\n",
+            nu_num_mean, nu_num_max
         ));
         let _ = fs::write(out_dir.join("low_mach_summary.txt"), summary);
     }

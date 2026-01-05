@@ -477,3 +477,31 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified compressible solver and validation tests pass with
   SOU/QUICK scheme coverage (`tests/gpu_compressible_solver_test.rs`,
   `tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Updated low-Mach test rasterization to match UI scaling and
+  range handling for plot comparability (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Set compressible low-Mach test to QUICK with more nonlinear
+  outer iterations to reduce numerical damping (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added speed-difference plot output for low-Mach diagnostics
+  (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Capture the most asymmetric low-Mach snapshot using a probe
+  peak to improve vortex street visualization (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added tunable outer-iteration knobs for low-Mach runs to make
+  long vortex-street tests tractable (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Fixed low-Mach test outer-iteration setter types to match the
+  solver API (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added a low-Mach numerical viscosity estimate (mean/max) to
+  the plot summary for comparing scheme diffusion levels
+  (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added `CFD2_QUIET=1` gating for coupled solver logging to keep
+  long low-Mach runs readable (`src/solver/gpu/coupled_solver.rs`).
+- **2025-02-10:** Gated coupled FGMRES logging behind `CFD2_QUIET=1` for long
+  low-Mach runs (`src/solver/gpu/coupled_solver_fgmres.rs`).
+- **2025-02-10:** Suppressed per-iteration FGMRES residual prints when running
+  with `CFD2_QUIET=1` to reduce low-Mach test spam
+  (`src/solver/gpu/coupled_solver_fgmres.rs`).
+- **2025-02-10:** Guarded remaining coupled FGMRES status prints (restart and
+  init messages) behind `CFD2_QUIET=1` (`src/solver/gpu/coupled_solver_fgmres.rs`).
+- **2025-02-10:** Added low-Mach acoustic-speed scaling to compressible HLL
+  flux (assembly + KT) to reduce numerical diffusion at small Mach
+  (`src/solver/codegen/compressible_assembly.rs`,
+  `src/solver/codegen/compressible_flux_kt.rs`).

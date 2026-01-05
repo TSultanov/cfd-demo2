@@ -357,6 +357,12 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("c_r", &format!("sqrt({gamma} * p_r * inv_rho_r)")));
     stmts.push(dsl::let_("u_face_x", "0.5 * (u_l_x + u_r_x)"));
     stmts.push(dsl::let_("u_face_y", "0.5 * (u_l_y + u_r_y)"));
+    stmts.push(dsl::let_("u_face_n", "u_face_x * normal.x + u_face_y * normal.y"));
+    stmts.push(dsl::let_("c_bar", "0.5 * (c_l + c_r)"));
+    stmts.push(dsl::let_("mach", "abs(u_face_n) / max(c_bar, 1e-6)"));
+    stmts.push(dsl::let_("beta", "max(mach, 0.01)"));
+    stmts.push(dsl::let_("c_l_eff", "c_l * beta"));
+    stmts.push(dsl::let_("c_r_eff", "c_r * beta"));
     stmts.push(dsl::let_("dx", "center_r.x - center_owner.x"));
     stmts.push(dsl::let_("dy", "center_r.y - center_owner.y"));
     stmts.push(dsl::let_("dist", "max(sqrt(dx * dx + dy * dy), 1e-6)"));
@@ -364,11 +370,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_(
         "a_plus",
-        "max(0.0, max(u_n_l + c_l, u_n_r + c_r))",
+        "max(0.0, max(u_n_l + c_l_eff, u_n_r + c_r_eff))",
     ));
     stmts.push(dsl::let_(
         "a_minus",
-        "min(0.0, min(u_n_l - c_l, u_n_r - c_r))",
+        "min(0.0, min(u_n_l - c_l_eff, u_n_r - c_r_eff))",
     ));
     stmts.push(dsl::let_("denom", "max(a_plus - a_minus, 1e-6)"));
     stmts.push(dsl::let_("a_prod", "a_plus * a_minus"));

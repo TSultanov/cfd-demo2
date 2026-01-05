@@ -33,10 +33,13 @@ impl GpuSolver {
     pub fn step_coupled(&mut self) {
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
+        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
 
         // We need to access coupled resources. If not available, return.
         if self.coupled_resources.is_none() {
-            println!("Coupled resources not initialized!");
+            if !quiet {
+                println!("Coupled resources not initialized!");
+            }
             return;
         }
 
@@ -123,7 +126,9 @@ impl GpuSolver {
         for iter in 0..max_coupled_iters {
             self.profiling_stats.increment_iteration();
             let io_start = Instant::now();
-            println!("Coupled Iteration: {}", iter + 1);
+            if !quiet {
+                println!("Coupled Iteration: {}", iter + 1);
+            }
             self.profiling_stats.record_location(
                 "coupled:println_iteration",
                 ProfileCategory::CpuCompute,
@@ -144,10 +149,12 @@ impl GpuSolver {
                 let min_dp = d_p_vals.iter().cloned().fold(f64::INFINITY, f64::min);
                 let max_dp = d_p_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                 let avg_dp: f64 = d_p_vals.iter().sum::<f64>() / d_p_vals.len() as f64;
-                println!(
-                    "d_p stats: min={:.2e}, max={:.2e}, avg={:.2e}",
-                    min_dp, max_dp, avg_dp
-                );
+                if !quiet {
+                    println!(
+                        "d_p stats: min={:.2e}, max={:.2e}, avg={:.2e}",
+                        min_dp, max_dp, avg_dp
+                    );
+                }
             }
 
             // Compute Gradients AND Assemble Coupled System (Merged Dispatch)
@@ -313,27 +320,33 @@ impl GpuSolver {
                     }
                 }
 
-                println!("Matrix diag_u sample: {:?}", diag_u_sample);
-                println!("Matrix diag_v sample: {:?}", diag_v_sample);
-                println!("Matrix diag_p sample: {:?}", diag_p_sample);
+                if !quiet {
+                    println!("Matrix diag_u sample: {:?}", diag_u_sample);
+                    println!("Matrix diag_v sample: {:?}", diag_v_sample);
+                    println!("Matrix diag_p sample: {:?}", diag_p_sample);
+                }
 
                 // Check RHS for NaN
                 let rhs_has_nan = rhs_vals.iter().any(|v| v.is_nan());
                 let rhs_u: Vec<_> = (0..5.min(num_cells)).map(|i| rhs_vals[i * 3]).collect();
                 let rhs_p: Vec<_> = (0..5.min(num_cells)).map(|i| rhs_vals[i * 3 + 2]).collect();
-                println!("RHS u sample: {:?}", rhs_u);
-                println!("RHS p sample: {:?}", rhs_p);
-                println!("RHS has NaN: {}", rhs_has_nan);
+                if !quiet {
+                    println!("RHS u sample: {:?}", rhs_u);
+                    println!("RHS p sample: {:?}", rhs_p);
+                    println!("RHS has NaN: {}", rhs_has_nan);
+                }
             }
 
             // 3. Solve Coupled System using FGMRES-based coupled solver (CPU-side Krylov, GPU SpMV/precond)
             let stats = self.solve_coupled_system();
             *self.stats_p.lock().unwrap() = stats;
             let io_start = Instant::now();
-            println!(
-                "Coupled linear solve: {} iterations, residual {:.2e}, converged={}",
-                stats.iterations, stats.residual, stats.converged
-            );
+            if !quiet {
+                println!(
+                    "Coupled linear solve: {} iterations, residual {:.2e}, converged={}",
+                    stats.iterations, stats.residual, stats.converged
+                );
+            }
             self.profiling_stats.record_location(
                 "coupled:println_linear_solve",
                 ProfileCategory::CpuCompute,
@@ -431,10 +444,12 @@ impl GpuSolver {
                         *self.outer_iterations.lock().unwrap() = iter + 1;
 
                         let io_start = Instant::now();
-                        println!(
-                            "Coupled Residuals - U: {:.2e}, P: {:.2e}",
-                            max_diff_u, max_diff_p
-                        );
+                        if !quiet {
+                            println!(
+                                "Coupled Residuals - U: {:.2e}, P: {:.2e}",
+                                max_diff_u, max_diff_p
+                            );
+                        }
                         self.profiling_stats.record_location(
                             "coupled:println_residuals",
                             ProfileCategory::CpuCompute,
@@ -444,7 +459,12 @@ impl GpuSolver {
 
                         // Converged if both U and P are below tolerance
                         if max_diff_u < convergence_tol_u && max_diff_p < convergence_tol_p {
-                            println!("Coupled Solver Converged in {} iterations", iter + 1);
+                            if !quiet {
+                                println!(
+                                    "Coupled Solver Converged in {} iterations",
+                                    iter + 1
+                                );
+                            }
                             break;
                         }
 
@@ -464,12 +484,14 @@ impl GpuSolver {
                         };
 
                         if rel_u < stagnation_factor && rel_p < stagnation_factor && iter > 2 {
-                            println!(
-                                "Coupled solver stagnated at iter {}: U={:.2e}, P={:.2e}",
-                                iter + 1,
-                                max_diff_u,
-                                max_diff_p
-                            );
+                            if !quiet {
+                                println!(
+                                    "Coupled solver stagnated at iter {}: U={:.2e}, P={:.2e}",
+                                    iter + 1,
+                                    max_diff_u,
+                                    max_diff_p
+                                );
+                            }
                             break;
                         }
 
@@ -499,6 +521,8 @@ impl GpuSolver {
     }
 
     fn check_evolution(&mut self) {
+        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
+
         // Read velocity field to check for evolution and variance
         // This involves a GPU->CPU read, so it has some overhead.
         let u_data = pollster::block_on(self.read_buffer_f32(&self.b_state, self.num_cells * 8)); // FluidState is 8 f32s = 32 bytes
@@ -566,15 +590,22 @@ impl GpuSolver {
 
         // 4. Act
         if self.degenerate_count > 10 {
-            println!("Solution is degenerate: Velocity field is uniform and not evolving. Variance U: {:.2e}, V: {:.2e}", var_u, var_v);
+            if !quiet {
+                println!(
+                    "Solution is degenerate: Velocity field is uniform and not evolving. Variance U: {:.2e}, V: {:.2e}",
+                    var_u, var_v
+                );
+            }
             self.should_stop = true;
         }
 
         if self.steady_state_count > 10 {
-            println!(
-                "Steady state reached. Evolution diff: {:.2e}",
-                evolution_diff
-            );
+            if !quiet {
+                println!(
+                    "Steady state reached. Evolution diff: {:.2e}",
+                    evolution_diff
+                );
+            }
             self.should_stop = true;
         }
     }

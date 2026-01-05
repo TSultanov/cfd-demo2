@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod coupled_assembly;
 pub mod emit;
+pub mod flux_rhie_chow;
 pub mod ir;
 pub mod model;
 pub mod prepare_coupled;
@@ -18,9 +19,11 @@ pub use ast::{
     Term, TermOp,
 };
 pub use coupled_assembly::generate_coupled_assembly_wgsl;
+pub use flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 pub use emit::write_wgsl_file;
 pub use emit::emit_coupled_assembly_codegen_wgsl;
 pub use emit::emit_coupled_assembly_codegen_wgsl_with_schemes;
+pub use emit::emit_flux_rhie_chow_codegen_wgsl;
 pub use emit::emit_incompressible_momentum_wgsl;
 pub use emit::emit_incompressible_momentum_wgsl_with_schemes;
 pub use emit::emit_prepare_coupled_codegen_wgsl;

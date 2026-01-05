@@ -19,6 +19,12 @@ mod solver {
                 "/src/solver/codegen/coupled_assembly.rs"
             ));
         }
+        pub mod flux_rhie_chow {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/flux_rhie_chow.rs"
+            ));
+        }
         pub mod prepare_coupled {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -126,6 +132,9 @@ fn main() {
         panic!("codegen failed: {}", err);
     }
     if let Err(err) = solver::codegen::emit::emit_update_fields_from_coupled_codegen_wgsl(&manifest_dir) {
+        panic!("codegen failed: {}", err);
+    }
+    if let Err(err) = solver::codegen::emit::emit_flux_rhie_chow_codegen_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
 

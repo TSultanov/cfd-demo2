@@ -1,5 +1,5 @@
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged;
-use crate::solver::gpu::bindings::flux_rhie_chow;
+use crate::solver::gpu::bindings::generated::flux_rhie_chow;
 use crate::solver::gpu::bindings::generated::prepare_coupled;
 use crate::solver::gpu::bindings::generated::pressure_assembly;
 use crate::solver::gpu::bindings::generated::update_fields_from_coupled;

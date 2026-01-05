@@ -98,3 +98,5 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Removed unused coupled-assembly layout parameter in codegen base-item builder to keep codegen warning-free (`src/solver/codegen/coupled_assembly.rs`).
 - **2025-02-10:** Avoided unsupported bitshift in codegen WGSL DSL by switching update-kernel stride reduction to `/ 2u` (`src/solver/codegen/update_fields_from_coupled.rs`).
 - **2025-02-10:** Verified codegen unit tests after generating packed-state prepare/pressure/update shaders via build hooks (`cargo test codegen --lib`).
+- **2025-02-10:** Added codegen for Rhie-Chow flux kernel with packed state arrays and wired generated shader into physics pipelines (`src/solver/codegen/flux_rhie_chow.rs`, `src/solver/gpu/init/physics.rs`).
+- **2025-02-10:** Verified codegen unit tests after adding flux kernel generator (`cargo test codegen --lib`).

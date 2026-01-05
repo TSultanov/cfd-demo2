@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use super::ir::DiscreteSystem;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
+use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use super::prepare_coupled::generate_prepare_coupled_wgsl;
 use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
@@ -128,6 +129,24 @@ pub fn emit_update_fields_from_coupled_codegen_wgsl(
     let wgsl = generate_update_fields_from_coupled_wgsl(&model.state_layout);
 
     let output_path = generated_dir_for(base_dir).join("update_fields_from_coupled.wgsl");
+    if let Ok(existing) = fs::read_to_string(&output_path) {
+        if existing == wgsl {
+            return Ok(output_path);
+        }
+    }
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&output_path, wgsl)?;
+    Ok(output_path)
+}
+
+pub fn emit_flux_rhie_chow_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    let base_dir = base_dir.as_ref();
+    let model = incompressible_momentum_model();
+    let wgsl = generate_flux_rhie_chow_wgsl(&model.state_layout);
+
+    let output_path = generated_dir_for(base_dir).join("flux_rhie_chow.wgsl");
     if let Ok(existing) = fs::read_to_string(&output_path) {
         if existing == wgsl {
             return Ok(output_path);
@@ -330,6 +349,19 @@ mod tests {
         let content = fs::read_to_string(&output).unwrap();
 
         assert!(output.ends_with("generated/update_fields_from_coupled.wgsl"));
+        assert!(content.contains("fn main("));
+        assert!(content.contains("state: array<f32>"));
+
+        let _ = fs::remove_dir_all(base_dir.join("src"));
+    }
+
+    #[test]
+    fn emit_flux_rhie_chow_codegen_wgsl_writes_generated_shader() {
+        let base_dir = temp_base_dir();
+        let output = emit_flux_rhie_chow_codegen_wgsl(&base_dir).unwrap();
+        let content = fs::read_to_string(&output).unwrap();
+
+        assert!(output.ends_with("generated/flux_rhie_chow.wgsl"));
         assert!(content.contains("fn main("));
         assert!(content.contains("state: array<f32>"));
 

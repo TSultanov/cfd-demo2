@@ -1,6 +1,6 @@
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
-use cfd2::solver::model::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
+use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {

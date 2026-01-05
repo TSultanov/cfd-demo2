@@ -9,7 +9,7 @@ use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
 use crate::solver::model::{incompressible_momentum_model, incompressible_momentum_system};
-use crate::solver::model::SchemeRegistry;
+use crate::solver::model::backend::SchemeRegistry;
 use crate::solver::scheme::Scheme;
 
 pub fn write_wgsl_file(
@@ -187,10 +187,10 @@ pub fn emit_incompressible_momentum_wgsl_with_schemes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{fvm, surface_scalar, vol_vector, Equation, EquationSystem};
-    use crate::solver::model::TermOp;
+    use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_vector, Equation, EquationSystem};
+    use crate::solver::model::backend::ast::TermOp;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::SchemeRegistry;
+    use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
     use std::time::{SystemTime, UNIX_EPOCH};
 

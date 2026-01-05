@@ -1,6 +1,5 @@
 use crate::solver::codegen::state_access::state_scalar_expr;
-use crate::solver::model::ast::{Coefficient, FieldKind};
-use crate::solver::model::StateLayout;
+use crate::solver::model::backend::{Coefficient, FieldKind, StateLayout};
 
 #[derive(Clone, Copy)]
 enum CoeffSample<'a> {
@@ -95,7 +94,7 @@ pub fn coeff_face_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{vol_scalar, vol_vector};
+    use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
 
     #[test]
     fn coeff_expr_handles_product_and_constants() {
@@ -124,7 +123,10 @@ mod tests {
             Coefficient::Field(u),
         )
         .unwrap_err();
-        assert!(matches!(err, crate::solver::model::ast::CodegenError::NonScalarCoefficient { .. }));
+        assert!(matches!(
+            err,
+            crate::solver::model::backend::ast::CodegenError::NonScalarCoefficient { .. }
+        ));
 
         let coeff = Coefficient::field(vol_scalar("p")).unwrap();
         let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", "1.0");

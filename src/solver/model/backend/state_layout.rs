@@ -92,7 +92,7 @@ impl StateLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{vol_scalar, vol_vector};
+    use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
 
     #[test]
     fn state_layout_assigns_offsets_and_stride() {

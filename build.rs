@@ -7,23 +7,34 @@ mod solver {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/scheme.rs"));
     }
     pub mod model {
-        pub mod ast {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/model/ast.rs"
-            ));
-        }
-        pub mod scheme {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/model/scheme.rs"
-            ));
-        }
-        pub mod state_layout {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/model/state_layout.rs"
-            ));
+        pub mod backend {
+            pub mod ast {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/model/backend/ast.rs"
+                ));
+            }
+            pub mod scheme {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/model/backend/scheme.rs"
+                ));
+            }
+            pub mod state_layout {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/model/backend/state_layout.rs"
+                ));
+            }
+            #[allow(unused_imports)]
+            pub use ast::{
+                fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind,
+                FieldRef, FluxRef, Term, TermOp,
+            };
+            #[allow(unused_imports)]
+            pub use scheme::{SchemeRegistry, TermKey};
+            #[allow(unused_imports)]
+            pub use state_layout::{StateField, StateLayout};
         }
         pub mod definitions {
             include!(concat!(
@@ -32,19 +43,10 @@ mod solver {
             ));
         }
         #[allow(unused_imports)]
-        pub use ast::{
-            fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef,
-            FluxRef, Term, TermOp,
-        };
-        #[allow(unused_imports)]
         pub use definitions::{
             incompressible_momentum_model, incompressible_momentum_system,
             IncompressibleMomentumFields, ModelSpec,
         };
-        #[allow(unused_imports)]
-        pub use scheme::{SchemeRegistry, TermKey};
-        #[allow(unused_imports)]
-        pub use state_layout::{StateField, StateLayout};
     }
     pub mod codegen {
         pub mod coupled_assembly {
@@ -130,7 +132,7 @@ mod solver {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/solver/scheme.rs");
-    for entry in glob("src/solver/model/*.rs").expect("Failed to read model glob") {
+    for entry in glob("src/solver/model/**/*.rs").expect("Failed to read model glob") {
         match entry {
             Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),

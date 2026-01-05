@@ -1,4 +1,4 @@
-use crate::solver::model::StateLayout;
+use crate::solver::model::backend::StateLayout;
 
 pub fn state_component_expr(
     layout: &StateLayout,
@@ -32,7 +32,7 @@ pub fn state_vec2_expr(layout: &StateLayout, buffer: &str, idx: &str, field: &st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{vol_scalar, vol_vector};
+    use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
 
     #[test]
     fn state_access_builds_scalar_and_vector_exprs() {

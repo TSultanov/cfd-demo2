@@ -1,5 +1,6 @@
 use super::state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
-use crate::solver::model::{IncompressibleMomentumFields, StateLayout};
+use crate::solver::model::IncompressibleMomentumFields;
+use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Function, GlobalVar, Item, Module, Param, StorageClass,
     StructDef, StructField, Type,

@@ -2,7 +2,8 @@ use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
-use crate::solver::model::{IncompressibleMomentumFields, StateLayout};
+use crate::solver::model::IncompressibleMomentumFields;
+use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
@@ -759,7 +760,7 @@ mod tests {
     use super::*;
     use crate::solver::codegen::lower_system;
     use crate::solver::model::incompressible_momentum_model;
-    use crate::solver::model::SchemeRegistry;
+    use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
 
     #[test]

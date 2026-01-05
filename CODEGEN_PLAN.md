@@ -212,3 +212,11 @@ discretization automatically, with modular swapping of schemes and boundary cond
   `src/solver/model/ast.rs`).
 - **2025-02-10:** Verified codegen unit tests after coupled-stride derivation
   (`cargo test codegen --lib`).
+- **2025-02-10:** Generalized coupled-assembly indexing math to derive row/stride offsets
+  from model component counts (no hardcoded `3u/9u` block sizes) (`src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Moved AST/scheme/state-layout under a `model::backend` module and switched
+  codegen/tests/build scripts to depend on backend types while keeping public model
+  definitions at the top level (`src/solver/model/backend/*`, `src/solver/model/mod.rs`,
+  `src/solver/codegen/*`, `build.rs`).
+- **2025-02-10:** Verified codegen unit tests after backend refactor
+  (`cargo test codegen --lib`).

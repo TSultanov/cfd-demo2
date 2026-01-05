@@ -1,8 +1,8 @@
-use super::ast::{
+use super::backend::ast::{
     fvc, fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef,
     FluxRef,
 };
-use super::state_layout::StateLayout;
+use super::backend::state_layout::StateLayout;
 
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
@@ -92,7 +92,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::TermOp;
+    use crate::solver::model::backend::ast::TermOp;
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {

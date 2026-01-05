@@ -2,7 +2,8 @@ use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::state_access::{state_scalar_expr, state_vec2_expr};
-use crate::solver::model::{IncompressibleMomentumFields, StateLayout};
+use crate::solver::model::IncompressibleMomentumFields;
+use crate::solver::model::backend::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
@@ -339,6 +340,30 @@ fn main_body(
     let mut stmts = Vec::new();
     let u_field = fields.u.name();
     let d_p_field = fields.d_p.name();
+    let u_components = fields.u.kind().component_count();
+    let p_components = fields.p.kind().component_count();
+    if u_components != 2 {
+        panic!(
+            "expected vector2 velocity field, got {} components",
+            u_components
+        );
+    }
+    if p_components != 1 {
+        panic!(
+            "expected scalar pressure field, got {} components",
+            p_components
+        );
+    }
+    let coupled_stride = u_components + p_components;
+    let p_offset = u_components;
+    let row_stride_2 = coupled_stride * 2;
+    let block_stride = coupled_stride * coupled_stride;
+    let start_row_0_expr = format!("{block_stride}u * scalar_offset");
+    let start_row_1_expr = format!("start_row_0 + {coupled_stride}u * num_neighbors");
+    let start_row_2_expr = format!("start_row_0 + {row_stride_2}u * num_neighbors");
+    let row_entry = |row: &str, rank: &str, comp: usize| {
+        format!("{row} + {coupled_stride}u * {rank} + {comp}u")
+    };
     let u_old_expr = state_vec2_expr(layout, "state_old", "idx", u_field);
     let u_old_old_expr = state_vec2_expr(layout, "state_old_old", "idx", u_field);
 
@@ -357,15 +382,9 @@ fn main_body(
         "num_neighbors",
         "scalar_row_offsets[idx + 1] - scalar_offset",
     ));
-    stmts.push(dsl::let_("start_row_0", "9u * scalar_offset"));
-    stmts.push(dsl::let_(
-        "start_row_1",
-        "start_row_0 + 3u * num_neighbors",
-    ));
-    stmts.push(dsl::let_(
-        "start_row_2",
-        "start_row_0 + 6u * num_neighbors",
-    ));
+    stmts.push(dsl::let_("start_row_0", &start_row_0_expr));
+    stmts.push(dsl::let_("start_row_1", &start_row_1_expr));
+    stmts.push(dsl::let_("start_row_2", &start_row_2_expr));
     stmts.push(dsl::var_typed("diag_u", Type::F32, Some("0.0")));
     stmts.push(dsl::var_typed("diag_v", Type::F32, Some("0.0")));
     stmts.push(dsl::var_typed("diag_p", Type::F32, Some("0.0")));
@@ -532,39 +551,39 @@ fn main_body(
         ));
         body.push(dsl::let_(
             "idx_0_0",
-            "start_row_0 + 3u * neighbor_rank + 0u",
+            &row_entry("start_row_0", "neighbor_rank", 0),
         ));
         body.push(dsl::let_(
             "idx_0_1",
-            "start_row_0 + 3u * neighbor_rank + 1u",
+            &row_entry("start_row_0", "neighbor_rank", 1),
         ));
         body.push(dsl::let_(
             "idx_0_2",
-            "start_row_0 + 3u * neighbor_rank + 2u",
+            &row_entry("start_row_0", "neighbor_rank", p_offset),
         ));
         body.push(dsl::let_(
             "idx_1_0",
-            "start_row_1 + 3u * neighbor_rank + 0u",
+            &row_entry("start_row_1", "neighbor_rank", 0),
         ));
         body.push(dsl::let_(
             "idx_1_1",
-            "start_row_1 + 3u * neighbor_rank + 1u",
+            &row_entry("start_row_1", "neighbor_rank", 1),
         ));
         body.push(dsl::let_(
             "idx_1_2",
-            "start_row_1 + 3u * neighbor_rank + 2u",
+            &row_entry("start_row_1", "neighbor_rank", p_offset),
         ));
         body.push(dsl::let_(
             "idx_2_0",
-            "start_row_2 + 3u * neighbor_rank + 0u",
+            &row_entry("start_row_2", "neighbor_rank", 0),
         ));
         body.push(dsl::let_(
             "idx_2_1",
-            "start_row_2 + 3u * neighbor_rank + 1u",
+            &row_entry("start_row_2", "neighbor_rank", 1),
         ));
         body.push(dsl::let_(
             "idx_2_2",
-            "start_row_2 + 3u * neighbor_rank + 2u",
+            &row_entry("start_row_2", "neighbor_rank", p_offset),
         ));
 
         let u_neigh_expr = state_vec2_expr(layout, "state", "other_idx", u_field);
@@ -875,39 +894,39 @@ fn main_body(
     stmts.push(dsl::let_("diag_rank", "scalar_diag_idx - scalar_offset"));
     stmts.push(dsl::let_(
         "d_0_0",
-        "start_row_0 + 3u * diag_rank + 0u",
+        &row_entry("start_row_0", "diag_rank", 0),
     ));
     stmts.push(dsl::let_(
         "d_0_1",
-        "start_row_0 + 3u * diag_rank + 1u",
+        &row_entry("start_row_0", "diag_rank", 1),
     ));
     stmts.push(dsl::let_(
         "d_0_2",
-        "start_row_0 + 3u * diag_rank + 2u",
+        &row_entry("start_row_0", "diag_rank", p_offset),
     ));
     stmts.push(dsl::let_(
         "d_1_0",
-        "start_row_1 + 3u * diag_rank + 0u",
+        &row_entry("start_row_1", "diag_rank", 0),
     ));
     stmts.push(dsl::let_(
         "d_1_1",
-        "start_row_1 + 3u * diag_rank + 1u",
+        &row_entry("start_row_1", "diag_rank", 1),
     ));
     stmts.push(dsl::let_(
         "d_1_2",
-        "start_row_1 + 3u * diag_rank + 2u",
+        &row_entry("start_row_1", "diag_rank", p_offset),
     ));
     stmts.push(dsl::let_(
         "d_2_0",
-        "start_row_2 + 3u * diag_rank + 0u",
+        &row_entry("start_row_2", "diag_rank", 0),
     ));
     stmts.push(dsl::let_(
         "d_2_1",
-        "start_row_2 + 3u * diag_rank + 1u",
+        &row_entry("start_row_2", "diag_rank", 1),
     ));
     stmts.push(dsl::let_(
         "d_2_2",
-        "start_row_2 + 3u * diag_rank + 2u",
+        &row_entry("start_row_2", "diag_rank", p_offset),
     ));
     stmts.push(dsl::assign("matrix_values[d_0_0]", "diag_u"));
     stmts.push(dsl::assign("matrix_values[d_0_1]", "0.0"));
@@ -918,9 +937,18 @@ fn main_body(
     stmts.push(dsl::assign("matrix_values[d_2_0]", "sum_diag_pu"));
     stmts.push(dsl::assign("matrix_values[d_2_1]", "sum_diag_pv"));
     stmts.push(dsl::assign("matrix_values[d_2_2]", "diag_p + sum_diag_pp"));
-    stmts.push(dsl::assign("rhs[3u * idx + 0u]", "rhs_u"));
-    stmts.push(dsl::assign("rhs[3u * idx + 1u]", "rhs_v"));
-    stmts.push(dsl::assign("rhs[3u * idx + 2u]", "rhs_p"));
+    stmts.push(dsl::assign(
+        &format!("rhs[{coupled_stride}u * idx + 0u]"),
+        "rhs_u",
+    ));
+    stmts.push(dsl::assign(
+        &format!("rhs[{coupled_stride}u * idx + 1u]"),
+        "rhs_v",
+    ));
+    stmts.push(dsl::assign(
+        &format!("rhs[{coupled_stride}u * idx + {p_offset}u]"),
+        "rhs_p",
+    ));
     stmts.push(dsl::assign(
         "scalar_matrix_values[scalar_diag_idx]",
         "scalar_diag_p",
@@ -944,9 +972,10 @@ fn main_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{fvm, surface_scalar, vol_scalar, vol_vector, Coefficient};
+    use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar, vol_vector, Coefficient};
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::{IncompressibleMomentumFields, SchemeRegistry};
+    use crate::solver::model::IncompressibleMomentumFields;
+    use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
 
     fn default_layout() -> StateLayout {
@@ -970,16 +999,16 @@ mod tests {
         let nu = vol_scalar("nu");
         let p = vol_scalar("p");
         let d_p = vol_scalar("d_p");
-        let eqn = crate::solver::model::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
                 Coefficient::field(nu).unwrap(),
                 u.clone(),
             ));
-        let mut system = crate::solver::model::ast::EquationSystem::new();
+        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
                 fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
             ),
         );
@@ -1001,19 +1030,19 @@ mod tests {
         let phi = surface_scalar("phi");
         let p = vol_scalar("p");
         let d_p = vol_scalar("d_p");
-        let eqn = crate::solver::model::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
-        let mut system = crate::solver::model::ast::EquationSystem::new();
+        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
                 fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
             ),
         );
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(
-            crate::solver::model::ast::TermOp::Div,
+            crate::solver::model::backend::ast::TermOp::Div,
             Some(&phi),
             &u,
             Scheme::QUICK,
@@ -1031,12 +1060,12 @@ mod tests {
         let u = vol_vector("U");
         let p = vol_scalar("p");
         let d_p = vol_scalar("d_p");
-        let eqn = crate::solver::model::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
-        let mut system = crate::solver::model::ast::EquationSystem::new();
+        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
                 fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
             ),
         );
@@ -1056,7 +1085,7 @@ mod tests {
         let rho = vol_scalar("rho");
         let p = vol_scalar("p");
         let d_p = vol_scalar("d_p");
-        let eqn = crate::solver::model::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::ddt_coeff(
                 Coefficient::field(rho).unwrap(),
                 u.clone(),
@@ -1065,10 +1094,10 @@ mod tests {
                 Coefficient::field(nu).unwrap(),
                 u.clone(),
             ));
-        let mut system = crate::solver::model::ast::EquationSystem::new();
+        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
                 fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
             ),
         );

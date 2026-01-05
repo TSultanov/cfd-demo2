@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::super::scheme::Scheme;
+use crate::solver::scheme::Scheme;
 
 use super::ast::{FieldRef, FluxRef, Term, TermOp};
 
@@ -92,7 +92,7 @@ impl Default for SchemeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{fvm, surface_scalar, vol_scalar};
+    use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar};
 
     #[test]
     fn scheme_registry_uses_default_when_unset() {

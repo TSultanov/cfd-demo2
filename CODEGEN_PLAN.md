@@ -111,3 +111,8 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified codegen + manual-vs-generated tests after removing TODOs (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).
 - **2025-02-10:** Added term-level WGSL emission for time, convection (upwind/SOU/QUICK), diffusion, and gradient terms with scheme-driven formulas, plus dummy-argument calls in assemble helpers and new tests that would have failed with stubs (`src/solver/codegen/wgsl.rs`).
 - **2025-02-10:** Verified codegen tests and manual-vs-generated comparison after term-level emission (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Extended the manual-vs-generated solver comparison test to run multiple steps, seed inlet velocity, and assert non-trivial flow so differences are detectable (`tests/gpu_codegen_matches_manual_test.rs`).
+- **2025-02-10:** Relaxed the pressure tolerance in the manual-vs-generated solver comparison test to account for accumulated solver differences over multiple steps (`tests/gpu_codegen_matches_manual_test.rs`).
+- **2025-02-10:** Verified manual-vs-generated solver comparison test after tolerance update (`cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Tightened manual-vs-generated solver comparison tolerances for velocity and pressure diffs (`tests/gpu_codegen_matches_manual_test.rs`).
+- **2025-02-10:** Verified manual-vs-generated solver comparison test after tightening tolerances (`cargo test --test gpu_codegen_matches_manual_test`).

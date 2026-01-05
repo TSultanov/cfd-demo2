@@ -153,6 +153,16 @@ fn assemble_scalar_system<F>(
 where
     F: Fn(BoundaryType, f64, f64) -> Option<f64>,
 {
+    fn eval_coeff_scalar(coeff: &Coefficient) -> f64 {
+        match coeff {
+            Coefficient::Constant(value) => *value,
+            Coefficient::Field(field) => {
+                panic!("coefficient field not supported: {}", field.name())
+            }
+            Coefficient::Product(lhs, rhs) => eval_coeff_scalar(lhs) * eval_coeff_scalar(rhs),
+        }
+    }
+
     let num_cells = mesh.num_cells();
     let (row_offsets, col_indices) = build_csr(mesh);
     let diag = diag_indices(&row_offsets, &col_indices);
@@ -170,10 +180,7 @@ where
             TermOp::Ddt => {
                 let phi_old = phi_old.expect("ddt term requires phi_old");
                 let coeff = match term.coeff {
-                    Some(Coefficient::Constant(value)) => value,
-                    Some(Coefficient::Field(field)) => {
-                        panic!("ddt coefficient field not supported: {}", field.name())
-                    }
+                    Some(ref coeff) => eval_coeff_scalar(coeff),
                     None => 1.0,
                 };
                 for cell in 0..num_cells {
@@ -185,10 +192,7 @@ where
             }
             TermOp::Laplacian => {
                 let coeff = match term.coeff {
-                    Some(Coefficient::Constant(value)) => value,
-                    Some(Coefficient::Field(field)) => {
-                        panic!("laplacian coefficient field not supported: {}", field.name())
-                    }
+                    Some(ref coeff) => eval_coeff_scalar(coeff),
                     None => 1.0,
                 };
                 for face in 0..mesh.num_faces() {

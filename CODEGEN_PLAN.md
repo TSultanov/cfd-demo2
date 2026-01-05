@@ -220,3 +220,7 @@ discretization automatically, with modular swapping of schemes and boundary cond
   `src/solver/codegen/*`, `build.rs`).
 - **2025-02-10:** Verified codegen unit tests after backend refactor
   (`cargo test codegen --lib`).
+- **2025-02-10:** Updated analytical-solution assembly helper to handle coefficient
+  products in scalar PDEs (`tests/model_analytical_solutions_test.rs`).
+- **2025-02-10:** Verified broader solver tests (`cargo test --test model_analytical_solutions_test`,
+  `cargo test --test gpu_solver_scaling_test`, `cargo test --test gpu_codegen_matches_manual_test`).

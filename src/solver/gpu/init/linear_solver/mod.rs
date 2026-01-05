@@ -4,7 +4,7 @@ pub mod state;
 
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::gpu::bindings;
-use crate::solver::gpu::bindings::coupled_assembly_merged;
+use crate::solver::gpu::bindings::generated::coupled_assembly_merged;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;

@@ -1,8 +1,8 @@
-use crate::solver::gpu::bindings::coupled_assembly_merged;
+use crate::solver::gpu::bindings::generated::coupled_assembly_merged;
 use crate::solver::gpu::bindings::flux_rhie_chow;
-use crate::solver::gpu::bindings::prepare_coupled;
-use crate::solver::gpu::bindings::pressure_assembly;
-use crate::solver::gpu::bindings::update_fields_from_coupled;
+use crate::solver::gpu::bindings::generated::prepare_coupled;
+use crate::solver::gpu::bindings::generated::pressure_assembly;
+use crate::solver::gpu::bindings::generated::update_fields_from_coupled;
 
 pub struct PhysicsPipelines {
     pub pipeline_pressure_assembly: wgpu::ComputePipeline,

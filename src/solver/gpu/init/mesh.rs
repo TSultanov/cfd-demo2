@@ -1,4 +1,4 @@
-use crate::solver::gpu::bindings::coupled_assembly_merged;
+use crate::solver::gpu::bindings::generated::coupled_assembly_merged;
 use crate::solver::mesh::{BoundaryType, Mesh};
 use wgpu::util::DeviceExt;
 

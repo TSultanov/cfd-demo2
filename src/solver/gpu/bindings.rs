@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 3d0e3b8a220df0a4a3579764ce6a92f4934b397c81501f437bb0b8168a5e032f
+// SourceHash: 137c79a10d146eeba70e2a3e7328cd00a156dfcb91b0fc7cafe73108cb2b19ef
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -4810,37 +4810,27 @@ fn safe_inverse(val: f32) -> f32 {
     return 0f;
 }
 
-fn term_ddt_U_upwind() {
-    return;
-}
+fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32, phi_n: vec2<f32>, phi_nm1_: vec2<f32>) -> vec3<f32> {
+    var diag: f32;
+    var rhs_x: f32;
+    var rhs_y: f32;
 
-fn term_div_phi_U_upwind() {
-    return;
-}
-
-fn term_laplacian_U_upwind() {
-    return;
-}
-
-fn term_grad_p_upwind() {
-    return;
-}
-
-fn codegen_assemble_U() {
-    term_ddt_U_upwind();
-    term_div_phi_U_upwind();
-    term_laplacian_U_upwind();
-    term_grad_p_upwind();
-    return;
-}
-
-fn term_laplacian_p_upwind() {
-    return;
-}
-
-fn codegen_assemble_p() {
-    term_laplacian_p_upwind();
-    return;
+    let base_coeff = ((rho * vol) / dt);
+    diag = base_coeff;
+    rhs_x = (base_coeff * phi_n.x);
+    rhs_y = (base_coeff * phi_n.y);
+    if (time_scheme == 1u) {
+        let r = (dt / dt_old);
+        diag = ((((rho * vol) / dt) * (1f + (2f * r))) / (1f + r));
+        let factor_n = (1f + r);
+        let factor_nm1_ = ((r * r) / (1f + r));
+        rhs_x = (((rho * vol) / dt) * ((factor_n * phi_n.x) - (factor_nm1_ * phi_nm1_.x)));
+        rhs_y = (((rho * vol) / dt) * ((factor_n * phi_n.y) - (factor_nm1_ * phi_nm1_.y)));
+    }
+    let _e51 = diag;
+    let _e52 = rhs_x;
+    let _e53 = rhs_y;
+    return vec3<f32>(_e51, _e52, _e53);
 }
 
 fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
@@ -4857,8 +4847,63 @@ fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
     return vec2<f32>(_e6, _e7);
 }
 
-fn codegen_diff_coeff(mu: f32, area: f32, dist: f32) -> f32 {
-    return ((mu * area) / dist);
+fn term_div_phi_U_upwind(flux_1: f32, phi_own: vec2<f32>, phi_neigh: vec2<f32>, grad_own_u: vec2<f32>, grad_own_v: vec2<f32>, grad_neigh_u: vec2<f32>, grad_neigh_v: vec2<f32>, r_upwind: vec2<f32>, r_downwind: vec2<f32>, r_cd: vec2<f32>) -> vec4<f32> {
+    var phi_upwind: vec2<f32>;
+    var phi_ho: vec2<f32>;
+
+    let _e1 = codegen_conv_coeff(flux_1);
+    let diag_coeff = _e1.x;
+    let off_coeff = _e1.y;
+    phi_upwind = phi_own;
+    phi_ho = phi_own;
+    if (flux_1 <= 0f) {
+        phi_upwind = phi_neigh;
+        phi_ho = phi_neigh;
+    }
+    let _e11 = phi_ho.x;
+    let _e13 = phi_upwind.x;
+    let rhs_corr_x = (flux_1 * (_e11 - _e13));
+    let _e17 = phi_ho.y;
+    let _e19 = phi_upwind.y;
+    let rhs_corr_y = (flux_1 * (_e17 - _e19));
+    return vec4<f32>(diag_coeff, off_coeff, rhs_corr_x, rhs_corr_y);
+}
+
+fn term_laplacian_U_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
+    let coeff = ((mu * area) / dist);
+    return vec2<f32>(coeff, -(coeff));
+}
+
+fn term_grad_p_upwind(area_1: f32, normal_1: vec2<f32>, lambda_1: f32) -> vec4<f32> {
+    let force_x = (area_1 * normal_1.x);
+    let force_y = (area_1 * normal_1.y);
+    let off_u = ((1f - lambda_1) * force_x);
+    let off_v = ((1f - lambda_1) * force_y);
+    let diag_u_1 = (lambda_1 * force_x);
+    let diag_v_1 = (lambda_1 * force_y);
+    return vec4<f32>(off_u, off_v, diag_u_1, diag_v_1);
+}
+
+fn codegen_assemble_U() {
+    let _e11 = term_ddt_U_upwind(1f, 1f, 1f, 1f, 0u, vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
+    let _e40 = term_div_phi_U_upwind(0f, vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
+    let _e44 = term_laplacian_U_upwind(1f, 1f, 1f);
+    let _e50 = term_grad_p_upwind(1f, vec2<f32>(0f, 0f), 0.5f);
+    return;
+}
+
+fn term_laplacian_p_upwind(mu_1: f32, area_2: f32, dist_1: f32) -> vec2<f32> {
+    let coeff_1 = ((mu_1 * area_2) / dist_1);
+    return vec2<f32>(coeff_1, -(coeff_1));
+}
+
+fn codegen_assemble_p() {
+    let _e3 = term_laplacian_p_upwind(1f, 1f, 1f);
+    return;
+}
+
+fn codegen_diff_coeff(mu_2: f32, area_3: f32, dist_2: f32) -> f32 {
+    return ((mu_2 * area_3) / dist_2);
 }
 
 @compute @workgroup_size(64, 1, 1) 
@@ -4897,7 +4942,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     let center = cell_centers[idx];
-    let vol = cell_vols[idx];
+    let vol_1 = cell_vols[idx];
     let start = cell_face_offsets[idx];
     let end = cell_face_offsets[(idx + 1u)];
     let scalar_offset = scalar_row_offsets[idx];
@@ -4911,27 +4956,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let u_n = vec2<f32>(_e43, _e50);
     let _e54 = constants.density;
     let _e58 = constants.dt;
-    coeff_time = ((vol * _e54) / _e58);
+    coeff_time = ((vol_1 * _e54) / _e58);
     let _e61 = coeff_time;
     rhs_time_u = (_e61 * u_n.x);
     let _e65 = coeff_time;
     rhs_time_v = (_e65 * u_n.y);
     let _e71 = constants.time_scheme;
     if (_e71 == 1u) {
-        let dt = constants.dt;
-        let dt_old = constants.dt_old;
-        let r = (dt / dt_old);
+        let dt_1 = constants.dt;
+        let dt_old_1 = constants.dt_old;
+        let r_1 = (dt_1 / dt_old_1);
         let _e87 = state_old_old[((idx * 8u) + 0u)];
         let _e94 = state_old_old[((idx * 8u) + 1u)];
         let u_nm1_ = vec2<f32>(_e87, _e94);
         let _e98 = constants.density;
-        coeff_time = ((((vol * _e98) / dt) * (1f + (2f * r))) / (1f + r));
-        let factor_n = (1f + r);
-        let factor_nm1_ = ((r * r) / (1f + r));
+        coeff_time = ((((vol_1 * _e98) / dt_1) * (1f + (2f * r_1))) / (1f + r_1));
+        let factor_n_1 = (1f + r_1);
+        let factor_nm1_1 = ((r_1 * r_1) / (1f + r_1));
         let _e117 = constants.density;
-        rhs_time_u = (((vol * _e117) / dt) * ((factor_n * u_n.x) - (factor_nm1_ * u_nm1_.x)));
+        rhs_time_u = (((vol_1 * _e117) / dt_1) * ((factor_n_1 * u_n.x) - (factor_nm1_1 * u_nm1_.x)));
         let _e128 = constants.density;
-        rhs_time_v = (((vol * _e128) / dt) * ((factor_n * u_n.y) - (factor_nm1_ * u_nm1_.y)));
+        rhs_time_v = (((vol_1 * _e128) / dt_1) * ((factor_n_1 * u_n.y) - (factor_nm1_1 * u_nm1_.y)));
     }
     let _e138 = coeff_time;
     let _e139 = diag_u;
@@ -4960,7 +5005,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let boundary_type = face_boundary[face_idx];
             let _e171 = face_normals[face_idx];
             normal = _e171;
-            let area_1 = face_areas[face_idx];
+            let area_4 = face_areas[face_idx];
             let f_center = face_centers[face_idx];
             normal_sign = 1f;
             if (owner != idx) {
@@ -4972,7 +5017,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let _e193 = fluxes[face_idx];
             let _e194 = normal_sign;
-            let flux_1 = (_e193 * _e194);
+            let flux_2 = (_e193 * _e194);
             is_boundary = false;
             other_idx = 0u;
             d_p_neigh = 0f;
@@ -5000,10 +5045,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e236 = normal.x;
             let _e239 = normal.y;
             let dist_proj = abs(((d_vec_x * _e236) + (d_vec_y * _e239)));
-            let dist_1 = max(dist_proj, 0.000001f);
-            let mu_1 = constants.viscosity;
-            let _e248 = codegen_diff_coeff(mu_1, area_1, dist_1);
-            let _e249 = codegen_conv_coeff(flux_1);
+            let dist_3 = max(dist_proj, 0.000001f);
+            let mu_3 = constants.viscosity;
+            let _e248 = codegen_diff_coeff(mu_3, area_4, dist_3);
+            let _e249 = codegen_conv_coeff(flux_2);
             let conv_coeff_diag_1 = _e249.x;
             let conv_coeff_off_1 = _e249.y;
             let _e253 = k;
@@ -5034,11 +5079,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let idx_2_2_ = ((start_row_2_ + (3u * _e311)) + 2u);
             let _e316 = is_boundary;
             if !(_e316) {
-                let coeff = (-(_e248) + conv_coeff_off_1);
-                matrix_values[idx_0_0_] = coeff;
+                let coeff_2 = (-(_e248) + conv_coeff_off_1);
+                matrix_values[idx_0_0_] = coeff_2;
                 matrix_values[idx_0_1_] = 0f;
                 matrix_values[idx_1_0_] = 0f;
-                matrix_values[idx_1_1_] = coeff;
+                matrix_values[idx_1_1_] = coeff_2;
                 let _e331 = diag_u;
                 diag_u = (_e331 + (_e248 + conv_coeff_diag_1));
                 let _e334 = diag_v;
@@ -5054,7 +5099,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let u_neigh = vec2<f32>(_e361, _e369);
                     phi_upwind_u = u_own.x;
                     phi_upwind_v = u_own.y;
-                    if (flux_1 < 0f) {
+                    if (flux_2 < 0f) {
                         phi_upwind_u = u_neigh.x;
                         phi_upwind_v = u_neigh.y;
                     }
@@ -5063,7 +5108,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let _e381 = phi_upwind_v;
                     phi_ho_v = _e381;
                     if (0u == 1u) {
-                        if (flux_1 > 0f) {
+                        if (flux_2 > 0f) {
                             let grad_u_own = grad_u[idx];
                             let grad_v_own = grad_v[idx];
                             let r_x = (f_center.x - center.x);
@@ -5084,7 +5129,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         }
                     } else {
                         if (0u == 2u) {
-                            if (flux_1 > 0f) {
+                            if (flux_2 > 0f) {
                                 let grad_u_own_1 = grad_u[idx];
                                 let grad_v_own_1 = grad_v[idx];
                                 let _e454 = other_center.x;
@@ -5113,10 +5158,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                     let _e537 = phi_ho_u;
                     let _e538 = phi_upwind_u;
-                    let correction_u = (flux_1 * (_e537 - _e538));
+                    let correction_u = (flux_2 * (_e537 - _e538));
                     let _e541 = phi_ho_v;
                     let _e542 = phi_upwind_v;
-                    let correction_v = (flux_1 * (_e541 - _e542));
+                    let correction_v = (flux_2 * (_e541 - _e542));
                     let _e545 = rhs_u;
                     rhs_u = (_e545 - correction_u);
                     let _e547 = rhs_v;
@@ -5132,9 +5177,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     lambda = (d_neigh / total_dist);
                 }
                 let _e572 = normal.x;
-                let pg_force_x = (area_1 * _e572);
+                let pg_force_x = (area_4 * _e572);
                 let _e575 = normal.y;
-                let pg_force_y = (area_1 * _e575);
+                let pg_force_y = (area_4 * _e575);
                 let _e579 = lambda;
                 matrix_values[idx_0_2_] = ((1f - _e579) * pg_force_x);
                 let _e585 = lambda;
@@ -5146,9 +5191,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e597 = sum_diag_vp;
                 sum_diag_vp = (_e597 + (_e595 * pg_force_y));
                 let _e600 = normal.x;
-                let div_coeff_x = (_e600 * area_1);
+                let div_coeff_x = (_e600 * area_4);
                 let _e603 = normal.y;
-                let div_coeff_y = (_e603 * area_1);
+                let div_coeff_y = (_e603 * area_4);
                 let _e607 = lambda;
                 matrix_values[idx_2_0_] = ((1f - _e607) * div_coeff_x);
                 let _e613 = lambda;
@@ -5165,7 +5210,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e639 = other_idx;
                 let _e646 = state[((_e639 * 8u) + 3u)];
                 let dp_f = ((_e627 * _e634) + ((1f - _e636) * _e646));
-                let lapl_coeff = ((dp_f * area_1) / dist_1);
+                let lapl_coeff = ((dp_f * area_4) / dist_3);
                 matrix_values[idx_2_2_] = -(lapl_coeff);
                 let _e655 = sum_diag_pp;
                 sum_diag_pp = (_e655 + lapl_coeff);
@@ -5175,7 +5220,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e669 = d_p_neigh;
                 let d_p_face = ((_e664 * d_p_own) + ((1f - _e666) * _e669));
                 let _e674 = constants.density;
-                let scalar_coeff = (((_e674 * d_p_face) * area_1) / dist_1);
+                let scalar_coeff = (((_e674 * d_p_face) * area_4) / dist_3);
                 if (scalar_mat_idx != 4294967295u) {
                     scalar_matrix_values[scalar_mat_idx] = -(scalar_coeff);
                 }
@@ -5196,28 +5241,28 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     rhs_u = (_e705 + (_e248 * u_bc_x));
                     let _e709 = rhs_v;
                     rhs_v = (_e709 + (_e248 * 0f));
-                    if (flux_1 > 0f) {
+                    if (flux_2 > 0f) {
                         let _e713 = diag_u;
-                        diag_u = (_e713 + flux_1);
+                        diag_u = (_e713 + flux_2);
                         let _e715 = diag_v;
-                        diag_v = (_e715 + flux_1);
+                        diag_v = (_e715 + flux_2);
                     } else {
                         let _e718 = rhs_u;
-                        rhs_u = (_e718 - (flux_1 * u_bc_x));
+                        rhs_u = (_e718 - (flux_2 * u_bc_x));
                         let _e721 = rhs_v;
-                        rhs_v = (_e721 - (flux_1 * 0f));
+                        rhs_v = (_e721 - (flux_2 * 0f));
                     }
                     let _e724 = normal.x;
-                    let pg_force_x_1 = (area_1 * _e724);
+                    let pg_force_x_1 = (area_4 * _e724);
                     let _e727 = normal.y;
-                    let pg_force_y_1 = (area_1 * _e727);
+                    let pg_force_y_1 = (area_4 * _e727);
                     let _e729 = sum_diag_up;
                     sum_diag_up = (_e729 + pg_force_x_1);
                     let _e731 = sum_diag_vp;
                     sum_diag_vp = (_e731 + pg_force_y_1);
                     let _e734 = normal.x;
                     let _e737 = normal.y;
-                    let flux_bc = (((u_bc_x * _e734) + (0f * _e737)) * area_1);
+                    let flux_bc = (((u_bc_x * _e734) + (0f * _e737)) * area_4);
                     let _e742 = rhs_p;
                     rhs_p = (_e742 - flux_bc);
                 } else {
@@ -5227,36 +5272,36 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         let _e748 = diag_v;
                         diag_v = (_e748 + _e248);
                         let _e751 = normal.x;
-                        let pg_force_x_2 = (area_1 * _e751);
+                        let pg_force_x_2 = (area_4 * _e751);
                         let _e754 = normal.y;
-                        let pg_force_y_2 = (area_1 * _e754);
+                        let pg_force_y_2 = (area_4 * _e754);
                         let _e756 = sum_diag_up;
                         sum_diag_up = (_e756 + pg_force_x_2);
                         let _e758 = sum_diag_vp;
                         sum_diag_vp = (_e758 + pg_force_y_2);
                     } else {
                         if (boundary_type == 2u) {
-                            if (flux_1 > 0f) {
+                            if (flux_2 > 0f) {
                                 let _e764 = diag_u;
-                                diag_u = (_e764 + flux_1);
+                                diag_u = (_e764 + flux_2);
                                 let _e766 = diag_v;
-                                diag_v = (_e766 + flux_1);
+                                diag_v = (_e766 + flux_2);
                             }
                             let _e769 = normal.x;
-                            let div_coeff_x_1 = (_e769 * area_1);
+                            let div_coeff_x_1 = (_e769 * area_4);
                             let _e772 = normal.y;
-                            let div_coeff_y_1 = (_e772 * area_1);
+                            let div_coeff_y_1 = (_e772 * area_4);
                             let _e774 = sum_diag_pu;
                             sum_diag_pu = (_e774 + div_coeff_x_1);
                             let _e776 = sum_diag_pv;
                             sum_diag_pv = (_e776 + div_coeff_y_1);
                             let dp_f_1 = state[((idx * 8u) + 3u)];
-                            let lapl_coeff_1 = ((dp_f_1 * area_1) / dist_1);
+                            let lapl_coeff_1 = ((dp_f_1 * area_4) / dist_3);
                             let _e787 = sum_diag_pp;
                             sum_diag_pp = (_e787 + lapl_coeff_1);
                             let d_p_own_1 = state[((idx * 8u) + 3u)];
                             let _e798 = constants.density;
-                            let scalar_coeff_1 = (((_e798 * d_p_own_1) * area_1) / dist_1);
+                            let scalar_coeff_1 = (((_e798 * d_p_own_1) * area_4) / dist_3);
                             let _e802 = scalar_diag_p;
                             scalar_diag_p = (_e802 + scalar_coeff_1);
                         }
@@ -6088,36 +6133,95 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             })
         }
         pub const SHADER_STRING: &str = r#"
-fn term_ddt_U_upwind() {
-    return;
+fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32, phi_n: vec2<f32>, phi_nm1_: vec2<f32>) -> vec3<f32> {
+    var diag: f32;
+    var rhs_x: f32;
+    var rhs_y: f32;
+
+    let base_coeff = ((rho * vol) / dt);
+    diag = base_coeff;
+    rhs_x = (base_coeff * phi_n.x);
+    rhs_y = (base_coeff * phi_n.y);
+    if (time_scheme == 1u) {
+        let r = (dt / dt_old);
+        diag = ((((rho * vol) / dt) * (1f + (2f * r))) / (1f + r));
+        let factor_n = (1f + r);
+        let factor_nm1_ = ((r * r) / (1f + r));
+        rhs_x = (((rho * vol) / dt) * ((factor_n * phi_n.x) - (factor_nm1_ * phi_nm1_.x)));
+        rhs_y = (((rho * vol) / dt) * ((factor_n * phi_n.y) - (factor_nm1_ * phi_nm1_.y)));
+    }
+    let _e51 = diag;
+    let _e52 = rhs_x;
+    let _e53 = rhs_y;
+    return vec3<f32>(_e51, _e52, _e53);
 }
 
-fn term_div_phi_U_upwind() {
-    return;
+fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
+    var conv_coeff_diag: f32 = 0f;
+    var conv_coeff_off: f32 = 0f;
+
+    if (flux > 0f) {
+        conv_coeff_diag = flux;
+    } else {
+        conv_coeff_off = flux;
+    }
+    let _e6 = conv_coeff_diag;
+    let _e7 = conv_coeff_off;
+    return vec2<f32>(_e6, _e7);
 }
 
-fn term_laplacian_U_upwind() {
-    return;
+fn term_div_phi_U_upwind(flux_1: f32, phi_own: vec2<f32>, phi_neigh: vec2<f32>, grad_own_u: vec2<f32>, grad_own_v: vec2<f32>, grad_neigh_u: vec2<f32>, grad_neigh_v: vec2<f32>, r_upwind: vec2<f32>, r_downwind: vec2<f32>, r_cd: vec2<f32>) -> vec4<f32> {
+    var phi_upwind: vec2<f32>;
+    var phi_ho: vec2<f32>;
+
+    let _e1 = codegen_conv_coeff(flux_1);
+    let diag_coeff = _e1.x;
+    let off_coeff = _e1.y;
+    phi_upwind = phi_own;
+    phi_ho = phi_own;
+    if (flux_1 <= 0f) {
+        phi_upwind = phi_neigh;
+        phi_ho = phi_neigh;
+    }
+    let _e11 = phi_ho.x;
+    let _e13 = phi_upwind.x;
+    let rhs_corr_x = (flux_1 * (_e11 - _e13));
+    let _e17 = phi_ho.y;
+    let _e19 = phi_upwind.y;
+    let rhs_corr_y = (flux_1 * (_e17 - _e19));
+    return vec4<f32>(diag_coeff, off_coeff, rhs_corr_x, rhs_corr_y);
 }
 
-fn term_grad_p_upwind() {
-    return;
+fn term_laplacian_U_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
+    let coeff = ((mu * area) / dist);
+    return vec2<f32>(coeff, -(coeff));
+}
+
+fn term_grad_p_upwind(area_1: f32, normal: vec2<f32>, lambda: f32) -> vec4<f32> {
+    let force_x = (area_1 * normal.x);
+    let force_y = (area_1 * normal.y);
+    let off_u = ((1f - lambda) * force_x);
+    let off_v = ((1f - lambda) * force_y);
+    let diag_u = (lambda * force_x);
+    let diag_v = (lambda * force_y);
+    return vec4<f32>(off_u, off_v, diag_u, diag_v);
 }
 
 fn assemble_U() {
-    term_ddt_U_upwind();
-    term_div_phi_U_upwind();
-    term_laplacian_U_upwind();
-    term_grad_p_upwind();
+    let _e11 = term_ddt_U_upwind(1f, 1f, 1f, 1f, 0u, vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
+    let _e40 = term_div_phi_U_upwind(0f, vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
+    let _e44 = term_laplacian_U_upwind(1f, 1f, 1f);
+    let _e50 = term_grad_p_upwind(1f, vec2<f32>(0f, 0f), 0.5f);
     return;
 }
 
-fn term_laplacian_p_upwind() {
-    return;
+fn term_laplacian_p_upwind(mu_1: f32, area_2: f32, dist_1: f32) -> vec2<f32> {
+    let coeff_1 = ((mu_1 * area_2) / dist_1);
+    return vec2<f32>(coeff_1, -(coeff_1));
 }
 
 fn assemble_p() {
-    term_laplacian_p_upwind();
+    let _e3 = term_laplacian_p_upwind(1f, 1f, 1f);
     return;
 }
 
@@ -6125,6 +6229,10 @@ fn main() {
     assemble_U();
     assemble_p();
     return;
+}
+
+fn codegen_diff_coeff(mu_2: f32, area_3: f32, dist_2: f32) -> f32 {
+    return ((mu_2 * area_3) / dist_2);
 }
 
 "#;

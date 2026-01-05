@@ -106,7 +106,9 @@ pub fn emit_prepare_coupled_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io:
 pub fn emit_pressure_assembly_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let wgsl = generate_pressure_assembly_wgsl(&model.state_layout);
+    let schemes = SchemeRegistry::new(Scheme::Upwind);
+    let discrete = lower_system(&model.system, &schemes);
+    let wgsl = generate_pressure_assembly_wgsl(&discrete, &model.state_layout);
 
     let output_path = generated_dir_for(base_dir).join("pressure_assembly.wgsl");
     if let Ok(existing) = fs::read_to_string(&output_path) {

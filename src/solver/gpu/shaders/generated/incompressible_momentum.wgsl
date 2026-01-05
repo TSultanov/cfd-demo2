@@ -6,68 +6,99 @@
 
 // term: ddt target=U field=U discretization=implicit scheme=upwind
 
-fn term_ddt_U_upwind() {
-    // TODO: codegen term implementation
-    let scheme_id: u32 = 0u;
-    let discretization_id: u32 = 0u;
-    _ = scheme_id;
-    _ = discretization_id;
+fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32, phi_n: vec2<f32>, phi_nm1: vec2<f32>) -> vec3<f32> {
+    // implicit time derivative (BDF1/BDF2)
+    let base_coeff = rho * vol / dt;
+    var diag: f32 = base_coeff;
+    var rhs_x: f32 = base_coeff * phi_n.x;
+    var rhs_y: f32 = base_coeff * phi_n.y;
+    if (time_scheme == 1u) {
+        let r = dt / dt_old;
+        diag = rho * vol / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        let factor_n = 1.0 + r;
+        let factor_nm1 = r * r / (1.0 + r);
+        rhs_x = rho * vol / dt * (factor_n * phi_n.x - factor_nm1 * phi_nm1.x);
+        rhs_y = rho * vol / dt * (factor_n * phi_n.y - factor_nm1 * phi_nm1.y);
+    }
+    return vec3<f32>(diag, rhs_x, rhs_y);
 }
 
 // term: div target=U field=U discretization=implicit scheme=upwind flux=phi
 
-fn term_div_phi_U_upwind() {
-    // TODO: codegen term implementation
-    let scheme_id: u32 = 0u;
-    let discretization_id: u32 = 0u;
-    _ = scheme_id;
-    _ = discretization_id;
+fn term_div_phi_U_upwind(flux: f32, phi_own: vec2<f32>, phi_neigh: vec2<f32>, grad_own_u: vec2<f32>, grad_own_v: vec2<f32>, grad_neigh_u: vec2<f32>, grad_neigh_v: vec2<f32>, r_upwind: vec2<f32>, r_downwind: vec2<f32>, r_cd: vec2<f32>) -> vec4<f32> {
+    // finite-volume convection with optional higher-order correction
+    let conv_coeff = codegen_conv_coeff(flux);
+    let diag_coeff = conv_coeff.x;
+    let off_coeff = conv_coeff.y;
+    var phi_upwind: vec2<f32> = phi_own;
+    var phi_ho: vec2<f32> = phi_own;
+    if (flux <= 0.0) {
+        phi_upwind = phi_neigh;
+        phi_ho = phi_neigh;
+    }
+    let rhs_corr_x = flux * (phi_ho.x - phi_upwind.x);
+    let rhs_corr_y = flux * (phi_ho.y - phi_upwind.y);
+    return vec4<f32>(diag_coeff, off_coeff, rhs_corr_x, rhs_corr_y);
 }
 
 // term: laplacian target=U field=U discretization=implicit scheme=upwind coeff=field(nu)
 
-fn term_laplacian_U_upwind() {
-    // TODO: codegen term implementation
-    let scheme_id: u32 = 0u;
-    let discretization_id: u32 = 0u;
-    _ = scheme_id;
-    _ = discretization_id;
+fn term_laplacian_U_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
+    // diffusion coefficient from mu * area / dist
+    let coeff = mu * area / dist;
+    return vec2<f32>(coeff, -coeff);
 }
 
 // term: grad target=U field=p discretization=explicit scheme=upwind
 
-fn term_grad_p_upwind() {
-    // TODO: codegen term implementation
-    let scheme_id: u32 = 0u;
-    let discretization_id: u32 = 1u;
-    _ = scheme_id;
-    _ = discretization_id;
+fn term_grad_p_upwind(area: f32, normal: vec2<f32>, lambda: f32) -> vec4<f32> {
+    // pressure gradient coupling weights
+    let force_x = area * normal.x;
+    let force_y = area * normal.y;
+    let off_u = (1.0 - lambda) * force_x;
+    let off_v = (1.0 - lambda) * force_y;
+    let diag_u = lambda * force_x;
+    let diag_v = lambda * force_y;
+    return vec4<f32>(off_u, off_v, diag_u, diag_v);
 }
 
 fn assemble_U() {
-    term_ddt_U_upwind();
-    term_div_phi_U_upwind();
-    term_laplacian_U_upwind();
-    term_grad_p_upwind();
+    term_ddt_U_upwind(1.0, 1.0, 1.0, 1.0, 0u, vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0));
+    term_div_phi_U_upwind(0.0, vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 0.0));
+    term_laplacian_U_upwind(1.0, 1.0, 1.0);
+    term_grad_p_upwind(1.0, vec2<f32>(0.0, 0.0), 0.5);
 }
 
 // equation: p (scalar)
 
 // term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=field(d_p)
 
-fn term_laplacian_p_upwind() {
-    // TODO: codegen term implementation
-    let scheme_id: u32 = 0u;
-    let discretization_id: u32 = 0u;
-    _ = scheme_id;
-    _ = discretization_id;
+fn term_laplacian_p_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
+    // diffusion coefficient from mu * area / dist
+    let coeff = mu * area / dist;
+    return vec2<f32>(coeff, -coeff);
 }
 
 fn assemble_p() {
-    term_laplacian_p_upwind();
+    term_laplacian_p_upwind(1.0, 1.0, 1.0);
 }
 
 fn main() {
     assemble_U();
     assemble_p();
+}
+
+fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
+    var conv_coeff_diag: f32 = 0.0;
+    var conv_coeff_off: f32 = 0.0;
+    if (flux > 0.0) {
+        conv_coeff_diag = flux;
+    } else {
+        conv_coeff_off = flux;
+    }
+    return vec2<f32>(conv_coeff_diag, conv_coeff_off);
+}
+
+fn codegen_diff_coeff(mu: f32, area: f32, dist: f32) -> f32 {
+    return mu * area / dist;
 }

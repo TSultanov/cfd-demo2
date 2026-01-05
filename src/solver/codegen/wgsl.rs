@@ -1,7 +1,7 @@
 use super::super::scheme::Scheme;
 
-use super::ast::{Coefficient, Discretization};
-use super::ir::{DiscreteOp, DiscreteSystem};
+use super::ast::{Coefficient, Discretization, FieldKind};
+use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::wgsl_ast::{Block, Function, Item, Module, Param, Stmt, Type};
 use super::wgsl_dsl as dsl;
 
@@ -28,7 +28,7 @@ pub fn generate_wgsl_library_items(system: &DiscreteSystem) -> Vec<Item> {
         )));
         for op in &equation.ops {
             items.push(Item::Comment(term_comment(op)));
-            items.push(Item::Function(term_stub(op)));
+            items.push(Item::Function(term_function(op)));
         }
         items.push(Item::Function(codegen_assemble_fn(equation)));
     }
@@ -56,12 +56,20 @@ fn generate_wgsl_module(system: &DiscreteSystem) -> Module {
         )));
         for op in &equation.ops {
             module.push(Item::Comment(term_comment(op)));
-            module.push(Item::Function(term_stub(op)));
+            module.push(Item::Function(term_function(op)));
         }
         module.push(Item::Function(equation_assemble_fn(equation)));
     }
 
     module.push(Item::Function(main_fn(system)));
+
+    if has_convection(system) {
+        module.push(Item::Function(codegen_conv_coeff_fn()));
+    }
+    if has_diffusion(system) {
+        module.push(Item::Function(codegen_diff_coeff_fn()));
+    }
+
     module
 }
 
@@ -88,26 +96,343 @@ fn term_comment(op: &DiscreteOp) -> String {
     line
 }
 
-fn term_stub(op: &DiscreteOp) -> Function {
+fn term_function(op: &DiscreteOp) -> Function {
+    match op.kind {
+        DiscreteOpKind::TimeDerivative => term_ddt_fn(op),
+        DiscreteOpKind::Convection => term_div_fn(op),
+        DiscreteOpKind::Diffusion => term_laplacian_fn(op),
+        DiscreteOpKind::Gradient => term_grad_fn(op),
+        DiscreteOpKind::Source => term_source_fn(op),
+    }
+}
+
+fn term_ddt_fn(op: &DiscreteOp) -> Function {
     let name = term_function_name(op);
-    let scheme_id_value = format!("{}u", scheme_id(op.scheme));
-    let discretization_value = format!("{}u", discretization_id(op.discretization));
+    let params = match op.target.kind() {
+        FieldKind::Vector2 => vec![
+            Param::new("vol", Type::F32, Vec::new()),
+            Param::new("rho", Type::F32, Vec::new()),
+            Param::new("dt", Type::F32, Vec::new()),
+            Param::new("dt_old", Type::F32, Vec::new()),
+            Param::new("time_scheme", Type::U32, Vec::new()),
+            Param::new("phi_n", Type::vec2_f32(), Vec::new()),
+            Param::new("phi_nm1", Type::vec2_f32(), Vec::new()),
+        ],
+        FieldKind::Scalar => vec![
+            Param::new("vol", Type::F32, Vec::new()),
+            Param::new("rho", Type::F32, Vec::new()),
+            Param::new("dt", Type::F32, Vec::new()),
+            Param::new("dt_old", Type::F32, Vec::new()),
+            Param::new("time_scheme", Type::U32, Vec::new()),
+            Param::new("phi_n", Type::F32, Vec::new()),
+            Param::new("phi_nm1", Type::F32, Vec::new()),
+        ],
+    };
+
+    let mut body = Vec::new();
+    body.push(Stmt::Comment(
+        "implicit time derivative (BDF1/BDF2)".to_string(),
+    ));
+    body.push(dsl::let_("base_coeff", "rho * vol / dt"));
+    body.push(dsl::var_typed("diag", Type::F32, Some("base_coeff")));
+
+    match op.target.kind() {
+        FieldKind::Vector2 => {
+            body.push(dsl::var_typed("rhs_x", Type::F32, Some("base_coeff * phi_n.x")));
+            body.push(dsl::var_typed("rhs_y", Type::F32, Some("base_coeff * phi_n.y")));
+            body.push(dsl::if_block(
+                "time_scheme == 1u",
+                dsl::block(vec![
+                    dsl::let_("r", "dt / dt_old"),
+                    dsl::assign(
+                        "diag",
+                        "rho * vol / dt * (1.0 + 2.0 * r) / (1.0 + r)",
+                    ),
+                    dsl::let_("factor_n", "1.0 + r"),
+                    dsl::let_("factor_nm1", "(r * r) / (1.0 + r)"),
+                    dsl::assign(
+                        "rhs_x",
+                        "rho * vol / dt * (factor_n * phi_n.x - factor_nm1 * phi_nm1.x)",
+                    ),
+                    dsl::assign(
+                        "rhs_y",
+                        "rho * vol / dt * (factor_n * phi_n.y - factor_nm1 * phi_nm1.y)",
+                    ),
+                ]),
+                None,
+            ));
+            body.push(Stmt::Return(Some(dsl::expr(
+                "vec3<f32>(diag, rhs_x, rhs_y)",
+            ))));
+            Function::new(name, params, Some(Type::Vec3(Box::new(Type::F32))), Vec::new(), Block::new(body))
+        }
+        FieldKind::Scalar => {
+            body.push(dsl::var_typed("rhs", Type::F32, Some("base_coeff * phi_n")));
+            body.push(dsl::if_block(
+                "time_scheme == 1u",
+                dsl::block(vec![
+                    dsl::let_("r", "dt / dt_old"),
+                    dsl::assign(
+                        "diag",
+                        "rho * vol / dt * (1.0 + 2.0 * r) / (1.0 + r)",
+                    ),
+                    dsl::let_("factor_n", "1.0 + r"),
+                    dsl::let_("factor_nm1", "(r * r) / (1.0 + r)"),
+                    dsl::assign(
+                        "rhs",
+                        "rho * vol / dt * (factor_n * phi_n - factor_nm1 * phi_nm1)",
+                    ),
+                ]),
+                None,
+            ));
+            body.push(Stmt::Return(Some(dsl::expr("vec2<f32>(diag, rhs)"))));
+            Function::new(name, params, Some(Type::Vec2(Box::new(Type::F32))), Vec::new(), Block::new(body))
+        }
+    }
+}
+
+fn term_div_fn(op: &DiscreteOp) -> Function {
+    let name = term_function_name(op);
+    let mut body = Vec::new();
+    body.push(Stmt::Comment(
+        "finite-volume convection with optional higher-order correction".to_string(),
+    ));
+    body.push(dsl::let_("conv_coeff", "codegen_conv_coeff(flux)"));
+    body.push(dsl::let_("diag_coeff", "conv_coeff.x"));
+    body.push(dsl::let_("off_coeff", "conv_coeff.y"));
+
+    match op.target.kind() {
+        FieldKind::Vector2 => {
+            let params = vec![
+                Param::new("flux", Type::F32, Vec::new()),
+                Param::new("phi_own", Type::vec2_f32(), Vec::new()),
+                Param::new("phi_neigh", Type::vec2_f32(), Vec::new()),
+                Param::new("grad_own_u", Type::vec2_f32(), Vec::new()),
+                Param::new("grad_own_v", Type::vec2_f32(), Vec::new()),
+                Param::new("grad_neigh_u", Type::vec2_f32(), Vec::new()),
+                Param::new("grad_neigh_v", Type::vec2_f32(), Vec::new()),
+                Param::new("r_upwind", Type::vec2_f32(), Vec::new()),
+                Param::new("r_downwind", Type::vec2_f32(), Vec::new()),
+                Param::new("r_cd", Type::vec2_f32(), Vec::new()),
+            ];
+
+            body.push(dsl::var_typed("phi_upwind", Type::vec2_f32(), Some("phi_own")));
+            body.push(dsl::var_typed("phi_ho", Type::vec2_f32(), Some("phi_own")));
+            body.push(dsl::if_block(
+                "flux <= 0.0",
+                dsl::block(vec![
+                    dsl::assign("phi_upwind", "phi_neigh"),
+                    dsl::assign("phi_ho", "phi_neigh"),
+                ]),
+                None,
+            ));
+
+            match op.scheme {
+                Scheme::SecondOrderUpwind => {
+                    body.push(dsl::if_block(
+                        "flux > 0.0",
+                        dsl::block(vec![
+                            dsl::assign(
+                                "phi_ho.x",
+                                "phi_own.x + (grad_own_u.x * r_upwind.x + grad_own_u.y * r_upwind.y)",
+                            ),
+                            dsl::assign(
+                                "phi_ho.y",
+                                "phi_own.y + (grad_own_v.x * r_upwind.x + grad_own_v.y * r_upwind.y)",
+                            ),
+                        ]),
+                        Some(dsl::block(vec![
+                            dsl::assign(
+                                "phi_ho.x",
+                                "phi_neigh.x + (grad_neigh_u.x * r_downwind.x + grad_neigh_u.y * r_downwind.y)",
+                            ),
+                            dsl::assign(
+                                "phi_ho.y",
+                                "phi_neigh.y + (grad_neigh_v.x * r_downwind.x + grad_neigh_v.y * r_downwind.y)",
+                            ),
+                        ])),
+                    ));
+                }
+                Scheme::QUICK => {
+                    body.push(dsl::if_block(
+                        "flux > 0.0",
+                        dsl::block(vec![
+                            dsl::assign(
+                                "phi_ho.x",
+                                "0.625 * phi_own.x + 0.375 * phi_neigh.x + 0.125 * (grad_own_u.x * r_cd.x + grad_own_u.y * r_cd.y)",
+                            ),
+                            dsl::assign(
+                                "phi_ho.y",
+                                "0.625 * phi_own.y + 0.375 * phi_neigh.y + 0.125 * (grad_own_v.x * r_cd.x + grad_own_v.y * r_cd.y)",
+                            ),
+                        ]),
+                        Some(dsl::block(vec![
+                            dsl::assign(
+                                "phi_ho.x",
+                                "0.625 * phi_neigh.x + 0.375 * phi_own.x + 0.125 * (grad_neigh_u.x * r_cd.x + grad_neigh_u.y * r_cd.y)",
+                            ),
+                            dsl::assign(
+                                "phi_ho.y",
+                                "0.625 * phi_neigh.y + 0.375 * phi_own.y + 0.125 * (grad_neigh_v.x * r_cd.x + grad_neigh_v.y * r_cd.y)",
+                            ),
+                        ])),
+                    ));
+                }
+                Scheme::Upwind => {}
+            }
+
+            body.push(dsl::let_("rhs_corr_x", "flux * (phi_ho.x - phi_upwind.x)"));
+            body.push(dsl::let_("rhs_corr_y", "flux * (phi_ho.y - phi_upwind.y)"));
+            body.push(Stmt::Return(Some(dsl::expr(
+                "vec4<f32>(diag_coeff, off_coeff, rhs_corr_x, rhs_corr_y)",
+            ))));
+            Function::new(
+                name,
+                params,
+                Some(Type::Vec4(Box::new(Type::F32))),
+                Vec::new(),
+                Block::new(body),
+            )
+        }
+        FieldKind::Scalar => {
+            let params = vec![
+                Param::new("flux", Type::F32, Vec::new()),
+                Param::new("phi_own", Type::F32, Vec::new()),
+                Param::new("phi_neigh", Type::F32, Vec::new()),
+                Param::new("grad_own", Type::vec2_f32(), Vec::new()),
+                Param::new("grad_neigh", Type::vec2_f32(), Vec::new()),
+                Param::new("r_upwind", Type::vec2_f32(), Vec::new()),
+                Param::new("r_downwind", Type::vec2_f32(), Vec::new()),
+                Param::new("r_cd", Type::vec2_f32(), Vec::new()),
+            ];
+
+            body.push(dsl::var_typed("phi_upwind", Type::F32, Some("phi_own")));
+            body.push(dsl::var_typed("phi_ho", Type::F32, Some("phi_own")));
+            body.push(dsl::if_block(
+                "flux <= 0.0",
+                dsl::block(vec![
+                    dsl::assign("phi_upwind", "phi_neigh"),
+                    dsl::assign("phi_ho", "phi_neigh"),
+                ]),
+                None,
+            ));
+
+            match op.scheme {
+                Scheme::SecondOrderUpwind => {
+                    body.push(dsl::if_block(
+                        "flux > 0.0",
+                        dsl::block(vec![dsl::assign(
+                            "phi_ho",
+                            "phi_own + (grad_own.x * r_upwind.x + grad_own.y * r_upwind.y)",
+                        )]),
+                        Some(dsl::block(vec![dsl::assign(
+                            "phi_ho",
+                            "phi_neigh + (grad_neigh.x * r_downwind.x + grad_neigh.y * r_downwind.y)",
+                        )])),
+                    ));
+                }
+                Scheme::QUICK => {
+                    body.push(dsl::if_block(
+                        "flux > 0.0",
+                        dsl::block(vec![dsl::assign(
+                            "phi_ho",
+                            "0.625 * phi_own + 0.375 * phi_neigh + 0.125 * (grad_own.x * r_cd.x + grad_own.y * r_cd.y)",
+                        )]),
+                        Some(dsl::block(vec![dsl::assign(
+                            "phi_ho",
+                            "0.625 * phi_neigh + 0.375 * phi_own + 0.125 * (grad_neigh.x * r_cd.x + grad_neigh.y * r_cd.y)",
+                        )])),
+                    ));
+                }
+                Scheme::Upwind => {}
+            }
+
+            body.push(dsl::let_("rhs_corr", "flux * (phi_ho - phi_upwind)"));
+            body.push(Stmt::Return(Some(dsl::expr(
+                "vec3<f32>(diag_coeff, off_coeff, rhs_corr)",
+            ))));
+            Function::new(
+                name,
+                params,
+                Some(Type::Vec3(Box::new(Type::F32))),
+                Vec::new(),
+                Block::new(body),
+            )
+        }
+    }
+}
+
+fn term_laplacian_fn(op: &DiscreteOp) -> Function {
+    let name = term_function_name(op);
+    let params = vec![
+        Param::new("mu", Type::F32, Vec::new()),
+        Param::new("area", Type::F32, Vec::new()),
+        Param::new("dist", Type::F32, Vec::new()),
+    ];
     let body = Block::new(vec![
-        Stmt::Comment("TODO: codegen term implementation".to_string()),
-        dsl::let_typed("scheme_id", Type::U32, &scheme_id_value),
-        dsl::let_typed("discretization_id", Type::U32, &discretization_value),
-        dsl::assign("_", "scheme_id"),
-        dsl::assign("_", "discretization_id"),
+        Stmt::Comment("diffusion coefficient from mu * area / dist".to_string()),
+        dsl::let_("coeff", "mu * area / dist"),
+        Stmt::Return(Some(dsl::expr("vec2<f32>(coeff, -coeff)"))),
     ]);
-    Function::new(name, Vec::new(), None, Vec::new(), body)
+    Function::new(name, params, Some(Type::Vec2(Box::new(Type::F32))), Vec::new(), body)
+}
+
+fn term_grad_fn(op: &DiscreteOp) -> Function {
+    let name = term_function_name(op);
+    let params = vec![
+        Param::new("area", Type::F32, Vec::new()),
+        Param::new("normal", Type::vec2_f32(), Vec::new()),
+        Param::new("lambda", Type::F32, Vec::new()),
+    ];
+    let body = match op.target.kind() {
+        FieldKind::Vector2 => Block::new(vec![
+            Stmt::Comment("pressure gradient coupling weights".to_string()),
+            dsl::let_("force_x", "area * normal.x"),
+            dsl::let_("force_y", "area * normal.y"),
+            dsl::let_("off_u", "(1.0 - lambda) * force_x"),
+            dsl::let_("off_v", "(1.0 - lambda) * force_y"),
+            dsl::let_("diag_u", "lambda * force_x"),
+            dsl::let_("diag_v", "lambda * force_y"),
+            Stmt::Return(Some(dsl::expr(
+                "vec4<f32>(off_u, off_v, diag_u, diag_v)",
+            ))),
+        ]),
+        FieldKind::Scalar => Block::new(vec![
+            Stmt::Comment("gradient term not used for scalar targets".to_string()),
+            Stmt::Return(Some(dsl::expr("vec2<f32>(0.0, 0.0)"))),
+        ]),
+    };
+    let return_type = match op.target.kind() {
+        FieldKind::Vector2 => Type::Vec4(Box::new(Type::F32)),
+        FieldKind::Scalar => Type::Vec2(Box::new(Type::F32)),
+    };
+    Function::new(name, params, Some(return_type), Vec::new(), body)
+}
+
+fn term_source_fn(op: &DiscreteOp) -> Function {
+    let name = term_function_name(op);
+    let body = match op.target.kind() {
+        FieldKind::Vector2 => Block::new(vec![
+            Stmt::Comment("source term placeholder".to_string()),
+            Stmt::Return(Some(dsl::expr("vec2<f32>(0.0, 0.0)"))),
+        ]),
+        FieldKind::Scalar => Block::new(vec![
+            Stmt::Comment("source term placeholder".to_string()),
+            Stmt::Return(Some(dsl::expr("0.0"))),
+        ]),
+    };
+    let return_type = match op.target.kind() {
+        FieldKind::Vector2 => Type::Vec2(Box::new(Type::F32)),
+        FieldKind::Scalar => Type::F32,
+    };
+    Function::new(name, Vec::new(), Some(return_type), Vec::new(), body)
 }
 
 fn equation_assemble_fn(equation: &super::ir::DiscreteEquation) -> Function {
     let name = equation_function_name(&equation.target);
     let mut stmts = Vec::new();
     for op in &equation.ops {
-        let term_name = term_function_name(op);
-        stmts.push(dsl::call_stmt(&format!("{}()", term_name)));
+        stmts.push(dsl::call_stmt(&term_call_expr(op)));
     }
     Function::new(name, Vec::new(), None, Vec::new(), Block::new(stmts))
 }
@@ -116,10 +441,59 @@ fn codegen_assemble_fn(equation: &super::ir::DiscreteEquation) -> Function {
     let name = codegen_assemble_function_name(&equation.target);
     let mut stmts = Vec::new();
     for op in &equation.ops {
-        let term_name = term_function_name(op);
-        stmts.push(dsl::call_stmt(&format!("{}()", term_name)));
+        stmts.push(dsl::call_stmt(&term_call_expr(op)));
     }
     Function::new(name, Vec::new(), None, Vec::new(), Block::new(stmts))
+}
+
+fn term_call_expr(op: &DiscreteOp) -> String {
+    let name = term_function_name(op);
+    let args: Vec<&'static str> = match op.kind {
+        DiscreteOpKind::TimeDerivative => match op.target.kind() {
+            FieldKind::Vector2 => vec![
+                "1.0",
+                "1.0",
+                "1.0",
+                "1.0",
+                "0u",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+            ],
+            FieldKind::Scalar => vec!["1.0", "1.0", "1.0", "1.0", "0u", "0.0", "0.0"],
+        },
+        DiscreteOpKind::Convection => match op.target.kind() {
+            FieldKind::Vector2 => vec![
+                "0.0",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+            ],
+            FieldKind::Scalar => vec![
+                "0.0",
+                "0.0",
+                "0.0",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+                "vec2<f32>(0.0, 0.0)",
+            ],
+        },
+        DiscreteOpKind::Diffusion => vec!["1.0", "1.0", "1.0"],
+        DiscreteOpKind::Gradient => vec!["1.0", "vec2<f32>(0.0, 0.0)", "0.5"],
+        DiscreteOpKind::Source => Vec::new(),
+    };
+    if args.is_empty() {
+        format!("{}()", name)
+    } else {
+        format!("{}({})", name, args.join(", "))
+    }
 }
 
 fn main_fn(system: &DiscreteSystem) -> Function {
@@ -185,6 +559,7 @@ fn scheme_name(scheme: Scheme) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn scheme_id(scheme: Scheme) -> u32 {
     match scheme {
         Scheme::Upwind => 0,
@@ -193,6 +568,7 @@ fn scheme_id(scheme: Scheme) -> u32 {
     }
 }
 
+#[allow(dead_code)]
 fn discretization_id(discretization: Discretization) -> u32 {
     match discretization {
         Discretization::Implicit => 0,
@@ -384,11 +760,14 @@ mod tests {
     }
 
     #[test]
-    fn generate_wgsl_emits_function_stubs() {
+    fn generate_wgsl_emits_term_math() {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
         let eqn = crate::solver::codegen::ast::Equation::new(u.clone())
-            .with_term(fvm::div(phi, u.clone()));
+            .with_term(fvm::ddt(u.clone()))
+            .with_term(fvm::div(phi, u.clone()))
+            .with_term(fvc::grad(vol_scalar("p")))
+            .with_term(fvm::laplacian(Coefficient::constant(0.1), u.clone()));
 
         let mut system = crate::solver::codegen::ast::EquationSystem::new();
         system.add_equation(eqn);
@@ -397,10 +776,11 @@ mod tests {
         let discrete = lower_system(&system, &registry);
         let wgsl = generate_wgsl(&discrete);
 
-        assert!(wgsl.contains("fn term_div_phi_U_upwind()"));
-        assert!(wgsl.contains("TODO: codegen term implementation"));
-        assert!(wgsl.contains("scheme_id: u32 = 0u"));
-        assert!(wgsl.contains("discretization_id: u32 = 0u"));
+        assert!(wgsl.contains("fn term_ddt_U_upwind"));
+        assert!(wgsl.contains("time_scheme == 1u"));
+        assert!(wgsl.contains("codegen_conv_coeff(flux)"));
+        assert!(wgsl.contains("mu * area / dist"));
+        assert!(!wgsl.contains("TODO"));
         assert!(wgsl.contains("fn assemble_U()"));
         assert!(wgsl.contains("assemble_U();"));
     }

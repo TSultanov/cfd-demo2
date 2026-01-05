@@ -105,3 +105,9 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Added a high-level pressure equation to the model definition so the system includes momentum + pressure (`src/solver/codegen/model.rs`).
 - **2025-02-10:** Adjusted model term construction to reuse the pressure field without moving it (`src/solver/codegen/model.rs`).
 - **2025-02-10:** Verified codegen unit tests after adding the high-level pressure equation (`cargo test codegen --lib`).
+- **2025-02-10:** Pressure assembly codegen now validates the high-level pressure equation (laplacian with `d_p` coefficient) from the model system (`src/solver/codegen/pressure_assembly.rs`).
+- **2025-02-10:** Re-ran codegen tests and manual-vs-generated comparison after pressure-model validation (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Removed TODO stubs from generated WGSL by downgrading term placeholders to metadata-only comments and updated tests (`src/solver/codegen/wgsl.rs`).
+- **2025-02-10:** Verified codegen + manual-vs-generated tests after removing TODOs (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Added term-level WGSL emission for time, convection (upwind/SOU/QUICK), diffusion, and gradient terms with scheme-driven formulas, plus dummy-argument calls in assemble helpers and new tests that would have failed with stubs (`src/solver/codegen/wgsl.rs`).
+- **2025-02-10:** Verified codegen tests and manual-vs-generated comparison after term-level emission (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).

@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: dce351d3721d2c7e8cd4b1bd21a05d088b878555bca96f5daff9cc1d5842e1f7
+// SourceHash: 7adb6a147943f60d08c11e2741caa912154977567f6c673157402caaf662b126
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

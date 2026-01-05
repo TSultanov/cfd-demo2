@@ -123,3 +123,6 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Updated UI solver initialization to explicitly use the generated shader variant (`src/ui/app.rs`).
 - **2025-02-10:** Removed manual WGSL kernels and simplified GPU init to generated-only pipelines/bindings; updated the solver smoke test to validate generated kernels only (`src/solver/gpu/init/*`, `src/solver/gpu/shaders/*`, `tests/gpu_codegen_matches_manual_test.rs`).
 - **2025-02-10:** Verified codegen unit tests and the generated-kernel smoke test after removing manual WGSL (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Refactored the incompressible momentum model/system definitions to share a single field set and avoid duplicate `vol_scalar`/`vol_vector` declarations (`src/solver/model/definitions.rs`).
+- **2025-02-10:** Made `FieldRef`/`FluxRef` copyable by storing static names and removed the remaining explicit clones in the incompressible momentum model builder (`src/solver/model/ast.rs`, `src/solver/model/definitions.rs`).
+- **2025-02-10:** Verified codegen unit tests after `FieldRef`/`FluxRef` changes (`cargo test codegen --lib`).

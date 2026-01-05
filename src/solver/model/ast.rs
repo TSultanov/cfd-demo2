@@ -16,18 +16,15 @@ impl FieldKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FieldRef {
-    name: String,
+    name: &'static str,
     kind: FieldKind,
 }
 
 impl FieldRef {
-    pub fn new(name: impl Into<String>, kind: FieldKind) -> Self {
-        Self {
-            name: name.into(),
-            kind,
-        }
+    pub fn new(name: &'static str, kind: FieldKind) -> Self {
+        Self { name, kind }
     }
 
     pub fn name(&self) -> &str {
@@ -43,14 +40,14 @@ impl FieldRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FluxRef {
-    name: String,
+    name: &'static str,
 }
 
 impl FluxRef {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub fn new(name: &'static str) -> Self {
+        Self { name }
     }
 
     pub fn name(&self) -> &str {
@@ -74,8 +71,8 @@ impl Coefficient {
             Ok(Self::Field(field))
         } else {
             Err(CodegenError::NonScalarCoefficient {
-                field: field.name,
-                kind: field.kind,
+                field: field.name().to_string(),
+                kind: field.kind(),
             })
         }
     }
@@ -269,15 +266,15 @@ impl fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
-pub fn vol_scalar(name: impl Into<String>) -> FieldRef {
+pub fn vol_scalar(name: &'static str) -> FieldRef {
     FieldRef::new(name, FieldKind::Scalar)
 }
 
-pub fn vol_vector(name: impl Into<String>) -> FieldRef {
+pub fn vol_vector(name: &'static str) -> FieldRef {
     FieldRef::new(name, FieldKind::Vector2)
 }
 
-pub fn surface_scalar(name: impl Into<String>) -> FluxRef {
+pub fn surface_scalar(name: &'static str) -> FluxRef {
     FluxRef::new(name)
 }
 

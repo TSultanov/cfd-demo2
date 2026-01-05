@@ -1,5 +1,6 @@
 use super::ast::{
-    fvc, fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem,
+    fvc, fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef,
+    FluxRef,
 };
 use super::state_layout::StateLayout;
 
@@ -9,24 +10,46 @@ pub struct ModelSpec {
     pub state_layout: StateLayout,
 }
 
-pub fn incompressible_momentum_system() -> EquationSystem {
-    let u = vol_vector("U");
-    let p = vol_scalar("p");
-    let phi = surface_scalar("phi");
-    let nu = vol_scalar("nu");
-    let d_p = vol_scalar("d_p");
+#[derive(Debug, Clone)]
+struct IncompressibleMomentumFields {
+    u: FieldRef,
+    p: FieldRef,
+    phi: FluxRef,
+    nu: FieldRef,
+    d_p: FieldRef,
+    grad_p: FieldRef,
+    grad_component: FieldRef,
+}
 
-    let momentum = (fvm::ddt(u.clone())
-        + fvm::div(phi, u.clone())
-        + fvm::laplacian(Coefficient::field(nu).expect("nu must be scalar"), u.clone())
-        + fvc::grad(p.clone()))
-    .eqn(u);
+impl IncompressibleMomentumFields {
+    fn new() -> Self {
+        Self {
+            u: vol_vector("U"),
+            p: vol_scalar("p"),
+            phi: surface_scalar("phi"),
+            nu: vol_scalar("nu"),
+            d_p: vol_scalar("d_p"),
+            grad_p: vol_vector("grad_p"),
+            grad_component: vol_vector("grad_component"),
+        }
+    }
+}
+
+fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -> EquationSystem {
+    let momentum = (fvm::ddt(fields.u)
+        + fvm::div(fields.phi, fields.u)
+        + fvm::laplacian(
+            Coefficient::field(fields.nu).expect("nu must be scalar"),
+            fields.u,
+        )
+        + fvc::grad(fields.p))
+    .eqn(fields.u);
 
     let pressure = fvm::laplacian(
-        Coefficient::field(d_p).expect("d_p must be scalar"),
-        p.clone(),
+        Coefficient::field(fields.d_p).expect("d_p must be scalar"),
+        fields.p,
     )
-    .eqn(p);
+    .eqn(fields.p);
 
     let mut system = EquationSystem::new();
     system.add_equation(momentum);
@@ -34,14 +57,20 @@ pub fn incompressible_momentum_system() -> EquationSystem {
     system
 }
 
+pub fn incompressible_momentum_system() -> EquationSystem {
+    let fields = IncompressibleMomentumFields::new();
+    build_incompressible_momentum_system(&fields)
+}
+
 pub fn incompressible_momentum_model() -> ModelSpec {
-    let system = incompressible_momentum_system();
+    let fields = IncompressibleMomentumFields::new();
+    let system = build_incompressible_momentum_system(&fields);
     let layout = StateLayout::new(vec![
-        vol_vector("U"),
-        vol_scalar("p"),
-        vol_scalar("d_p"),
-        vol_vector("grad_p"),
-        vol_vector("grad_component"),
+        fields.u,
+        fields.p,
+        fields.d_p,
+        fields.grad_p,
+        fields.grad_component,
     ]);
     ModelSpec {
         system,

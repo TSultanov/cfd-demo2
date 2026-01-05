@@ -1,7 +1,7 @@
-use super::ast::Coefficient;
+use crate::solver::model::ast::Coefficient;
 use super::ir::{DiscreteOpKind, DiscreteSystem};
 use super::state_access::{state_scalar_expr, state_vec2_expr};
-use super::state_layout::StateLayout;
+use crate::solver::model::StateLayout;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
@@ -480,9 +480,9 @@ fn main_body(layout: &StateLayout) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::model::incompressible_momentum_model;
+    use crate::solver::model::incompressible_momentum_model;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::codegen::scheme::SchemeRegistry;
+    use crate::solver::model::SchemeRegistry;
     use crate::solver::scheme::Scheme;
 
     #[test]

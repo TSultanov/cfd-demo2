@@ -52,7 +52,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::TermOp;
+    use crate::solver::model::ast::TermOp;
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {

@@ -1,7 +1,7 @@
 use super::ir::{DiscreteOpKind, DiscreteSystem};
-use super::state_layout::StateLayout;
+use crate::solver::model::StateLayout;
 use super::state_access::{state_scalar_expr, state_vec2_expr};
-use super::super::scheme::Scheme;
+use crate::solver::scheme::Scheme;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
@@ -955,9 +955,9 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::{fvm, surface_scalar, vol_scalar, vol_vector};
+    use crate::solver::model::ast::{fvm, surface_scalar, vol_scalar, vol_vector};
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::codegen::scheme::SchemeRegistry;
+    use crate::solver::model::SchemeRegistry;
     use crate::solver::scheme::Scheme;
 
     fn default_layout() -> StateLayout {
@@ -975,13 +975,13 @@ mod tests {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
         let nu = vol_scalar("nu");
-        let eqn = crate::solver::codegen::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
-                crate::solver::codegen::ast::Coefficient::field(nu).unwrap(),
+                crate::solver::model::ast::Coefficient::field(nu).unwrap(),
                 u.clone(),
             ));
-        let mut system = crate::solver::codegen::ast::EquationSystem::new();
+        let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -998,14 +998,14 @@ mod tests {
     fn coupled_assembly_codegen_embeds_scheme_id_from_registry() {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
-        let eqn = crate::solver::codegen::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
-        let mut system = crate::solver::codegen::ast::EquationSystem::new();
+        let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(
-            crate::solver::codegen::ast::TermOp::Div,
+            crate::solver::model::ast::TermOp::Div,
             Some(&phi),
             &u,
             Scheme::QUICK,
@@ -1020,9 +1020,9 @@ mod tests {
     #[test]
     fn coupled_assembly_codegen_zeros_diffusion_when_missing() {
         let u = vol_vector("U");
-        let eqn = crate::solver::codegen::ast::Equation::new(u.clone())
+        let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
-        let mut system = crate::solver::codegen::ast::EquationSystem::new();
+        let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);

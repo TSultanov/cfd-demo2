@@ -1,5 +1,5 @@
 use super::state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
-use super::state_layout::StateLayout;
+use crate::solver::model::StateLayout;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
@@ -720,7 +720,7 @@ fn main_body(layout: &StateLayout) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::{vol_scalar, vol_vector};
+    use crate::solver::model::ast::{vol_scalar, vol_vector};
 
     #[test]
     fn prepare_coupled_codegen_emits_state_arrays() {

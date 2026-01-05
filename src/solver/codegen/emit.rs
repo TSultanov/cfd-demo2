@@ -1,17 +1,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::ir::DiscreteSystem;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
 use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
+use super::ir::{lower_system, DiscreteSystem};
 use super::prepare_coupled::generate_prepare_coupled_wgsl;
 use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
-use super::ir::lower_system;
-use super::model::{incompressible_momentum_model, incompressible_momentum_system};
-use super::scheme::SchemeRegistry;
-use super::super::scheme::Scheme;
+use crate::solver::model::{incompressible_momentum_model, incompressible_momentum_system};
+use crate::solver::model::SchemeRegistry;
+use crate::solver::scheme::Scheme;
 
 pub fn write_wgsl_file(
     system: &DiscreteSystem,
@@ -180,10 +179,10 @@ pub fn emit_incompressible_momentum_wgsl_with_schemes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::{fvm, surface_scalar, vol_vector, Equation, EquationSystem};
-    use crate::solver::codegen::TermOp;
+    use crate::solver::model::ast::{fvm, surface_scalar, vol_vector, Equation, EquationSystem};
+    use crate::solver::model::TermOp;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::codegen::scheme::SchemeRegistry;
+    use crate::solver::model::SchemeRegistry;
     use crate::solver::scheme::Scheme;
     use std::time::{SystemTime, UNIX_EPOCH};
 

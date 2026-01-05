@@ -1,5 +1,5 @@
 use super::state_access::{state_scalar_expr, state_vec2_expr};
-use super::state_layout::StateLayout;
+use crate::solver::model::StateLayout;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
     StructField, Type,
@@ -381,7 +381,7 @@ fn main_body(layout: &StateLayout) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::{vol_scalar, vol_vector};
+    use crate::solver::model::ast::{vol_scalar, vol_vector};
 
     #[test]
     fn flux_rhie_chow_codegen_emits_state_arrays() {

@@ -116,3 +116,8 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified manual-vs-generated solver comparison test after tolerance update (`cargo test --test gpu_codegen_matches_manual_test`).
 - **2025-02-10:** Tightened manual-vs-generated solver comparison tolerances for velocity and pressure diffs (`tests/gpu_codegen_matches_manual_test.rs`).
 - **2025-02-10:** Verified manual-vs-generated solver comparison test after tightening tolerances (`cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Moved high-level model definitions, AST, scheme registry, and state layout into `src/solver/model/` and updated codegen backend imports/build hooks accordingly (`src/solver/model/*`, `src/solver/codegen/*`, `build.rs`).
+- **2025-02-10:** Added build-script `unused_imports` allowances for the new model re-exports used by codegen during build-time codegen (`build.rs`).
+- **2025-02-10:** Verified codegen unit tests after model/backend module split and build-script cleanup (`cargo test codegen --lib`).
+- **2025-02-10:** Verified manual-vs-generated solver comparison after the model/backend refactor (`cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Updated UI solver initialization to explicitly use the generated shader variant (`src/ui/app.rs`).

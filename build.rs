@@ -6,13 +6,46 @@ mod solver {
     pub mod scheme {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/scheme.rs"));
     }
-    pub mod codegen {
+    pub mod model {
         pub mod ast {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/ast.rs"
+                "/src/solver/model/ast.rs"
             ));
         }
+        pub mod scheme {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/scheme.rs"
+            ));
+        }
+        pub mod state_layout {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/state_layout.rs"
+            ));
+        }
+        pub mod definitions {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/definitions.rs"
+            ));
+        }
+        #[allow(unused_imports)]
+        pub use ast::{
+            fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef,
+            FluxRef, Term, TermOp,
+        };
+        #[allow(unused_imports)]
+        pub use definitions::{
+            incompressible_momentum_model, incompressible_momentum_system, ModelSpec,
+        };
+        #[allow(unused_imports)]
+        pub use scheme::{SchemeRegistry, TermKey};
+        #[allow(unused_imports)]
+        pub use state_layout::{StateField, StateLayout};
+    }
+    pub mod codegen {
         pub mod coupled_assembly {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -55,12 +88,6 @@ mod solver {
                 "/src/solver/codegen/state_access.rs"
             ));
         }
-        pub mod state_layout {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/state_layout.rs"
-            ));
-        }
         pub mod wgsl {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -79,18 +106,6 @@ mod solver {
                 "/src/solver/codegen/wgsl_dsl.rs"
             ));
         }
-        pub mod scheme {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/scheme.rs"
-            ));
-        }
-        pub mod model {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/model.rs"
-            ));
-        }
         pub mod emit {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -102,6 +117,12 @@ mod solver {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/solver/scheme.rs");
+    for entry in glob("src/solver/model/*.rs").expect("Failed to read model glob") {
+        match entry {
+            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
+            Err(e) => println!("cargo:warning=Glob error: {:?}", e),
+        }
+    }
     for entry in glob("src/solver/codegen/*.rs").expect("Failed to read codegen glob") {
         match entry {
             Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),

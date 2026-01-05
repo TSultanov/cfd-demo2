@@ -1,7 +1,7 @@
-use super::super::scheme::Scheme;
+use crate::solver::scheme::Scheme;
 
-use super::ast::{Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp};
-use super::scheme::SchemeRegistry;
+use crate::solver::model::ast::{Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp};
+use crate::solver::model::SchemeRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiscreteOpKind {
@@ -83,7 +83,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
+    use crate::solver::model::ast::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
 
     #[test]
     fn lower_system_maps_all_term_kinds() {
@@ -92,7 +92,7 @@ mod tests {
         let phi = surface_scalar("phi");
         let mu = vol_scalar("mu");
 
-        let mut eqn = super::super::ast::Equation::new(u.clone());
+        let mut eqn = crate::solver::model::ast::Equation::new(u.clone());
         eqn.add_term(fvm::ddt(u.clone()));
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
         eqn.add_term(fvc::grad(p.clone()));
@@ -121,7 +121,7 @@ mod tests {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
 
-        let mut eqn = super::super::ast::Equation::new(u.clone());
+        let mut eqn = crate::solver::model::ast::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
 
         let mut system = EquationSystem::new();

@@ -92,7 +92,7 @@ impl Default for SchemeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::ast::{fvm, surface_scalar, vol_scalar};
+    use crate::solver::model::ast::{fvm, surface_scalar, vol_scalar};
 
     #[test]
     fn scheme_registry_uses_default_when_unset() {

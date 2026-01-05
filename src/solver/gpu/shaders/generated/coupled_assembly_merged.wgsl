@@ -182,15 +182,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let mu = constants.viscosity;
         let diff_coeff = mu * area / dist;
         
-        // Convection: Upwind
-        var conv_coeff_diag: f32 = 0.0;
-        var conv_coeff_off: f32 = 0.0;
-        
-        if (flux > 0.0) {
-            conv_coeff_diag = flux;
-        } else {
-            conv_coeff_off = flux;
-        }
+        // Convection: Upwind (codegen)
+        let conv_coeff = codegen_conv_coeff(flux);
+        var conv_coeff_diag: f32 = conv_coeff.x;
+        var conv_coeff_off: f32 = conv_coeff.y;
         
         // Matrix indices
         let scalar_mat_idx = cell_face_matrix_indices[k];
@@ -505,3 +500,13 @@ fn codegen_assemble_U() {
     term_grad_p_upwind();
 }
 
+fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
+    var conv_coeff_diag: f32 = 0.0;
+    var conv_coeff_off: f32 = 0.0;
+    if (flux > 0.0) {
+        conv_coeff_diag = flux;
+    } else {
+        conv_coeff_off = flux;
+    }
+    return vec2<f32>(conv_coeff_diag, conv_coeff_off);
+}

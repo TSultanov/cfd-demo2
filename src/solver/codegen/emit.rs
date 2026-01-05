@@ -8,7 +8,7 @@ use super::prepare_coupled::generate_prepare_coupled_wgsl;
 use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
-use crate::solver::model::{incompressible_momentum_model, incompressible_momentum_system};
+use crate::solver::model::{incompressible_momentum_model, KernelKind, ModelSpec};
 use crate::solver::model::backend::SchemeRegistry;
 use crate::solver::scheme::Scheme;
 
@@ -55,6 +55,104 @@ pub fn write_wgsl_in_dir(
     write_wgsl_file(system, output_path)
 }
 
+fn kernel_output_name(kind: KernelKind) -> &'static str {
+    match kind {
+        KernelKind::PrepareCoupled => "prepare_coupled.wgsl",
+        KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl",
+        KernelKind::PressureAssembly => "pressure_assembly.wgsl",
+        KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl",
+        KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl",
+        KernelKind::IncompressibleMomentum => "incompressible_momentum.wgsl",
+        KernelKind::CompressibleAssembly => "compressible_assembly.wgsl",
+        KernelKind::CompressibleUpdate => "compressible_update.wgsl",
+        KernelKind::CompressibleFluxKt => "compressible_flux_kt.wgsl",
+    }
+}
+
+fn generate_kernel_wgsl(
+    model: &ModelSpec,
+    schemes: &SchemeRegistry,
+    kind: KernelKind,
+) -> Result<String, String> {
+    let discrete = lower_system(&model.system, schemes);
+    let wgsl = match kind {
+        KernelKind::PrepareCoupled => generate_prepare_coupled_wgsl(
+            &discrete,
+            &model.state_layout,
+            &model.fields,
+        ),
+        KernelKind::CoupledAssembly => generate_coupled_assembly_wgsl(
+            &discrete,
+            &model.state_layout,
+            &model.fields,
+        ),
+        KernelKind::PressureAssembly => generate_pressure_assembly_wgsl(
+            &discrete,
+            &model.state_layout,
+            &model.fields,
+        ),
+        KernelKind::UpdateFieldsFromCoupled => {
+            generate_update_fields_from_coupled_wgsl(&model.state_layout, &model.fields)
+        }
+        KernelKind::FluxRhieChow => {
+            generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &model.fields)
+        }
+        KernelKind::IncompressibleMomentum => generate_wgsl(&discrete),
+        KernelKind::CompressibleAssembly
+        | KernelKind::CompressibleUpdate
+        | KernelKind::CompressibleFluxKt => {
+            return Err(format!("kernel {:?} not implemented", kind));
+        }
+    };
+    Ok(wgsl)
+}
+
+pub fn emit_model_kernel_wgsl(
+    base_dir: impl AsRef<Path>,
+    model: &ModelSpec,
+    kind: KernelKind,
+) -> std::io::Result<PathBuf> {
+    let schemes = SchemeRegistry::new(Scheme::Upwind);
+    emit_model_kernel_wgsl_with_schemes(base_dir, model, &schemes, kind)
+}
+
+pub fn emit_model_kernel_wgsl_with_schemes(
+    base_dir: impl AsRef<Path>,
+    model: &ModelSpec,
+    schemes: &SchemeRegistry,
+    kind: KernelKind,
+) -> std::io::Result<PathBuf> {
+    let base_dir = base_dir.as_ref();
+    let wgsl = generate_kernel_wgsl(model, schemes, kind).map_err(|err| {
+        std::io::Error::new(std::io::ErrorKind::Other, err)
+    })?;
+    let output_path = generated_dir_for(base_dir).join(kernel_output_name(kind));
+    if let Ok(existing) = fs::read_to_string(&output_path) {
+        if existing == wgsl {
+            return Ok(output_path);
+        }
+    }
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&output_path, wgsl)?;
+    Ok(output_path)
+}
+
+pub fn emit_model_kernels_wgsl(
+    base_dir: impl AsRef<Path>,
+    model: &ModelSpec,
+    schemes: &SchemeRegistry,
+) -> std::io::Result<Vec<PathBuf>> {
+    let mut outputs = Vec::new();
+    for kind in model.kernel_plan.kernels() {
+        outputs.push(emit_model_kernel_wgsl_with_schemes(
+            &base_dir, model, schemes, *kind,
+        )?);
+    }
+    Ok(outputs)
+}
+
 pub fn emit_coupled_assembly_codegen_wgsl(
     base_dir: impl AsRef<Path>,
 ) -> std::io::Result<PathBuf> {
@@ -66,106 +164,30 @@ pub fn emit_coupled_assembly_codegen_wgsl_with_schemes(
     base_dir: impl AsRef<Path>,
     schemes: &SchemeRegistry,
 ) -> std::io::Result<PathBuf> {
-    let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let discrete = lower_system(&model.system, schemes);
-    let combined =
-        generate_coupled_assembly_wgsl(&discrete, &model.state_layout, &model.fields);
-
-    let output_path = generated_dir_for(base_dir).join("coupled_assembly_merged.wgsl");
-    if let Ok(existing) = fs::read_to_string(&output_path) {
-        if existing == combined {
-            return Ok(output_path);
-        }
-    }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&output_path, combined)?;
-    Ok(output_path)
+    emit_model_kernel_wgsl_with_schemes(base_dir, &model, schemes, KernelKind::CoupledAssembly)
 }
 
 pub fn emit_prepare_coupled_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let schemes = SchemeRegistry::new(Scheme::Upwind);
-    let discrete = lower_system(&model.system, &schemes);
-    let wgsl =
-        generate_prepare_coupled_wgsl(&discrete, &model.state_layout, &model.fields);
-
-    let output_path = generated_dir_for(base_dir).join("prepare_coupled.wgsl");
-    if let Ok(existing) = fs::read_to_string(&output_path) {
-        if existing == wgsl {
-            return Ok(output_path);
-        }
-    }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&output_path, wgsl)?;
-    Ok(output_path)
+    emit_model_kernel_wgsl(base_dir, &model, KernelKind::PrepareCoupled)
 }
 
 pub fn emit_pressure_assembly_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let schemes = SchemeRegistry::new(Scheme::Upwind);
-    let discrete = lower_system(&model.system, &schemes);
-    let wgsl =
-        generate_pressure_assembly_wgsl(&discrete, &model.state_layout, &model.fields);
-
-    let output_path = generated_dir_for(base_dir).join("pressure_assembly.wgsl");
-    if let Ok(existing) = fs::read_to_string(&output_path) {
-        if existing == wgsl {
-            return Ok(output_path);
-        }
-    }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&output_path, wgsl)?;
-    Ok(output_path)
+    emit_model_kernel_wgsl(base_dir, &model, KernelKind::PressureAssembly)
 }
 
 pub fn emit_update_fields_from_coupled_codegen_wgsl(
     base_dir: impl AsRef<Path>,
 ) -> std::io::Result<PathBuf> {
-    let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let wgsl = generate_update_fields_from_coupled_wgsl(&model.state_layout, &model.fields);
-
-    let output_path = generated_dir_for(base_dir).join("update_fields_from_coupled.wgsl");
-    if let Ok(existing) = fs::read_to_string(&output_path) {
-        if existing == wgsl {
-            return Ok(output_path);
-        }
-    }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&output_path, wgsl)?;
-    Ok(output_path)
+    emit_model_kernel_wgsl(base_dir, &model, KernelKind::UpdateFieldsFromCoupled)
 }
 
 pub fn emit_flux_rhie_chow_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    let base_dir = base_dir.as_ref();
     let model = incompressible_momentum_model();
-    let schemes = SchemeRegistry::new(Scheme::Upwind);
-    let discrete = lower_system(&model.system, &schemes);
-    let wgsl =
-        generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &model.fields);
-
-    let output_path = generated_dir_for(base_dir).join("flux_rhie_chow.wgsl");
-    if let Ok(existing) = fs::read_to_string(&output_path) {
-        if existing == wgsl {
-            return Ok(output_path);
-        }
-    }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&output_path, wgsl)?;
-    Ok(output_path)
+    emit_model_kernel_wgsl(base_dir, &model, KernelKind::FluxRhieChow)
 }
 
 pub fn emit_incompressible_momentum_wgsl(
@@ -179,9 +201,13 @@ pub fn emit_incompressible_momentum_wgsl_with_schemes(
     base_dir: impl AsRef<Path>,
     schemes: &SchemeRegistry,
 ) -> std::io::Result<PathBuf> {
-    let system = incompressible_momentum_system();
-    let discrete = lower_system(&system, schemes);
-    write_wgsl_in_dir(&discrete, base_dir, "incompressible_momentum.wgsl")
+    let model = incompressible_momentum_model();
+    emit_model_kernel_wgsl_with_schemes(
+        base_dir,
+        &model,
+        schemes,
+        KernelKind::IncompressibleMomentum,
+    )
 }
 
 #[cfg(test)]
@@ -208,6 +234,21 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("cfd2_codegen_base_{}", nanos))
+    }
+
+    #[test]
+    fn emit_model_kernels_writes_expected_outputs() {
+        let base_dir = temp_base_dir();
+        let model = incompressible_momentum_model();
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let outputs = emit_model_kernels_wgsl(&base_dir, &model, &schemes).unwrap();
+
+        assert_eq!(outputs.len(), model.kernel_plan.kernels().len());
+        for kind in model.kernel_plan.kernels() {
+            let expected = generated_dir_for(&base_dir).join(kernel_output_name(*kind));
+            assert!(expected.exists());
+            assert!(outputs.contains(&expected));
+        }
     }
 
     #[test]

@@ -224,3 +224,11 @@ discretization automatically, with modular swapping of schemes and boundary cond
   products in scalar PDEs (`tests/model_analytical_solutions_test.rs`).
 - **2025-02-10:** Verified broader solver tests (`cargo test --test model_analytical_solutions_test`,
   `cargo test --test gpu_solver_scaling_test`, `cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Added a model-level `KernelPlan`/`KernelKind` and wired the incompressible
+  model to declare its required kernels (`src/solver/model/kernel.rs`, `src/solver/model/definitions.rs`).
+- **2025-02-10:** Added kernel-dispatch emission helpers so codegen can target kernels via
+  `KernelKind` and model plan (with build hooks generating the model-declared kernels)
+  (`src/solver/codegen/emit.rs`, `src/solver/codegen/mod.rs`, `build.rs`).
+- **2025-02-10:** Added a codegen emit test for model kernel plans and verified codegen
+  unit tests after the dispatch refactor (`src/solver/codegen/emit.rs`,
+  `cargo test codegen --lib`).

@@ -42,11 +42,19 @@ mod solver {
                 "/src/solver/model/definitions.rs"
             ));
         }
+        pub mod kernel {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/kernel.rs"
+            ));
+        }
         #[allow(unused_imports)]
         pub use definitions::{
             incompressible_momentum_model, incompressible_momentum_system,
             IncompressibleMomentumFields, ModelSpec,
         };
+        #[allow(unused_imports)]
+        pub use kernel::{KernelKind, KernelPlan};
     }
     pub mod codegen {
         pub mod coupled_assembly {
@@ -158,19 +166,14 @@ fn main() {
     if let Err(err) = solver::codegen::emit::emit_incompressible_momentum_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
-    if let Err(err) = solver::codegen::emit::emit_coupled_assembly_codegen_wgsl(&manifest_dir) {
-        panic!("codegen failed: {}", err);
-    }
-    if let Err(err) = solver::codegen::emit::emit_prepare_coupled_codegen_wgsl(&manifest_dir) {
-        panic!("codegen failed: {}", err);
-    }
-    if let Err(err) = solver::codegen::emit::emit_pressure_assembly_codegen_wgsl(&manifest_dir) {
-        panic!("codegen failed: {}", err);
-    }
-    if let Err(err) = solver::codegen::emit::emit_update_fields_from_coupled_codegen_wgsl(&manifest_dir) {
-        panic!("codegen failed: {}", err);
-    }
-    if let Err(err) = solver::codegen::emit::emit_flux_rhie_chow_codegen_wgsl(&manifest_dir) {
+    let model = solver::model::incompressible_momentum_model();
+    let schemes =
+        solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
+    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
+        &manifest_dir,
+        &model,
+        &schemes,
+    ) {
         panic!("codegen failed: {}", err);
     }
 

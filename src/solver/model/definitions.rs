@@ -3,12 +3,14 @@ use super::backend::ast::{
     FluxRef,
 };
 use super::backend::state_layout::StateLayout;
+use super::kernel::{KernelKind, KernelPlan};
 
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub fields: IncompressibleMomentumFields,
+    pub kernel_plan: KernelPlan,
 }
 
 #[derive(Debug, Clone)]
@@ -82,10 +84,18 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_p,
         fields.grad_component,
     ]);
+    let kernel_plan = KernelPlan::new(vec![
+        KernelKind::PrepareCoupled,
+        KernelKind::CoupledAssembly,
+        KernelKind::PressureAssembly,
+        KernelKind::UpdateFieldsFromCoupled,
+        KernelKind::FluxRhieChow,
+    ]);
     ModelSpec {
         system,
         state_layout: layout,
         fields,
+        kernel_plan,
     }
 }
 
@@ -130,5 +140,6 @@ mod tests {
         assert_eq!(model.state_layout.offset_for("p"), Some(2));
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
+        assert!(model.kernel_plan.contains(KernelKind::CoupledAssembly));
     }
 }

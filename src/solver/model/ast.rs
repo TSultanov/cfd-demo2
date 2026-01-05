@@ -59,6 +59,7 @@ impl FluxRef {
 pub enum Coefficient {
     Constant(f64),
     Field(FieldRef),
+    Product(Box<Coefficient>, Box<Coefficient>),
 }
 
 impl Coefficient {
@@ -74,6 +75,32 @@ impl Coefficient {
                 field: field.name().to_string(),
                 kind: field.kind(),
             })
+        }
+    }
+
+    pub fn product(lhs: Coefficient, rhs: Coefficient) -> Result<Self, CodegenError> {
+        lhs.ensure_scalar()?;
+        rhs.ensure_scalar()?;
+        Ok(Self::Product(Box::new(lhs), Box::new(rhs)))
+    }
+
+    fn ensure_scalar(&self) -> Result<(), CodegenError> {
+        match self {
+            Coefficient::Constant(_) => Ok(()),
+            Coefficient::Field(field) => {
+                if field.is_scalar() {
+                    Ok(())
+                } else {
+                    Err(CodegenError::NonScalarCoefficient {
+                        field: field.name().to_string(),
+                        kind: field.kind(),
+                    })
+                }
+            }
+            Coefficient::Product(lhs, rhs) => {
+                lhs.ensure_scalar()?;
+                rhs.ensure_scalar()
+            }
         }
     }
 }
@@ -413,6 +440,21 @@ mod tests {
     fn coefficient_rejects_vector_field() {
         let u = vol_vector("U");
         let err = Coefficient::field(u).unwrap_err();
+        assert!(matches!(
+            err,
+            CodegenError::NonScalarCoefficient { .. }
+        ));
+    }
+
+    #[test]
+    fn coefficient_product_rejects_vector_field() {
+        let u = vol_vector("U");
+        let rho = vol_scalar("rho");
+        let err = Coefficient::product(
+            Coefficient::field(rho).unwrap(),
+            Coefficient::Field(u),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             CodegenError::NonScalarCoefficient { .. }

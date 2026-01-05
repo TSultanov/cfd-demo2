@@ -1,6 +1,6 @@
+use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::state_access::{state_scalar_expr, state_vec2_expr};
-use crate::solver::model::ast::{Coefficient, FieldKind};
 use crate::solver::model::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
@@ -10,6 +10,7 @@ use super::wgsl_ast::{
 use super::wgsl_dsl as dsl;
 
 const FIELD_U: &str = "U";
+const FIELD_P: &str = "p";
 const FIELD_D_P: &str = "d_p";
 
 pub fn generate_coupled_assembly_wgsl(system: &DiscreteSystem, layout: &StateLayout) -> String {
@@ -300,75 +301,13 @@ fn safe_inverse_fn() -> Function {
     Function::new("safe_inverse", params, Some(Type::F32), Vec::new(), body)
 }
 
-fn f32_literal(value: f64) -> String {
-    format!("{value:.8}")
-}
-
-fn coeff_named_expr(name: &str) -> Option<String> {
-    match name {
-        "rho" => Some("constants.density".to_string()),
-        "nu" => Some("constants.viscosity".to_string()),
-        _ => None,
-    }
-}
-
-fn coeff_cell_expr(
-    layout: &StateLayout,
-    coeff: Option<&Coefficient>,
-    idx: &str,
-    fallback: &str,
-) -> String {
-    match coeff {
-        None => fallback.to_string(),
-        Some(Coefficient::Constant(value)) => f32_literal(*value),
-        Some(Coefficient::Field(field)) => {
-            if let Some(state_field) = layout.field(field.name()) {
-                if state_field.kind() != FieldKind::Scalar {
-                    panic!("coefficient '{}' must be scalar", field.name());
-                }
-                state_scalar_expr(layout, "state", idx, field.name())
-            } else {
-                coeff_named_expr(field.name()).unwrap_or_else(|| {
-                    panic!("missing coefficient field '{}' in state layout", field.name())
-                })
-            }
-        }
-    }
-}
-
-fn coeff_face_expr(
-    layout: &StateLayout,
-    coeff: Option<&Coefficient>,
-    owner_idx: &str,
-    neighbor_idx: &str,
-    fallback: &str,
-) -> String {
-    match coeff {
-        None => fallback.to_string(),
-        Some(Coefficient::Constant(value)) => f32_literal(*value),
-        Some(Coefficient::Field(field)) => {
-            if let Some(state_field) = layout.field(field.name()) {
-                if state_field.kind() != FieldKind::Scalar {
-                    panic!("coefficient '{}' must be scalar", field.name());
-                }
-                let own = state_scalar_expr(layout, "state", owner_idx, field.name());
-                let neigh = state_scalar_expr(layout, "state", neighbor_idx, field.name());
-                format!("0.5 * ({own} + {neigh})")
-            } else {
-                coeff_named_expr(field.name()).unwrap_or_else(|| {
-                    panic!("missing coefficient field '{}' in state layout", field.name())
-                })
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct MomentumPlan {
     ddt: Option<DiscreteOp>,
     convection: Option<DiscreteOp>,
     diffusion: Option<DiscreteOp>,
     gradient: Option<DiscreteOp>,
+    pressure_diffusion: Option<DiscreteOp>,
 }
 
 fn momentum_plan(system: &DiscreteSystem) -> MomentumPlan {
@@ -377,6 +316,7 @@ fn momentum_plan(system: &DiscreteSystem) -> MomentumPlan {
         convection: None,
         diffusion: None,
         gradient: None,
+        pressure_diffusion: None,
     };
 
     let mut found = false;
@@ -402,6 +342,22 @@ fn momentum_plan(system: &DiscreteSystem) -> MomentumPlan {
 
     if !found {
         panic!("missing momentum equation for field '{}'", FIELD_U);
+    }
+
+    for equation in &system.equations {
+        if equation.target.name() != FIELD_P {
+            continue;
+        }
+        for op in &equation.ops {
+            if op.kind == DiscreteOpKind::Diffusion {
+                plan.pressure_diffusion = Some(op.clone());
+                break;
+            }
+        }
+    }
+
+    if plan.pressure_diffusion.is_none() {
+        panic!("missing pressure diffusion term for field '{}'", FIELD_P);
     }
 
     plan
@@ -506,6 +462,20 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
 
     let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", FIELD_D_P);
     let u_idx_expr = state_vec2_expr(layout, "state", "idx", FIELD_U);
+    let pressure_coeff_face_expr = coeff_face_expr(
+        layout,
+        plan.pressure_diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
+        "idx",
+        "other_idx",
+        "lambda",
+        "d_p_face",
+    );
+    let pressure_coeff_cell_expr = coeff_cell_expr(
+        layout,
+        plan.pressure_diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
+        "idx",
+        "d_p_own",
+    );
 
     let face_loop_body = {
         let mut body = Vec::new();
@@ -565,8 +535,14 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
         ));
         body.push(dsl::let_("dist", "max(dist_proj, 1e-6)"));
         if let Some(diff_op) = &plan.diffusion {
-            let mu_expr =
-                coeff_face_expr(layout, diff_op.coeff.as_ref(), "idx", "other_idx", "1.0");
+            let mu_expr = coeff_face_expr(
+                layout,
+                diff_op.coeff.as_ref(),
+                "idx",
+                "other_idx",
+                "0.5",
+                "1.0",
+            );
             body.push(dsl::let_(
                 "diff_coeff",
                 &format!("codegen_diff_coeff({}, area, dist)", mu_expr),
@@ -634,7 +610,6 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
         ));
 
         let u_neigh_expr = state_vec2_expr(layout, "state", "other_idx", FIELD_U);
-        let d_p_neigh_expr = state_scalar_expr(layout, "state", "other_idx", FIELD_D_P);
         let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", FIELD_D_P);
 
         let mut inlet_stmts = vec![
@@ -704,14 +679,11 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             dsl::let_("div_coeff_y", "normal.y * area"),
             dsl::assign_op(AssignOp::Add, "sum_diag_pu", "div_coeff_x"),
             dsl::assign_op(AssignOp::Add, "sum_diag_pv", "div_coeff_y"),
-            dsl::let_("dp_f", &d_p_idx_expr),
-            dsl::let_("lapl_coeff", "dp_f * area / dist"),
-            dsl::assign_op(AssignOp::Add, "sum_diag_pp", "lapl_coeff"),
             dsl::let_("d_p_own", &d_p_idx_expr),
-            dsl::let_(
-                "scalar_coeff",
-                "constants.density * d_p_own * area / dist",
-            ),
+            dsl::let_("pressure_coeff_cell", &pressure_coeff_cell_expr),
+            dsl::let_("lapl_coeff", "pressure_coeff_cell * area / dist"),
+            dsl::assign_op(AssignOp::Add, "sum_diag_pp", "lapl_coeff"),
+            dsl::let_("scalar_coeff", "pressure_coeff_cell * area / dist"),
             dsl::assign_op(AssignOp::Add, "scalar_diag_p", "scalar_coeff"),
         ]);
 
@@ -903,22 +875,16 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             ),
             dsl::assign_op(AssignOp::Add, "sum_diag_pu", "lambda * div_coeff_x"),
             dsl::assign_op(AssignOp::Add, "sum_diag_pv", "lambda * div_coeff_y"),
-            dsl::let_(
-                "dp_f",
-                &format!(
-                    "lambda * {} + (1.0 - lambda) * {}",
-                    d_p_idx_expr, d_p_neigh_expr
-                ),
-            ),
-            dsl::let_("lapl_coeff", "dp_f * area / dist"),
-            dsl::assign("matrix_values[idx_2_2]", "-lapl_coeff"),
-            dsl::assign_op(AssignOp::Add, "sum_diag_pp", "lapl_coeff"),
             dsl::let_("d_p_own", &d_p_idx_expr),
             dsl::let_(
                 "d_p_face",
                 "lambda * d_p_own + (1.0 - lambda) * d_p_neigh",
             ),
-            dsl::let_("scalar_coeff", "constants.density * d_p_face * area / dist"),
+            dsl::let_("pressure_coeff_face", &pressure_coeff_face_expr),
+            dsl::let_("lapl_coeff", "pressure_coeff_face * area / dist"),
+            dsl::assign("matrix_values[idx_2_2]", "-lapl_coeff"),
+            dsl::assign_op(AssignOp::Add, "sum_diag_pp", "lapl_coeff"),
+            dsl::let_("scalar_coeff", "pressure_coeff_face * area / dist"),
             dsl::if_block(
                 "scalar_mat_idx != 4294967295u",
                 dsl::block(vec![dsl::assign(
@@ -1020,7 +986,7 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ast::{fvm, surface_scalar, vol_scalar, vol_vector};
+    use crate::solver::model::ast::{fvm, surface_scalar, vol_scalar, vol_vector, Coefficient};
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::model::SchemeRegistry;
     use crate::solver::scheme::Scheme;
@@ -1040,14 +1006,21 @@ mod tests {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
         let nu = vol_scalar("nu");
+        let p = vol_scalar("p");
+        let d_p = vol_scalar("d_p");
         let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
-                crate::solver::model::ast::Coefficient::field(nu).unwrap(),
+                Coefficient::field(nu).unwrap(),
                 u.clone(),
             ));
         let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
+        system.add_equation(
+            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
+            ),
+        );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry);
@@ -1063,10 +1036,17 @@ mod tests {
     fn coupled_assembly_codegen_embeds_scheme_id_from_registry() {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
+        let p = vol_scalar("p");
+        let d_p = vol_scalar("d_p");
         let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
         let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
+        system.add_equation(
+            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
+            ),
+        );
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(
@@ -1085,10 +1065,17 @@ mod tests {
     #[test]
     fn coupled_assembly_codegen_zeros_diffusion_when_missing() {
         let u = vol_vector("U");
+        let p = vol_scalar("p");
+        let d_p = vol_scalar("d_p");
         let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
         let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
+        system.add_equation(
+            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
+            ),
+        );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry);
@@ -1102,17 +1089,24 @@ mod tests {
         let u = vol_vector("U");
         let nu = vol_scalar("nu");
         let rho = vol_scalar("rho");
+        let p = vol_scalar("p");
+        let d_p = vol_scalar("d_p");
         let eqn = crate::solver::model::ast::Equation::new(u.clone())
             .with_term(fvm::ddt_coeff(
-                crate::solver::model::ast::Coefficient::field(rho).unwrap(),
+                Coefficient::field(rho).unwrap(),
                 u.clone(),
             ))
             .with_term(fvm::laplacian(
-                crate::solver::model::ast::Coefficient::field(nu).unwrap(),
+                Coefficient::field(nu).unwrap(),
                 u.clone(),
             ));
         let mut system = crate::solver::model::ast::EquationSystem::new();
         system.add_equation(eqn);
+        system.add_equation(
+            crate::solver::model::ast::Equation::new(p.clone()).with_term(
+                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
+            ),
+        );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry);

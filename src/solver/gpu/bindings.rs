@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: d9a620849f08d1533bbe34bea0e3d86f4c3093b3fb45086825efa056e1adbc14
+// SourceHash: 33d18e36b7770a7acb500b949f0c0787b3011fbed59fe4bf2ba60fe1be091f95
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2989,23 +2989,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e614 = lambda;
                 let _e616 = sum_diag_pv;
                 sum_diag_pv = (_e616 + (_e614 * div_coeff_y));
-                let _e618 = lambda;
-                let _e625 = state[((idx * 8u) + 3u)];
-                let _e627 = lambda;
-                let _e630 = other_idx;
-                let _e637 = state[((_e630 * 8u) + 3u)];
-                let dp_f = ((_e618 * _e625) + ((1f - _e627) * _e637));
-                let lapl_coeff = ((dp_f * area_4) / dist_3);
-                matrix_values[idx_2_2_] = -(lapl_coeff);
-                let _e646 = sum_diag_pp;
-                sum_diag_pp = (_e646 + lapl_coeff);
                 let d_p_own = state[((idx * 8u) + 3u)];
-                let _e655 = lambda;
-                let _e657 = lambda;
-                let _e660 = d_p_neigh;
-                let d_p_face = ((_e655 * d_p_own) + ((1f - _e657) * _e660));
-                let _e665 = constants.density;
-                let scalar_coeff = (((_e665 * d_p_face) * area_4) / dist_3);
+                let _e625 = lambda;
+                let _e627 = lambda;
+                let _e630 = d_p_neigh;
+                let d_p_face = ((_e625 * d_p_own) + ((1f - _e627) * _e630));
+                let _e635 = constants.density;
+                let _e636 = lambda;
+                let _e643 = state[((idx * 8u) + 3u)];
+                let _e645 = lambda;
+                let _e648 = other_idx;
+                let _e655 = state[((_e648 * 8u) + 3u)];
+                let pressure_coeff_face = (_e635 * ((_e636 * _e643) + ((1f - _e645) * _e655)));
+                let lapl_coeff = ((pressure_coeff_face * area_4) / dist_3);
+                matrix_values[idx_2_2_] = -(lapl_coeff);
+                let _e665 = sum_diag_pp;
+                sum_diag_pp = (_e665 + lapl_coeff);
+                let scalar_coeff = ((pressure_coeff_face * area_4) / dist_3);
                 if (scalar_mat_idx != 4294967295u) {
                     scalar_matrix_values[scalar_mat_idx] = -(scalar_coeff);
                 }
@@ -3080,13 +3080,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             sum_diag_pu = (_e765 + div_coeff_x_1);
                             let _e767 = sum_diag_pv;
                             sum_diag_pv = (_e767 + div_coeff_y_1);
-                            let dp_f_1 = state[((idx * 8u) + 3u)];
-                            let lapl_coeff_1 = ((dp_f_1 * area_4) / dist_3);
-                            let _e778 = sum_diag_pp;
-                            sum_diag_pp = (_e778 + lapl_coeff_1);
                             let d_p_own_1 = state[((idx * 8u) + 3u)];
-                            let _e789 = constants.density;
-                            let scalar_coeff_1 = (((_e789 * d_p_own_1) * area_4) / dist_3);
+                            let _e778 = constants.density;
+                            let _e785 = state[((idx * 8u) + 3u)];
+                            let pressure_coeff_cell = (_e778 * _e785);
+                            let lapl_coeff_1 = ((pressure_coeff_cell * area_4) / dist_3);
+                            let _e789 = sum_diag_pp;
+                            sum_diag_pp = (_e789 + lapl_coeff_1);
+                            let scalar_coeff_1 = ((pressure_coeff_cell * area_4) / dist_3);
                             let _e793 = scalar_diag_p;
                             scalar_diag_p = (_e793 + scalar_coeff_1);
                         }
@@ -5922,8 +5923,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var normal_sign: f32;
     var other_center: Vector2_;
     var is_boundary: bool;
-    var d_p_neigh: f32;
     var other_idx: u32;
+    var d_p_neigh: f32;
+    var other_idx_1: u32;
     var lambda: f32;
     var k_scale: f32;
     var other_idx_p: u32;
@@ -5979,58 +5981,65 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e90 = rhs_val;
             rhs_val = (_e90 - flux);
             is_boundary = false;
+            other_idx = idx;
             d_p_neigh = 0f;
             if (neigh_idx != -1i) {
-                other_idx = u32(neigh_idx);
+                other_idx_1 = u32(neigh_idx);
                 if (owner != idx) {
-                    other_idx = owner;
+                    other_idx_1 = owner;
                 }
-                let _e102 = other_idx;
-                let _e104 = cell_centers[_e102];
-                other_center = _e104;
-                let _e106 = other_idx;
-                let _e113 = state[((_e106 * 8u) + 3u)];
-                d_p_neigh = _e113;
+                let _e103 = other_idx_1;
+                let _e105 = cell_centers[_e103];
+                other_center = _e105;
+                let _e107 = other_idx_1;
+                let _e114 = state[((_e107 * 8u) + 3u)];
+                d_p_neigh = _e114;
             } else {
                 is_boundary = true;
                 other_center = f_center;
-                let _e121 = state[((idx * 8u) + 3u)];
-                d_p_neigh = _e121;
+                let _e122 = state[((idx * 8u) + 3u)];
+                d_p_neigh = _e122;
             }
-            let _e122 = is_boundary;
-            if !(_e122) {
-                let _e125 = other_center.x;
-                let d_vec_x = (_e125 - center.x);
-                let _e129 = other_center.y;
-                let d_vec_y = (_e129 - center.y);
+            let _e123 = is_boundary;
+            if !(_e123) {
+                let _e126 = other_center.x;
+                let d_vec_x = (_e126 - center.x);
+                let _e130 = other_center.y;
+                let d_vec_y = (_e130 - center.y);
                 let dist = sqrt(((d_vec_x * d_vec_x) + (d_vec_y * d_vec_y)));
                 let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
-                let _e144 = other_center.x;
-                let _e146 = other_center.y;
-                let d_neigh = distance(vec2<f32>(_e144, _e146), vec2<f32>(f_center.x, f_center.y));
+                let _e145 = other_center.x;
+                let _e147 = other_center.y;
+                let d_neigh = distance(vec2<f32>(_e145, _e147), vec2<f32>(f_center.x, f_center.y));
                 let total_dist = (d_own + d_neigh);
                 lambda = 0.5f;
                 if (total_dist > 0.000001f) {
                     lambda = (d_neigh / total_dist);
                 }
                 let d_p_own = state[((idx * 8u) + 3u)];
-                let _e165 = lambda;
-                let _e167 = lambda;
-                let _e170 = d_p_neigh;
-                let d_p_face = ((_e165 * d_p_own) + ((1f - _e167) * _e170));
-                let _e175 = constants.density;
-                let coeff = (((_e175 * d_p_face) * area) / dist);
-                let _e180 = k;
-                let mat_idx = cell_face_matrix_indices[_e180];
+                let _e166 = lambda;
+                let _e168 = lambda;
+                let _e171 = d_p_neigh;
+                let d_p_face = ((_e166 * d_p_own) + ((1f - _e168) * _e171));
+                let _e176 = constants.density;
+                let _e177 = lambda;
+                let _e184 = state[((idx * 8u) + 3u)];
+                let _e186 = lambda;
+                let _e189 = other_idx;
+                let _e196 = state[((_e189 * 8u) + 3u)];
+                let pressure_coeff_face = (_e176 * ((_e177 * _e184) + ((1f - _e186) * _e196)));
+                let coeff = ((pressure_coeff_face * area) / dist);
+                let _e203 = k;
+                let mat_idx = cell_face_matrix_indices[_e203];
                 if (mat_idx != 4294967295u) {
                     matrix_values[mat_idx] = -(coeff);
                 }
-                let _e189 = diag_coeff;
-                diag_coeff = (_e189 + coeff);
-                let _e192 = normal.x;
-                let s_x = (_e192 * area);
-                let _e195 = normal.y;
-                let s_y = (_e195 * area);
+                let _e212 = diag_coeff;
+                diag_coeff = (_e212 + coeff);
+                let _e215 = normal.x;
+                let s_x = (_e215 * area);
+                let _e218 = normal.y;
+                let s_y = (_e218 * area);
                 let k_x_raw = (s_x - ((d_vec_x * area) / dist));
                 let k_y_raw = (s_y - ((d_vec_y * area) / dist));
                 let k_mag = sqrt(((k_x_raw * k_x_raw) + (k_y_raw * k_y_raw)));
@@ -6039,57 +6048,58 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (k_mag > k_limit) {
                     k_scale = (k_limit / k_mag);
                 }
-                let _e213 = k_scale;
-                let k_x = (k_x_raw * _e213);
-                let _e215 = k_scale;
-                let k_y = (k_y_raw * _e215);
+                let _e236 = k_scale;
+                let k_x = (k_x_raw * _e236);
+                let _e238 = k_scale;
+                let k_y = (k_y_raw * _e238);
                 other_idx_p = u32(neigh_idx);
                 if (owner != idx) {
                     other_idx_p = owner;
                 }
-                let _e226 = state[((idx * 8u) + 4u)];
-                let _e233 = state[((idx * 8u) + 5u)];
-                let grad_p_own = vec2<f32>(_e226, _e233);
-                let _e235 = other_idx_p;
-                let _e242 = state[((_e235 * 8u) + 4u)];
-                let _e243 = other_idx_p;
-                let _e250 = state[((_e243 * 8u) + 5u)];
-                let grad_p_neigh = vec2<f32>(_e242, _e250);
+                let _e249 = state[((idx * 8u) + 4u)];
+                let _e256 = state[((idx * 8u) + 5u)];
+                let grad_p_own = vec2<f32>(_e249, _e256);
+                let _e258 = other_idx_p;
+                let _e265 = state[((_e258 * 8u) + 4u)];
+                let _e266 = other_idx_p;
+                let _e273 = state[((_e266 * 8u) + 5u)];
+                let grad_p_neigh = vec2<f32>(_e265, _e273);
                 interp_f = 0.5f;
                 if (total_dist > 0.000001f) {
                     interp_f = (d_own / total_dist);
                 }
-                let _e258 = interp_f;
-                let grad_p_f_x = (grad_p_own.x + (_e258 * (grad_p_neigh.x - grad_p_own.x)));
-                let _e265 = interp_f;
-                let grad_p_f_y = (grad_p_own.y + (_e265 * (grad_p_neigh.y - grad_p_own.y)));
-                let _e273 = constants.density;
-                let correction_flux = (((0.5f * _e273) * d_p_face) * ((grad_p_f_x * k_x) + (grad_p_f_y * k_y)));
-                let _e281 = rhs_val;
-                rhs_val = (_e281 - correction_flux);
+                let _e281 = interp_f;
+                let grad_p_f_x = (grad_p_own.x + (_e281 * (grad_p_neigh.x - grad_p_own.x)));
+                let _e288 = interp_f;
+                let grad_p_f_y = (grad_p_own.y + (_e288 * (grad_p_neigh.y - grad_p_own.y)));
+                let correction_flux = ((0.5f * pressure_coeff_face) * ((grad_p_f_x * k_x) + (grad_p_f_y * k_y)));
+                let _e300 = rhs_val;
+                rhs_val = (_e300 - correction_flux);
             } else {
                 if (boundary_type == 2u) {
                     let dx = (center.x - f_center.x);
                     let dy = (center.y - f_center.y);
                     let dist_1 = sqrt(((dx * dx) + (dy * dy)));
                     let d_p_own_1 = state[((idx * 8u) + 3u)];
-                    let _e304 = constants.density;
-                    let coeff_1 = (((_e304 * d_p_own_1) * area) / dist_1);
-                    let _e308 = diag_coeff;
-                    diag_coeff = (_e308 + coeff_1);
+                    let _e323 = constants.density;
+                    let _e330 = state[((idx * 8u) + 3u)];
+                    let pressure_coeff_cell = (_e323 * _e330);
+                    let coeff_1 = ((pressure_coeff_cell * area) / dist_1);
+                    let _e334 = diag_coeff;
+                    diag_coeff = (_e334 + coeff_1);
                 }
             }
         }
         continuing {
-            let _e311 = k;
-            k = (_e311 + 1u);
+            let _e337 = k;
+            k = (_e337 + 1u);
         }
     }
     let diag_idx = diagonal_indices[idx];
-    let _e318 = diag_coeff;
-    matrix_values[diag_idx] = _e318;
-    let _e321 = rhs_val;
-    rhs[idx] = _e321;
+    let _e344 = diag_coeff;
+    matrix_values[diag_idx] = _e344;
+    let _e347 = rhs_val;
+    rhs[idx] = _e347;
     return;
 }
 "#;

@@ -548,6 +548,9 @@ fn format_coeff(coeff: &Coefficient) -> String {
     match coeff {
         Coefficient::Constant(value) => format!("const({})", value),
         Coefficient::Field(field) => format!("field({})", field.name()),
+        Coefficient::Product(lhs, rhs) => {
+            format!("product({}, {})", format_coeff(lhs), format_coeff(rhs))
+        }
     }
 }
 
@@ -681,6 +684,14 @@ mod tests {
     fn format_helpers_cover_constant_coeff_and_schemes() {
         let coeff = Coefficient::constant(1.5);
         assert_eq!(format_coeff(&coeff), "const(1.5)");
+        let rho = vol_scalar("rho");
+        let d_p = vol_scalar("d_p");
+        let coeff = Coefficient::product(
+            Coefficient::field(rho).unwrap(),
+            Coefficient::field(d_p).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(format_coeff(&coeff), "product(field(rho), field(d_p))");
 
         assert_eq!(scheme_name(Scheme::Upwind), "upwind");
         assert_eq!(scheme_name(Scheme::SecondOrderUpwind), "sou");

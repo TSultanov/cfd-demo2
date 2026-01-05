@@ -51,7 +51,11 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
     .eqn(fields.u);
 
     let pressure = fvm::laplacian(
-        Coefficient::field(fields.d_p).expect("d_p must be scalar"),
+        Coefficient::product(
+            Coefficient::field(fields.rho).expect("rho must be scalar"),
+            Coefficient::field(fields.d_p).expect("d_p must be scalar"),
+        )
+        .expect("pressure coefficient must be scalar"),
         fields.p,
     )
     .eqn(fields.p);
@@ -108,6 +112,13 @@ mod tests {
         assert_eq!(pressure.target().name(), "p");
         assert_eq!(pressure.terms().len(), 1);
         assert_eq!(pressure.terms()[0].op, TermOp::Laplacian);
+        match &pressure.terms()[0].coeff {
+            Some(Coefficient::Product(lhs, rhs)) => {
+                assert!(matches!(**lhs, Coefficient::Field(_)));
+                assert!(matches!(**rhs, Coefficient::Field(_)));
+            }
+            other => panic!("expected coefficient product, got {:?}", other),
+        }
     }
 
     #[test]

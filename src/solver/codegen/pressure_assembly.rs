@@ -1,5 +1,5 @@
-use crate::solver::model::ast::Coefficient;
-use super::ir::{DiscreteOpKind, DiscreteSystem};
+use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
+use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::state_access::{state_scalar_expr, state_vec2_expr};
 use crate::solver::model::StateLayout;
 use super::wgsl_ast::{
@@ -232,7 +232,7 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
     ))
 }
 
-fn main_fn(layout: &StateLayout, _plan: &PressurePlan) -> Function {
+fn main_fn(layout: &StateLayout, plan: &PressurePlan) -> Function {
     let params = vec![Param::new(
         "global_id",
         Type::vec3_u32(),
@@ -243,21 +243,17 @@ fn main_fn(layout: &StateLayout, _plan: &PressurePlan) -> Function {
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(layout),
+        main_body(layout, plan),
     )
 }
 
 #[derive(Debug, Clone)]
 struct PressurePlan {
-    has_laplacian: bool,
-    coeff_field: Option<String>,
+    diffusion: Option<DiscreteOp>,
 }
 
 fn pressure_plan(system: &DiscreteSystem) -> PressurePlan {
-    let mut plan = PressurePlan {
-        has_laplacian: false,
-        coeff_field: None,
-    };
+    let mut plan = PressurePlan { diffusion: None };
 
     let mut found = false;
     for equation in &system.equations {
@@ -267,10 +263,8 @@ fn pressure_plan(system: &DiscreteSystem) -> PressurePlan {
         found = true;
         for op in &equation.ops {
             if op.kind == DiscreteOpKind::Diffusion {
-                plan.has_laplacian = true;
-                if let Some(Coefficient::Field(field)) = &op.coeff {
-                    plan.coeff_field = Some(field.name().to_string());
-                }
+                plan.diffusion = Some(op.clone());
+                break;
             }
         }
     }
@@ -278,19 +272,14 @@ fn pressure_plan(system: &DiscreteSystem) -> PressurePlan {
     if !found {
         panic!("missing pressure equation for field '{}'", FIELD_P);
     }
-    if !plan.has_laplacian {
+    if plan.diffusion.is_none() {
         panic!("pressure equation for '{}' must include a laplacian term", FIELD_P);
-    }
-    if let Some(name) = &plan.coeff_field {
-        if name != FIELD_D_P {
-            panic!("pressure laplacian coefficient must be '{}'", FIELD_D_P);
-        }
     }
 
     plan
 }
 
-fn main_body(layout: &StateLayout) -> Block {
+fn main_body(layout: &StateLayout, plan: &PressurePlan) -> Block {
     let mut stmts = Vec::new();
 
     stmts.push(dsl::let_("idx", "global_id.x"));
@@ -308,6 +297,20 @@ fn main_body(layout: &StateLayout) -> Block {
 
     let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", FIELD_D_P);
     let grad_p_idx_expr = state_vec2_expr(layout, "state", "idx", FIELD_GRAD_P);
+    let pressure_coeff_face_expr = coeff_face_expr(
+        layout,
+        plan.diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
+        "idx",
+        "other_idx",
+        "lambda",
+        "d_p_face",
+    );
+    let pressure_coeff_cell_expr = coeff_cell_expr(
+        layout,
+        plan.diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
+        "idx",
+        "d_p_own",
+    );
 
     let mut loop_body = Vec::new();
     loop_body.push(dsl::let_("face_idx", "cell_faces[k]"));
@@ -346,6 +349,7 @@ fn main_body(layout: &StateLayout) -> Block {
         None,
     ));
     loop_body.push(dsl::var("is_boundary", "false"));
+    loop_body.push(dsl::var("other_idx", "idx"));
     loop_body.push(dsl::var_typed("d_p_neigh", Type::F32, Some("0.0")));
 
     let d_p_other_expr = state_scalar_expr(layout, "state", "other_idx", FIELD_D_P);
@@ -390,7 +394,8 @@ fn main_body(layout: &StateLayout) -> Block {
         ),
         dsl::let_("d_p_own", &d_p_idx_expr),
         dsl::let_("d_p_face", "lambda * d_p_own + (1.0 - lambda) * d_p_neigh"),
-        dsl::let_("coeff", "constants.density * d_p_face * area / dist"),
+        dsl::let_("pressure_coeff_face", &pressure_coeff_face_expr),
+        dsl::let_("coeff", "pressure_coeff_face * area / dist"),
         dsl::let_("mat_idx", "cell_face_matrix_indices[k]"),
         dsl::if_block(
             "mat_idx != 4294967295u",
@@ -439,7 +444,7 @@ fn main_body(layout: &StateLayout) -> Block {
         ),
         dsl::let_(
             "correction_flux",
-            "0.5 * constants.density * d_p_face * (grad_p_f_x * k_x + grad_p_f_y * k_y)",
+            "0.5 * pressure_coeff_face * (grad_p_f_x * k_x + grad_p_f_y * k_y)",
         ),
         dsl::assign_op(AssignOp::Sub, "rhs_val", "correction_flux"),
     ]);
@@ -451,7 +456,8 @@ fn main_body(layout: &StateLayout) -> Block {
             dsl::let_("dy", "center.y - f_center.y"),
             dsl::let_("dist", "sqrt(dx*dx + dy*dy)"),
             dsl::let_("d_p_own", &d_p_idx_expr),
-            dsl::let_("coeff", "constants.density * d_p_own * area / dist"),
+            dsl::let_("pressure_coeff_cell", &pressure_coeff_cell_expr),
+            dsl::let_("coeff", "pressure_coeff_cell * area / dist"),
             dsl::assign_op(AssignOp::Add, "diag_coeff", "coeff"),
         ]),
         None,

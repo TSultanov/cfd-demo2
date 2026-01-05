@@ -52,6 +52,12 @@ mod solver {
                 "/src/solver/codegen/coupled_assembly.rs"
             ));
         }
+        pub mod coeff_expr {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/coeff_expr.rs"
+            ));
+        }
         pub mod flux_rhie_chow {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

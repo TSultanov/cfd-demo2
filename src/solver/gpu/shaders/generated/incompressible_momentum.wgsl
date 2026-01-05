@@ -71,7 +71,7 @@ fn assemble_U() {
 
 // equation: p (scalar)
 
-// term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=field(d_p)
+// term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=product(field(rho), field(d_p))
 
 fn term_laplacian_p_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
     // diffusion coefficient from mu * area / dist

@@ -183,7 +183,7 @@ fn codegen_assemble_U() {
 
 // equation: p (scalar)
 
-// term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=field(d_p)
+// term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=product(field(rho), field(d_p))
 
 fn term_laplacian_p_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
     // diffusion coefficient from mu * area / dist
@@ -397,13 +397,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[idx_2_1] = (1.0 - lambda) * div_coeff_y;
             sum_diag_pu += lambda * div_coeff_x;
             sum_diag_pv += lambda * div_coeff_y;
-            let dp_f = lambda * state[idx * 8u + 3u] + (1.0 - lambda) * state[other_idx * 8u + 3u];
-            let lapl_coeff = dp_f * area / dist;
-            matrix_values[idx_2_2] = -lapl_coeff;
-            sum_diag_pp += lapl_coeff;
             let d_p_own = state[idx * 8u + 3u];
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
-            let scalar_coeff = constants.density * d_p_face * area / dist;
+            let pressure_coeff_face = constants.density * (lambda * state[idx * 8u + 3u] + (1.0 - lambda) * state[other_idx * 8u + 3u]);
+            let lapl_coeff = pressure_coeff_face * area / dist;
+            matrix_values[idx_2_2] = -lapl_coeff;
+            sum_diag_pp += lapl_coeff;
+            let scalar_coeff = pressure_coeff_face * area / dist;
             if (scalar_mat_idx != 4294967295u) {
                 scalar_matrix_values[scalar_mat_idx] = -scalar_coeff;
             }
@@ -448,11 +448,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         let div_coeff_y = normal.y * area;
                         sum_diag_pu += div_coeff_x;
                         sum_diag_pv += div_coeff_y;
-                        let dp_f = state[idx * 8u + 3u];
-                        let lapl_coeff = dp_f * area / dist;
-                        sum_diag_pp += lapl_coeff;
                         let d_p_own = state[idx * 8u + 3u];
-                        let scalar_coeff = constants.density * d_p_own * area / dist;
+                        let pressure_coeff_cell = constants.density * state[idx * 8u + 3u];
+                        let lapl_coeff = pressure_coeff_cell * area / dist;
+                        sum_diag_pp += lapl_coeff;
+                        let scalar_coeff = pressure_coeff_cell * area / dist;
                         scalar_diag_p += scalar_coeff;
                     }
                 }

@@ -27,3 +27,4 @@ pub use pressure_assembly::generate_pressure_assembly_wgsl;
 pub use update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 pub use state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
 pub use wgsl::{generate_wgsl, generate_wgsl_library};
+pub mod coeff_expr;

@@ -124,6 +124,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_val -= flux;
         var other_center: Vector2;
         var is_boundary = false;
+        var other_idx = idx;
         var d_p_neigh: f32 = 0.0;
         if (neigh_idx != -1) {
             var other_idx = u32(neigh_idx);
@@ -150,7 +151,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let d_p_own = state[idx * 8u + 3u];
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
-            let coeff = constants.density * d_p_face * area / dist;
+            let pressure_coeff_face = constants.density * (lambda * state[idx * 8u + 3u] + (1.0 - lambda) * state[other_idx * 8u + 3u]);
+            let coeff = pressure_coeff_face * area / dist;
             let mat_idx = cell_face_matrix_indices[k];
             if (mat_idx != 4294967295u) {
                 matrix_values[mat_idx] = -coeff;
@@ -180,7 +182,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let grad_p_f_x = grad_p_own.x + interp_f * (grad_p_neigh.x - grad_p_own.x);
             let grad_p_f_y = grad_p_own.y + interp_f * (grad_p_neigh.y - grad_p_own.y);
-            let correction_flux = 0.5 * constants.density * d_p_face * (grad_p_f_x * k_x + grad_p_f_y * k_y);
+            let correction_flux = 0.5 * pressure_coeff_face * (grad_p_f_x * k_x + grad_p_f_y * k_y);
             rhs_val -= correction_flux;
         } else {
             if (boundary_type == 2u) {
@@ -188,7 +190,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let dy = center.y - f_center.y;
                 let dist = sqrt(dx * dx + dy * dy);
                 let d_p_own = state[idx * 8u + 3u];
-                let coeff = constants.density * d_p_own * area / dist;
+                let pressure_coeff_cell = constants.density * state[idx * 8u + 3u];
+                let coeff = pressure_coeff_cell * area / dist;
                 diag_coeff += coeff;
             }
         }

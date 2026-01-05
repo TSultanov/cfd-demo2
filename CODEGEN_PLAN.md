@@ -164,3 +164,28 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified solver scaling test (`cargo test --test gpu_solver_scaling_test`).
 - **2025-02-10:** Re-verified solver-backed analytical tests after solver sizing updates
   (`cargo test --test model_analytical_solutions_test`).
+- **2025-02-10:** Added coefficient products to the model AST so terms can express
+  multi-field coefficients (e.g. `rho * d_p`) (`src/solver/model/ast.rs`).
+- **2025-02-10:** Updated incompressible pressure equation to use a coefficient product
+  (`rho * d_p`) and adjusted model tests (`src/solver/model/definitions.rs`).
+- **2025-02-10:** Added shared coefficient-expression helpers for cell/face evaluation and
+  product handling in codegen (`src/solver/codegen/coeff_expr.rs`).
+- **2025-02-10:** Pressure assembly now uses model-driven coefficient expressions instead of
+  hardcoded `density * d_p` (`src/solver/codegen/pressure_assembly.rs`).
+- **2025-02-10:** Coupled assembly now derives pressure coefficients from the model diffusion
+  term (including `rho * d_p`) for both pressure row and scalar preconditioner (`src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Updated codegen coefficient metadata formatting and tests for coefficient
+  products (`src/solver/codegen/wgsl.rs`).
+- **2025-02-10:** Added AST and codegen unit coverage for coefficient products
+  (`src/solver/model/ast.rs`, `src/solver/codegen/coeff_expr.rs`).
+- **2025-02-10:** Adjusted coupled-assembly codegen tests to include a pressure equation now
+  required by the planner (`src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Added codegen coefficient-expression module to the build-script include list
+  for build-time WGSL generation (`build.rs`).
+- **2025-02-10:** Fixed coeff-expression cloning and cleaned unused pressure helpers in
+  coupled assembly to keep build warnings away (`src/solver/codegen/coeff_expr.rs`,
+  `src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Fixed pressure-assembly codegen to declare `other_idx` before coefficient
+  interpolation (`src/solver/codegen/pressure_assembly.rs`).
+- **2025-02-10:** Verified codegen unit tests after coefficient-expression refactor
+  (`cargo test codegen --lib`).

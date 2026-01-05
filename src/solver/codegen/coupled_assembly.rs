@@ -1,7 +1,7 @@
-use super::ir::{DiscreteOpKind, DiscreteSystem};
-use crate::solver::model::StateLayout;
+use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::state_access::{state_scalar_expr, state_vec2_expr};
-use crate::solver::scheme::Scheme;
+use crate::solver::model::ast::{Coefficient, FieldKind};
+use crate::solver::model::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
@@ -300,22 +300,83 @@ fn safe_inverse_fn() -> Function {
     Function::new("safe_inverse", params, Some(Type::F32), Vec::new(), body)
 }
 
+fn f32_literal(value: f64) -> String {
+    format!("{value:.8}")
+}
+
+fn coeff_named_expr(name: &str) -> Option<String> {
+    match name {
+        "rho" => Some("constants.density".to_string()),
+        "nu" => Some("constants.viscosity".to_string()),
+        _ => None,
+    }
+}
+
+fn coeff_cell_expr(
+    layout: &StateLayout,
+    coeff: Option<&Coefficient>,
+    idx: &str,
+    fallback: &str,
+) -> String {
+    match coeff {
+        None => fallback.to_string(),
+        Some(Coefficient::Constant(value)) => f32_literal(*value),
+        Some(Coefficient::Field(field)) => {
+            if let Some(state_field) = layout.field(field.name()) {
+                if state_field.kind() != FieldKind::Scalar {
+                    panic!("coefficient '{}' must be scalar", field.name());
+                }
+                state_scalar_expr(layout, "state", idx, field.name())
+            } else {
+                coeff_named_expr(field.name()).unwrap_or_else(|| {
+                    panic!("missing coefficient field '{}' in state layout", field.name())
+                })
+            }
+        }
+    }
+}
+
+fn coeff_face_expr(
+    layout: &StateLayout,
+    coeff: Option<&Coefficient>,
+    owner_idx: &str,
+    neighbor_idx: &str,
+    fallback: &str,
+) -> String {
+    match coeff {
+        None => fallback.to_string(),
+        Some(Coefficient::Constant(value)) => f32_literal(*value),
+        Some(Coefficient::Field(field)) => {
+            if let Some(state_field) = layout.field(field.name()) {
+                if state_field.kind() != FieldKind::Scalar {
+                    panic!("coefficient '{}' must be scalar", field.name());
+                }
+                let own = state_scalar_expr(layout, "state", owner_idx, field.name());
+                let neigh = state_scalar_expr(layout, "state", neighbor_idx, field.name());
+                format!("0.5 * ({own} + {neigh})")
+            } else {
+                coeff_named_expr(field.name()).unwrap_or_else(|| {
+                    panic!("missing coefficient field '{}' in state layout", field.name())
+                })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct MomentumPlan {
-    has_ddt: bool,
-    has_convection: bool,
-    has_diffusion: bool,
-    has_grad: bool,
-    convection_scheme: Option<Scheme>,
+    ddt: Option<DiscreteOp>,
+    convection: Option<DiscreteOp>,
+    diffusion: Option<DiscreteOp>,
+    gradient: Option<DiscreteOp>,
 }
 
 fn momentum_plan(system: &DiscreteSystem) -> MomentumPlan {
     let mut plan = MomentumPlan {
-        has_ddt: false,
-        has_convection: false,
-        has_diffusion: false,
-        has_grad: false,
-        convection_scheme: None,
+        ddt: None,
+        convection: None,
+        diffusion: None,
+        gradient: None,
     };
 
     let mut found = false;
@@ -326,15 +387,14 @@ fn momentum_plan(system: &DiscreteSystem) -> MomentumPlan {
         found = true;
         for op in &equation.ops {
             match op.kind {
-                DiscreteOpKind::TimeDerivative => plan.has_ddt = true,
+                DiscreteOpKind::TimeDerivative => plan.ddt = Some(op.clone()),
                 DiscreteOpKind::Convection => {
-                    plan.has_convection = true;
-                    if plan.convection_scheme.is_none() {
-                        plan.convection_scheme = Some(op.scheme);
+                    if plan.convection.is_none() {
+                        plan.convection = Some(op.clone());
                     }
                 }
-                DiscreteOpKind::Diffusion => plan.has_diffusion = true,
-                DiscreteOpKind::Gradient => plan.has_grad = true,
+                DiscreteOpKind::Diffusion => plan.diffusion = Some(op.clone()),
+                DiscreteOpKind::Gradient => plan.gradient = Some(op.clone()),
                 DiscreteOpKind::Source => {}
             }
         }
@@ -404,11 +464,13 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
     stmts.push(dsl::var_typed("rhs_v", Type::F32, Some("0.0")));
     stmts.push(dsl::var_typed("rhs_p", Type::F32, Some("0.0")));
     stmts.push(dsl::var_typed("scalar_diag_p", Type::F32, Some("0.0")));
-    if plan.has_ddt {
+    if let Some(ddt_op) = &plan.ddt {
+        let rho_expr = coeff_cell_expr(layout, ddt_op.coeff.as_ref(), "idx", "constants.density");
         stmts.push(dsl::let_("u_n", &u_old_expr));
+        stmts.push(dsl::let_("rho", &rho_expr));
         stmts.push(dsl::var(
             "coeff_time",
-            "vol * constants.density / constants.dt",
+            "vol * rho / constants.dt",
         ));
         stmts.push(dsl::var("rhs_time_u", "coeff_time * u_n.x"));
         stmts.push(dsl::var("rhs_time_v", "coeff_time * u_n.y"));
@@ -421,17 +483,17 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
                 dsl::let_("u_nm1", &u_old_old_expr),
                 dsl::assign(
                     "coeff_time",
-                    "vol * constants.density / dt * (1.0 + 2.0 * r) / (1.0 + r)",
+                    "vol * rho / dt * (1.0 + 2.0 * r) / (1.0 + r)",
                 ),
                 dsl::let_("factor_n", "(1.0 + r)"),
                 dsl::let_("factor_nm1", "(r * r) / (1.0 + r)"),
                 dsl::assign(
                     "rhs_time_u",
-                    "(vol * constants.density / dt) * (factor_n * u_n.x - factor_nm1 * u_nm1.x)",
+                    "(vol * rho / dt) * (factor_n * u_n.x - factor_nm1 * u_nm1.x)",
                 ),
                 dsl::assign(
                     "rhs_time_v",
-                    "(vol * constants.density / dt) * (factor_n * u_n.y - factor_nm1 * u_nm1.y)",
+                    "(vol * rho / dt) * (factor_n * u_n.y - factor_nm1 * u_nm1.y)",
                 ),
             ]),
             None,
@@ -489,6 +551,7 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             ]),
             Some(dsl::block(vec![
                 dsl::assign("is_boundary", "true"),
+                dsl::assign("other_idx", "idx"),
                 dsl::assign("other_center", "f_center"),
                 dsl::assign("d_p_neigh", &d_p_idx_expr),
             ])),
@@ -501,14 +564,18 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             "abs(d_vec_x * normal.x + d_vec_y * normal.y)",
         ));
         body.push(dsl::let_("dist", "max(dist_proj, 1e-6)"));
-        if plan.has_diffusion {
-            body.push(dsl::let_("mu", "constants.viscosity"));
-            body.push(dsl::let_("diff_coeff", "codegen_diff_coeff(mu, area, dist)"));
+        if let Some(diff_op) = &plan.diffusion {
+            let mu_expr =
+                coeff_face_expr(layout, diff_op.coeff.as_ref(), "idx", "other_idx", "1.0");
+            body.push(dsl::let_(
+                "diff_coeff",
+                &format!("codegen_diff_coeff({}, area, dist)", mu_expr),
+            ));
         } else {
             body.push(dsl::let_("diff_coeff", "0.0"));
         }
 
-        if plan.has_convection {
+        if plan.convection.is_some() {
             body.push(dsl::let_("conv_coeff", "codegen_conv_coeff(flux)"));
             body.push(dsl::let_("conv_coeff_diag", "conv_coeff.x"));
             body.push(dsl::let_("conv_coeff_off", "conv_coeff.y"));
@@ -593,7 +660,7 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
                 ])),
             ),
         ];
-        if plan.has_grad {
+        if plan.gradient.is_some() {
             inlet_stmts.extend(vec![
                 dsl::let_("pg_force_x", "area * normal.x"),
                 dsl::let_("pg_force_y", "area * normal.y"),
@@ -614,7 +681,7 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             dsl::assign_op(AssignOp::Add, "diag_u", "diff_coeff"),
             dsl::assign_op(AssignOp::Add, "diag_v", "diff_coeff"),
         ];
-        if plan.has_grad {
+        if plan.gradient.is_some() {
             wall_stmts.extend(vec![
                 dsl::let_("pg_force_x", "area * normal.x"),
                 dsl::let_("pg_force_y", "area * normal.y"),
@@ -672,10 +739,8 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             dsl::assign_op(AssignOp::Add, "diag_v", "diff_coeff + conv_coeff_diag"),
         ];
 
-        if plan.has_convection {
-            let scheme_id = plan
-                .convection_scheme
-                .unwrap_or(Scheme::Upwind) as u32;
+        if let Some(conv_op) = &plan.convection {
+            let scheme_id = conv_op.scheme as u32;
             interior_stmts.push(dsl::let_typed(
                 "scheme_id",
                 Type::U32,
@@ -808,7 +873,7 @@ fn main_body(layout: &StateLayout, plan: &MomentumPlan) -> Block {
             None,
         ));
 
-        if plan.has_grad {
+        if plan.gradient.is_some() {
             interior_stmts.extend(vec![
                 dsl::let_("pg_force_x", "area * normal.x"),
                 dsl::let_("pg_force_y", "area * normal.y"),
@@ -1030,5 +1095,30 @@ mod tests {
         let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout());
 
         assert!(wgsl.contains("let diff_coeff = 0.0"));
+    }
+
+    #[test]
+    fn coupled_assembly_codegen_maps_named_coefficients() {
+        let u = vol_vector("U");
+        let nu = vol_scalar("nu");
+        let rho = vol_scalar("rho");
+        let eqn = crate::solver::model::ast::Equation::new(u.clone())
+            .with_term(fvm::ddt_coeff(
+                crate::solver::model::ast::Coefficient::field(rho).unwrap(),
+                u.clone(),
+            ))
+            .with_term(fvm::laplacian(
+                crate::solver::model::ast::Coefficient::field(nu).unwrap(),
+                u.clone(),
+            ));
+        let mut system = crate::solver::model::ast::EquationSystem::new();
+        system.add_equation(eqn);
+
+        let registry = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &registry);
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout());
+
+        assert!(wgsl.contains("let rho = constants.density"));
+        assert!(wgsl.contains("codegen_diff_coeff(constants.viscosity, area, dist)"));
     }
 }

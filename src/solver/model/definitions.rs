@@ -16,6 +16,7 @@ struct IncompressibleMomentumFields {
     p: FieldRef,
     phi: FluxRef,
     nu: FieldRef,
+    rho: FieldRef,
     d_p: FieldRef,
     grad_p: FieldRef,
     grad_component: FieldRef,
@@ -28,6 +29,7 @@ impl IncompressibleMomentumFields {
             p: vol_scalar("p"),
             phi: surface_scalar("phi"),
             nu: vol_scalar("nu"),
+            rho: vol_scalar("rho"),
             d_p: vol_scalar("d_p"),
             grad_p: vol_vector("grad_p"),
             grad_component: vol_vector("grad_component"),
@@ -36,7 +38,10 @@ impl IncompressibleMomentumFields {
 }
 
 fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -> EquationSystem {
-    let momentum = (fvm::ddt(fields.u)
+    let momentum = (fvm::ddt_coeff(
+        Coefficient::field(fields.rho).expect("rho must be scalar"),
+        fields.u,
+    )
         + fvm::div(fields.phi, fields.u)
         + fvm::laplacian(
             Coefficient::field(fields.nu).expect("nu must be scalar"),
@@ -91,6 +96,10 @@ mod tests {
         assert_eq!(momentum.target().name(), "U");
         assert_eq!(momentum.terms().len(), 4);
         assert_eq!(momentum.terms()[0].op, TermOp::Ddt);
+        match &momentum.terms()[0].coeff {
+            Some(Coefficient::Field(field)) => assert_eq!(field.name(), "rho"),
+            other => panic!("expected rho coefficient, got {:?}", other),
+        }
         assert_eq!(momentum.terms()[1].op, TermOp::Div);
         assert_eq!(momentum.terms()[2].op, TermOp::Laplacian);
         assert_eq!(momentum.terms()[3].op, TermOp::Grad);

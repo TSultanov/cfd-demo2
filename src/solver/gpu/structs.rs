@@ -24,6 +24,7 @@ pub enum PreconditionerType {
 }
 
 pub struct CoupledSolverResources {
+    pub num_unknowns: u32,
     pub b_row_offsets: wgpu::Buffer,
     pub b_col_indices: wgpu::Buffer,
     pub b_matrix_values: wgpu::Buffer,

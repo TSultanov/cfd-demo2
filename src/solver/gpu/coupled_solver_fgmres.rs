@@ -47,6 +47,8 @@ pub struct FgmresResources {
     pub b_precond_params: wgpu::Buffer, // New buffer for PreconditionerParams
     /// Maximum restart dimension
     pub max_restart: usize,
+    /// Total number of unknowns in the coupled system
+    pub num_unknowns: u32,
     /// Number of workgroups for dot product
     pub num_dot_groups: u32,
     /// Vector bind group layout (x, y, z)
@@ -159,9 +161,17 @@ struct IterParams {
 }
 
 impl GpuSolver {
+    pub fn coupled_unknowns(&self) -> u32 {
+        self.coupled_resources
+            .as_ref()
+            .map(|res| res.num_unknowns)
+            .unwrap_or(self.num_cells * 3)
+    }
+
     fn ensure_fgmres_resources(&mut self, max_restart: usize) {
+        let n = self.coupled_unknowns();
         let rebuild = match &self.fgmres_resources {
-            Some(existing) => existing.max_restart < max_restart,
+            Some(existing) => existing.max_restart < max_restart || existing.num_unknowns != n,
             None => true,
         };
 
@@ -210,7 +220,7 @@ impl GpuSolver {
 
     /// Initialize FGMRES resources
     pub fn init_fgmres_resources(&self, max_restart: usize) -> FgmresResources {
-        let n = self.num_cells * 3;
+        let n = self.coupled_unknowns();
         let workgroup_size = 64u32;
         let num_groups = n.div_ceil(workgroup_size);
         let device = &self.context.device;
@@ -1218,6 +1228,7 @@ impl GpuSolver {
             b_params,
             b_precond_params,
             max_restart,
+            num_unknowns: n,
             num_dot_groups: num_groups,
             bgl_vectors,
             bgl_schur_vectors,
@@ -1733,7 +1744,7 @@ impl GpuSolver {
         }
 
         let num_cells = self.num_cells;
-        let n = num_cells * 3;
+        let n = self.coupled_unknowns();
         let max_restart = 50usize;
         let max_outer = 20usize;
         let tol = 1e-5f32;

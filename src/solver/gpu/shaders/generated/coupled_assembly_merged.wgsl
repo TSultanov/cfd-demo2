@@ -116,7 +116,7 @@ fn safe_inverse(val: f32) -> f32 {
 
 // equation: U (vector2)
 
-// term: ddt target=U field=U discretization=implicit scheme=upwind
+// term: ddt target=U field=U discretization=implicit scheme=upwind coeff=field(rho)
 
 fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32, phi_n: vec2<f32>, phi_nm1: vec2<f32>) -> vec3<f32> {
     // implicit time derivative (BDF1/BDF2)
@@ -239,7 +239,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_p: f32 = 0.0;
     var scalar_diag_p: f32 = 0.0;
     let u_n = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
-    var coeff_time = vol * constants.density / constants.dt;
+    let rho = constants.density;
+    var coeff_time = vol * rho / constants.dt;
     var rhs_time_u = coeff_time * u_n.x;
     var rhs_time_v = coeff_time * u_n.y;
     if (constants.time_scheme == 1u) {
@@ -247,11 +248,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
         let u_nm1 = vec2<f32>(state_old_old[idx * 8u + 0u], state_old_old[idx * 8u + 1u]);
-        coeff_time = vol * constants.density / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        coeff_time = vol * rho / dt * (1.0 + 2.0 * r) / (1.0 + r);
         let factor_n = 1.0 + r;
         let factor_nm1 = r * r / (1.0 + r);
-        rhs_time_u = vol * constants.density / dt * (factor_n * u_n.x - factor_nm1 * u_nm1.x);
-        rhs_time_v = vol * constants.density / dt * (factor_n * u_n.y - factor_nm1 * u_nm1.y);
+        rhs_time_u = vol * rho / dt * (factor_n * u_n.x - factor_nm1 * u_nm1.x);
+        rhs_time_v = vol * rho / dt * (factor_n * u_n.y - factor_nm1 * u_nm1.y);
     }
     diag_u += coeff_time;
     diag_v += coeff_time;
@@ -285,6 +286,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             d_p_neigh = state[other_idx * 8u + 3u];
         } else {
             is_boundary = true;
+            other_idx = idx;
             other_center = f_center;
             d_p_neigh = state[idx * 8u + 3u];
         }
@@ -292,8 +294,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d_vec_y = other_center.y - center.y;
         let dist_proj = abs(d_vec_x * normal.x + d_vec_y * normal.y);
         let dist = max(dist_proj, 1e-6);
-        let mu = constants.viscosity;
-        let diff_coeff = codegen_diff_coeff(mu, area, dist);
+        let diff_coeff = codegen_diff_coeff(constants.viscosity, area, dist);
         let conv_coeff = codegen_conv_coeff(flux);
         let conv_coeff_diag = conv_coeff.x;
         let conv_coeff_off = conv_coeff.y;

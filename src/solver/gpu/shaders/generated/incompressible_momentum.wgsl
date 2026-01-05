@@ -4,7 +4,7 @@
 
 // equation: U (vector2)
 
-// term: ddt target=U field=U discretization=implicit scheme=upwind
+// term: ddt target=U field=U discretization=implicit scheme=upwind coeff=field(rho)
 
 fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32, phi_n: vec2<f32>, phi_nm1: vec2<f32>) -> vec3<f32> {
     // implicit time derivative (BDF1/BDF2)

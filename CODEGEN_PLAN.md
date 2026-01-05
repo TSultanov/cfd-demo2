@@ -13,6 +13,8 @@ discretization automatically, with modular swapping of schemes and boundary cond
   QUICK, `grad(p)` uses linear, `ddt` uses BDF2).
 - **BC Layer:** Boundary-condition objects applied during IR lowering for each term.
 - **Codegen Backend:** Emit WGSL kernels from IR and feed into `wgsl_bindgen`.
+- **Scalar-as-Multiscalar:** Treat scalar PDEs as the `N=1` case of a multiscalar system,
+  using the same packed-state layout and per-field offsets.
 
 ## Integration Points in Current Code
 - Replace hand-coded assembly in `src/solver/gpu/shaders/coupled_assembly_merged.wgsl`
@@ -126,3 +128,39 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Refactored the incompressible momentum model/system definitions to share a single field set and avoid duplicate `vol_scalar`/`vol_vector` declarations (`src/solver/model/definitions.rs`).
 - **2025-02-10:** Made `FieldRef`/`FluxRef` copyable by storing static names and removed the remaining explicit clones in the incompressible momentum model builder (`src/solver/model/ast.rs`, `src/solver/model/definitions.rs`).
 - **2025-02-10:** Verified codegen unit tests after `FieldRef`/`FluxRef` changes (`cargo test codegen --lib`).
+- **2025-02-10:** Added analytical-solution model tests for Laplace/Poisson and heat equation using a simple 1D evaluator driven by the high-level model AST (`tests/model_analytical_solutions_test.rs`).
+- **2025-02-10:** Verified analytical-solution model tests (`cargo test --test model_analytical_solutions_test`).
+- **2025-02-10:** Noted scalar PDEs should be handled as `N=1` multiscalar systems in the codegen/model
+  plan (same offsets/layout logic as multi-field models).
+- **2025-02-10:** Added a GPU CG solver path for generic scalar systems, with linear-system
+  upload and solution readback helpers (`src/solver/gpu/linear_solver/common.rs`).
+- **2025-02-10:** Reworked analytical-solution tests to assemble scalar PDE systems on a mesh
+  and solve them with the GPU CG path (Laplace, Poisson, heat) (`tests/model_analytical_solutions_test.rs`).
+- **2025-02-10:** Cleaned CG helper warnings by tightening residual handling and marking
+  unused scalar fields as intentionally reserved (`src/solver/gpu/linear_solver/common.rs`).
+- **2025-02-10:** Verified solver-backed analytical tests (`cargo test --test model_analytical_solutions_test`).
+- **2025-02-10:** Promoted density into the high-level incompressible momentum model as an
+  explicit `rho` coefficient on the time-derivative term (`src/solver/model/definitions.rs`).
+- **2025-02-10:** Switched coupled-assembly codegen to pull time/diffusion coefficients from
+  the model (including `rho`/`nu` mapping to constants) and added coverage for the new
+  coefficient mapping (`src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Cleaned coupled-assembly codegen imports after coefficient refactor
+  (`src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Verified codegen unit tests after coefficient refactor (`cargo test codegen --lib`).
+- **2025-02-10:** Verified solver-backed analytical tests after coefficient refactor
+  (`cargo test --test model_analytical_solutions_test`).
+- **2025-02-10:** Started generalizing solver sizing by tracking coupled-system unknown counts
+  alongside CSR buffers (`src/solver/gpu/structs.rs`).
+- **2025-02-10:** Initialized coupled-system unknown counts during solver setup
+  (`src/solver/gpu/init/linear_solver/mod.rs`).
+- **2025-02-10:** Tracked coupled unknown counts in FGMRES resources to decouple solver sizing
+  from hardcoded field counts (`src/solver/gpu/coupled_solver_fgmres.rs`).
+- **2025-02-10:** Added a coupled-unknowns helper and ensured FGMRES resources rebuild when
+  the coupled system size changes (`src/solver/gpu/coupled_solver_fgmres.rs`).
+- **2025-02-10:** Made CG update solver params per solve and added a size-aware CG entry point
+  to handle different system sizes (`src/solver/gpu/linear_solver/common.rs`).
+- **2025-02-10:** Added a scaling test that exercises CG and FGMRES sizing across two mesh
+  resolutions (`tests/gpu_solver_scaling_test.rs`).
+- **2025-02-10:** Verified solver scaling test (`cargo test --test gpu_solver_scaling_test`).
+- **2025-02-10:** Re-verified solver-backed analytical tests after solver sizing updates
+  (`cargo test --test model_analytical_solutions_test`).

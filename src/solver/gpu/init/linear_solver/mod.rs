@@ -737,6 +737,7 @@ fn init_coupled_resources(
     });
 
     CoupledSolverResources {
+        num_unknowns: num_coupled_cells,
         b_row_offsets: matrix_res.b_row_offsets,
         b_col_indices: matrix_res.b_col_indices,
         b_matrix_values: matrix_res.b_matrix_values,

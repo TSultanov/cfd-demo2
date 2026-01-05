@@ -3,9 +3,6 @@ pub mod linear_solver;
 pub mod mesh;
 pub mod physics;
 pub mod scalars;
-pub mod shader_variant;
-
-pub use shader_variant::ShaderVariant;
 
 use crate::solver::mesh::Mesh;
 use std::sync::Arc;
@@ -20,34 +17,20 @@ impl GpuSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Self {
-        Self::new_with_shader_variant(mesh, device, queue, ShaderVariant::default()).await
-    }
-
-    pub async fn new_with_shader_variant(
-        mesh: &Mesh,
-        device: Option<wgpu::Device>,
-        queue: Option<wgpu::Queue>,
-        shader_variant: ShaderVariant,
-    ) -> Self {
         let context = super::context::GpuContext::new(device, queue).await;
 
         let num_cells = mesh.cell_cx.len() as u32;
         let num_faces = mesh.face_owner.len() as u32;
 
         // 1. Initialize Mesh
-        let mesh_res = mesh::init_mesh(&context.device, mesh, shader_variant);
+        let mesh_res = mesh::init_mesh(&context.device, mesh);
 
         // 2. Initialize Field Buffers (phase 1 - before pipelines)
         let field_buffers = fields::init_field_buffers(&context.device, num_cells, num_faces);
 
         // 3. Initialize Linear Solver
-        let linear_res = linear_solver::init_linear_solver(
-            &context.device,
-            mesh,
-            num_cells,
-            &mesh_res.bgl_mesh,
-            shader_variant,
-        );
+        let linear_res =
+            linear_solver::init_linear_solver(&context.device, mesh, num_cells, &mesh_res.bgl_mesh);
 
         // 4. Initialize Scalars
         let scalar_res = scalars::init_scalars(
@@ -59,7 +42,7 @@ impl GpuSolver {
         );
 
         // 5. Initialize Physics Pipelines (creates pipelines with shader-derived layouts)
-        let physics_res = physics::init_physics_pipelines(&context.device, shader_variant);
+        let physics_res = physics::init_physics_pipelines(&context.device);
 
         // 6. Extract bind group layout from pipeline and create bind groups (phase 2)
         let bgl_fields = physics_res

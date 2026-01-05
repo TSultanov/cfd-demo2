@@ -1,4 +1,3 @@
-use crate::solver::gpu::init::ShaderVariant;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::GpuSolver;
 use crate::solver::mesh::{
@@ -308,11 +307,10 @@ impl CFDApp {
         let initial_u = self.build_initial_velocity(&mesh);
         let initial_p = vec![0.0; n_cells];
 
-        let mut gpu_solver = pollster::block_on(GpuSolver::new_with_shader_variant(
+        let mut gpu_solver = pollster::block_on(GpuSolver::new(
             &mesh,
             self.wgpu_device.clone(),
             self.wgpu_queue.clone(),
-            ShaderVariant::Generated,
         ));
         gpu_solver.set_dt(self.timestep as f32);
         gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);

@@ -1,4 +1,3 @@
-use cfd2::solver::gpu::init::ShaderVariant;
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
 use nalgebra::{Point2, Vector2};
@@ -17,10 +16,8 @@ fn build_mesh() -> Mesh {
     generate_cut_cell_mesh(&geo, 0.2, 0.2, 1.0, domain_size)
 }
 
-fn run_solver(mesh: &Mesh, variant: ShaderVariant, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
-    let mut solver = pollster::block_on(GpuSolver::new_with_shader_variant(
-        mesh, None, None, variant,
-    ));
+fn run_solver(mesh: &Mesh, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
+    let mut solver = pollster::block_on(GpuSolver::new(mesh, None, None));
     solver.set_dt(0.01);
     solver.set_viscosity(0.01);
     solver.set_density(1.0);
@@ -44,49 +41,28 @@ fn run_solver(mesh: &Mesh, variant: ShaderVariant, steps: usize) -> (Vec<(f64, f
 }
 
 #[test]
-fn gpu_generated_kernels_match_manual() {
+fn gpu_codegen_kernels_run_nontrivial() {
     let mesh = build_mesh();
 
     let steps = 5;
-    let (u_manual, p_manual) = run_solver(&mesh, ShaderVariant::Manual, steps);
-    let (u_codegen, p_codegen) = run_solver(&mesh, ShaderVariant::Generated, steps);
+    let (u, p) = run_solver(&mesh, steps);
 
-    assert_eq!(u_manual.len(), u_codegen.len());
-    assert_eq!(p_manual.len(), p_codegen.len());
-
-    let mut max_u_diff = 0.0f64;
     let mut max_u_mag = 0.0f64;
-    for (manual, codegen) in u_manual.iter().zip(u_codegen.iter()) {
-        let dx = (manual.0 - codegen.0).abs();
-        let dy = (manual.1 - codegen.1).abs();
-        max_u_diff = max_u_diff.max(dx.max(dy));
-        max_u_mag = max_u_mag.max((manual.0 * manual.0 + manual.1 * manual.1).sqrt());
+    for value in &u {
+        assert!(value.0.is_finite());
+        assert!(value.1.is_finite());
+        max_u_mag = max_u_mag.max((value.0 * value.0 + value.1 * value.1).sqrt());
     }
 
-    let mut max_p_diff = 0.0f64;
-    for (manual, codegen) in p_manual.iter().zip(p_codegen.iter()) {
-        max_p_diff = max_p_diff.max((manual - codegen).abs());
+    for value in &p {
+        assert!(value.is_finite());
     }
 
-    let u_tol = 8e-6;
-    let p_tol = 1.5e-4;
     let nontrivial_tol = 1e-4;
-    assert!(
-        max_u_diff < u_tol,
-        "max u diff {:.6e} exceeds tolerance {:.6e}",
-        max_u_diff,
-        u_tol
-    );
     assert!(
         max_u_mag > nontrivial_tol,
         "max u magnitude {:.6e} is below nontrivial threshold {:.6e}",
         max_u_mag,
         nontrivial_tol
-    );
-    assert!(
-        max_p_diff < p_tol,
-        "max p diff {:.6e} exceeds tolerance {:.6e}",
-        max_p_diff,
-        p_tol
     );
 }

@@ -121,3 +121,5 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified codegen unit tests after model/backend module split and build-script cleanup (`cargo test codegen --lib`).
 - **2025-02-10:** Verified manual-vs-generated solver comparison after the model/backend refactor (`cargo test --test gpu_codegen_matches_manual_test`).
 - **2025-02-10:** Updated UI solver initialization to explicitly use the generated shader variant (`src/ui/app.rs`).
+- **2025-02-10:** Removed manual WGSL kernels and simplified GPU init to generated-only pipelines/bindings; updated the solver smoke test to validate generated kernels only (`src/solver/gpu/init/*`, `src/solver/gpu/shaders/*`, `tests/gpu_codegen_matches_manual_test.rs`).
+- **2025-02-10:** Verified codegen unit tests and the generated-kernel smoke test after removing manual WGSL (`cargo test codegen --lib`, `cargo test --test gpu_codegen_matches_manual_test`).

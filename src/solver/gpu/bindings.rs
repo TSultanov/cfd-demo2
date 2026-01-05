@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 3b1d8b2685aff20a35332d15a7e86ee077e64179bfff50e3a283d5a4b45e59fa
+// SourceHash: d0ffae2fa00f3f3fd293d9d3f8990aec94a918fea93cce391fc02ad6710ec258
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12,6 +12,7 @@ pub enum ShaderEntry {
     DotProduct,
     DotProductPair,
     FluxRhieChow,
+    GeneratedIncompressibleMomentum,
     GmresCgs,
     GmresLogic,
     GmresOps,
@@ -31,6 +32,9 @@ impl ShaderEntry {
             Self::DotProduct => dot_product::create_pipeline_layout(device),
             Self::DotProductPair => dot_product_pair::create_pipeline_layout(device),
             Self::FluxRhieChow => flux_rhie_chow::create_pipeline_layout(device),
+            Self::GeneratedIncompressibleMomentum => {
+                generated::incompressible_momentum::create_pipeline_layout(device)
+            }
             Self::GmresCgs => gmres_cgs::create_pipeline_layout(device),
             Self::GmresLogic => gmres_logic::create_pipeline_layout(device),
             Self::GmresOps => gmres_ops::create_pipeline_layout(device),
@@ -54,6 +58,9 @@ impl ShaderEntry {
             Self::DotProduct => dot_product::create_shader_module_embed_source(device),
             Self::DotProductPair => dot_product_pair::create_shader_module_embed_source(device),
             Self::FluxRhieChow => flux_rhie_chow::create_shader_module_embed_source(device),
+            Self::GeneratedIncompressibleMomentum => {
+                generated::incompressible_momentum::create_shader_module_embed_source(device)
+            }
             Self::GmresCgs => gmres_cgs::create_shader_module_embed_source(device),
             Self::GmresLogic => gmres_logic::create_shader_module_embed_source(device),
             Self::GmresOps => gmres_ops::create_shader_module_embed_source(device),
@@ -3770,6 +3777,66 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 "#;
+}
+pub mod generated {
+    use super::{_root, _root::*};
+    pub mod incompressible_momentum {
+        use super::{_root, _root::*};
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 0],
+            ) -> [wgpu::BindGroupLayout; 0] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedIncompressibleMomentum::PipelineLayout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("incompressible_momentum.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+fn term_ddt_U_upwind() {
+    return;
+}
+
+fn term_div_phi_U_upwind() {
+    return;
+}
+
+fn term_laplacian_U_upwind() {
+    return;
+}
+
+fn term_grad_p_upwind() {
+    return;
+}
+
+fn assemble_U() {
+    term_ddt_U_upwind();
+    term_div_phi_U_upwind();
+    term_laplacian_U_upwind();
+    term_grad_p_upwind();
+    return;
+}
+
+fn main() {
+    assemble_U();
+    return;
+}
+
+"#;
+    }
 }
 pub mod gmres_cgs {
     use super::{_root, _root::*};

@@ -188,6 +188,7 @@ pub fn compressible_model() -> ModelSpec {
     let layout = StateLayout::new(vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.u]);
     let kernel_plan = KernelPlan::new(vec![
         KernelKind::CompressibleFluxKt,
+        KernelKind::CompressibleGradients,
         KernelKind::CompressibleAssembly,
         KernelKind::CompressibleApply,
         KernelKind::CompressibleUpdate,

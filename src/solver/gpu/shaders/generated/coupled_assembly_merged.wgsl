@@ -327,48 +327,61 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let u_own = vec2<f32>(state[idx * 8u + 0u], state[idx * 8u + 1u]);
                 let u_neigh = vec2<f32>(state[other_idx * 8u + 0u], state[other_idx * 8u + 1u]);
                 var phi_upwind_u = u_own.x;
-                var phi_upwind_v = u_own.y;
                 if (flux < 0.0) {
                     phi_upwind_u = u_neigh.x;
-                    phi_upwind_v = u_neigh.y;
                 }
                 var phi_ho_u = phi_upwind_u;
-                var phi_ho_v = phi_upwind_v;
                 if (scheme_id == 1u) {
                     if (flux > 0.0) {
-                        let grad_u_own = grad_u[idx];
-                        let grad_v_own = grad_v[idx];
-                        let r_x = f_center.x - center.x;
-                        let r_y = f_center.y - center.y;
-                        phi_ho_u = u_own.x + grad_u_own.x * r_x + grad_u_own.y * r_y;
-                        phi_ho_v = u_own.y + grad_v_own.x * r_x + grad_v_own.y * r_y;
+                        let r_u_x = f_center.x - center.x;
+                        let r_u_y = f_center.y - center.y;
+                        phi_ho_u = u_own.x + grad_u[idx].x * r_u_x + grad_u[idx].y * r_u_y;
                     } else {
-                        let grad_u_neigh = grad_u[other_idx];
-                        let grad_v_neigh = grad_v[other_idx];
-                        let r_x = f_center.x - other_center.x;
-                        let r_y = f_center.y - other_center.y;
-                        phi_ho_u = u_neigh.x + grad_u_neigh.x * r_x + grad_u_neigh.y * r_y;
-                        phi_ho_v = u_neigh.y + grad_v_neigh.x * r_x + grad_v_neigh.y * r_y;
+                        let r_u_x = f_center.x - other_center.x;
+                        let r_u_y = f_center.y - other_center.y;
+                        phi_ho_u = u_neigh.x + grad_u[other_idx].x * r_u_x + grad_u[other_idx].y * r_u_y;
                     }
                 } else {
                     if (scheme_id == 2u) {
                         if (flux > 0.0) {
-                            let grad_u_own = grad_u[idx];
-                            let grad_v_own = grad_v[idx];
-                            let d_cd_x = other_center.x - center.x;
-                            let d_cd_y = other_center.y - center.y;
-                            let grad_term_u = grad_u_own.x * d_cd_x + grad_u_own.y * d_cd_y;
-                            let grad_term_v = grad_v_own.x * d_cd_x + grad_v_own.y * d_cd_y;
+                            let d_cd_u_x = other_center.x - center.x;
+                            let d_cd_u_y = other_center.y - center.y;
+                            let grad_term_u = grad_u[idx].x * d_cd_u_x + grad_u[idx].y * d_cd_u_y;
                             phi_ho_u = 0.625 * u_own.x + 0.375 * u_neigh.x + 0.125 * grad_term_u;
+                        } else {
+                            let d_cd_u_x = center.x - other_center.x;
+                            let d_cd_u_y = center.y - other_center.y;
+                            let grad_term_u = grad_u[other_idx].x * d_cd_u_x + grad_u[other_idx].y * d_cd_u_y;
+                            phi_ho_u = 0.625 * u_neigh.x + 0.375 * u_own.x + 0.125 * grad_term_u;
+                        }
+                    }
+                }
+                var phi_upwind_v = u_own.y;
+                if (flux < 0.0) {
+                    phi_upwind_v = u_neigh.y;
+                }
+                var phi_ho_v = phi_upwind_v;
+                if (scheme_id == 1u) {
+                    if (flux > 0.0) {
+                        let r_v_x = f_center.x - center.x;
+                        let r_v_y = f_center.y - center.y;
+                        phi_ho_v = u_own.y + grad_v[idx].x * r_v_x + grad_v[idx].y * r_v_y;
+                    } else {
+                        let r_v_x = f_center.x - other_center.x;
+                        let r_v_y = f_center.y - other_center.y;
+                        phi_ho_v = u_neigh.y + grad_v[other_idx].x * r_v_x + grad_v[other_idx].y * r_v_y;
+                    }
+                } else {
+                    if (scheme_id == 2u) {
+                        if (flux > 0.0) {
+                            let d_cd_v_x = other_center.x - center.x;
+                            let d_cd_v_y = other_center.y - center.y;
+                            let grad_term_v = grad_v[idx].x * d_cd_v_x + grad_v[idx].y * d_cd_v_y;
                             phi_ho_v = 0.625 * u_own.y + 0.375 * u_neigh.y + 0.125 * grad_term_v;
                         } else {
-                            let grad_u_neigh = grad_u[other_idx];
-                            let grad_v_neigh = grad_v[other_idx];
-                            let d_cd_x = center.x - other_center.x;
-                            let d_cd_y = center.y - other_center.y;
-                            let grad_term_u = grad_u_neigh.x * d_cd_x + grad_u_neigh.y * d_cd_y;
-                            let grad_term_v = grad_v_neigh.x * d_cd_x + grad_v_neigh.y * d_cd_y;
-                            phi_ho_u = 0.625 * u_neigh.x + 0.375 * u_own.x + 0.125 * grad_term_u;
+                            let d_cd_v_x = center.x - other_center.x;
+                            let d_cd_v_y = center.y - other_center.y;
+                            let grad_term_v = grad_v[other_idx].x * d_cd_v_x + grad_v[other_idx].y * d_cd_v_y;
                             phi_ho_v = 0.625 * u_neigh.y + 0.375 * u_own.y + 0.125 * grad_term_v;
                         }
                     }

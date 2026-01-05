@@ -454,3 +454,26 @@ discretization automatically, with modular swapping of schemes and boundary cond
   iterations for improved acoustic accuracy (`tests/gpu_compressible_validation_test.rs`).
 - **2025-02-10:** Refined the acoustic pulse validation mesh to improve wave
   resolution (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Added shared reconstruction helpers for SOU/QUICK face
+  extrapolation to reuse between incompressible and compressible codegen
+  (`src/solver/codegen/reconstruction.rs`, `src/solver/codegen/mod.rs`, `build.rs`).
+- **2025-02-10:** Refactored coupled assembly scheme corrections to use the shared
+  reconstruction helper for consistent SOU/QUICK handling
+  (`src/solver/codegen/coupled_assembly.rs`).
+- **2025-02-10:** Added SOU/QUICK defect-correction for compressible conservative
+  fluxes using reconstructed face states in the assembly loop
+  (`src/solver/codegen/compressible_assembly.rs`).
+- **2025-02-10:** Exercised Second-Order Upwind scheme for the compressible solver
+  in the uniform-state GPU test (`tests/gpu_compressible_solver_test.rs`).
+- **2025-02-10:** Switched the compressible acoustic pulse validation to QUICK
+  to cover the higher-order path on smooth initial data
+  (`tests/gpu_compressible_validation_test.rs`).
+- **2025-02-10:** Fixed missing `AssignOp` import in compressible gradients codegen
+  after adding gradient accumulation (`src/solver/codegen/compressible_gradients.rs`).
+- **2025-02-10:** Fixed compressible gradients WGSL generation to use a mutable
+  `other_idx` binding for neighbor selection (`src/solver/codegen/compressible_gradients.rs`).
+- **2025-02-10:** Added compressible gradient buffers to apply-stage bind groups
+  so generated WGSL bindings match (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Verified compressible solver and validation tests pass with
+  SOU/QUICK scheme coverage (`tests/gpu_compressible_solver_test.rs`,
+  `tests/gpu_compressible_validation_test.rs`).

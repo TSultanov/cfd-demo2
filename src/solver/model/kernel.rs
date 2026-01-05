@@ -8,6 +8,7 @@ pub enum KernelKind {
     IncompressibleMomentum,
     CompressibleAssembly,
     CompressibleApply,
+    CompressibleGradients,
     CompressibleUpdate,
     CompressibleFluxKt,
 }

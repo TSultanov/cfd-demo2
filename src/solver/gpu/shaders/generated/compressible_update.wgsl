@@ -41,6 +41,18 @@ var<storage, read_write> fluxes: array<f32>;
 @group(0) @binding(4) 
 var<uniform> constants: Constants;
 
+@group(0) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2>;
+
+@group(0) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2>;
+
+@group(0) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2>;
+
+@group(0) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2>;
+
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {

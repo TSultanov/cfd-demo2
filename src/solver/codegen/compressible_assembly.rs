@@ -1,6 +1,7 @@
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::state_access::{state_scalar_expr, state_vec2_expr};
+use super::reconstruction::scalar_reconstruction;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
     StructDef, StructField, Type,
@@ -188,6 +189,34 @@ fn state_bindings() -> Vec<Item> {
             AccessMode::ReadWrite,
         ),
         uniform_var("constants", Type::Custom("Constants".to_string()), 1, 4),
+        storage_var(
+            "grad_rho",
+            Type::array(Type::Custom("Vector2".to_string())),
+            1,
+            5,
+            AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "grad_rho_u_x",
+            Type::array(Type::Custom("Vector2".to_string())),
+            1,
+            6,
+            AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "grad_rho_u_y",
+            Type::array(Type::Custom("Vector2".to_string())),
+            1,
+            7,
+            AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "grad_rho_e",
+            Type::array(Type::Custom("Vector2".to_string())),
+            1,
+            8,
+            AccessMode::ReadWrite,
+        ),
     ]
 }
 
@@ -292,6 +321,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "start_row_3",
         &format!("start_row_0 + {}u * num_neighbors", block_size * 3),
     ));
+    stmts.push(dsl::let_("scheme_id", "constants.scheme"));
 
     stmts.push(dsl::comment("Jacobian rows/cols: rho, rho_u_x, rho_u_y, rho_e"));
     stmts.push(dsl::var("diag_00", "0.0"));
@@ -485,6 +515,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("c_r", &format!("sqrt({gamma} * p_r * inv_rho_r)")));
     loop_body.push(dsl::let_("u_face_x", "0.5 * (u_l_x + u_r_x)"));
     loop_body.push(dsl::let_("u_face_y", "0.5 * (u_l_y + u_r_y)"));
+    loop_body.push(dsl::let_("u_face_n", "u_face_x * normal.x + u_face_y * normal.y"));
+    loop_body.push(dsl::let_("flux_adv", "u_face_n * area"));
     loop_body.push(dsl::let_("dx", "center_r.x - center.x"));
     loop_body.push(dsl::let_("dy", "center_r.y - center.y"));
     loop_body.push(dsl::let_("dist", "max(sqrt(dx * dx + dy * dy), 1e-6)"));
@@ -797,7 +829,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_32", "d_e_visc_r_rv"));
     loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_33", "d_e_visc_r_re"));
 
-    let interior_matrix = dsl::block(vec![
+    let mut interior_matrix_stmts = vec![
         dsl::let_("scalar_mat_idx", "cell_face_matrix_indices[face_offset]"),
         dsl::var("neighbor_rank", "0u"),
         dsl::if_block(
@@ -812,6 +844,98 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::let_("base_1", "start_row_1 + 4u * neighbor_rank"),
         dsl::let_("base_2", "start_row_2 + 4u * neighbor_rank"),
         dsl::let_("base_3", "start_row_3 + 4u * neighbor_rank"),
+    ];
+
+    interior_matrix_stmts.push(dsl::if_block(
+        "scheme_id != 0u",
+        {
+            let mut ho_block = Vec::new();
+            let (rho_stmts, rho_vars) = scalar_reconstruction(
+                "rho",
+                "scheme_id",
+                "flux_adv",
+                "rho_l",
+                "rho_r",
+                "grad_rho[idx]",
+                "grad_rho[other_idx]",
+                "center",
+                "center_r",
+                "f_center",
+            );
+            ho_block.extend(rho_stmts);
+            let (ru_stmts, ru_vars) = scalar_reconstruction(
+                "ru",
+                "scheme_id",
+                "flux_adv",
+                "rho_u_l.x",
+                "rho_u_r.x",
+                "grad_rho_u_x[idx]",
+                "grad_rho_u_x[other_idx]",
+                "center",
+                "center_r",
+                "f_center",
+            );
+            ho_block.extend(ru_stmts);
+            let (rv_stmts, rv_vars) = scalar_reconstruction(
+                "rv",
+                "scheme_id",
+                "flux_adv",
+                "rho_u_l.y",
+                "rho_u_r.y",
+                "grad_rho_u_y[idx]",
+                "grad_rho_u_y[other_idx]",
+                "center",
+                "center_r",
+                "f_center",
+            );
+            ho_block.extend(rv_stmts);
+            let (re_stmts, re_vars) = scalar_reconstruction(
+                "re",
+                "scheme_id",
+                "flux_adv",
+                "rho_e_l",
+                "rho_e_r",
+                "grad_rho_e[idx]",
+                "grad_rho_e[other_idx]",
+                "center",
+                "center_r",
+                "f_center",
+            );
+            ho_block.extend(re_stmts);
+            ho_block.push(dsl::let_(
+                "correction_rho",
+                &format!("flux_adv * ({} - {})", rho_vars.phi_ho, rho_vars.phi_upwind),
+            ));
+            ho_block.push(dsl::let_(
+                "correction_rho_u_x",
+                &format!("flux_adv * ({} - {})", ru_vars.phi_ho, ru_vars.phi_upwind),
+            ));
+            ho_block.push(dsl::let_(
+                "correction_rho_u_y",
+                &format!("flux_adv * ({} - {})", rv_vars.phi_ho, rv_vars.phi_upwind),
+            ));
+            ho_block.push(dsl::let_(
+                "correction_rho_e",
+                &format!("flux_adv * ({} - {})", re_vars.phi_ho, re_vars.phi_upwind),
+            ));
+            ho_block.push(dsl::assign_op(AssignOp::Add, "sum_rho", "correction_rho"));
+            ho_block.push(dsl::assign_op(
+                AssignOp::Add,
+                "sum_rho_u_x",
+                "correction_rho_u_x",
+            ));
+            ho_block.push(dsl::assign_op(
+                AssignOp::Add,
+                "sum_rho_u_y",
+                "correction_rho_u_y",
+            ));
+            ho_block.push(dsl::assign_op(AssignOp::Add, "sum_rho_e", "correction_rho_e"));
+            dsl::block(ho_block)
+        },
+        None,
+    ));
+
+    interior_matrix_stmts.extend(vec![
         dsl::assign("matrix_values[base_0 + 0u]", "jac_r_00 * area"),
         dsl::assign("matrix_values[base_0 + 1u]", "jac_r_01 * area"),
         dsl::assign("matrix_values[base_0 + 2u]", "jac_r_02 * area"),
@@ -845,6 +969,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::assign_op(AssignOp::Add, "diag_32", "jac_l_32 * area"),
         dsl::assign_op(AssignOp::Add, "diag_33", "jac_l_33 * area"),
     ]);
+
+    let interior_matrix = dsl::block(interior_matrix_stmts);
 
     let boundary_matrix = {
         let mut body = Vec::new();

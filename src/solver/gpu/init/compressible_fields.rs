@@ -14,6 +14,10 @@ pub struct CompressibleFieldBuffers {
     pub b_state_old_old: wgpu::Buffer,
     pub state_buffers: Vec<wgpu::Buffer>,
     pub b_fluxes: wgpu::Buffer,
+    pub b_grad_rho: wgpu::Buffer,
+    pub b_grad_rho_u_x: wgpu::Buffer,
+    pub b_grad_rho_u_y: wgpu::Buffer,
+    pub b_grad_rho_e: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
     pub constants: GpuConstants,
 }
@@ -25,6 +29,10 @@ pub struct CompressibleFieldResources {
     pub b_state_old_old: wgpu::Buffer,
     pub state_buffers: Vec<wgpu::Buffer>,
     pub b_fluxes: wgpu::Buffer,
+    pub b_grad_rho: wgpu::Buffer,
+    pub b_grad_rho_u_x: wgpu::Buffer,
+    pub b_grad_rho_u_y: wgpu::Buffer,
+    pub b_grad_rho_e: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
     pub bg_fields: wgpu::BindGroup,
     pub bg_fields_ping_pong: Vec<wgpu::BindGroup>,
@@ -74,6 +82,28 @@ pub fn init_compressible_field_buffers(
             | wgpu::BufferUsages::COPY_SRC,
     });
 
+    let zero_grad = vec![[0.0f32; 2]; num_cells as usize];
+    let b_grad_rho = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Compressible Grad Rho Buffer"),
+        contents: bytemuck::cast_slice(&zero_grad),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+    let b_grad_rho_u_x = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Compressible Grad RhoU X Buffer"),
+        contents: bytemuck::cast_slice(&zero_grad),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+    let b_grad_rho_u_y = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Compressible Grad RhoU Y Buffer"),
+        contents: bytemuck::cast_slice(&zero_grad),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+    let b_grad_rho_e = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Compressible Grad RhoE Buffer"),
+        contents: bytemuck::cast_slice(&zero_grad),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+
     let constants = GpuConstants {
         dt: 0.0001,
         dt_old: 0.0001,
@@ -108,6 +138,10 @@ pub fn init_compressible_field_buffers(
         b_state_old_old,
         state_buffers,
         b_fluxes,
+        b_grad_rho,
+        b_grad_rho_u_x,
+        b_grad_rho_u_y,
+        b_grad_rho_e,
         b_constants,
         constants,
     }
@@ -152,6 +186,22 @@ pub fn create_compressible_field_bind_groups(
                     binding: 4,
                     resource: buffers.b_constants.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: buffers.b_grad_rho.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: buffers.b_grad_rho_u_x.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: buffers.b_grad_rho_u_y.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: buffers.b_grad_rho_e.as_entire_binding(),
+                },
             ],
         });
         bg_fields_ping_pong.push(bg);
@@ -165,6 +215,10 @@ pub fn create_compressible_field_bind_groups(
         b_state_old_old: buffers.b_state_old_old,
         state_buffers: buffers.state_buffers,
         b_fluxes: buffers.b_fluxes,
+        b_grad_rho: buffers.b_grad_rho,
+        b_grad_rho_u_x: buffers.b_grad_rho_u_x,
+        b_grad_rho_u_y: buffers.b_grad_rho_u_y,
+        b_grad_rho_e: buffers.b_grad_rho_e,
         b_constants: buffers.b_constants,
         bg_fields,
         bg_fields_ping_pong,

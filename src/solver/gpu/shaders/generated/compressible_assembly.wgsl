@@ -79,6 +79,18 @@ var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
 
+@group(1) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2>;
+
+@group(1) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2>;
+
+@group(1) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2>;
+
+@group(1) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2>;
+
 // Group 2: Solver
 
 @group(2) @binding(0) 
@@ -107,6 +119,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start_row_1 = start_row_0 + 4u * num_neighbors;
     let start_row_2 = start_row_0 + 8u * num_neighbors;
     let start_row_3 = start_row_0 + 12u * num_neighbors;
+    let scheme_id = constants.scheme;
     // Jacobian rows/cols: rho, rho_u_x, rho_u_y, rho_e
     var diag_00 = 0.0;
     var diag_01 = 0.0;
@@ -221,6 +234,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let c_r = sqrt(1.4 * p_r * inv_rho_r);
         let u_face_x = 0.5 * (u_l_x + u_r_x);
         let u_face_y = 0.5 * (u_l_y + u_r_y);
+        let u_face_n = u_face_x * normal.x + u_face_y * normal.y;
+        let flux_adv = u_face_n * area;
         let dx = center_r.x - center.x;
         let dy = center_r.y - center.y;
         let dist = max(sqrt(dx * dx + dy * dy), 1e-6);
@@ -410,6 +425,136 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let base_1 = start_row_1 + 4u * neighbor_rank;
             let base_2 = start_row_2 + 4u * neighbor_rank;
             let base_3 = start_row_3 + 4u * neighbor_rank;
+            if (scheme_id != 0u) {
+                var phi_upwind_rho = rho_l;
+                if (flux_adv < 0.0) {
+                    phi_upwind_rho = rho_r;
+                }
+                var phi_ho_rho = phi_upwind_rho;
+                if (scheme_id == 1u) {
+                    if (flux_adv > 0.0) {
+                        let r_rho_x = f_center.x - center.x;
+                        let r_rho_y = f_center.y - center.y;
+                        phi_ho_rho = rho_l + grad_rho[idx].x * r_rho_x + grad_rho[idx].y * r_rho_y;
+                    } else {
+                        let r_rho_x = f_center.x - center_r.x;
+                        let r_rho_y = f_center.y - center_r.y;
+                        phi_ho_rho = rho_r + grad_rho[other_idx].x * r_rho_x + grad_rho[other_idx].y * r_rho_y;
+                    }
+                } else {
+                    if (scheme_id == 2u) {
+                        if (flux_adv > 0.0) {
+                            let d_cd_rho_x = center_r.x - center.x;
+                            let d_cd_rho_y = center_r.y - center.y;
+                            let grad_term_rho = grad_rho[idx].x * d_cd_rho_x + grad_rho[idx].y * d_cd_rho_y;
+                            phi_ho_rho = 0.625 * rho_l + 0.375 * rho_r + 0.125 * grad_term_rho;
+                        } else {
+                            let d_cd_rho_x = center.x - center_r.x;
+                            let d_cd_rho_y = center.y - center_r.y;
+                            let grad_term_rho = grad_rho[other_idx].x * d_cd_rho_x + grad_rho[other_idx].y * d_cd_rho_y;
+                            phi_ho_rho = 0.625 * rho_r + 0.375 * rho_l + 0.125 * grad_term_rho;
+                        }
+                    }
+                }
+                var phi_upwind_ru = rho_u_l.x;
+                if (flux_adv < 0.0) {
+                    phi_upwind_ru = rho_u_r.x;
+                }
+                var phi_ho_ru = phi_upwind_ru;
+                if (scheme_id == 1u) {
+                    if (flux_adv > 0.0) {
+                        let r_ru_x = f_center.x - center.x;
+                        let r_ru_y = f_center.y - center.y;
+                        phi_ho_ru = rho_u_l.x + grad_rho_u_x[idx].x * r_ru_x + grad_rho_u_x[idx].y * r_ru_y;
+                    } else {
+                        let r_ru_x = f_center.x - center_r.x;
+                        let r_ru_y = f_center.y - center_r.y;
+                        phi_ho_ru = rho_u_r.x + grad_rho_u_x[other_idx].x * r_ru_x + grad_rho_u_x[other_idx].y * r_ru_y;
+                    }
+                } else {
+                    if (scheme_id == 2u) {
+                        if (flux_adv > 0.0) {
+                            let d_cd_ru_x = center_r.x - center.x;
+                            let d_cd_ru_y = center_r.y - center.y;
+                            let grad_term_ru = grad_rho_u_x[idx].x * d_cd_ru_x + grad_rho_u_x[idx].y * d_cd_ru_y;
+                            phi_ho_ru = 0.625 * rho_u_l.x + 0.375 * rho_u_r.x + 0.125 * grad_term_ru;
+                        } else {
+                            let d_cd_ru_x = center.x - center_r.x;
+                            let d_cd_ru_y = center.y - center_r.y;
+                            let grad_term_ru = grad_rho_u_x[other_idx].x * d_cd_ru_x + grad_rho_u_x[other_idx].y * d_cd_ru_y;
+                            phi_ho_ru = 0.625 * rho_u_r.x + 0.375 * rho_u_l.x + 0.125 * grad_term_ru;
+                        }
+                    }
+                }
+                var phi_upwind_rv = rho_u_l.y;
+                if (flux_adv < 0.0) {
+                    phi_upwind_rv = rho_u_r.y;
+                }
+                var phi_ho_rv = phi_upwind_rv;
+                if (scheme_id == 1u) {
+                    if (flux_adv > 0.0) {
+                        let r_rv_x = f_center.x - center.x;
+                        let r_rv_y = f_center.y - center.y;
+                        phi_ho_rv = rho_u_l.y + grad_rho_u_y[idx].x * r_rv_x + grad_rho_u_y[idx].y * r_rv_y;
+                    } else {
+                        let r_rv_x = f_center.x - center_r.x;
+                        let r_rv_y = f_center.y - center_r.y;
+                        phi_ho_rv = rho_u_r.y + grad_rho_u_y[other_idx].x * r_rv_x + grad_rho_u_y[other_idx].y * r_rv_y;
+                    }
+                } else {
+                    if (scheme_id == 2u) {
+                        if (flux_adv > 0.0) {
+                            let d_cd_rv_x = center_r.x - center.x;
+                            let d_cd_rv_y = center_r.y - center.y;
+                            let grad_term_rv = grad_rho_u_y[idx].x * d_cd_rv_x + grad_rho_u_y[idx].y * d_cd_rv_y;
+                            phi_ho_rv = 0.625 * rho_u_l.y + 0.375 * rho_u_r.y + 0.125 * grad_term_rv;
+                        } else {
+                            let d_cd_rv_x = center.x - center_r.x;
+                            let d_cd_rv_y = center.y - center_r.y;
+                            let grad_term_rv = grad_rho_u_y[other_idx].x * d_cd_rv_x + grad_rho_u_y[other_idx].y * d_cd_rv_y;
+                            phi_ho_rv = 0.625 * rho_u_r.y + 0.375 * rho_u_l.y + 0.125 * grad_term_rv;
+                        }
+                    }
+                }
+                var phi_upwind_re = rho_e_l;
+                if (flux_adv < 0.0) {
+                    phi_upwind_re = rho_e_r;
+                }
+                var phi_ho_re = phi_upwind_re;
+                if (scheme_id == 1u) {
+                    if (flux_adv > 0.0) {
+                        let r_re_x = f_center.x - center.x;
+                        let r_re_y = f_center.y - center.y;
+                        phi_ho_re = rho_e_l + grad_rho_e[idx].x * r_re_x + grad_rho_e[idx].y * r_re_y;
+                    } else {
+                        let r_re_x = f_center.x - center_r.x;
+                        let r_re_y = f_center.y - center_r.y;
+                        phi_ho_re = rho_e_r + grad_rho_e[other_idx].x * r_re_x + grad_rho_e[other_idx].y * r_re_y;
+                    }
+                } else {
+                    if (scheme_id == 2u) {
+                        if (flux_adv > 0.0) {
+                            let d_cd_re_x = center_r.x - center.x;
+                            let d_cd_re_y = center_r.y - center.y;
+                            let grad_term_re = grad_rho_e[idx].x * d_cd_re_x + grad_rho_e[idx].y * d_cd_re_y;
+                            phi_ho_re = 0.625 * rho_e_l + 0.375 * rho_e_r + 0.125 * grad_term_re;
+                        } else {
+                            let d_cd_re_x = center.x - center_r.x;
+                            let d_cd_re_y = center.y - center_r.y;
+                            let grad_term_re = grad_rho_e[other_idx].x * d_cd_re_x + grad_rho_e[other_idx].y * d_cd_re_y;
+                            phi_ho_re = 0.625 * rho_e_r + 0.375 * rho_e_l + 0.125 * grad_term_re;
+                        }
+                    }
+                }
+                let correction_rho = flux_adv * (phi_ho_rho - phi_upwind_rho);
+                let correction_rho_u_x = flux_adv * (phi_ho_ru - phi_upwind_ru);
+                let correction_rho_u_y = flux_adv * (phi_ho_rv - phi_upwind_rv);
+                let correction_rho_e = flux_adv * (phi_ho_re - phi_upwind_re);
+                sum_rho += correction_rho;
+                sum_rho_u_x += correction_rho_u_x;
+                sum_rho_u_y += correction_rho_u_y;
+                sum_rho_e += correction_rho_e;
+            }
             matrix_values[base_0 + 0u] = jac_r_00 * area;
             matrix_values[base_0 + 1u] = jac_r_01 * area;
             matrix_values[base_0 + 2u] = jac_r_02 * area;

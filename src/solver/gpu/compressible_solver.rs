@@ -1,6 +1,7 @@
 use crate::solver::gpu::bindings::generated::{
     compressible_apply as generated_apply, compressible_assembly as generated_assembly,
-    compressible_flux_kt as generated_flux, compressible_update as generated_update,
+    compressible_flux_kt as generated_flux, compressible_gradients as generated_gradients,
+    compressible_update as generated_update,
 };
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::compressible_fgmres::CompressibleFgmresResources;
@@ -40,6 +41,10 @@ pub struct GpuCompressibleSolver {
     pub b_state_old: wgpu::Buffer,
     pub b_state_old_old: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
+    pub b_grad_rho: wgpu::Buffer,
+    pub b_grad_rho_u_x: wgpu::Buffer,
+    pub b_grad_rho_u_y: wgpu::Buffer,
+    pub b_grad_rho_e: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
     pub constants: GpuConstants,
     pub b_row_offsets: wgpu::Buffer,
@@ -54,6 +59,7 @@ pub struct GpuCompressibleSolver {
     pub pipeline_flux_kt: wgpu::ComputePipeline,
     pub pipeline_assembly: wgpu::ComputePipeline,
     pub pipeline_apply: wgpu::ComputePipeline,
+    pub pipeline_gradients: wgpu::ComputePipeline,
     pub pipeline_update: wgpu::ComputePipeline,
     pub fgmres_resources: Option<CompressibleFgmresResources>,
     pub outer_iters: usize,
@@ -100,6 +106,8 @@ impl GpuCompressibleSolver {
             generated_assembly::compute::create_main_pipeline_embed_source(&context.device);
         let pipeline_apply =
             generated_apply::compute::create_main_pipeline_embed_source(&context.device);
+        let pipeline_gradients =
+            generated_gradients::compute::create_main_pipeline_embed_source(&context.device);
         let pipeline_update =
             generated_update::compute::create_main_pipeline_embed_source(&context.device);
 
@@ -203,6 +211,10 @@ impl GpuCompressibleSolver {
                             .as_entire_buffer_binding(),
                         fluxes: fields_res.b_fluxes.as_entire_buffer_binding(),
                         constants: fields_res.b_constants.as_entire_buffer_binding(),
+                        grad_rho: fields_res.b_grad_rho.as_entire_buffer_binding(),
+                        grad_rho_u_x: fields_res.b_grad_rho_u_x.as_entire_buffer_binding(),
+                        grad_rho_u_y: fields_res.b_grad_rho_u_y.as_entire_buffer_binding(),
+                        grad_rho_e: fields_res.b_grad_rho_e.as_entire_buffer_binding(),
                     },
                 )
                 .into_array(),
@@ -239,6 +251,10 @@ impl GpuCompressibleSolver {
             b_state_old: fields_res.b_state_old,
             b_state_old_old: fields_res.b_state_old_old,
             b_fluxes: fields_res.b_fluxes,
+            b_grad_rho: fields_res.b_grad_rho,
+            b_grad_rho_u_x: fields_res.b_grad_rho_u_x,
+            b_grad_rho_u_y: fields_res.b_grad_rho_u_y,
+            b_grad_rho_e: fields_res.b_grad_rho_e,
             b_constants: fields_res.b_constants,
             constants: fields_res.constants,
             b_row_offsets: matrix_res.b_row_offsets,
@@ -253,6 +269,7 @@ impl GpuCompressibleSolver {
             pipeline_flux_kt,
             pipeline_assembly,
             pipeline_apply,
+            pipeline_gradients,
             pipeline_update,
             fgmres_resources: None,
             outer_iters: 1,
@@ -300,6 +317,11 @@ impl GpuCompressibleSolver {
 
     pub fn set_inlet_velocity(&mut self, velocity: f32) {
         self.constants.inlet_velocity = velocity;
+        self.update_constants();
+    }
+
+    pub fn set_scheme(&mut self, scheme: u32) {
+        self.constants.scheme = scheme;
         self.update_constants();
     }
 
@@ -385,6 +407,26 @@ impl GpuCompressibleSolver {
         self.context.queue.submit(Some(encoder.finish()));
 
         for _ in 0..self.outer_iters {
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Compressible Gradients Encoder"),
+                    });
+
+            {
+                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Compressible Gradients Pass"),
+                    timestamp_writes: None,
+                });
+                cpass.set_pipeline(&self.pipeline_gradients);
+                cpass.set_bind_group(0, &self.bg_mesh, &[]);
+                cpass.set_bind_group(1, &self.bg_fields, &[]);
+                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+            }
+
+            self.context.queue.submit(Some(encoder.finish()));
+
             let mut encoder =
                 self.context
                     .device

@@ -1,6 +1,7 @@
 use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
+use super::reconstruction::scalar_reconstruction;
 use super::state_access::{state_scalar_expr, state_vec2_expr};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
@@ -697,111 +698,49 @@ fn main_body(
             ));
             interior_stmts.push(dsl::if_block(
                 "scheme_id != 0u",
-                dsl::block(vec![
-                    dsl::let_("u_own", &u_idx_expr),
-                    dsl::let_("u_neigh", &u_neigh_expr),
-                    dsl::var("phi_upwind_u", "u_own.x"),
-                    dsl::var("phi_upwind_v", "u_own.y"),
-                    dsl::if_block(
-                        "flux < 0.0",
-                        dsl::block(vec![
-                            dsl::assign("phi_upwind_u", "u_neigh.x"),
-                            dsl::assign("phi_upwind_v", "u_neigh.y"),
-                        ]),
-                        None,
-                    ),
-                    dsl::var("phi_ho_u", "phi_upwind_u"),
-                    dsl::var("phi_ho_v", "phi_upwind_v"),
-                    dsl::if_block(
-                        "scheme_id == 1u",
-                        dsl::block(vec![dsl::if_block(
-                            "flux > 0.0",
-                            dsl::block(vec![
-                                dsl::let_("grad_u_own", "grad_u[idx]"),
-                                dsl::let_("grad_v_own", "grad_v[idx]"),
-                                dsl::let_("r_x", "f_center.x - center.x"),
-                                dsl::let_("r_y", "f_center.y - center.y"),
-                                dsl::assign(
-                                    "phi_ho_u",
-                                    "u_own.x + (grad_u_own.x * r_x + grad_u_own.y * r_y)",
-                                ),
-                                dsl::assign(
-                                    "phi_ho_v",
-                                    "u_own.y + (grad_v_own.x * r_x + grad_v_own.y * r_y)",
-                                ),
-                            ]),
-                            Some(dsl::block(vec![
-                                dsl::let_("grad_u_neigh", "grad_u[other_idx]"),
-                                dsl::let_("grad_v_neigh", "grad_v[other_idx]"),
-                                dsl::let_("r_x", "f_center.x - other_center.x"),
-                                dsl::let_("r_y", "f_center.y - other_center.y"),
-                                dsl::assign(
-                                    "phi_ho_u",
-                                    "u_neigh.x + (grad_u_neigh.x * r_x + grad_u_neigh.y * r_y)",
-                                ),
-                                dsl::assign(
-                                    "phi_ho_v",
-                                    "u_neigh.y + (grad_v_neigh.x * r_x + grad_v_neigh.y * r_y)",
-                                ),
-                            ])),
-                        )]),
-                        Some(dsl::block(vec![dsl::if_block(
-                            "scheme_id == 2u",
-                            dsl::block(vec![dsl::if_block(
-                                "flux > 0.0",
-                                dsl::block(vec![
-                                    dsl::let_("grad_u_own", "grad_u[idx]"),
-                                    dsl::let_("grad_v_own", "grad_v[idx]"),
-                                    dsl::let_("d_cd_x", "other_center.x - center.x"),
-                                    dsl::let_("d_cd_y", "other_center.y - center.y"),
-                                    dsl::let_(
-                                        "grad_term_u",
-                                        "grad_u_own.x * d_cd_x + grad_u_own.y * d_cd_y",
-                                    ),
-                                    dsl::let_(
-                                        "grad_term_v",
-                                        "grad_v_own.x * d_cd_x + grad_v_own.y * d_cd_y",
-                                    ),
-                                    dsl::assign(
-                                        "phi_ho_u",
-                                        "0.625 * u_own.x + 0.375 * u_neigh.x + 0.125 * grad_term_u",
-                                    ),
-                                    dsl::assign(
-                                        "phi_ho_v",
-                                        "0.625 * u_own.y + 0.375 * u_neigh.y + 0.125 * grad_term_v",
-                                    ),
-                                ]),
-                                Some(dsl::block(vec![
-                                    dsl::let_("grad_u_neigh", "grad_u[other_idx]"),
-                                    dsl::let_("grad_v_neigh", "grad_v[other_idx]"),
-                                    dsl::let_("d_cd_x", "center.x - other_center.x"),
-                                    dsl::let_("d_cd_y", "center.y - other_center.y"),
-                                    dsl::let_(
-                                        "grad_term_u",
-                                        "grad_u_neigh.x * d_cd_x + grad_u_neigh.y * d_cd_y",
-                                    ),
-                                    dsl::let_(
-                                        "grad_term_v",
-                                        "grad_v_neigh.x * d_cd_x + grad_v_neigh.y * d_cd_y",
-                                    ),
-                                    dsl::assign(
-                                        "phi_ho_u",
-                                        "0.625 * u_neigh.x + 0.375 * u_own.x + 0.125 * grad_term_u",
-                                    ),
-                                    dsl::assign(
-                                        "phi_ho_v",
-                                        "0.625 * u_neigh.y + 0.375 * u_own.y + 0.125 * grad_term_v",
-                                    ),
-                                ])),
-                            )]),
-                            None,
-                        )])),
-                    ),
-                    dsl::let_("correction_u", "flux * (phi_ho_u - phi_upwind_u)"),
-                    dsl::let_("correction_v", "flux * (phi_ho_v - phi_upwind_v)"),
-                    dsl::assign_op(AssignOp::Sub, "rhs_u", "correction_u"),
-                    dsl::assign_op(AssignOp::Sub, "rhs_v", "correction_v"),
-                ]),
+                {
+                    let mut ho_block = vec![
+                        dsl::let_("u_own", &u_idx_expr),
+                        dsl::let_("u_neigh", &u_neigh_expr),
+                    ];
+                    let (u_stmts, u_vars) = scalar_reconstruction(
+                        "u",
+                        "scheme_id",
+                        "flux",
+                        "u_own.x",
+                        "u_neigh.x",
+                        "grad_u[idx]",
+                        "grad_u[other_idx]",
+                        "center",
+                        "other_center",
+                        "f_center",
+                    );
+                    ho_block.extend(u_stmts);
+                    let (v_stmts, v_vars) = scalar_reconstruction(
+                        "v",
+                        "scheme_id",
+                        "flux",
+                        "u_own.y",
+                        "u_neigh.y",
+                        "grad_v[idx]",
+                        "grad_v[other_idx]",
+                        "center",
+                        "other_center",
+                        "f_center",
+                    );
+                    ho_block.extend(v_stmts);
+                    ho_block.push(dsl::let_(
+                        "correction_u",
+                        &format!("flux * ({} - {})", u_vars.phi_ho, u_vars.phi_upwind),
+                    ));
+                    ho_block.push(dsl::let_(
+                        "correction_v",
+                        &format!("flux * ({} - {})", v_vars.phi_ho, v_vars.phi_upwind),
+                    ));
+                    ho_block.push(dsl::assign_op(AssignOp::Sub, "rhs_u", "correction_u"));
+                    ho_block.push(dsl::assign_op(AssignOp::Sub, "rhs_v", "correction_v"));
+                    dsl::block(ho_block)
+                },
                 None,
             ));
         }

@@ -70,6 +70,12 @@ mod solver {
                 "/src/solver/codegen/compressible_apply.rs"
             ));
         }
+        pub mod compressible_gradients {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/compressible_gradients.rs"
+            ));
+        }
         pub mod compressible_flux_kt {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -110,6 +116,12 @@ mod solver {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/solver/codegen/pressure_assembly.rs"
+            ));
+        }
+        pub mod reconstruction {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/reconstruction.rs"
             ));
         }
         pub mod update_fields_from_coupled {

@@ -117,6 +117,7 @@ fn compressible_acoustic_pulse_propagates() {
     solver.set_time_scheme(0);
     solver.set_viscosity(0.0);
     solver.set_inlet_velocity(0.0);
+    solver.set_scheme(2);
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 

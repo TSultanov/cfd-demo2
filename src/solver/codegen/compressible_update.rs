@@ -93,6 +93,34 @@ fn state_bindings() -> Vec<Item> {
             AccessMode::ReadWrite,
         ),
         uniform_var("constants", Type::Custom("Constants".to_string()), 0, 4),
+        storage_var(
+            "grad_rho",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            5,
+            AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "grad_rho_u_x",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            6,
+            AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "grad_rho_u_y",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            7,
+            AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "grad_rho_e",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            8,
+            AccessMode::ReadWrite,
+        ),
     ]
 }
 

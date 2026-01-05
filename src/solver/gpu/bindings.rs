@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 0069d0ee2cd3fb3b48964933658a2ed0647c78770b4525bb2ae63aa264f85138
+// SourceHash: db5696bb3cacfb1f676efffd41d05287bd76e1c0d4114997453ac1a7a7b45c8a
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -13,6 +13,7 @@ pub enum ShaderEntry {
     GeneratedCompressibleApply,
     GeneratedCompressibleAssembly,
     GeneratedCompressibleFluxKt,
+    GeneratedCompressibleGradients,
     GeneratedCompressibleUpdate,
     GeneratedCoupledAssemblyMerged,
     GeneratedFluxRhieChow,
@@ -42,6 +43,9 @@ impl ShaderEntry {
             }
             Self::GeneratedCompressibleFluxKt => {
                 generated::compressible_flux_kt::create_pipeline_layout(device)
+            }
+            Self::GeneratedCompressibleGradients => {
+                generated::compressible_gradients::create_pipeline_layout(device)
             }
             Self::GeneratedCompressibleUpdate => {
                 generated::compressible_update::create_pipeline_layout(device)
@@ -86,6 +90,9 @@ impl ShaderEntry {
             }
             Self::GeneratedCompressibleFluxKt => {
                 generated::compressible_flux_kt::create_shader_module_embed_source(device)
+            }
+            Self::GeneratedCompressibleGradients => {
+                generated::compressible_gradients::create_shader_module_embed_source(device)
             }
             Self::GeneratedCompressibleUpdate => {
                 generated::compressible_update::create_shader_module_embed_source(device)
@@ -155,6 +162,11 @@ pub mod layout_asserts {
     const DOT_PRODUCT_PAIR_SOLVER_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(dot_product_pair::SolverParams, n) == 0);
         assert!(std::mem::size_of::<dot_product_pair::SolverParams>() == 4);
+    };
+    const GENERATED_COMPRESSIBLE_APPLY_VECTOR2_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_apply::Vector2, x) == 0);
+        assert!(std::mem::offset_of!(generated::compressible_apply::Vector2, y) == 4);
+        assert!(std::mem::size_of::<generated::compressible_apply::Vector2>() == 8);
     };
     const GENERATED_COMPRESSIBLE_APPLY_CONSTANTS_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::compressible_apply::Constants, dt) == 0);
@@ -230,6 +242,46 @@ pub mod layout_asserts {
             std::mem::offset_of!(generated::compressible_flux_kt::Constants, precond_type) == 52
         );
         assert!(std::mem::size_of::<generated::compressible_flux_kt::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_GRADIENTS_VECTOR2_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Vector2, x) == 0);
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Vector2, y) == 4);
+        assert!(std::mem::size_of::<generated::compressible_gradients::Vector2>() == 8);
+    };
+    const GENERATED_COMPRESSIBLE_GRADIENTS_CONSTANTS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, dt) == 0);
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, dt_old) == 4);
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, time) == 8);
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::Constants, viscosity) == 12
+        );
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, density) == 16);
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::Constants, component) == 20
+        );
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, alpha_p) == 24);
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, scheme) == 28);
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, alpha_u) == 32);
+        assert!(std::mem::offset_of!(generated::compressible_gradients::Constants, stride_x) == 36);
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::Constants, time_scheme) == 40
+        );
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::Constants, inlet_velocity)
+                == 44
+        );
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::Constants, ramp_time) == 48
+        );
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::Constants, precond_type) == 52
+        );
+        assert!(std::mem::size_of::<generated::compressible_gradients::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_UPDATE_VECTOR2_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_update::Vector2, x) == 0);
+        assert!(std::mem::offset_of!(generated::compressible_update::Vector2, y) == 4);
+        assert!(std::mem::size_of::<generated::compressible_update::Vector2>() == 8);
     };
     const GENERATED_COMPRESSIBLE_UPDATE_CONSTANTS_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::compressible_update::Constants, dt) == 0);
@@ -1182,6 +1234,8 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for dot_product::SolverParams {}
     unsafe impl bytemuck::Zeroable for dot_product_pair::SolverParams {}
     unsafe impl bytemuck::Pod for dot_product_pair::SolverParams {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_apply::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::compressible_apply::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_apply::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_apply::Constants {}
     unsafe impl bytemuck::Zeroable for generated::compressible_assembly::Vector2 {}
@@ -1192,6 +1246,12 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for generated::compressible_flux_kt::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_flux_kt::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_flux_kt::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_gradients::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::compressible_gradients::Vector2 {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_gradients::Constants {}
+    unsafe impl bytemuck::Pod for generated::compressible_gradients::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_update::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::compressible_update::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_update::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_update::Constants {}
     unsafe impl bytemuck::Zeroable for generated::coupled_assembly_merged::Vector2 {}
@@ -1905,6 +1965,19 @@ pub mod generated {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
         pub struct Constants {
             #[doc = "offset: 0, size: 4, type: `f32`"]
             pub dt: f32,
@@ -1996,6 +2069,10 @@ pub mod generated {
             pub state_old_old: wgpu::BufferBinding<'a>,
             pub fluxes: wgpu::BufferBinding<'a>,
             pub constants: wgpu::BufferBinding<'a>,
+            pub grad_rho: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+            pub grad_rho_e: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -2004,6 +2081,10 @@ pub mod generated {
             pub state_old_old: wgpu::BindGroupEntry<'a>,
             pub fluxes: wgpu::BindGroupEntry<'a>,
             pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_rho: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -2028,15 +2109,35 @@ pub mod generated {
                         binding: 4,
                         resource: wgpu::BindingResource::Buffer(params.constants),
                     },
+                    grad_rho: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                    },
+                    grad_rho_u_x: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                    },
+                    grad_rho_u_y: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                    },
+                    grad_rho_e: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
                 [
                     self.state,
                     self.state_old,
                     self.state_old_old,
                     self.fluxes,
                     self.constants,
+                    self.grad_rho,
+                    self.grad_rho_u_x,
+                    self.grad_rho_u_y,
+                    self.grad_rho_e,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -2106,6 +2207,50 @@ pub mod generated {
                                 >(
                                 )
                                     as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"grad_rho\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"grad_rho_u_x\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"grad_rho_u_y\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"grad_rho_e\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
                             },
                             count: None,
                         },
@@ -2265,6 +2410,14 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(0) @binding(4) 
 var<uniform> constants: Constants;
+@group(0) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(0) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(0) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(0) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage> solution: array<f32>;
 
@@ -2679,6 +2832,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BufferBinding<'a>,
             pub fluxes: wgpu::BufferBinding<'a>,
             pub constants: wgpu::BufferBinding<'a>,
+            pub grad_rho: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+            pub grad_rho_e: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup1Entries<'a> {
@@ -2687,6 +2844,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BindGroupEntry<'a>,
             pub fluxes: wgpu::BindGroupEntry<'a>,
             pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_rho: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup1Entries<'a> {
             pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -2711,15 +2872,35 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 4,
                         resource: wgpu::BindingResource::Buffer(params.constants),
                     },
+                    grad_rho: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                    },
+                    grad_rho_u_x: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                    },
+                    grad_rho_u_y: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                    },
+                    grad_rho_e: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
                 [
                     self.state,
                     self.state_old,
                     self.state_old_old,
                     self.fluxes,
                     self.constants,
+                    self.grad_rho,
+                    self.grad_rho_u_x,
+                    self.grad_rho_u_y,
+                    self.grad_rho_e,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -2789,6 +2970,50 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                                 >(
                                 )
                                     as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"grad_rho\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"grad_rho_u_x\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"grad_rho_u_y\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"grad_rho_e\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
                             },
                             count: None,
                         },
@@ -3009,6 +3234,14 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
+@group(1) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(1) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(1) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(2) @binding(0) 
 var<storage, read_write> matrix_values: array<f32>;
 @group(2) @binding(1) 
@@ -3087,6 +3320,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var jac_r_32_: f32;
     var jac_r_33_: f32;
     var neighbor_rank: u32;
+    var phi_upwind_rho: f32;
+    var phi_ho_rho: f32;
+    var phi_upwind_ru: f32;
+    var phi_ho_ru: f32;
+    var phi_upwind_rv: f32;
+    var phi_ho_rv: f32;
+    var phi_upwind_re: f32;
+    var phi_ho_re: f32;
     var eff_00_: f32;
     var eff_01_: f32;
     var eff_02_: f32;
@@ -3123,35 +3364,36 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start_row_1_ = (start_row_0_ + (4u * num_neighbors));
     let start_row_2_ = (start_row_0_ + (8u * num_neighbors));
     let start_row_3_ = (start_row_0_ + (12u * num_neighbors));
+    let scheme_id = constants.scheme;
     let rho = state[((idx * 7u) + 0u)];
-    let _e53 = state[((idx * 7u) + 1u)];
-    let _e60 = state[((idx * 7u) + 2u)];
-    let rho_u = vec2<f32>(_e53, _e60);
+    let _e56 = state[((idx * 7u) + 1u)];
+    let _e63 = state[((idx * 7u) + 2u)];
+    let rho_u = vec2<f32>(_e56, _e63);
     let rho_e = state[((idx * 7u) + 3u)];
     let rho_old = state_old[((idx * 7u) + 0u)];
-    let _e82 = state_old[((idx * 7u) + 1u)];
-    let _e89 = state_old[((idx * 7u) + 2u)];
-    let rho_u_old = vec2<f32>(_e82, _e89);
+    let _e85 = state_old[((idx * 7u) + 1u)];
+    let _e92 = state_old[((idx * 7u) + 2u)];
+    let rho_u_old = vec2<f32>(_e85, _e92);
     let rho_e_old = state_old[((idx * 7u) + 3u)];
-    let _e100 = constants.dt;
-    coeff_time = (vol / _e100);
-    let _e103 = coeff_time;
-    rhs_time_rho = (_e103 * rho_old);
+    let _e103 = constants.dt;
+    coeff_time = (vol / _e103);
     let _e106 = coeff_time;
-    rhs_time_rho_u_x = (_e106 * rho_u_old.x);
-    let _e110 = coeff_time;
-    rhs_time_rho_u_y = (_e110 * rho_u_old.y);
-    let _e114 = coeff_time;
-    rhs_time_rho_e = (_e114 * rho_e_old);
-    let _e119 = constants.time_scheme;
-    if (_e119 == 1u) {
+    rhs_time_rho = (_e106 * rho_old);
+    let _e109 = coeff_time;
+    rhs_time_rho_u_x = (_e109 * rho_u_old.x);
+    let _e113 = coeff_time;
+    rhs_time_rho_u_y = (_e113 * rho_u_old.y);
+    let _e117 = coeff_time;
+    rhs_time_rho_e = (_e117 * rho_e_old);
+    let _e122 = constants.time_scheme;
+    if (_e122 == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = (dt / dt_old);
         let rho_old_old = state_old_old[((idx * 7u) + 0u)];
-        let _e142 = state_old_old[((idx * 7u) + 1u)];
-        let _e149 = state_old_old[((idx * 7u) + 2u)];
-        let rho_u_old_old = vec2<f32>(_e142, _e149);
+        let _e145 = state_old_old[((idx * 7u) + 1u)];
+        let _e152 = state_old_old[((idx * 7u) + 2u)];
+        let rho_u_old_old = vec2<f32>(_e145, _e152);
         let rho_e_old_old = state_old_old[((idx * 7u) + 3u)];
         coeff_time = (((vol / dt) * (1f + (2f * r))) / (1f + r));
         let factor_n = (1f + r);
@@ -3163,33 +3405,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     face_offset = start;
     loop {
-        let _e198 = face_offset;
-        if (_e198 < end) {
+        let _e201 = face_offset;
+        if (_e201 < end) {
         } else {
             break;
         }
         {
-            let _e201 = face_offset;
-            let face_idx = cell_faces[_e201];
+            let _e204 = face_offset;
+            let face_idx = cell_faces[_e204];
             let owner = face_owner[face_idx];
             let neighbor = face_neighbor[face_idx];
             let boundary_type = face_boundary[face_idx];
             let area = face_areas[face_idx];
-            let _e218 = face_normals[face_idx];
-            normal = _e218;
+            let _e221 = face_normals[face_idx];
+            normal = _e221;
             let f_center = face_centers[face_idx];
             is_boundary = false;
             other_idx = 0u;
             if (owner != idx) {
-                let _e230 = normal.x;
-                normal.x = -(_e230);
-                let _e234 = normal.y;
-                normal.y = -(_e234);
+                let _e233 = normal.x;
+                normal.x = -(_e233);
+                let _e237 = normal.y;
+                normal.y = -(_e237);
             }
             let rho_l = state[((idx * 7u) + 0u)];
-            let _e249 = state[((idx * 7u) + 1u)];
-            let _e256 = state[((idx * 7u) + 2u)];
-            let rho_u_l = vec2<f32>(_e249, _e256);
+            let _e252 = state[((idx * 7u) + 1u)];
+            let _e259 = state[((idx * 7u) + 2u)];
+            let rho_u_l = vec2<f32>(_e252, _e259);
             let rho_e_l = state[((idx * 7u) + 3u)];
             rho_r = rho_l;
             rho_u_r = rho_u_l;
@@ -3200,18 +3442,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (owner != idx) {
                     other_idx = owner;
                 }
-                let _e273 = other_idx;
-                let _e275 = cell_centers[_e273];
-                center_r = _e275;
-                let _e277 = other_idx;
-                let rho_neigh = state[((_e277 * 7u) + 0u)];
-                let _e285 = other_idx;
-                let _e292 = state[((_e285 * 7u) + 1u)];
-                let _e293 = other_idx;
-                let _e300 = state[((_e293 * 7u) + 2u)];
-                let rho_u_neigh = vec2<f32>(_e292, _e300);
-                let _e302 = other_idx;
-                let rho_e_neigh = state[((_e302 * 7u) + 3u)];
+                let _e276 = other_idx;
+                let _e278 = cell_centers[_e276];
+                center_r = _e278;
+                let _e280 = other_idx;
+                let rho_neigh = state[((_e280 * 7u) + 0u)];
+                let _e288 = other_idx;
+                let _e295 = state[((_e288 * 7u) + 1u)];
+                let _e296 = other_idx;
+                let _e303 = state[((_e296 * 7u) + 2u)];
+                let rho_u_neigh = vec2<f32>(_e295, _e303);
+                let _e305 = other_idx;
+                let rho_e_neigh = state[((_e305 * 7u) + 3u)];
                 rho_r = rho_neigh;
                 rho_u_r.x = rho_u_neigh.x;
                 rho_u_r.y = rho_u_neigh.y;
@@ -3221,12 +3463,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 other_idx = idx;
                 center_r = f_center;
             }
-            let _e315 = is_boundary;
-            if _e315 {
+            let _e318 = is_boundary;
+            if _e318 {
                 if (boundary_type == 1u) {
-                    let _e319 = rho_r;
-                    let _e322 = constants.inlet_velocity;
-                    rho_u_r.x = (_e319 * _e322);
+                    let _e322 = rho_r;
+                    let _e325 = constants.inlet_velocity;
+                    rho_u_r.x = (_e322 * _e325);
                     rho_u_r.y = 0f;
                 } else {
                     if (boundary_type == 3u) {
@@ -3240,30 +3482,34 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let u_l_y = (rho_u_l.y * du_ly_drv);
             let ke_l = ((0.5f * rho_l) * ((u_l_x * u_l_x) + (u_l_y * u_l_y)));
             let p_l = max(0f, (0.4f * (rho_e_l - ke_l)));
-            let _e354 = normal.x;
-            let _e357 = normal.y;
-            let u_n_l = ((u_l_x * _e354) + (u_l_y * _e357));
+            let _e357 = normal.x;
+            let _e360 = normal.y;
+            let u_n_l = ((u_l_x * _e357) + (u_l_y * _e360));
             let c_l = sqrt(((1.4f * p_l) * du_ly_drv));
-            let _e364 = rho_r;
-            let du_ry_drv = (1f / max(_e364, 0.00000001f));
-            let _e370 = rho_u_r.x;
-            let u_r_x = (_e370 * du_ry_drv);
-            let _e373 = rho_u_r.y;
-            let u_r_y = (_e373 * du_ry_drv);
-            let _e375 = rho_r;
-            let ke_r = ((0.5f * _e375) * ((u_r_x * u_r_x) + (u_r_y * u_r_y)));
-            let _e382 = rho_e_r;
-            let p_r = max(0f, (0.4f * (_e382 - ke_r)));
-            let _e389 = normal.x;
-            let _e392 = normal.y;
-            let u_n_r = ((u_r_x * _e389) + (u_r_y * _e392));
+            let _e367 = rho_r;
+            let du_ry_drv = (1f / max(_e367, 0.00000001f));
+            let _e373 = rho_u_r.x;
+            let u_r_x = (_e373 * du_ry_drv);
+            let _e376 = rho_u_r.y;
+            let u_r_y = (_e376 * du_ry_drv);
+            let _e378 = rho_r;
+            let ke_r = ((0.5f * _e378) * ((u_r_x * u_r_x) + (u_r_y * u_r_y)));
+            let _e385 = rho_e_r;
+            let p_r = max(0f, (0.4f * (_e385 - ke_r)));
+            let _e392 = normal.x;
+            let _e395 = normal.y;
+            let u_n_r = ((u_r_x * _e392) + (u_r_y * _e395));
             let c_r = sqrt(((1.4f * p_r) * du_ry_drv));
             let u_face_x = (0.5f * (u_l_x + u_r_x));
             let u_face_y = (0.5f * (u_l_y + u_r_y));
-            let _e406 = center_r.x;
-            let dx = (_e406 - center.x);
-            let _e410 = center_r.y;
-            let dy = (_e410 - center.y);
+            let _e409 = normal.x;
+            let _e412 = normal.y;
+            let u_face_n = ((u_face_x * _e409) + (u_face_y * _e412));
+            let flux_adv = (u_face_n * area);
+            let _e417 = center_r.x;
+            let dx = (_e417 - center.x);
+            let _e421 = center_r.y;
+            let dy = (_e421 - center.y);
             let dist = max(sqrt(((dx * dx) + (dy * dy))), 0.000001f);
             let mu = constants.viscosity;
             let a_plus = max(0f, max((u_n_l + c_l), (u_n_r + c_r)));
@@ -3271,48 +3517,48 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let denom = max((a_plus - a_minus), 0.000001f);
             let a_prod = (a_plus * a_minus);
             let f_rho_l = (rho_l * u_n_l);
-            let _e437 = rho_r;
-            let f_rho_r = (_e437 * u_n_r);
-            let _e442 = rho_r;
-            let flux_rho = ((((a_plus * f_rho_l) - (a_minus * f_rho_r)) + (a_prod * (_e442 - rho_l))) / denom);
-            let _e450 = normal.x;
-            let f_rho_u_l_x = ((rho_u_l.x * u_n_l) + (p_l * _e450));
-            let _e456 = normal.y;
-            let f_rho_u_l_y = ((rho_u_l.y * u_n_l) + (p_l * _e456));
-            let _e460 = rho_u_r.x;
-            let _e463 = normal.x;
-            let f_rho_u_r_x = ((_e460 * u_n_r) + (p_r * _e463));
-            let _e467 = rho_u_r.y;
-            let _e470 = normal.y;
-            let f_rho_u_r_y = ((_e467 * u_n_r) + (p_r * _e470));
-            let _e477 = rho_u_r.x;
-            flux_rho_u_x = ((((a_plus * f_rho_u_l_x) - (a_minus * f_rho_u_r_x)) + (a_prod * (_e477 - rho_u_l.x))) / denom);
-            let _e488 = rho_u_r.y;
-            flux_rho_u_y = ((((a_plus * f_rho_u_l_y) - (a_minus * f_rho_u_r_y)) + (a_prod * (_e488 - rho_u_l.y))) / denom);
+            let _e448 = rho_r;
+            let f_rho_r = (_e448 * u_n_r);
+            let _e453 = rho_r;
+            let flux_rho = ((((a_plus * f_rho_l) - (a_minus * f_rho_r)) + (a_prod * (_e453 - rho_l))) / denom);
+            let _e461 = normal.x;
+            let f_rho_u_l_x = ((rho_u_l.x * u_n_l) + (p_l * _e461));
+            let _e467 = normal.y;
+            let f_rho_u_l_y = ((rho_u_l.y * u_n_l) + (p_l * _e467));
+            let _e471 = rho_u_r.x;
+            let _e474 = normal.x;
+            let f_rho_u_r_x = ((_e471 * u_n_r) + (p_r * _e474));
+            let _e478 = rho_u_r.y;
+            let _e481 = normal.y;
+            let f_rho_u_r_y = ((_e478 * u_n_r) + (p_r * _e481));
+            let _e488 = rho_u_r.x;
+            flux_rho_u_x = ((((a_plus * f_rho_u_l_x) - (a_minus * f_rho_u_r_x)) + (a_prod * (_e488 - rho_u_l.x))) / denom);
+            let _e499 = rho_u_r.y;
+            flux_rho_u_y = ((((a_plus * f_rho_u_l_y) - (a_minus * f_rho_u_r_y)) + (a_prod * (_e499 - rho_u_l.y))) / denom);
             let diff_u_x = ((-(mu) * (u_r_x - u_l_x)) / dist);
             let diff_u_y = ((-(mu) * (u_r_y - u_l_y)) / dist);
-            let _e503 = flux_rho_u_x;
-            flux_rho_u_x = (_e503 + diff_u_x);
-            let _e505 = flux_rho_u_y;
-            flux_rho_u_y = (_e505 + diff_u_y);
+            let _e514 = flux_rho_u_x;
+            flux_rho_u_x = (_e514 + diff_u_x);
+            let _e516 = flux_rho_u_y;
+            flux_rho_u_y = (_e516 + diff_u_y);
             let f_rho_e_l = ((rho_e_l + p_l) * u_n_l);
-            let _e509 = rho_e_r;
-            let f_rho_e_r = ((_e509 + p_r) * u_n_r);
-            let _e515 = rho_e_r;
-            flux_rho_e = ((((a_plus * f_rho_e_l) - (a_minus * f_rho_e_r)) + (a_prod * (_e515 - rho_e_l))) / denom);
-            let _e521 = flux_rho_e;
-            flux_rho_e = ((_e521 + (diff_u_x * u_face_x)) + (diff_u_y * u_face_y));
-            let _e528 = sum_rho;
-            sum_rho = (_e528 + (flux_rho * area));
-            let _e531 = flux_rho_u_x;
-            let _e533 = sum_rho_u_x;
-            sum_rho_u_x = (_e533 + (_e531 * area));
-            let _e536 = flux_rho_u_y;
-            let _e538 = sum_rho_u_y;
-            sum_rho_u_y = (_e538 + (_e536 * area));
-            let _e541 = flux_rho_e;
-            let _e543 = sum_rho_e;
-            sum_rho_e = (_e543 + (_e541 * area));
+            let _e520 = rho_e_r;
+            let f_rho_e_r = ((_e520 + p_r) * u_n_r);
+            let _e526 = rho_e_r;
+            flux_rho_e = ((((a_plus * f_rho_e_l) - (a_minus * f_rho_e_r)) + (a_prod * (_e526 - rho_e_l))) / denom);
+            let _e532 = flux_rho_e;
+            flux_rho_e = ((_e532 + (diff_u_x * u_face_x)) + (diff_u_y * u_face_y));
+            let _e539 = sum_rho;
+            sum_rho = (_e539 + (flux_rho * area));
+            let _e542 = flux_rho_u_x;
+            let _e544 = sum_rho_u_x;
+            sum_rho_u_x = (_e544 + (_e542 * area));
+            let _e547 = flux_rho_u_y;
+            let _e549 = sum_rho_u_y;
+            sum_rho_u_y = (_e549 + (_e547 * area));
+            let _e552 = flux_rho_e;
+            let _e554 = sum_rho_e;
+            sum_rho_e = (_e554 + (_e552 * area));
             let q_l = ((u_l_x * u_l_x) + (u_l_y * u_l_y));
             let dp_drho_l = (0.2f * q_l);
             let dp_dru_l = (-0.4f * u_l_x);
@@ -3322,74 +3568,74 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let dp_drho_r = (0.2f * q_r);
             let dp_dru_r = (-0.4f * u_r_x);
             let dp_drv_r = (-0.4f * u_r_y);
-            let _e565 = rho_e_r;
-            let H_r = ((_e565 + p_r) * du_ry_drv);
+            let _e576 = rho_e_r;
+            let H_r = ((_e576 + p_r) * du_ry_drv);
             let a_l = (a_plus / denom);
             let a_r = (-(a_minus) / denom);
             let a_prod_scaled = (a_prod / denom);
             jac_l_00_ = -(a_prod_scaled);
-            let _e575 = normal.x;
-            jac_l_01_ = (a_l * _e575);
-            let _e579 = normal.y;
-            jac_l_02_ = (a_l * _e579);
+            let _e586 = normal.x;
+            jac_l_01_ = (a_l * _e586);
+            let _e590 = normal.y;
+            jac_l_02_ = (a_l * _e590);
             jac_l_03_ = 0f;
             jac_r_00_ = a_prod_scaled;
-            let _e586 = normal.x;
-            jac_r_01_ = (a_r * _e586);
-            let _e590 = normal.y;
-            jac_r_02_ = (a_r * _e590);
+            let _e597 = normal.x;
+            jac_r_01_ = (a_r * _e597);
+            let _e601 = normal.y;
+            jac_r_02_ = (a_r * _e601);
             jac_r_03_ = 0f;
-            let _e598 = normal.x;
-            let A_l_10_ = ((-(u_l_x) * u_n_l) + (dp_drho_l * _e598));
-            let _e602 = normal.x;
-            let _e606 = normal.x;
-            let A_l_11_ = ((u_n_l + (u_l_x * _e602)) + (dp_dru_l * _e606));
-            let _e610 = normal.y;
+            let _e609 = normal.x;
+            let A_l_10_ = ((-(u_l_x) * u_n_l) + (dp_drho_l * _e609));
             let _e613 = normal.x;
-            let A_l_12_ = ((u_l_x * _e610) + (dp_drv_l * _e613));
-            let _e618 = normal.x;
-            let A_l_13_ = (0.4f * _e618);
-            let _e623 = normal.y;
-            let A_l_20_ = ((-(u_l_y) * u_n_l) + (dp_drho_l * _e623));
-            let _e627 = normal.x;
-            let _e630 = normal.y;
-            let A_l_21_ = ((u_l_y * _e627) + (dp_dru_l * _e630));
+            let _e617 = normal.x;
+            let A_l_11_ = ((u_n_l + (u_l_x * _e613)) + (dp_dru_l * _e617));
+            let _e621 = normal.y;
+            let _e624 = normal.x;
+            let A_l_12_ = ((u_l_x * _e621) + (dp_drv_l * _e624));
+            let _e629 = normal.x;
+            let A_l_13_ = (0.4f * _e629);
             let _e634 = normal.y;
-            let _e638 = normal.y;
-            let A_l_22_ = ((u_n_l + (u_l_y * _e634)) + (dp_drv_l * _e638));
-            let _e642 = normal.y;
-            let A_l_23_ = (0.4f * _e642);
+            let A_l_20_ = ((-(u_l_y) * u_n_l) + (dp_drho_l * _e634));
+            let _e638 = normal.x;
+            let _e641 = normal.y;
+            let A_l_21_ = ((u_l_y * _e638) + (dp_dru_l * _e641));
+            let _e645 = normal.y;
+            let _e649 = normal.y;
+            let A_l_22_ = ((u_n_l + (u_l_y * _e645)) + (dp_drv_l * _e649));
+            let _e653 = normal.y;
+            let A_l_23_ = (0.4f * _e653);
             let A_l_30_ = ((-(H_l) * u_n_l) + (dp_drho_l * u_n_l));
-            let _e649 = normal.x;
-            let A_l_31_ = ((H_l * _e649) + (dp_dru_l * u_n_l));
-            let _e654 = normal.y;
-            let A_l_32_ = ((H_l * _e654) + (dp_drv_l * u_n_l));
+            let _e660 = normal.x;
+            let A_l_31_ = ((H_l * _e660) + (dp_dru_l * u_n_l));
+            let _e665 = normal.y;
+            let A_l_32_ = ((H_l * _e665) + (dp_drv_l * u_n_l));
             let A_l_33_ = (1.4f * u_n_l);
-            let _e663 = normal.x;
-            let A_r_10_ = ((-(u_r_x) * u_n_r) + (dp_drho_r * _e663));
-            let _e667 = normal.x;
-            let _e671 = normal.x;
-            let A_r_11_ = ((u_n_r + (u_r_x * _e667)) + (dp_dru_r * _e671));
-            let _e675 = normal.y;
+            let _e674 = normal.x;
+            let A_r_10_ = ((-(u_r_x) * u_n_r) + (dp_drho_r * _e674));
             let _e678 = normal.x;
-            let A_r_12_ = ((u_r_x * _e675) + (dp_drv_r * _e678));
-            let _e683 = normal.x;
-            let A_r_13_ = (0.4f * _e683);
-            let _e688 = normal.y;
-            let A_r_20_ = ((-(u_r_y) * u_n_r) + (dp_drho_r * _e688));
-            let _e692 = normal.x;
-            let _e695 = normal.y;
-            let A_r_21_ = ((u_r_y * _e692) + (dp_dru_r * _e695));
+            let _e682 = normal.x;
+            let A_r_11_ = ((u_n_r + (u_r_x * _e678)) + (dp_dru_r * _e682));
+            let _e686 = normal.y;
+            let _e689 = normal.x;
+            let A_r_12_ = ((u_r_x * _e686) + (dp_drv_r * _e689));
+            let _e694 = normal.x;
+            let A_r_13_ = (0.4f * _e694);
             let _e699 = normal.y;
-            let _e703 = normal.y;
-            let A_r_22_ = ((u_n_r + (u_r_y * _e699)) + (dp_drv_r * _e703));
-            let _e707 = normal.y;
-            let A_r_23_ = (0.4f * _e707);
+            let A_r_20_ = ((-(u_r_y) * u_n_r) + (dp_drho_r * _e699));
+            let _e703 = normal.x;
+            let _e706 = normal.y;
+            let A_r_21_ = ((u_r_y * _e703) + (dp_dru_r * _e706));
+            let _e710 = normal.y;
+            let _e714 = normal.y;
+            let A_r_22_ = ((u_n_r + (u_r_y * _e710)) + (dp_drv_r * _e714));
+            let _e718 = normal.y;
+            let A_r_23_ = (0.4f * _e718);
             let A_r_30_ = ((-(H_r) * u_n_r) + (dp_drho_r * u_n_r));
-            let _e714 = normal.x;
-            let A_r_31_ = ((H_r * _e714) + (dp_dru_r * u_n_r));
-            let _e719 = normal.y;
-            let A_r_32_ = ((H_r * _e719) + (dp_drv_r * u_n_r));
+            let _e725 = normal.x;
+            let A_r_31_ = ((H_r * _e725) + (dp_dru_r * u_n_r));
+            let _e730 = normal.y;
+            let A_r_32_ = ((H_r * _e730) + (dp_drv_r * u_n_r));
             let A_r_33_ = (1.4f * u_n_r);
             jac_l_10_ = (a_l * A_l_10_);
             jac_l_11_ = ((a_l * A_l_11_) - a_prod_scaled);
@@ -3428,38 +3674,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_diff_x_r_ru = (-(mu_over_dist) * du_ry_drv);
             let d_diff_y_r_rho = (-(mu_over_dist) * du_ry_drho);
             let d_diff_y_r_rv = (-(mu_over_dist) * du_ry_drv);
-            let _e800 = jac_l_10_;
-            jac_l_10_ = (_e800 + d_diff_x_l_rho);
-            let _e802 = jac_l_11_;
-            jac_l_11_ = (_e802 + d_diff_x_l_ru);
-            let _e805 = jac_l_12_;
-            jac_l_12_ = (_e805 + 0f);
-            let _e808 = jac_l_13_;
-            jac_l_13_ = (_e808 + 0f);
-            let _e810 = jac_l_20_;
-            jac_l_20_ = (_e810 + d_diff_y_l_rho);
-            let _e813 = jac_l_21_;
-            jac_l_21_ = (_e813 + 0f);
-            let _e815 = jac_l_22_;
-            jac_l_22_ = (_e815 + d_diff_y_l_rv);
-            let _e818 = jac_l_23_;
-            jac_l_23_ = (_e818 + 0f);
-            let _e820 = jac_r_10_;
-            jac_r_10_ = (_e820 + d_diff_x_r_rho);
-            let _e822 = jac_r_11_;
-            jac_r_11_ = (_e822 + d_diff_x_r_ru);
-            let _e825 = jac_r_12_;
-            jac_r_12_ = (_e825 + 0f);
-            let _e828 = jac_r_13_;
-            jac_r_13_ = (_e828 + 0f);
-            let _e830 = jac_r_20_;
-            jac_r_20_ = (_e830 + d_diff_y_r_rho);
-            let _e833 = jac_r_21_;
-            jac_r_21_ = (_e833 + 0f);
-            let _e835 = jac_r_22_;
-            jac_r_22_ = (_e835 + d_diff_y_r_rv);
-            let _e838 = jac_r_23_;
-            jac_r_23_ = (_e838 + 0f);
+            let _e811 = jac_l_10_;
+            jac_l_10_ = (_e811 + d_diff_x_l_rho);
+            let _e813 = jac_l_11_;
+            jac_l_11_ = (_e813 + d_diff_x_l_ru);
+            let _e816 = jac_l_12_;
+            jac_l_12_ = (_e816 + 0f);
+            let _e819 = jac_l_13_;
+            jac_l_13_ = (_e819 + 0f);
+            let _e821 = jac_l_20_;
+            jac_l_20_ = (_e821 + d_diff_y_l_rho);
+            let _e824 = jac_l_21_;
+            jac_l_21_ = (_e824 + 0f);
+            let _e826 = jac_l_22_;
+            jac_l_22_ = (_e826 + d_diff_y_l_rv);
+            let _e829 = jac_l_23_;
+            jac_l_23_ = (_e829 + 0f);
+            let _e831 = jac_r_10_;
+            jac_r_10_ = (_e831 + d_diff_x_r_rho);
+            let _e833 = jac_r_11_;
+            jac_r_11_ = (_e833 + d_diff_x_r_ru);
+            let _e836 = jac_r_12_;
+            jac_r_12_ = (_e836 + 0f);
+            let _e839 = jac_r_13_;
+            jac_r_13_ = (_e839 + 0f);
+            let _e841 = jac_r_20_;
+            jac_r_20_ = (_e841 + d_diff_y_r_rho);
+            let _e844 = jac_r_21_;
+            jac_r_21_ = (_e844 + 0f);
+            let _e846 = jac_r_22_;
+            jac_r_22_ = (_e846 + d_diff_y_r_rv);
+            let _e849 = jac_r_23_;
+            jac_r_23_ = (_e849 + 0f);
             let du_face_x_l_rho = (0.5f * du_lx_drho);
             let du_face_x_l_ru = (0.5f * du_ly_drv);
             let du_face_y_l_rho = (0.5f * du_ly_drho);
@@ -3476,399 +3722,633 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_e_visc_r_ru = ((((d_diff_x_r_ru * u_face_x) + (diff_u_x * du_face_x_r_ru)) + (0f * u_face_y)) + (diff_u_y * 0f));
             let d_e_visc_r_rv = ((((0f * u_face_x) + (diff_u_x * 0f)) + (d_diff_y_r_rv * u_face_y)) + (diff_u_y * du_face_y_r_rv));
             let d_e_visc_r_re = ((((0f * u_face_x) + (diff_u_x * 0f)) + (0f * u_face_y)) + (diff_u_y * 0f));
-            let _e920 = jac_l_30_;
-            jac_l_30_ = (_e920 + d_e_visc_l_rho);
-            let _e922 = jac_l_31_;
-            jac_l_31_ = (_e922 + d_e_visc_l_ru);
-            let _e924 = jac_l_32_;
-            jac_l_32_ = (_e924 + d_e_visc_l_rv);
-            let _e926 = jac_l_33_;
-            jac_l_33_ = (_e926 + d_e_visc_l_re);
-            let _e928 = jac_r_30_;
-            jac_r_30_ = (_e928 + d_e_visc_r_rho);
-            let _e930 = jac_r_31_;
-            jac_r_31_ = (_e930 + d_e_visc_r_ru);
-            let _e932 = jac_r_32_;
-            jac_r_32_ = (_e932 + d_e_visc_r_rv);
-            let _e934 = jac_r_33_;
-            jac_r_33_ = (_e934 + d_e_visc_r_re);
-            let _e936 = is_boundary;
-            if !(_e936) {
-                let _e939 = face_offset;
-                let scalar_mat_idx = cell_face_matrix_indices[_e939];
+            let _e931 = jac_l_30_;
+            jac_l_30_ = (_e931 + d_e_visc_l_rho);
+            let _e933 = jac_l_31_;
+            jac_l_31_ = (_e933 + d_e_visc_l_ru);
+            let _e935 = jac_l_32_;
+            jac_l_32_ = (_e935 + d_e_visc_l_rv);
+            let _e937 = jac_l_33_;
+            jac_l_33_ = (_e937 + d_e_visc_l_re);
+            let _e939 = jac_r_30_;
+            jac_r_30_ = (_e939 + d_e_visc_r_rho);
+            let _e941 = jac_r_31_;
+            jac_r_31_ = (_e941 + d_e_visc_r_ru);
+            let _e943 = jac_r_32_;
+            jac_r_32_ = (_e943 + d_e_visc_r_rv);
+            let _e945 = jac_r_33_;
+            jac_r_33_ = (_e945 + d_e_visc_r_re);
+            let _e947 = is_boundary;
+            if !(_e947) {
+                let _e950 = face_offset;
+                let scalar_mat_idx = cell_face_matrix_indices[_e950];
                 neighbor_rank = 0u;
                 if (scalar_mat_idx != 4294967295u) {
                     neighbor_rank = (scalar_mat_idx - scalar_offset);
                 } else {
                     neighbor_rank = (scalar_mat_idx - scalar_offset);
                 }
-                let _e949 = neighbor_rank;
-                let base_0_ = (start_row_0_ + (4u * _e949));
-                let _e953 = neighbor_rank;
-                let base_1_ = (start_row_1_ + (4u * _e953));
-                let _e957 = neighbor_rank;
-                let base_2_ = (start_row_2_ + (4u * _e957));
-                let _e961 = neighbor_rank;
-                let base_3_ = (start_row_3_ + (4u * _e961));
-                let _e968 = jac_r_00_;
-                matrix_values[(base_0_ + 0u)] = (_e968 * area);
-                let _e974 = jac_r_01_;
-                matrix_values[(base_0_ + 1u)] = (_e974 * area);
-                let _e980 = jac_r_02_;
-                matrix_values[(base_0_ + 2u)] = (_e980 * area);
-                let _e986 = jac_r_03_;
-                matrix_values[(base_0_ + 3u)] = (_e986 * area);
-                let _e992 = jac_r_10_;
-                matrix_values[(base_1_ + 0u)] = (_e992 * area);
-                let _e998 = jac_r_11_;
-                matrix_values[(base_1_ + 1u)] = (_e998 * area);
-                let _e1004 = jac_r_12_;
-                matrix_values[(base_1_ + 2u)] = (_e1004 * area);
-                let _e1010 = jac_r_13_;
-                matrix_values[(base_1_ + 3u)] = (_e1010 * area);
-                let _e1016 = jac_r_20_;
-                matrix_values[(base_2_ + 0u)] = (_e1016 * area);
-                let _e1022 = jac_r_21_;
-                matrix_values[(base_2_ + 1u)] = (_e1022 * area);
-                let _e1028 = jac_r_22_;
-                matrix_values[(base_2_ + 2u)] = (_e1028 * area);
-                let _e1034 = jac_r_23_;
-                matrix_values[(base_2_ + 3u)] = (_e1034 * area);
-                let _e1040 = jac_r_30_;
-                matrix_values[(base_3_ + 0u)] = (_e1040 * area);
-                let _e1046 = jac_r_31_;
-                matrix_values[(base_3_ + 1u)] = (_e1046 * area);
-                let _e1052 = jac_r_32_;
-                matrix_values[(base_3_ + 2u)] = (_e1052 * area);
-                let _e1058 = jac_r_33_;
-                matrix_values[(base_3_ + 3u)] = (_e1058 * area);
-                let _e1061 = jac_l_00_;
-                let _e1063 = diag_00_;
-                diag_00_ = (_e1063 + (_e1061 * area));
-                let _e1066 = jac_l_01_;
-                let _e1068 = diag_01_;
-                diag_01_ = (_e1068 + (_e1066 * area));
-                let _e1071 = jac_l_02_;
-                let _e1073 = diag_02_;
-                diag_02_ = (_e1073 + (_e1071 * area));
-                let _e1076 = jac_l_03_;
-                let _e1078 = diag_03_;
-                diag_03_ = (_e1078 + (_e1076 * area));
-                let _e1081 = jac_l_10_;
-                let _e1083 = diag_10_;
-                diag_10_ = (_e1083 + (_e1081 * area));
-                let _e1086 = jac_l_11_;
-                let _e1088 = diag_11_;
-                diag_11_ = (_e1088 + (_e1086 * area));
-                let _e1091 = jac_l_12_;
-                let _e1093 = diag_12_;
-                diag_12_ = (_e1093 + (_e1091 * area));
-                let _e1096 = jac_l_13_;
-                let _e1098 = diag_13_;
-                diag_13_ = (_e1098 + (_e1096 * area));
-                let _e1101 = jac_l_20_;
-                let _e1103 = diag_20_;
-                diag_20_ = (_e1103 + (_e1101 * area));
-                let _e1106 = jac_l_21_;
-                let _e1108 = diag_21_;
-                diag_21_ = (_e1108 + (_e1106 * area));
-                let _e1111 = jac_l_22_;
-                let _e1113 = diag_22_;
-                diag_22_ = (_e1113 + (_e1111 * area));
-                let _e1116 = jac_l_23_;
-                let _e1118 = diag_23_;
-                diag_23_ = (_e1118 + (_e1116 * area));
-                let _e1121 = jac_l_30_;
-                let _e1123 = diag_30_;
-                diag_30_ = (_e1123 + (_e1121 * area));
-                let _e1126 = jac_l_31_;
-                let _e1128 = diag_31_;
-                diag_31_ = (_e1128 + (_e1126 * area));
-                let _e1131 = jac_l_32_;
-                let _e1133 = diag_32_;
-                diag_32_ = (_e1133 + (_e1131 * area));
-                let _e1136 = jac_l_33_;
-                let _e1138 = diag_33_;
-                diag_33_ = (_e1138 + (_e1136 * area));
+                let _e960 = neighbor_rank;
+                let base_0_ = (start_row_0_ + (4u * _e960));
+                let _e964 = neighbor_rank;
+                let base_1_ = (start_row_1_ + (4u * _e964));
+                let _e968 = neighbor_rank;
+                let base_2_ = (start_row_2_ + (4u * _e968));
+                let _e972 = neighbor_rank;
+                let base_3_ = (start_row_3_ + (4u * _e972));
+                if (scheme_id != 0u) {
+                    phi_upwind_rho = rho_l;
+                    if (flux_adv < 0f) {
+                        let _e980 = rho_r;
+                        phi_upwind_rho = _e980;
+                    }
+                    let _e981 = phi_upwind_rho;
+                    phi_ho_rho = _e981;
+                    if (scheme_id == 1u) {
+                        if (flux_adv > 0f) {
+                            let r_rho_x = (f_center.x - center.x);
+                            let r_rho_y = (f_center.y - center.y);
+                            let _e996 = grad_rho[idx].x;
+                            let _e1002 = grad_rho[idx].y;
+                            phi_ho_rho = ((rho_l + (_e996 * r_rho_x)) + (_e1002 * r_rho_y));
+                        } else {
+                            let _e1007 = center_r.x;
+                            let r_rho_x_1 = (f_center.x - _e1007);
+                            let _e1011 = center_r.y;
+                            let r_rho_y_1 = (f_center.y - _e1011);
+                            let _e1013 = rho_r;
+                            let _e1015 = other_idx;
+                            let _e1018 = grad_rho[_e1015].x;
+                            let _e1022 = other_idx;
+                            let _e1025 = grad_rho[_e1022].y;
+                            phi_ho_rho = ((_e1013 + (_e1018 * r_rho_x_1)) + (_e1025 * r_rho_y_1));
+                        }
+                    } else {
+                        if (scheme_id == 2u) {
+                            if (flux_adv > 0f) {
+                                let _e1033 = center_r.x;
+                                let d_cd_rho_x = (_e1033 - center.x);
+                                let _e1037 = center_r.y;
+                                let d_cd_rho_y = (_e1037 - center.y);
+                                let _e1043 = grad_rho[idx].x;
+                                let _e1048 = grad_rho[idx].y;
+                                let grad_term_rho = ((_e1043 * d_cd_rho_x) + (_e1048 * d_cd_rho_y));
+                                let _e1053 = rho_r;
+                                phi_ho_rho = (((0.625f * rho_l) + (0.375f * _e1053)) + (0.125f * grad_term_rho));
+                            } else {
+                                let _e1062 = center_r.x;
+                                let d_cd_rho_x_1 = (center.x - _e1062);
+                                let _e1066 = center_r.y;
+                                let d_cd_rho_y_1 = (center.y - _e1066);
+                                let _e1069 = other_idx;
+                                let _e1072 = grad_rho[_e1069].x;
+                                let _e1075 = other_idx;
+                                let _e1078 = grad_rho[_e1075].y;
+                                let grad_term_rho_1 = ((_e1072 * d_cd_rho_x_1) + (_e1078 * d_cd_rho_y_1));
+                                let _e1081 = rho_r;
+                                phi_ho_rho = (((0.625f * _e1081) + (0.375f * rho_l)) + (0.125f * grad_term_rho_1));
+                            }
+                        }
+                    }
+                    phi_upwind_ru = rho_u_l.x;
+                    if (flux_adv < 0f) {
+                        let _e1095 = rho_u_r.x;
+                        phi_upwind_ru = _e1095;
+                    }
+                    let _e1096 = phi_upwind_ru;
+                    phi_ho_ru = _e1096;
+                    if (scheme_id == 1u) {
+                        if (flux_adv > 0f) {
+                            let r_ru_x = (f_center.x - center.x);
+                            let r_ru_y = (f_center.y - center.y);
+                            let _e1112 = grad_rho_u_x[idx].x;
+                            let _e1118 = grad_rho_u_x[idx].y;
+                            phi_ho_ru = ((rho_u_l.x + (_e1112 * r_ru_x)) + (_e1118 * r_ru_y));
+                        } else {
+                            let _e1123 = center_r.x;
+                            let r_ru_x_1 = (f_center.x - _e1123);
+                            let _e1127 = center_r.y;
+                            let r_ru_y_1 = (f_center.y - _e1127);
+                            let _e1130 = rho_u_r.x;
+                            let _e1132 = other_idx;
+                            let _e1135 = grad_rho_u_x[_e1132].x;
+                            let _e1139 = other_idx;
+                            let _e1142 = grad_rho_u_x[_e1139].y;
+                            phi_ho_ru = ((_e1130 + (_e1135 * r_ru_x_1)) + (_e1142 * r_ru_y_1));
+                        }
+                    } else {
+                        if (scheme_id == 2u) {
+                            if (flux_adv > 0f) {
+                                let _e1150 = center_r.x;
+                                let d_cd_ru_x = (_e1150 - center.x);
+                                let _e1154 = center_r.y;
+                                let d_cd_ru_y = (_e1154 - center.y);
+                                let _e1160 = grad_rho_u_x[idx].x;
+                                let _e1165 = grad_rho_u_x[idx].y;
+                                let grad_term_ru = ((_e1160 * d_cd_ru_x) + (_e1165 * d_cd_ru_y));
+                                let _e1172 = rho_u_r.x;
+                                phi_ho_ru = (((0.625f * rho_u_l.x) + (0.375f * _e1172)) + (0.125f * grad_term_ru));
+                            } else {
+                                let _e1181 = center_r.x;
+                                let d_cd_ru_x_1 = (center.x - _e1181);
+                                let _e1185 = center_r.y;
+                                let d_cd_ru_y_1 = (center.y - _e1185);
+                                let _e1188 = other_idx;
+                                let _e1191 = grad_rho_u_x[_e1188].x;
+                                let _e1194 = other_idx;
+                                let _e1197 = grad_rho_u_x[_e1194].y;
+                                let grad_term_ru_1 = ((_e1191 * d_cd_ru_x_1) + (_e1197 * d_cd_ru_y_1));
+                                let _e1201 = rho_u_r.x;
+                                phi_ho_ru = (((0.625f * _e1201) + (0.375f * rho_u_l.x)) + (0.125f * grad_term_ru_1));
+                            }
+                        }
+                    }
+                    phi_upwind_rv = rho_u_l.y;
+                    if (flux_adv < 0f) {
+                        let _e1216 = rho_u_r.y;
+                        phi_upwind_rv = _e1216;
+                    }
+                    let _e1217 = phi_upwind_rv;
+                    phi_ho_rv = _e1217;
+                    if (scheme_id == 1u) {
+                        if (flux_adv > 0f) {
+                            let r_rv_x = (f_center.x - center.x);
+                            let r_rv_y = (f_center.y - center.y);
+                            let _e1233 = grad_rho_u_y[idx].x;
+                            let _e1239 = grad_rho_u_y[idx].y;
+                            phi_ho_rv = ((rho_u_l.y + (_e1233 * r_rv_x)) + (_e1239 * r_rv_y));
+                        } else {
+                            let _e1244 = center_r.x;
+                            let r_rv_x_1 = (f_center.x - _e1244);
+                            let _e1248 = center_r.y;
+                            let r_rv_y_1 = (f_center.y - _e1248);
+                            let _e1251 = rho_u_r.y;
+                            let _e1253 = other_idx;
+                            let _e1256 = grad_rho_u_y[_e1253].x;
+                            let _e1260 = other_idx;
+                            let _e1263 = grad_rho_u_y[_e1260].y;
+                            phi_ho_rv = ((_e1251 + (_e1256 * r_rv_x_1)) + (_e1263 * r_rv_y_1));
+                        }
+                    } else {
+                        if (scheme_id == 2u) {
+                            if (flux_adv > 0f) {
+                                let _e1271 = center_r.x;
+                                let d_cd_rv_x = (_e1271 - center.x);
+                                let _e1275 = center_r.y;
+                                let d_cd_rv_y = (_e1275 - center.y);
+                                let _e1281 = grad_rho_u_y[idx].x;
+                                let _e1286 = grad_rho_u_y[idx].y;
+                                let grad_term_rv = ((_e1281 * d_cd_rv_x) + (_e1286 * d_cd_rv_y));
+                                let _e1293 = rho_u_r.y;
+                                phi_ho_rv = (((0.625f * rho_u_l.y) + (0.375f * _e1293)) + (0.125f * grad_term_rv));
+                            } else {
+                                let _e1302 = center_r.x;
+                                let d_cd_rv_x_1 = (center.x - _e1302);
+                                let _e1306 = center_r.y;
+                                let d_cd_rv_y_1 = (center.y - _e1306);
+                                let _e1309 = other_idx;
+                                let _e1312 = grad_rho_u_y[_e1309].x;
+                                let _e1315 = other_idx;
+                                let _e1318 = grad_rho_u_y[_e1315].y;
+                                let grad_term_rv_1 = ((_e1312 * d_cd_rv_x_1) + (_e1318 * d_cd_rv_y_1));
+                                let _e1322 = rho_u_r.y;
+                                phi_ho_rv = (((0.625f * _e1322) + (0.375f * rho_u_l.y)) + (0.125f * grad_term_rv_1));
+                            }
+                        }
+                    }
+                    phi_upwind_re = rho_e_l;
+                    if (flux_adv < 0f) {
+                        let _e1335 = rho_e_r;
+                        phi_upwind_re = _e1335;
+                    }
+                    let _e1336 = phi_upwind_re;
+                    phi_ho_re = _e1336;
+                    if (scheme_id == 1u) {
+                        if (flux_adv > 0f) {
+                            let r_re_x = (f_center.x - center.x);
+                            let r_re_y = (f_center.y - center.y);
+                            let _e1351 = grad_rho_e[idx].x;
+                            let _e1357 = grad_rho_e[idx].y;
+                            phi_ho_re = ((rho_e_l + (_e1351 * r_re_x)) + (_e1357 * r_re_y));
+                        } else {
+                            let _e1362 = center_r.x;
+                            let r_re_x_1 = (f_center.x - _e1362);
+                            let _e1366 = center_r.y;
+                            let r_re_y_1 = (f_center.y - _e1366);
+                            let _e1368 = rho_e_r;
+                            let _e1370 = other_idx;
+                            let _e1373 = grad_rho_e[_e1370].x;
+                            let _e1377 = other_idx;
+                            let _e1380 = grad_rho_e[_e1377].y;
+                            phi_ho_re = ((_e1368 + (_e1373 * r_re_x_1)) + (_e1380 * r_re_y_1));
+                        }
+                    } else {
+                        if (scheme_id == 2u) {
+                            if (flux_adv > 0f) {
+                                let _e1388 = center_r.x;
+                                let d_cd_re_x = (_e1388 - center.x);
+                                let _e1392 = center_r.y;
+                                let d_cd_re_y = (_e1392 - center.y);
+                                let _e1398 = grad_rho_e[idx].x;
+                                let _e1403 = grad_rho_e[idx].y;
+                                let grad_term_re = ((_e1398 * d_cd_re_x) + (_e1403 * d_cd_re_y));
+                                let _e1408 = rho_e_r;
+                                phi_ho_re = (((0.625f * rho_e_l) + (0.375f * _e1408)) + (0.125f * grad_term_re));
+                            } else {
+                                let _e1417 = center_r.x;
+                                let d_cd_re_x_1 = (center.x - _e1417);
+                                let _e1421 = center_r.y;
+                                let d_cd_re_y_1 = (center.y - _e1421);
+                                let _e1424 = other_idx;
+                                let _e1427 = grad_rho_e[_e1424].x;
+                                let _e1430 = other_idx;
+                                let _e1433 = grad_rho_e[_e1430].y;
+                                let grad_term_re_1 = ((_e1427 * d_cd_re_x_1) + (_e1433 * d_cd_re_y_1));
+                                let _e1436 = rho_e_r;
+                                phi_ho_re = (((0.625f * _e1436) + (0.375f * rho_e_l)) + (0.125f * grad_term_re_1));
+                            }
+                        }
+                    }
+                    let _e1445 = phi_ho_rho;
+                    let _e1446 = phi_upwind_rho;
+                    let correction_rho = (flux_adv * (_e1445 - _e1446));
+                    let _e1449 = phi_ho_ru;
+                    let _e1450 = phi_upwind_ru;
+                    let correction_rho_u_x = (flux_adv * (_e1449 - _e1450));
+                    let _e1453 = phi_ho_rv;
+                    let _e1454 = phi_upwind_rv;
+                    let correction_rho_u_y = (flux_adv * (_e1453 - _e1454));
+                    let _e1457 = phi_ho_re;
+                    let _e1458 = phi_upwind_re;
+                    let correction_rho_e = (flux_adv * (_e1457 - _e1458));
+                    let _e1461 = sum_rho;
+                    sum_rho = (_e1461 + correction_rho);
+                    let _e1463 = sum_rho_u_x;
+                    sum_rho_u_x = (_e1463 + correction_rho_u_x);
+                    let _e1465 = sum_rho_u_y;
+                    sum_rho_u_y = (_e1465 + correction_rho_u_y);
+                    let _e1467 = sum_rho_e;
+                    sum_rho_e = (_e1467 + correction_rho_e);
+                }
+                let _e1473 = jac_r_00_;
+                matrix_values[(base_0_ + 0u)] = (_e1473 * area);
+                let _e1479 = jac_r_01_;
+                matrix_values[(base_0_ + 1u)] = (_e1479 * area);
+                let _e1485 = jac_r_02_;
+                matrix_values[(base_0_ + 2u)] = (_e1485 * area);
+                let _e1491 = jac_r_03_;
+                matrix_values[(base_0_ + 3u)] = (_e1491 * area);
+                let _e1497 = jac_r_10_;
+                matrix_values[(base_1_ + 0u)] = (_e1497 * area);
+                let _e1503 = jac_r_11_;
+                matrix_values[(base_1_ + 1u)] = (_e1503 * area);
+                let _e1509 = jac_r_12_;
+                matrix_values[(base_1_ + 2u)] = (_e1509 * area);
+                let _e1515 = jac_r_13_;
+                matrix_values[(base_1_ + 3u)] = (_e1515 * area);
+                let _e1521 = jac_r_20_;
+                matrix_values[(base_2_ + 0u)] = (_e1521 * area);
+                let _e1527 = jac_r_21_;
+                matrix_values[(base_2_ + 1u)] = (_e1527 * area);
+                let _e1533 = jac_r_22_;
+                matrix_values[(base_2_ + 2u)] = (_e1533 * area);
+                let _e1539 = jac_r_23_;
+                matrix_values[(base_2_ + 3u)] = (_e1539 * area);
+                let _e1545 = jac_r_30_;
+                matrix_values[(base_3_ + 0u)] = (_e1545 * area);
+                let _e1551 = jac_r_31_;
+                matrix_values[(base_3_ + 1u)] = (_e1551 * area);
+                let _e1557 = jac_r_32_;
+                matrix_values[(base_3_ + 2u)] = (_e1557 * area);
+                let _e1563 = jac_r_33_;
+                matrix_values[(base_3_ + 3u)] = (_e1563 * area);
+                let _e1566 = jac_l_00_;
+                let _e1568 = diag_00_;
+                diag_00_ = (_e1568 + (_e1566 * area));
+                let _e1571 = jac_l_01_;
+                let _e1573 = diag_01_;
+                diag_01_ = (_e1573 + (_e1571 * area));
+                let _e1576 = jac_l_02_;
+                let _e1578 = diag_02_;
+                diag_02_ = (_e1578 + (_e1576 * area));
+                let _e1581 = jac_l_03_;
+                let _e1583 = diag_03_;
+                diag_03_ = (_e1583 + (_e1581 * area));
+                let _e1586 = jac_l_10_;
+                let _e1588 = diag_10_;
+                diag_10_ = (_e1588 + (_e1586 * area));
+                let _e1591 = jac_l_11_;
+                let _e1593 = diag_11_;
+                diag_11_ = (_e1593 + (_e1591 * area));
+                let _e1596 = jac_l_12_;
+                let _e1598 = diag_12_;
+                diag_12_ = (_e1598 + (_e1596 * area));
+                let _e1601 = jac_l_13_;
+                let _e1603 = diag_13_;
+                diag_13_ = (_e1603 + (_e1601 * area));
+                let _e1606 = jac_l_20_;
+                let _e1608 = diag_20_;
+                diag_20_ = (_e1608 + (_e1606 * area));
+                let _e1611 = jac_l_21_;
+                let _e1613 = diag_21_;
+                diag_21_ = (_e1613 + (_e1611 * area));
+                let _e1616 = jac_l_22_;
+                let _e1618 = diag_22_;
+                diag_22_ = (_e1618 + (_e1616 * area));
+                let _e1621 = jac_l_23_;
+                let _e1623 = diag_23_;
+                diag_23_ = (_e1623 + (_e1621 * area));
+                let _e1626 = jac_l_30_;
+                let _e1628 = diag_30_;
+                diag_30_ = (_e1628 + (_e1626 * area));
+                let _e1631 = jac_l_31_;
+                let _e1633 = diag_31_;
+                diag_31_ = (_e1633 + (_e1631 * area));
+                let _e1636 = jac_l_32_;
+                let _e1638 = diag_32_;
+                diag_32_ = (_e1638 + (_e1636 * area));
+                let _e1641 = jac_l_33_;
+                let _e1643 = diag_33_;
+                diag_33_ = (_e1643 + (_e1641 * area));
             } else {
-                let _e1140 = jac_l_00_;
-                let _e1141 = jac_r_00_;
-                eff_00_ = (_e1140 + _e1141);
-                let _e1144 = jac_l_01_;
-                let _e1145 = jac_r_01_;
-                eff_01_ = (_e1144 + _e1145);
-                let _e1148 = jac_l_02_;
-                let _e1149 = jac_r_02_;
-                eff_02_ = (_e1148 + _e1149);
-                let _e1152 = jac_l_03_;
-                let _e1153 = jac_r_03_;
-                eff_03_ = (_e1152 + _e1153);
-                let _e1156 = jac_l_10_;
-                let _e1157 = jac_r_10_;
-                eff_10_ = (_e1156 + _e1157);
-                let _e1160 = jac_l_11_;
-                let _e1161 = jac_r_11_;
-                eff_11_ = (_e1160 + _e1161);
-                let _e1164 = jac_l_12_;
-                let _e1165 = jac_r_12_;
-                eff_12_ = (_e1164 + _e1165);
-                let _e1168 = jac_l_13_;
-                let _e1169 = jac_r_13_;
-                eff_13_ = (_e1168 + _e1169);
-                let _e1172 = jac_l_20_;
-                let _e1173 = jac_r_20_;
-                eff_20_ = (_e1172 + _e1173);
-                let _e1176 = jac_l_21_;
-                let _e1177 = jac_r_21_;
-                eff_21_ = (_e1176 + _e1177);
-                let _e1180 = jac_l_22_;
-                let _e1181 = jac_r_22_;
-                eff_22_ = (_e1180 + _e1181);
-                let _e1184 = jac_l_23_;
-                let _e1185 = jac_r_23_;
-                eff_23_ = (_e1184 + _e1185);
-                let _e1188 = jac_l_30_;
-                let _e1189 = jac_r_30_;
-                eff_30_ = (_e1188 + _e1189);
-                let _e1192 = jac_l_31_;
-                let _e1193 = jac_r_31_;
-                eff_31_ = (_e1192 + _e1193);
-                let _e1196 = jac_l_32_;
-                let _e1197 = jac_r_32_;
-                eff_32_ = (_e1196 + _e1197);
-                let _e1200 = jac_l_33_;
-                let _e1201 = jac_r_33_;
-                eff_33_ = (_e1200 + _e1201);
+                let _e1645 = jac_l_00_;
+                let _e1646 = jac_r_00_;
+                eff_00_ = (_e1645 + _e1646);
+                let _e1649 = jac_l_01_;
+                let _e1650 = jac_r_01_;
+                eff_01_ = (_e1649 + _e1650);
+                let _e1653 = jac_l_02_;
+                let _e1654 = jac_r_02_;
+                eff_02_ = (_e1653 + _e1654);
+                let _e1657 = jac_l_03_;
+                let _e1658 = jac_r_03_;
+                eff_03_ = (_e1657 + _e1658);
+                let _e1661 = jac_l_10_;
+                let _e1662 = jac_r_10_;
+                eff_10_ = (_e1661 + _e1662);
+                let _e1665 = jac_l_11_;
+                let _e1666 = jac_r_11_;
+                eff_11_ = (_e1665 + _e1666);
+                let _e1669 = jac_l_12_;
+                let _e1670 = jac_r_12_;
+                eff_12_ = (_e1669 + _e1670);
+                let _e1673 = jac_l_13_;
+                let _e1674 = jac_r_13_;
+                eff_13_ = (_e1673 + _e1674);
+                let _e1677 = jac_l_20_;
+                let _e1678 = jac_r_20_;
+                eff_20_ = (_e1677 + _e1678);
+                let _e1681 = jac_l_21_;
+                let _e1682 = jac_r_21_;
+                eff_21_ = (_e1681 + _e1682);
+                let _e1685 = jac_l_22_;
+                let _e1686 = jac_r_22_;
+                eff_22_ = (_e1685 + _e1686);
+                let _e1689 = jac_l_23_;
+                let _e1690 = jac_r_23_;
+                eff_23_ = (_e1689 + _e1690);
+                let _e1693 = jac_l_30_;
+                let _e1694 = jac_r_30_;
+                eff_30_ = (_e1693 + _e1694);
+                let _e1697 = jac_l_31_;
+                let _e1698 = jac_r_31_;
+                eff_31_ = (_e1697 + _e1698);
+                let _e1701 = jac_l_32_;
+                let _e1702 = jac_r_32_;
+                eff_32_ = (_e1701 + _e1702);
+                let _e1705 = jac_l_33_;
+                let _e1706 = jac_r_33_;
+                eff_33_ = (_e1705 + _e1706);
                 if (boundary_type == 1u) {
-                    let _e1206 = jac_l_00_;
-                    let _e1207 = jac_r_00_;
-                    let _e1209 = jac_r_01_;
-                    let _e1212 = constants.inlet_velocity;
-                    eff_00_ = ((_e1206 + _e1207) + (_e1209 * _e1212));
-                    let _e1215 = jac_l_01_;
-                    eff_01_ = _e1215;
-                    let _e1216 = jac_l_02_;
-                    eff_02_ = _e1216;
-                    let _e1217 = jac_l_03_;
-                    let _e1218 = jac_r_03_;
-                    eff_03_ = (_e1217 + _e1218);
-                    let _e1220 = jac_l_10_;
-                    let _e1221 = jac_r_10_;
-                    let _e1223 = jac_r_11_;
-                    let _e1226 = constants.inlet_velocity;
-                    eff_10_ = ((_e1220 + _e1221) + (_e1223 * _e1226));
-                    let _e1229 = jac_l_11_;
-                    eff_11_ = _e1229;
-                    let _e1230 = jac_l_12_;
-                    eff_12_ = _e1230;
-                    let _e1231 = jac_l_13_;
-                    let _e1232 = jac_r_13_;
-                    eff_13_ = (_e1231 + _e1232);
-                    let _e1234 = jac_l_20_;
-                    let _e1235 = jac_r_20_;
-                    let _e1237 = jac_r_21_;
-                    let _e1240 = constants.inlet_velocity;
-                    eff_20_ = ((_e1234 + _e1235) + (_e1237 * _e1240));
-                    let _e1243 = jac_l_21_;
-                    eff_21_ = _e1243;
-                    let _e1244 = jac_l_22_;
-                    eff_22_ = _e1244;
-                    let _e1245 = jac_l_23_;
-                    let _e1246 = jac_r_23_;
-                    eff_23_ = (_e1245 + _e1246);
-                    let _e1248 = jac_l_30_;
-                    let _e1249 = jac_r_30_;
-                    let _e1251 = jac_r_31_;
-                    let _e1254 = constants.inlet_velocity;
-                    eff_30_ = ((_e1248 + _e1249) + (_e1251 * _e1254));
-                    let _e1257 = jac_l_31_;
-                    eff_31_ = _e1257;
-                    let _e1258 = jac_l_32_;
-                    eff_32_ = _e1258;
-                    let _e1259 = jac_l_33_;
-                    let _e1260 = jac_r_33_;
-                    eff_33_ = (_e1259 + _e1260);
+                    let _e1711 = jac_l_00_;
+                    let _e1712 = jac_r_00_;
+                    let _e1714 = jac_r_01_;
+                    let _e1717 = constants.inlet_velocity;
+                    eff_00_ = ((_e1711 + _e1712) + (_e1714 * _e1717));
+                    let _e1720 = jac_l_01_;
+                    eff_01_ = _e1720;
+                    let _e1721 = jac_l_02_;
+                    eff_02_ = _e1721;
+                    let _e1722 = jac_l_03_;
+                    let _e1723 = jac_r_03_;
+                    eff_03_ = (_e1722 + _e1723);
+                    let _e1725 = jac_l_10_;
+                    let _e1726 = jac_r_10_;
+                    let _e1728 = jac_r_11_;
+                    let _e1731 = constants.inlet_velocity;
+                    eff_10_ = ((_e1725 + _e1726) + (_e1728 * _e1731));
+                    let _e1734 = jac_l_11_;
+                    eff_11_ = _e1734;
+                    let _e1735 = jac_l_12_;
+                    eff_12_ = _e1735;
+                    let _e1736 = jac_l_13_;
+                    let _e1737 = jac_r_13_;
+                    eff_13_ = (_e1736 + _e1737);
+                    let _e1739 = jac_l_20_;
+                    let _e1740 = jac_r_20_;
+                    let _e1742 = jac_r_21_;
+                    let _e1745 = constants.inlet_velocity;
+                    eff_20_ = ((_e1739 + _e1740) + (_e1742 * _e1745));
+                    let _e1748 = jac_l_21_;
+                    eff_21_ = _e1748;
+                    let _e1749 = jac_l_22_;
+                    eff_22_ = _e1749;
+                    let _e1750 = jac_l_23_;
+                    let _e1751 = jac_r_23_;
+                    eff_23_ = (_e1750 + _e1751);
+                    let _e1753 = jac_l_30_;
+                    let _e1754 = jac_r_30_;
+                    let _e1756 = jac_r_31_;
+                    let _e1759 = constants.inlet_velocity;
+                    eff_30_ = ((_e1753 + _e1754) + (_e1756 * _e1759));
+                    let _e1762 = jac_l_31_;
+                    eff_31_ = _e1762;
+                    let _e1763 = jac_l_32_;
+                    eff_32_ = _e1763;
+                    let _e1764 = jac_l_33_;
+                    let _e1765 = jac_r_33_;
+                    eff_33_ = (_e1764 + _e1765);
                 } else {
                     if (boundary_type == 3u) {
-                        let _e1264 = jac_l_00_;
-                        let _e1265 = jac_r_00_;
-                        eff_00_ = (_e1264 + _e1265);
-                        let _e1267 = jac_l_01_;
-                        let _e1268 = jac_r_01_;
-                        eff_01_ = (_e1267 - _e1268);
-                        let _e1270 = jac_l_02_;
-                        let _e1271 = jac_r_02_;
-                        eff_02_ = (_e1270 - _e1271);
-                        let _e1273 = jac_l_03_;
-                        let _e1274 = jac_r_03_;
-                        eff_03_ = (_e1273 + _e1274);
-                        let _e1276 = jac_l_10_;
-                        let _e1277 = jac_r_10_;
-                        eff_10_ = (_e1276 + _e1277);
-                        let _e1279 = jac_l_11_;
-                        let _e1280 = jac_r_11_;
-                        eff_11_ = (_e1279 - _e1280);
-                        let _e1282 = jac_l_12_;
-                        let _e1283 = jac_r_12_;
-                        eff_12_ = (_e1282 - _e1283);
-                        let _e1285 = jac_l_13_;
-                        let _e1286 = jac_r_13_;
-                        eff_13_ = (_e1285 + _e1286);
-                        let _e1288 = jac_l_20_;
-                        let _e1289 = jac_r_20_;
-                        eff_20_ = (_e1288 + _e1289);
-                        let _e1291 = jac_l_21_;
-                        let _e1292 = jac_r_21_;
-                        eff_21_ = (_e1291 - _e1292);
-                        let _e1294 = jac_l_22_;
-                        let _e1295 = jac_r_22_;
-                        eff_22_ = (_e1294 - _e1295);
-                        let _e1297 = jac_l_23_;
-                        let _e1298 = jac_r_23_;
-                        eff_23_ = (_e1297 + _e1298);
-                        let _e1300 = jac_l_30_;
-                        let _e1301 = jac_r_30_;
-                        eff_30_ = (_e1300 + _e1301);
-                        let _e1303 = jac_l_31_;
-                        let _e1304 = jac_r_31_;
-                        eff_31_ = (_e1303 - _e1304);
-                        let _e1306 = jac_l_32_;
-                        let _e1307 = jac_r_32_;
-                        eff_32_ = (_e1306 - _e1307);
-                        let _e1309 = jac_l_33_;
-                        let _e1310 = jac_r_33_;
-                        eff_33_ = (_e1309 + _e1310);
+                        let _e1769 = jac_l_00_;
+                        let _e1770 = jac_r_00_;
+                        eff_00_ = (_e1769 + _e1770);
+                        let _e1772 = jac_l_01_;
+                        let _e1773 = jac_r_01_;
+                        eff_01_ = (_e1772 - _e1773);
+                        let _e1775 = jac_l_02_;
+                        let _e1776 = jac_r_02_;
+                        eff_02_ = (_e1775 - _e1776);
+                        let _e1778 = jac_l_03_;
+                        let _e1779 = jac_r_03_;
+                        eff_03_ = (_e1778 + _e1779);
+                        let _e1781 = jac_l_10_;
+                        let _e1782 = jac_r_10_;
+                        eff_10_ = (_e1781 + _e1782);
+                        let _e1784 = jac_l_11_;
+                        let _e1785 = jac_r_11_;
+                        eff_11_ = (_e1784 - _e1785);
+                        let _e1787 = jac_l_12_;
+                        let _e1788 = jac_r_12_;
+                        eff_12_ = (_e1787 - _e1788);
+                        let _e1790 = jac_l_13_;
+                        let _e1791 = jac_r_13_;
+                        eff_13_ = (_e1790 + _e1791);
+                        let _e1793 = jac_l_20_;
+                        let _e1794 = jac_r_20_;
+                        eff_20_ = (_e1793 + _e1794);
+                        let _e1796 = jac_l_21_;
+                        let _e1797 = jac_r_21_;
+                        eff_21_ = (_e1796 - _e1797);
+                        let _e1799 = jac_l_22_;
+                        let _e1800 = jac_r_22_;
+                        eff_22_ = (_e1799 - _e1800);
+                        let _e1802 = jac_l_23_;
+                        let _e1803 = jac_r_23_;
+                        eff_23_ = (_e1802 + _e1803);
+                        let _e1805 = jac_l_30_;
+                        let _e1806 = jac_r_30_;
+                        eff_30_ = (_e1805 + _e1806);
+                        let _e1808 = jac_l_31_;
+                        let _e1809 = jac_r_31_;
+                        eff_31_ = (_e1808 - _e1809);
+                        let _e1811 = jac_l_32_;
+                        let _e1812 = jac_r_32_;
+                        eff_32_ = (_e1811 - _e1812);
+                        let _e1814 = jac_l_33_;
+                        let _e1815 = jac_r_33_;
+                        eff_33_ = (_e1814 + _e1815);
                     }
                 }
-                let _e1312 = eff_00_;
-                let _e1314 = diag_00_;
-                diag_00_ = (_e1314 + (_e1312 * area));
-                let _e1316 = eff_01_;
-                let _e1318 = diag_01_;
-                diag_01_ = (_e1318 + (_e1316 * area));
-                let _e1320 = eff_02_;
-                let _e1322 = diag_02_;
-                diag_02_ = (_e1322 + (_e1320 * area));
-                let _e1324 = eff_03_;
-                let _e1326 = diag_03_;
-                diag_03_ = (_e1326 + (_e1324 * area));
-                let _e1328 = eff_10_;
-                let _e1330 = diag_10_;
-                diag_10_ = (_e1330 + (_e1328 * area));
-                let _e1332 = eff_11_;
-                let _e1334 = diag_11_;
-                diag_11_ = (_e1334 + (_e1332 * area));
-                let _e1336 = eff_12_;
-                let _e1338 = diag_12_;
-                diag_12_ = (_e1338 + (_e1336 * area));
-                let _e1340 = eff_13_;
-                let _e1342 = diag_13_;
-                diag_13_ = (_e1342 + (_e1340 * area));
-                let _e1344 = eff_20_;
-                let _e1346 = diag_20_;
-                diag_20_ = (_e1346 + (_e1344 * area));
-                let _e1348 = eff_21_;
-                let _e1350 = diag_21_;
-                diag_21_ = (_e1350 + (_e1348 * area));
-                let _e1352 = eff_22_;
-                let _e1354 = diag_22_;
-                diag_22_ = (_e1354 + (_e1352 * area));
-                let _e1356 = eff_23_;
-                let _e1358 = diag_23_;
-                diag_23_ = (_e1358 + (_e1356 * area));
-                let _e1360 = eff_30_;
-                let _e1362 = diag_30_;
-                diag_30_ = (_e1362 + (_e1360 * area));
-                let _e1364 = eff_31_;
-                let _e1366 = diag_31_;
-                diag_31_ = (_e1366 + (_e1364 * area));
-                let _e1368 = eff_32_;
-                let _e1370 = diag_32_;
-                diag_32_ = (_e1370 + (_e1368 * area));
-                let _e1372 = eff_33_;
-                let _e1374 = diag_33_;
-                diag_33_ = (_e1374 + (_e1372 * area));
+                let _e1817 = eff_00_;
+                let _e1819 = diag_00_;
+                diag_00_ = (_e1819 + (_e1817 * area));
+                let _e1821 = eff_01_;
+                let _e1823 = diag_01_;
+                diag_01_ = (_e1823 + (_e1821 * area));
+                let _e1825 = eff_02_;
+                let _e1827 = diag_02_;
+                diag_02_ = (_e1827 + (_e1825 * area));
+                let _e1829 = eff_03_;
+                let _e1831 = diag_03_;
+                diag_03_ = (_e1831 + (_e1829 * area));
+                let _e1833 = eff_10_;
+                let _e1835 = diag_10_;
+                diag_10_ = (_e1835 + (_e1833 * area));
+                let _e1837 = eff_11_;
+                let _e1839 = diag_11_;
+                diag_11_ = (_e1839 + (_e1837 * area));
+                let _e1841 = eff_12_;
+                let _e1843 = diag_12_;
+                diag_12_ = (_e1843 + (_e1841 * area));
+                let _e1845 = eff_13_;
+                let _e1847 = diag_13_;
+                diag_13_ = (_e1847 + (_e1845 * area));
+                let _e1849 = eff_20_;
+                let _e1851 = diag_20_;
+                diag_20_ = (_e1851 + (_e1849 * area));
+                let _e1853 = eff_21_;
+                let _e1855 = diag_21_;
+                diag_21_ = (_e1855 + (_e1853 * area));
+                let _e1857 = eff_22_;
+                let _e1859 = diag_22_;
+                diag_22_ = (_e1859 + (_e1857 * area));
+                let _e1861 = eff_23_;
+                let _e1863 = diag_23_;
+                diag_23_ = (_e1863 + (_e1861 * area));
+                let _e1865 = eff_30_;
+                let _e1867 = diag_30_;
+                diag_30_ = (_e1867 + (_e1865 * area));
+                let _e1869 = eff_31_;
+                let _e1871 = diag_31_;
+                diag_31_ = (_e1871 + (_e1869 * area));
+                let _e1873 = eff_32_;
+                let _e1875 = diag_32_;
+                diag_32_ = (_e1875 + (_e1873 * area));
+                let _e1877 = eff_33_;
+                let _e1879 = diag_33_;
+                diag_33_ = (_e1879 + (_e1877 * area));
             }
         }
         continuing {
-            let _e1377 = face_offset;
-            face_offset = (_e1377 + 1u);
+            let _e1882 = face_offset;
+            face_offset = (_e1882 + 1u);
         }
     }
-    let _e1379 = rhs_time_rho;
-    let _e1380 = coeff_time;
-    let _e1383 = sum_rho;
-    rhs_rho = ((_e1379 - (_e1380 * rho)) - _e1383);
-    let _e1386 = rhs_time_rho_u_x;
-    let _e1387 = coeff_time;
-    let _e1391 = sum_rho_u_x;
-    rhs_rho_u_x = ((_e1386 - (_e1387 * rho_u.x)) - _e1391);
-    let _e1394 = rhs_time_rho_u_y;
-    let _e1395 = coeff_time;
-    let _e1399 = sum_rho_u_y;
-    rhs_rho_u_y = ((_e1394 - (_e1395 * rho_u.y)) - _e1399);
-    let _e1402 = rhs_time_rho_e;
-    let _e1403 = coeff_time;
-    let _e1406 = sum_rho_e;
-    rhs_rho_e = ((_e1402 - (_e1403 * rho_e)) - _e1406);
-    let _e1409 = coeff_time;
-    let _e1410 = diag_00_;
-    diag_00_ = (_e1410 + _e1409);
-    let _e1412 = coeff_time;
-    let _e1413 = diag_11_;
-    diag_11_ = (_e1413 + _e1412);
-    let _e1415 = coeff_time;
-    let _e1416 = diag_22_;
-    diag_22_ = (_e1416 + _e1415);
-    let _e1418 = coeff_time;
-    let _e1419 = diag_33_;
-    diag_33_ = (_e1419 + _e1418);
+    let _e1884 = rhs_time_rho;
+    let _e1885 = coeff_time;
+    let _e1888 = sum_rho;
+    rhs_rho = ((_e1884 - (_e1885 * rho)) - _e1888);
+    let _e1891 = rhs_time_rho_u_x;
+    let _e1892 = coeff_time;
+    let _e1896 = sum_rho_u_x;
+    rhs_rho_u_x = ((_e1891 - (_e1892 * rho_u.x)) - _e1896);
+    let _e1899 = rhs_time_rho_u_y;
+    let _e1900 = coeff_time;
+    let _e1904 = sum_rho_u_y;
+    rhs_rho_u_y = ((_e1899 - (_e1900 * rho_u.y)) - _e1904);
+    let _e1907 = rhs_time_rho_e;
+    let _e1908 = coeff_time;
+    let _e1911 = sum_rho_e;
+    rhs_rho_e = ((_e1907 - (_e1908 * rho_e)) - _e1911);
+    let _e1914 = coeff_time;
+    let _e1915 = diag_00_;
+    diag_00_ = (_e1915 + _e1914);
+    let _e1917 = coeff_time;
+    let _e1918 = diag_11_;
+    diag_11_ = (_e1918 + _e1917);
+    let _e1920 = coeff_time;
+    let _e1921 = diag_22_;
+    diag_22_ = (_e1921 + _e1920);
+    let _e1923 = coeff_time;
+    let _e1924 = diag_33_;
+    diag_33_ = (_e1924 + _e1923);
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = (scalar_diag_idx - scalar_offset);
     let diag_base_0_ = (start_row_0_ + (4u * diag_rank));
     let diag_base_1_ = (start_row_1_ + (4u * diag_rank));
     let diag_base_2_ = (start_row_2_ + (4u * diag_rank));
     let diag_base_3_ = (start_row_3_ + (4u * diag_rank));
-    let _e1441 = diag_00_;
-    matrix_values[(diag_base_0_ + 0u)] = _e1441;
-    let _e1446 = diag_01_;
-    matrix_values[(diag_base_0_ + 1u)] = _e1446;
-    let _e1451 = diag_02_;
-    matrix_values[(diag_base_0_ + 2u)] = _e1451;
-    let _e1456 = diag_03_;
-    matrix_values[(diag_base_0_ + 3u)] = _e1456;
-    let _e1461 = diag_10_;
-    matrix_values[(diag_base_1_ + 0u)] = _e1461;
-    let _e1466 = diag_11_;
-    matrix_values[(diag_base_1_ + 1u)] = _e1466;
-    let _e1471 = diag_12_;
-    matrix_values[(diag_base_1_ + 2u)] = _e1471;
-    let _e1476 = diag_13_;
-    matrix_values[(diag_base_1_ + 3u)] = _e1476;
-    let _e1481 = diag_20_;
-    matrix_values[(diag_base_2_ + 0u)] = _e1481;
-    let _e1486 = diag_21_;
-    matrix_values[(diag_base_2_ + 1u)] = _e1486;
-    let _e1491 = diag_22_;
-    matrix_values[(diag_base_2_ + 2u)] = _e1491;
-    let _e1496 = diag_23_;
-    matrix_values[(diag_base_2_ + 3u)] = _e1496;
-    let _e1501 = diag_30_;
-    matrix_values[(diag_base_3_ + 0u)] = _e1501;
-    let _e1506 = diag_31_;
-    matrix_values[(diag_base_3_ + 1u)] = _e1506;
-    let _e1511 = diag_32_;
-    matrix_values[(diag_base_3_ + 2u)] = _e1511;
-    let _e1516 = diag_33_;
-    matrix_values[(diag_base_3_ + 3u)] = _e1516;
-    let _e1523 = rhs_rho;
-    rhs[((4u * idx) + 0u)] = _e1523;
-    let _e1530 = rhs_rho_u_x;
-    rhs[((4u * idx) + 1u)] = _e1530;
-    let _e1537 = rhs_rho_u_y;
-    rhs[((4u * idx) + 2u)] = _e1537;
-    let _e1544 = rhs_rho_e;
-    rhs[((4u * idx) + 3u)] = _e1544;
+    let _e1946 = diag_00_;
+    matrix_values[(diag_base_0_ + 0u)] = _e1946;
+    let _e1951 = diag_01_;
+    matrix_values[(diag_base_0_ + 1u)] = _e1951;
+    let _e1956 = diag_02_;
+    matrix_values[(diag_base_0_ + 2u)] = _e1956;
+    let _e1961 = diag_03_;
+    matrix_values[(diag_base_0_ + 3u)] = _e1961;
+    let _e1966 = diag_10_;
+    matrix_values[(diag_base_1_ + 0u)] = _e1966;
+    let _e1971 = diag_11_;
+    matrix_values[(diag_base_1_ + 1u)] = _e1971;
+    let _e1976 = diag_12_;
+    matrix_values[(diag_base_1_ + 2u)] = _e1976;
+    let _e1981 = diag_13_;
+    matrix_values[(diag_base_1_ + 3u)] = _e1981;
+    let _e1986 = diag_20_;
+    matrix_values[(diag_base_2_ + 0u)] = _e1986;
+    let _e1991 = diag_21_;
+    matrix_values[(diag_base_2_ + 1u)] = _e1991;
+    let _e1996 = diag_22_;
+    matrix_values[(diag_base_2_ + 2u)] = _e1996;
+    let _e2001 = diag_23_;
+    matrix_values[(diag_base_2_ + 3u)] = _e2001;
+    let _e2006 = diag_30_;
+    matrix_values[(diag_base_3_ + 0u)] = _e2006;
+    let _e2011 = diag_31_;
+    matrix_values[(diag_base_3_ + 1u)] = _e2011;
+    let _e2016 = diag_32_;
+    matrix_values[(diag_base_3_ + 2u)] = _e2016;
+    let _e2021 = diag_33_;
+    matrix_values[(diag_base_3_ + 3u)] = _e2021;
+    let _e2028 = rhs_rho;
+    rhs[((4u * idx) + 0u)] = _e2028;
+    let _e2035 = rhs_rho_u_x;
+    rhs[((4u * idx) + 1u)] = _e2035;
+    let _e2042 = rhs_rho_u_y;
+    rhs[((4u * idx) + 2u)] = _e2042;
+    let _e2049 = rhs_rho_e;
+    rhs[((4u * idx) + 3u)] = _e2049;
     return;
 }
 "#;
@@ -4242,6 +4722,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BufferBinding<'a>,
             pub fluxes: wgpu::BufferBinding<'a>,
             pub constants: wgpu::BufferBinding<'a>,
+            pub grad_rho: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+            pub grad_rho_e: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup1Entries<'a> {
@@ -4250,6 +4734,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BindGroupEntry<'a>,
             pub fluxes: wgpu::BindGroupEntry<'a>,
             pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_rho: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup1Entries<'a> {
             pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -4274,15 +4762,35 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 4,
                         resource: wgpu::BindingResource::Buffer(params.constants),
                     },
+                    grad_rho: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                    },
+                    grad_rho_u_x: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                    },
+                    grad_rho_u_y: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                    },
+                    grad_rho_e: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
                 [
                     self.state,
                     self.state_old,
                     self.state_old_old,
                     self.fluxes,
                     self.constants,
+                    self.grad_rho,
+                    self.grad_rho_u_x,
+                    self.grad_rho_u_y,
+                    self.grad_rho_e,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -4352,6 +4860,50 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                                 >(
                                 )
                                     as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"grad_rho\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"grad_rho_u_x\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"grad_rho_u_y\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"grad_rho_e\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
                             },
                             count: None,
                         },
@@ -4474,6 +5026,14 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
+@group(1) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(1) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(1) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -4613,8 +5173,856 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
+    pub mod compressible_gradients {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 20, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 24, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 28, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 32, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 36, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 44, size: 4, type: `f32`"]
+            pub inlet_velocity: f32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub ramp_time: f32,
+            #[doc = "offset: 52, size: 4, type: `u32`"]
+            pub precond_type: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                inlet_velocity: f32,
+                ramp_time: f32,
+                precond_type: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    inlet_velocity,
+                    ramp_time,
+                    precond_type,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
+            pub diagonal_indices: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
+            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    cell_face_matrix_indices: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
+                    },
+                    diagonal_indices: wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.cell_face_matrix_indices,
+                    self.diagonal_indices,
+                    self.face_boundary,
+                    self.face_centers,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GeneratedCompressibleGradients::BindGroup0::LayoutDescriptor"),
+                    entries: &[
+                        #[doc = " @binding(0): \"face_owner\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"face_neighbor\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(2): \"face_areas\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(3): \"face_normals\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(4): \"cell_centers\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"cell_vols\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"cell_face_offsets\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"cell_faces\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"cell_face_matrix_indices\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(9): \"diagonal_indices\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 9,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(12): \"face_boundary\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 12,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(13): \"face_centers\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 13,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedCompressibleGradients::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub grad_rho: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+            pub grad_rho_e: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_rho: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    grad_rho: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                    },
+                    grad_rho_u_x: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                    },
+                    grad_rho_u_y: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                    },
+                    grad_rho_e: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.fluxes,
+                    self.constants,
+                    self.grad_rho,
+                    self.grad_rho_u_x,
+                    self.grad_rho_u_y,
+                    self.grad_rho_e,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GeneratedCompressibleGradients::BindGroup1::LayoutDescriptor"),
+                    entries: &[
+                        #[doc = " @binding(0): \"state\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"state_old\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(2): \"state_old_old\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(3): \"fluxes\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(4): \"constants\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::compressible_gradients::Constants,
+                                >(
+                                )
+                                    as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"grad_rho\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"grad_rho_u_x\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"grad_rho_u_y\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"grad_rho_e\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedCompressibleGradients::BindGroup1"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 2],
+            ) -> [wgpu::BindGroupLayout; 2] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedCompressibleGradients::PipelineLayout"),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("compressible_gradients.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
+    precond_type: u32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(0) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(0) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(0) @binding(8) 
+var<storage> cell_face_matrix_indices: array<u32>;
+@group(0) @binding(9) 
+var<storage> diagonal_indices: array<u32>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) 
+var<uniform> constants: Constants;
+@group(1) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(1) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(1) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var grad_rho_accum: Vector2_ = Vector2_(0f, 0f);
+    var grad_rho_u_x_accum: Vector2_ = Vector2_(0f, 0f);
+    var grad_rho_u_y_accum: Vector2_ = Vector2_(0f, 0f);
+    var grad_rho_e_accum: Vector2_ = Vector2_(0f, 0f);
+    var k: u32;
+    var normal: Vector2_;
+    var rho_r: f32;
+    var rho_u_r: vec2<f32>;
+    var rho_e_r: f32;
+    var other_idx: u32;
+    var rho_face: f32;
+    var rho_u_face_x: f32;
+    var rho_u_face_y: f32;
+    var rho_e_face: f32;
+
+    let idx = global_id.x;
+    if (idx >= arrayLength((&cell_vols))) {
+        return;
+    }
+    let center = cell_centers[idx];
+    let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    let rho_l = state[((idx * 7u) + 0u)];
+    let _e34 = state[((idx * 7u) + 1u)];
+    let _e41 = state[((idx * 7u) + 2u)];
+    let rho_u_l = vec2<f32>(_e34, _e41);
+    let rho_e_l = state[((idx * 7u) + 3u)];
+    k = start;
+    loop {
+        let _e51 = k;
+        if (_e51 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e54 = k;
+            let face_idx = cell_faces[_e54];
+            let owner = face_owner[face_idx];
+            let neighbor = face_neighbor[face_idx];
+            let area = face_areas[face_idx];
+            let _e68 = face_normals[face_idx];
+            normal = _e68;
+            if (owner != idx) {
+                let _e73 = normal.x;
+                normal.x = -(_e73);
+                let _e77 = normal.y;
+                normal.y = -(_e77);
+            }
+            rho_r = rho_l;
+            rho_u_r = rho_u_l;
+            rho_e_r = rho_e_l;
+            if (neighbor != -1i) {
+                other_idx = u32(neighbor);
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e87 = other_idx;
+                let rho_neigh = state[((_e87 * 7u) + 0u)];
+                let _e95 = other_idx;
+                let _e102 = state[((_e95 * 7u) + 1u)];
+                let _e103 = other_idx;
+                let _e110 = state[((_e103 * 7u) + 2u)];
+                let rho_u_neigh = vec2<f32>(_e102, _e110);
+                let _e112 = other_idx;
+                let rho_e_neigh = state[((_e112 * 7u) + 3u)];
+                rho_r = rho_neigh;
+                rho_u_r.x = rho_u_neigh.x;
+                rho_u_r.y = rho_u_neigh.y;
+                rho_e_r = rho_e_neigh;
+            }
+            rho_face = rho_l;
+            rho_u_face_x = rho_u_l.x;
+            rho_u_face_y = rho_u_l.y;
+            rho_e_face = rho_e_l;
+            if (neighbor != -1i) {
+                let _e132 = rho_r;
+                rho_face = (0.5f * (rho_l + _e132));
+                let _e138 = rho_u_r.x;
+                rho_u_face_x = (0.5f * (rho_u_l.x + _e138));
+                let _e144 = rho_u_r.y;
+                rho_u_face_y = (0.5f * (rho_u_l.y + _e144));
+                let _e148 = rho_e_r;
+                rho_e_face = (0.5f * (rho_e_l + _e148));
+            }
+            let _e154 = rho_face;
+            let _e156 = normal.x;
+            let _e159 = grad_rho_accum.x;
+            grad_rho_accum.x = (_e159 + ((_e154 * _e156) * area));
+            let _e162 = rho_face;
+            let _e164 = normal.y;
+            let _e167 = grad_rho_accum.y;
+            grad_rho_accum.y = (_e167 + ((_e162 * _e164) * area));
+            let _e171 = rho_u_face_x;
+            let _e173 = normal.x;
+            let _e176 = grad_rho_u_x_accum.x;
+            grad_rho_u_x_accum.x = (_e176 + ((_e171 * _e173) * area));
+            let _e179 = rho_u_face_x;
+            let _e181 = normal.y;
+            let _e184 = grad_rho_u_x_accum.y;
+            grad_rho_u_x_accum.y = (_e184 + ((_e179 * _e181) * area));
+            let _e188 = rho_u_face_y;
+            let _e190 = normal.x;
+            let _e193 = grad_rho_u_y_accum.x;
+            grad_rho_u_y_accum.x = (_e193 + ((_e188 * _e190) * area));
+            let _e196 = rho_u_face_y;
+            let _e198 = normal.y;
+            let _e201 = grad_rho_u_y_accum.y;
+            grad_rho_u_y_accum.y = (_e201 + ((_e196 * _e198) * area));
+            let _e205 = rho_e_face;
+            let _e207 = normal.x;
+            let _e210 = grad_rho_e_accum.x;
+            grad_rho_e_accum.x = (_e210 + ((_e205 * _e207) * area));
+            let _e213 = rho_e_face;
+            let _e215 = normal.y;
+            let _e218 = grad_rho_e_accum.y;
+            grad_rho_e_accum.y = (_e218 + ((_e213 * _e215) * area));
+        }
+        continuing {
+            let _e221 = k;
+            k = (_e221 + 1u);
+        }
+    }
+    let _e225 = grad_rho_accum.x;
+    grad_rho_accum.x = (_e225 / vol);
+    let _e229 = grad_rho_accum.y;
+    grad_rho_accum.y = (_e229 / vol);
+    let _e233 = grad_rho_u_x_accum.x;
+    grad_rho_u_x_accum.x = (_e233 / vol);
+    let _e237 = grad_rho_u_x_accum.y;
+    grad_rho_u_x_accum.y = (_e237 / vol);
+    let _e241 = grad_rho_u_y_accum.x;
+    grad_rho_u_y_accum.x = (_e241 / vol);
+    let _e245 = grad_rho_u_y_accum.y;
+    grad_rho_u_y_accum.y = (_e245 / vol);
+    let _e249 = grad_rho_e_accum.x;
+    grad_rho_e_accum.x = (_e249 / vol);
+    let _e253 = grad_rho_e_accum.y;
+    grad_rho_e_accum.y = (_e253 / vol);
+    let _e257 = grad_rho_accum;
+    grad_rho[idx] = _e257;
+    let _e260 = grad_rho_u_x_accum;
+    grad_rho_u_x[idx] = _e260;
+    let _e263 = grad_rho_u_y_accum;
+    grad_rho_u_y[idx] = _e263;
+    let _e266 = grad_rho_e_accum;
+    grad_rho_e[idx] = _e266;
+    return;
+}
+"#;
+    }
     pub mod compressible_update {
         use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
         pub struct Constants {
@@ -4708,6 +6116,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BufferBinding<'a>,
             pub fluxes: wgpu::BufferBinding<'a>,
             pub constants: wgpu::BufferBinding<'a>,
+            pub grad_rho: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+            pub grad_rho_e: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -4716,6 +6128,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BindGroupEntry<'a>,
             pub fluxes: wgpu::BindGroupEntry<'a>,
             pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_rho: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -4740,15 +6156,35 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 4,
                         resource: wgpu::BindingResource::Buffer(params.constants),
                     },
+                    grad_rho: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                    },
+                    grad_rho_u_x: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                    },
+                    grad_rho_u_y: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                    },
+                    grad_rho_e: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
                 [
                     self.state,
                     self.state_old,
                     self.state_old_old,
                     self.fluxes,
                     self.constants,
+                    self.grad_rho,
+                    self.grad_rho_u_x,
+                    self.grad_rho_u_y,
+                    self.grad_rho_e,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -4818,6 +6254,50 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                                 >(
                                 )
                                     as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"grad_rho\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"grad_rho_u_x\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"grad_rho_u_y\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"grad_rho_e\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
                             },
                             count: None,
                         },
@@ -4911,6 +6391,14 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(0) @binding(4) 
 var<uniform> constants: Constants;
+@group(0) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(0) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(0) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(0) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -5890,8 +7378,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var d_p_neigh: f32;
     var neighbor_rank: u32;
     var phi_upwind_u: f32;
-    var phi_upwind_v: f32;
     var phi_ho_u: f32;
+    var phi_upwind_v: f32;
     var phi_ho_v: f32;
     var lambda: f32;
 
@@ -6054,221 +7542,260 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let _e360 = state[((_e353 * 8u) + 1u)];
                     let u_neigh = vec2<f32>(_e352, _e360);
                     phi_upwind_u = u_own.x;
-                    phi_upwind_v = u_own.y;
                     if (flux_2 < 0f) {
                         phi_upwind_u = u_neigh.x;
-                        phi_upwind_v = u_neigh.y;
                     }
-                    let _e370 = phi_upwind_u;
-                    phi_ho_u = _e370;
-                    let _e372 = phi_upwind_v;
-                    phi_ho_v = _e372;
+                    let _e367 = phi_upwind_u;
+                    phi_ho_u = _e367;
                     if (0u == 1u) {
                         if (flux_2 > 0f) {
-                            let grad_u_own = grad_u[idx];
-                            let grad_v_own = grad_v[idx];
-                            let r_x = (f_center.x - center.x);
-                            let r_y = (f_center.y - center.y);
-                            phi_ho_u = ((u_own.x + (grad_u_own.x * r_x)) + (grad_u_own.y * r_y));
-                            phi_ho_v = ((u_own.y + (grad_v_own.x * r_x)) + (grad_v_own.y * r_y));
+                            let r_u_x = (f_center.x - center.x);
+                            let r_u_y = (f_center.y - center.y);
+                            let _e383 = grad_u[idx].x;
+                            let _e389 = grad_u[idx].y;
+                            phi_ho_u = ((u_own.x + (_e383 * r_u_x)) + (_e389 * r_u_y));
                         } else {
-                            let _e405 = other_idx;
-                            let grad_u_neigh = grad_u[_e405];
+                            let _e394 = other_center.x;
+                            let r_u_x_1 = (f_center.x - _e394);
+                            let _e398 = other_center.y;
+                            let r_u_y_1 = (f_center.y - _e398);
+                            let _e402 = other_idx;
+                            let _e405 = grad_u[_e402].x;
                             let _e409 = other_idx;
-                            let grad_v_neigh = grad_v[_e409];
-                            let _e414 = other_center.x;
-                            let r_x_1 = (f_center.x - _e414);
-                            let _e418 = other_center.y;
-                            let r_y_1 = (f_center.y - _e418);
-                            phi_ho_u = ((u_neigh.x + (grad_u_neigh.x * r_x_1)) + (grad_u_neigh.y * r_y_1));
-                            phi_ho_v = ((u_neigh.y + (grad_v_neigh.x * r_x_1)) + (grad_v_neigh.y * r_y_1));
+                            let _e412 = grad_u[_e409].y;
+                            phi_ho_u = ((u_neigh.x + (_e405 * r_u_x_1)) + (_e412 * r_u_y_1));
                         }
                     } else {
                         if (0u == 2u) {
                             if (flux_2 > 0f) {
-                                let grad_u_own_1 = grad_u[idx];
-                                let grad_v_own_1 = grad_v[idx];
-                                let _e445 = other_center.x;
-                                let d_cd_x = (_e445 - center.x);
-                                let _e449 = other_center.y;
-                                let d_cd_y = (_e449 - center.y);
-                                let grad_term_u = ((grad_u_own_1.x * d_cd_x) + (grad_u_own_1.y * d_cd_y));
-                                let grad_term_v = ((grad_v_own_1.x * d_cd_x) + (grad_v_own_1.y * d_cd_y));
+                                let _e420 = other_center.x;
+                                let d_cd_u_x = (_e420 - center.x);
+                                let _e424 = other_center.y;
+                                let d_cd_u_y = (_e424 - center.y);
+                                let _e430 = grad_u[idx].x;
+                                let _e435 = grad_u[idx].y;
+                                let grad_term_u = ((_e430 * d_cd_u_x) + (_e435 * d_cd_u_y));
                                 phi_ho_u = (((0.625f * u_own.x) + (0.375f * u_neigh.x)) + (0.125f * grad_term_u));
+                            } else {
+                                let _e450 = other_center.x;
+                                let d_cd_u_x_1 = (center.x - _e450);
+                                let _e454 = other_center.y;
+                                let d_cd_u_y_1 = (center.y - _e454);
+                                let _e457 = other_idx;
+                                let _e460 = grad_u[_e457].x;
+                                let _e463 = other_idx;
+                                let _e466 = grad_u[_e463].y;
+                                let grad_term_u_1 = ((_e460 * d_cd_u_x_1) + (_e466 * d_cd_u_y_1));
+                                phi_ho_u = (((0.625f * u_neigh.x) + (0.375f * u_own.x)) + (0.125f * grad_term_u_1));
+                            }
+                        }
+                    }
+                    phi_upwind_v = u_own.y;
+                    if (flux_2 < 0f) {
+                        phi_upwind_v = u_neigh.y;
+                    }
+                    let _e484 = phi_upwind_v;
+                    phi_ho_v = _e484;
+                    if (0u == 1u) {
+                        if (flux_2 > 0f) {
+                            let r_v_x = (f_center.x - center.x);
+                            let r_v_y = (f_center.y - center.y);
+                            let _e500 = grad_v[idx].x;
+                            let _e506 = grad_v[idx].y;
+                            phi_ho_v = ((u_own.y + (_e500 * r_v_x)) + (_e506 * r_v_y));
+                        } else {
+                            let _e511 = other_center.x;
+                            let r_v_x_1 = (f_center.x - _e511);
+                            let _e515 = other_center.y;
+                            let r_v_y_1 = (f_center.y - _e515);
+                            let _e519 = other_idx;
+                            let _e522 = grad_v[_e519].x;
+                            let _e526 = other_idx;
+                            let _e529 = grad_v[_e526].y;
+                            phi_ho_v = ((u_neigh.y + (_e522 * r_v_x_1)) + (_e529 * r_v_y_1));
+                        }
+                    } else {
+                        if (0u == 2u) {
+                            if (flux_2 > 0f) {
+                                let _e537 = other_center.x;
+                                let d_cd_v_x = (_e537 - center.x);
+                                let _e541 = other_center.y;
+                                let d_cd_v_y = (_e541 - center.y);
+                                let _e547 = grad_v[idx].x;
+                                let _e552 = grad_v[idx].y;
+                                let grad_term_v = ((_e547 * d_cd_v_x) + (_e552 * d_cd_v_y));
                                 phi_ho_v = (((0.625f * u_own.y) + (0.375f * u_neigh.y)) + (0.125f * grad_term_v));
                             } else {
-                                let _e483 = other_idx;
-                                let grad_u_neigh_1 = grad_u[_e483];
-                                let _e487 = other_idx;
-                                let grad_v_neigh_1 = grad_v[_e487];
-                                let _e492 = other_center.x;
-                                let d_cd_x_1 = (center.x - _e492);
-                                let _e496 = other_center.y;
-                                let d_cd_y_1 = (center.y - _e496);
-                                let grad_term_u_1 = ((grad_u_neigh_1.x * d_cd_x_1) + (grad_u_neigh_1.y * d_cd_y_1));
-                                let grad_term_v_1 = ((grad_v_neigh_1.x * d_cd_x_1) + (grad_v_neigh_1.y * d_cd_y_1));
-                                phi_ho_u = (((0.625f * u_neigh.x) + (0.375f * u_own.x)) + (0.125f * grad_term_u_1));
+                                let _e567 = other_center.x;
+                                let d_cd_v_x_1 = (center.x - _e567);
+                                let _e571 = other_center.y;
+                                let d_cd_v_y_1 = (center.y - _e571);
+                                let _e574 = other_idx;
+                                let _e577 = grad_v[_e574].x;
+                                let _e580 = other_idx;
+                                let _e583 = grad_v[_e580].y;
+                                let grad_term_v_1 = ((_e577 * d_cd_v_x_1) + (_e583 * d_cd_v_y_1));
                                 phi_ho_v = (((0.625f * u_neigh.y) + (0.375f * u_own.y)) + (0.125f * grad_term_v_1));
                             }
                         }
                     }
-                    let _e528 = phi_ho_u;
-                    let _e529 = phi_upwind_u;
-                    let correction_u = (flux_2 * (_e528 - _e529));
-                    let _e532 = phi_ho_v;
-                    let _e533 = phi_upwind_v;
-                    let correction_v = (flux_2 * (_e532 - _e533));
-                    let _e536 = rhs_u;
-                    rhs_u = (_e536 - correction_u);
-                    let _e538 = rhs_v;
-                    rhs_v = (_e538 - correction_v);
+                    let _e596 = phi_ho_u;
+                    let _e597 = phi_upwind_u;
+                    let correction_u = (flux_2 * (_e596 - _e597));
+                    let _e600 = phi_ho_v;
+                    let _e601 = phi_upwind_v;
+                    let correction_v = (flux_2 * (_e600 - _e601));
+                    let _e604 = rhs_u;
+                    rhs_u = (_e604 - correction_u);
+                    let _e606 = rhs_v;
+                    rhs_v = (_e606 - correction_v);
                 }
                 let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
-                let _e548 = other_center.x;
-                let _e550 = other_center.y;
-                let d_neigh = distance(vec2<f32>(_e548, _e550), vec2<f32>(f_center.x, f_center.y));
+                let _e616 = other_center.x;
+                let _e618 = other_center.y;
+                let d_neigh = distance(vec2<f32>(_e616, _e618), vec2<f32>(f_center.x, f_center.y));
                 let total_dist = (d_own + d_neigh);
                 lambda = 0.5f;
                 if (total_dist > 0.000001f) {
                     lambda = (d_neigh / total_dist);
                 }
-                let _e563 = normal.x;
-                let pg_force_x = (area_4 * _e563);
-                let _e566 = normal.y;
-                let pg_force_y = (area_4 * _e566);
-                let _e570 = lambda;
-                matrix_values[idx_0_2_] = ((1f - _e570) * pg_force_x);
-                let _e576 = lambda;
-                matrix_values[idx_1_2_] = ((1f - _e576) * pg_force_y);
-                let _e581 = lambda;
-                let _e583 = sum_diag_up;
-                sum_diag_up = (_e583 + (_e581 * pg_force_x));
-                let _e586 = lambda;
-                let _e588 = sum_diag_vp;
-                sum_diag_vp = (_e588 + (_e586 * pg_force_y));
-                let _e591 = normal.x;
-                let div_coeff_x = (_e591 * area_4);
-                let _e594 = normal.y;
-                let div_coeff_y = (_e594 * area_4);
-                let _e598 = lambda;
-                matrix_values[idx_2_0_] = ((1f - _e598) * div_coeff_x);
-                let _e604 = lambda;
-                matrix_values[idx_2_1_] = ((1f - _e604) * div_coeff_y);
-                let _e609 = lambda;
-                let _e611 = sum_diag_pu;
-                sum_diag_pu = (_e611 + (_e609 * div_coeff_x));
-                let _e614 = lambda;
-                let _e616 = sum_diag_pv;
-                sum_diag_pv = (_e616 + (_e614 * div_coeff_y));
+                let _e631 = normal.x;
+                let pg_force_x = (area_4 * _e631);
+                let _e634 = normal.y;
+                let pg_force_y = (area_4 * _e634);
+                let _e638 = lambda;
+                matrix_values[idx_0_2_] = ((1f - _e638) * pg_force_x);
+                let _e644 = lambda;
+                matrix_values[idx_1_2_] = ((1f - _e644) * pg_force_y);
+                let _e649 = lambda;
+                let _e651 = sum_diag_up;
+                sum_diag_up = (_e651 + (_e649 * pg_force_x));
+                let _e654 = lambda;
+                let _e656 = sum_diag_vp;
+                sum_diag_vp = (_e656 + (_e654 * pg_force_y));
+                let _e659 = normal.x;
+                let div_coeff_x = (_e659 * area_4);
+                let _e662 = normal.y;
+                let div_coeff_y = (_e662 * area_4);
+                let _e666 = lambda;
+                matrix_values[idx_2_0_] = ((1f - _e666) * div_coeff_x);
+                let _e672 = lambda;
+                matrix_values[idx_2_1_] = ((1f - _e672) * div_coeff_y);
+                let _e677 = lambda;
+                let _e679 = sum_diag_pu;
+                sum_diag_pu = (_e679 + (_e677 * div_coeff_x));
+                let _e682 = lambda;
+                let _e684 = sum_diag_pv;
+                sum_diag_pv = (_e684 + (_e682 * div_coeff_y));
                 let d_p_own = state[((idx * 8u) + 3u)];
-                let _e625 = lambda;
-                let _e627 = lambda;
-                let _e630 = d_p_neigh;
-                let d_p_face = ((_e625 * d_p_own) + ((1f - _e627) * _e630));
-                let _e635 = constants.density;
-                let _e636 = lambda;
-                let _e643 = state[((idx * 8u) + 3u)];
-                let _e645 = lambda;
-                let _e648 = other_idx;
-                let _e655 = state[((_e648 * 8u) + 3u)];
-                let pressure_coeff_face = (_e635 * ((_e636 * _e643) + ((1f - _e645) * _e655)));
+                let _e693 = lambda;
+                let _e695 = lambda;
+                let _e698 = d_p_neigh;
+                let d_p_face = ((_e693 * d_p_own) + ((1f - _e695) * _e698));
+                let _e703 = constants.density;
+                let _e704 = lambda;
+                let _e711 = state[((idx * 8u) + 3u)];
+                let _e713 = lambda;
+                let _e716 = other_idx;
+                let _e723 = state[((_e716 * 8u) + 3u)];
+                let pressure_coeff_face = (_e703 * ((_e704 * _e711) + ((1f - _e713) * _e723)));
                 let lapl_coeff = ((pressure_coeff_face * area_4) / dist_3);
                 matrix_values[idx_2_2_] = -(lapl_coeff);
-                let _e665 = sum_diag_pp;
-                sum_diag_pp = (_e665 + lapl_coeff);
+                let _e733 = sum_diag_pp;
+                sum_diag_pp = (_e733 + lapl_coeff);
                 let scalar_coeff = ((pressure_coeff_face * area_4) / dist_3);
                 if (scalar_mat_idx != 4294967295u) {
                     scalar_matrix_values[scalar_mat_idx] = -(scalar_coeff);
                 }
-                let _e675 = scalar_diag_p;
-                scalar_diag_p = (_e675 + scalar_coeff);
+                let _e743 = scalar_diag_p;
+                scalar_diag_p = (_e743 + scalar_coeff);
             } else {
                 if (boundary_type == 1u) {
-                    let _e681 = constants.ramp_time;
-                    let _e684 = constants.time;
-                    let ramp = smoothstep(0f, _e681, _e684);
-                    let _e689 = constants.inlet_velocity;
-                    let u_bc_x = (_e689 * ramp);
-                    let _e691 = diag_u;
-                    diag_u = (_e691 + _e239);
-                    let _e693 = diag_v;
-                    diag_v = (_e693 + _e239);
-                    let _e696 = rhs_u;
-                    rhs_u = (_e696 + (_e239 * u_bc_x));
-                    let _e700 = rhs_v;
-                    rhs_v = (_e700 + (_e239 * 0f));
+                    let _e749 = constants.ramp_time;
+                    let _e752 = constants.time;
+                    let ramp = smoothstep(0f, _e749, _e752);
+                    let _e757 = constants.inlet_velocity;
+                    let u_bc_x = (_e757 * ramp);
+                    let _e759 = diag_u;
+                    diag_u = (_e759 + _e239);
+                    let _e761 = diag_v;
+                    diag_v = (_e761 + _e239);
+                    let _e764 = rhs_u;
+                    rhs_u = (_e764 + (_e239 * u_bc_x));
+                    let _e768 = rhs_v;
+                    rhs_v = (_e768 + (_e239 * 0f));
                     if (flux_2 > 0f) {
-                        let _e704 = diag_u;
-                        diag_u = (_e704 + flux_2);
-                        let _e706 = diag_v;
-                        diag_v = (_e706 + flux_2);
+                        let _e772 = diag_u;
+                        diag_u = (_e772 + flux_2);
+                        let _e774 = diag_v;
+                        diag_v = (_e774 + flux_2);
                     } else {
-                        let _e709 = rhs_u;
-                        rhs_u = (_e709 - (flux_2 * u_bc_x));
-                        let _e712 = rhs_v;
-                        rhs_v = (_e712 - (flux_2 * 0f));
+                        let _e777 = rhs_u;
+                        rhs_u = (_e777 - (flux_2 * u_bc_x));
+                        let _e780 = rhs_v;
+                        rhs_v = (_e780 - (flux_2 * 0f));
                     }
-                    let _e715 = normal.x;
-                    let pg_force_x_1 = (area_4 * _e715);
-                    let _e718 = normal.y;
-                    let pg_force_y_1 = (area_4 * _e718);
-                    let _e720 = sum_diag_up;
-                    sum_diag_up = (_e720 + pg_force_x_1);
-                    let _e722 = sum_diag_vp;
-                    sum_diag_vp = (_e722 + pg_force_y_1);
-                    let _e725 = normal.x;
-                    let _e728 = normal.y;
-                    let flux_bc = (((u_bc_x * _e725) + (0f * _e728)) * area_4);
-                    let _e733 = rhs_p;
-                    rhs_p = (_e733 - flux_bc);
+                    let _e783 = normal.x;
+                    let pg_force_x_1 = (area_4 * _e783);
+                    let _e786 = normal.y;
+                    let pg_force_y_1 = (area_4 * _e786);
+                    let _e788 = sum_diag_up;
+                    sum_diag_up = (_e788 + pg_force_x_1);
+                    let _e790 = sum_diag_vp;
+                    sum_diag_vp = (_e790 + pg_force_y_1);
+                    let _e793 = normal.x;
+                    let _e796 = normal.y;
+                    let flux_bc = (((u_bc_x * _e793) + (0f * _e796)) * area_4);
+                    let _e801 = rhs_p;
+                    rhs_p = (_e801 - flux_bc);
                 } else {
                     if (boundary_type == 3u) {
-                        let _e737 = diag_u;
-                        diag_u = (_e737 + _e239);
-                        let _e739 = diag_v;
-                        diag_v = (_e739 + _e239);
-                        let _e742 = normal.x;
-                        let pg_force_x_2 = (area_4 * _e742);
-                        let _e745 = normal.y;
-                        let pg_force_y_2 = (area_4 * _e745);
-                        let _e747 = sum_diag_up;
-                        sum_diag_up = (_e747 + pg_force_x_2);
-                        let _e749 = sum_diag_vp;
-                        sum_diag_vp = (_e749 + pg_force_y_2);
+                        let _e805 = diag_u;
+                        diag_u = (_e805 + _e239);
+                        let _e807 = diag_v;
+                        diag_v = (_e807 + _e239);
+                        let _e810 = normal.x;
+                        let pg_force_x_2 = (area_4 * _e810);
+                        let _e813 = normal.y;
+                        let pg_force_y_2 = (area_4 * _e813);
+                        let _e815 = sum_diag_up;
+                        sum_diag_up = (_e815 + pg_force_x_2);
+                        let _e817 = sum_diag_vp;
+                        sum_diag_vp = (_e817 + pg_force_y_2);
                     } else {
                         if (boundary_type == 2u) {
                             if (flux_2 > 0f) {
-                                let _e755 = diag_u;
-                                diag_u = (_e755 + flux_2);
-                                let _e757 = diag_v;
-                                diag_v = (_e757 + flux_2);
+                                let _e823 = diag_u;
+                                diag_u = (_e823 + flux_2);
+                                let _e825 = diag_v;
+                                diag_v = (_e825 + flux_2);
                             }
-                            let _e760 = normal.x;
-                            let div_coeff_x_1 = (_e760 * area_4);
-                            let _e763 = normal.y;
-                            let div_coeff_y_1 = (_e763 * area_4);
-                            let _e765 = sum_diag_pu;
-                            sum_diag_pu = (_e765 + div_coeff_x_1);
-                            let _e767 = sum_diag_pv;
-                            sum_diag_pv = (_e767 + div_coeff_y_1);
+                            let _e828 = normal.x;
+                            let div_coeff_x_1 = (_e828 * area_4);
+                            let _e831 = normal.y;
+                            let div_coeff_y_1 = (_e831 * area_4);
+                            let _e833 = sum_diag_pu;
+                            sum_diag_pu = (_e833 + div_coeff_x_1);
+                            let _e835 = sum_diag_pv;
+                            sum_diag_pv = (_e835 + div_coeff_y_1);
                             let d_p_own_1 = state[((idx * 8u) + 3u)];
-                            let _e778 = constants.density;
-                            let _e785 = state[((idx * 8u) + 3u)];
-                            let pressure_coeff_cell = (_e778 * _e785);
+                            let _e846 = constants.density;
+                            let _e853 = state[((idx * 8u) + 3u)];
+                            let pressure_coeff_cell = (_e846 * _e853);
                             let lapl_coeff_1 = ((pressure_coeff_cell * area_4) / dist_3);
-                            let _e789 = sum_diag_pp;
-                            sum_diag_pp = (_e789 + lapl_coeff_1);
+                            let _e857 = sum_diag_pp;
+                            sum_diag_pp = (_e857 + lapl_coeff_1);
                             let scalar_coeff_1 = ((pressure_coeff_cell * area_4) / dist_3);
-                            let _e793 = scalar_diag_p;
-                            scalar_diag_p = (_e793 + scalar_coeff_1);
+                            let _e861 = scalar_diag_p;
+                            scalar_diag_p = (_e861 + scalar_coeff_1);
                         }
                     }
                 }
             }
         }
         continuing {
-            let _e796 = k;
-            k = (_e796 + 1u);
+            let _e864 = k;
+            k = (_e864 + 1u);
         }
     }
     let scalar_diag_idx = diagonal_indices[idx];
@@ -6282,40 +7809,40 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let d_2_0_ = ((start_row_2_ + (3u * diag_rank)) + 0u);
     let d_2_1_ = ((start_row_2_ + (3u * diag_rank)) + 1u);
     let d_2_2_ = ((start_row_2_ + (3u * diag_rank)) + 2u);
-    let _e849 = diag_u;
-    matrix_values[d_0_0_] = _e849;
+    let _e917 = diag_u;
+    matrix_values[d_0_0_] = _e917;
     matrix_values[d_0_1_] = 0f;
-    let _e855 = sum_diag_up;
-    matrix_values[d_0_2_] = _e855;
+    let _e923 = sum_diag_up;
+    matrix_values[d_0_2_] = _e923;
     matrix_values[d_1_0_] = 0f;
-    let _e861 = diag_v;
-    matrix_values[d_1_1_] = _e861;
-    let _e864 = sum_diag_vp;
-    matrix_values[d_1_2_] = _e864;
-    let _e867 = sum_diag_pu;
-    matrix_values[d_2_0_] = _e867;
-    let _e870 = sum_diag_pv;
-    matrix_values[d_2_1_] = _e870;
-    let _e874 = diag_p;
-    let _e875 = sum_diag_pp;
-    matrix_values[d_2_2_] = (_e874 + _e875);
-    let _e883 = rhs_u;
-    rhs[((3u * idx) + 0u)] = _e883;
-    let _e890 = rhs_v;
-    rhs[((3u * idx) + 1u)] = _e890;
-    let _e897 = rhs_p;
-    rhs[((3u * idx) + 2u)] = _e897;
-    let _e900 = scalar_diag_p;
-    scalar_matrix_values[scalar_diag_idx] = _e900;
-    let _e903 = diag_u;
-    let _e904 = safe_inverse(_e903);
-    diag_u_inv[idx] = _e904;
-    let _e907 = diag_v;
-    let _e908 = safe_inverse(_e907);
-    diag_v_inv[idx] = _e908;
-    let _e911 = scalar_diag_p;
-    let _e912 = safe_inverse(_e911);
-    diag_p_inv[idx] = _e912;
+    let _e929 = diag_v;
+    matrix_values[d_1_1_] = _e929;
+    let _e932 = sum_diag_vp;
+    matrix_values[d_1_2_] = _e932;
+    let _e935 = sum_diag_pu;
+    matrix_values[d_2_0_] = _e935;
+    let _e938 = sum_diag_pv;
+    matrix_values[d_2_1_] = _e938;
+    let _e942 = diag_p;
+    let _e943 = sum_diag_pp;
+    matrix_values[d_2_2_] = (_e942 + _e943);
+    let _e951 = rhs_u;
+    rhs[((3u * idx) + 0u)] = _e951;
+    let _e958 = rhs_v;
+    rhs[((3u * idx) + 1u)] = _e958;
+    let _e965 = rhs_p;
+    rhs[((3u * idx) + 2u)] = _e965;
+    let _e968 = scalar_diag_p;
+    scalar_matrix_values[scalar_diag_idx] = _e968;
+    let _e971 = diag_u;
+    let _e972 = safe_inverse(_e971);
+    diag_u_inv[idx] = _e972;
+    let _e975 = diag_v;
+    let _e976 = safe_inverse(_e975);
+    diag_v_inv[idx] = _e976;
+    let _e979 = scalar_diag_p;
+    let _e980 = safe_inverse(_e979);
+    diag_p_inv[idx] = _e980;
     return;
 }
 "#;

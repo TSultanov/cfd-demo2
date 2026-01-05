@@ -23,6 +23,7 @@ fn gpu_compressible_solver_preserves_uniform_state() {
 
     solver.set_dt(0.01);
     solver.set_inlet_velocity(0.0);
+    solver.set_scheme(1);
     solver.set_uniform_state(1.0, [0.0, 0.0], 1.0);
     solver.initialize_history();
 

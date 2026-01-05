@@ -1,5 +1,6 @@
 pub mod compressible_assembly;
 pub mod compressible_apply;
+pub mod compressible_gradients;
 pub mod compressible_flux_kt;
 pub mod compressible_update;
 pub mod coupled_assembly;
@@ -10,6 +11,7 @@ pub mod plan;
 pub mod prepare_coupled;
 pub mod pressure_assembly;
 pub mod update_fields_from_coupled;
+pub mod reconstruction;
 pub mod state_access;
 pub mod wgsl;
 pub mod wgsl_ast;

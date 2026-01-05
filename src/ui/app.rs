@@ -705,8 +705,15 @@ impl CFDApp {
     }
 
     fn update_gpu_scheme(&self) {
-        if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_gpu_solver(|solver| solver.set_scheme(self.selected_scheme.gpu_id()));
+        match self.solver_kind {
+            SolverKind::Incompressible => {
+                self.with_gpu_solver(|solver| solver.set_scheme(self.selected_scheme.gpu_id()));
+            }
+            SolverKind::Compressible => {
+                self.with_compressible_solver(|solver| {
+                    solver.set_scheme(self.selected_scheme.gpu_id());
+                });
+            }
         }
     }
 
@@ -1018,7 +1025,7 @@ impl eframe::App for CFDApp {
                                 self.update_gpu_alpha_p();
                             }
                         } else {
-                            ui.label("Compressible solver uses KT flux (scheme and preconditioner ignored).");
+                            ui.label("Compressible solver applies the selected advection scheme to KT reconstruction.");
                         }
                     });
 

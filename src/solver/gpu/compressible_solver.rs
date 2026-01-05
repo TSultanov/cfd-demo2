@@ -448,7 +448,7 @@ impl GpuCompressibleSolver {
 
             self.context.queue.submit(Some(encoder.finish()));
 
-            let _ = self.solve_compressible_fgmres(20, 1e-6);
+            let _ = self.solve_compressible_fgmres(30, 1e-7);
 
             let mut encoder =
                 self.context

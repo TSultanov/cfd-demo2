@@ -537,25 +537,24 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::let_("denom", "max(a_plus - a_minus, 1e-6)"));
     loop_body.push(dsl::let_("a_prod", "a_plus * a_minus"));
+    loop_body.push(dsl::let_("a_pos", "a_plus / denom"));
+    loop_body.push(dsl::let_("a_neg", "1.0 - a_pos"));
+    loop_body.push(dsl::let_("aSf", "a_minus * a_pos"));
+    loop_body.push(dsl::let_("aphiv_pos", "u_n_l - aSf"));
+    loop_body.push(dsl::let_("aphiv_neg", "u_n_r + aSf"));
 
-    loop_body.push(dsl::let_("f_rho_l", "rho_l * u_n_l"));
-    loop_body.push(dsl::let_("f_rho_r", "rho_r * u_n_r"));
     loop_body.push(dsl::let_(
         "flux_rho",
-        "(a_plus * f_rho_l - a_minus * f_rho_r + a_prod * (rho_r - rho_l)) / denom",
+        "aphiv_pos * rho_l + aphiv_neg * rho_r",
     ));
-
-    loop_body.push(dsl::let_("f_rho_u_l_x", "rho_u_l.x * u_n_l + p_l * normal.x"));
-    loop_body.push(dsl::let_("f_rho_u_l_y", "rho_u_l.y * u_n_l + p_l * normal.y"));
-    loop_body.push(dsl::let_("f_rho_u_r_x", "rho_u_r.x * u_n_r + p_r * normal.x"));
-    loop_body.push(dsl::let_("f_rho_u_r_y", "rho_u_r.y * u_n_r + p_r * normal.y"));
+    loop_body.push(dsl::let_("p_face", "a_pos * p_l + a_neg * p_r"));
     loop_body.push(dsl::var(
         "flux_rho_u_x",
-        "(a_plus * f_rho_u_l_x - a_minus * f_rho_u_r_x + a_prod * (rho_u_r.x - rho_u_l.x)) / denom",
+        "aphiv_pos * rho_u_l.x + aphiv_neg * rho_u_r.x + p_face * normal.x",
     ));
     loop_body.push(dsl::var(
         "flux_rho_u_y",
-        "(a_plus * f_rho_u_l_y - a_minus * f_rho_u_r_y + a_prod * (rho_u_r.y - rho_u_l.y)) / denom",
+        "aphiv_pos * rho_u_l.y + aphiv_neg * rho_u_r.y + p_face * normal.y",
     ));
     loop_body.push(dsl::let_(
         "diff_u_x",
@@ -574,11 +573,9 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "flux_rho_u_y + diff_u_y",
     ));
 
-    loop_body.push(dsl::let_("f_rho_e_l", "(rho_e_l + p_l) * u_n_l"));
-    loop_body.push(dsl::let_("f_rho_e_r", "(rho_e_r + p_r) * u_n_r"));
     loop_body.push(dsl::var(
         "flux_rho_e",
-        "(a_plus * f_rho_e_l - a_minus * f_rho_e_r + a_prod * (rho_e_r - rho_e_l)) / denom",
+        "aphiv_pos * (rho_e_l + p_l) + aphiv_neg * (rho_e_r + p_r) + aSf * (p_l - p_r)",
     ));
     loop_body.push(dsl::assign(
         "flux_rho_e",

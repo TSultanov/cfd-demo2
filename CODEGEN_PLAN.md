@@ -505,3 +505,9 @@ discretization automatically, with modular swapping of schemes and boundary cond
   flux (assembly + KT) to reduce numerical diffusion at small Mach
   (`src/solver/codegen/compressible_assembly.rs`,
   `src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Switched compressible flux residuals to a Kurganov–Tadmor
+  central-upwind form (OpenFOAM-style `aSf` blending) for lower diffusion
+  (`src/solver/codegen/compressible_assembly.rs`,
+  `src/solver/codegen/compressible_flux_kt.rs`).
+- **2025-02-10:** Tightened compressible implicit solve tolerance/iters to
+  better realize low-diffusion fluxes in dual-time (`src/solver/gpu/compressible_solver.rs`).

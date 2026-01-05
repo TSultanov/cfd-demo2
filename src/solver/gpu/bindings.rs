@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 8ecd850debc9c427b6fddb3efedca01069d16e28e52dfc4162dce205c1f58dae
+// SourceHash: 3d0e3b8a220df0a4a3579764ce6a92f4934b397c81501f437bb0b8168a5e032f
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -4834,6 +4834,15 @@ fn codegen_assemble_U() {
     return;
 }
 
+fn term_laplacian_p_upwind() {
+    return;
+}
+
+fn codegen_assemble_p() {
+    term_laplacian_p_upwind();
+    return;
+}
+
 fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
     var conv_coeff_diag: f32 = 0f;
     var conv_coeff_off: f32 = 0f;
@@ -6103,8 +6112,18 @@ fn assemble_U() {
     return;
 }
 
+fn term_laplacian_p_upwind() {
+    return;
+}
+
+fn assemble_p() {
+    term_laplacian_p_upwind();
+    return;
+}
+
 fn main() {
     assemble_U();
+    assemble_p();
     return;
 }
 

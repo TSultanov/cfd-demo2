@@ -102,3 +102,6 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Verified codegen unit tests after adding flux kernel generator (`cargo test codegen --lib`).
 - **2025-02-10:** Added `ShaderVariant` plumbing so GPU init can switch between manual and generated kernels; added a solver-level comparison test (`src/solver/gpu/init/*.rs`, `tests/gpu_codegen_matches_manual_test.rs`).
 - **2025-02-10:** Verified manual vs generated solver comparison test (`cargo test --test gpu_codegen_matches_manual_test`).
+- **2025-02-10:** Added a high-level pressure equation to the model definition so the system includes momentum + pressure (`src/solver/codegen/model.rs`).
+- **2025-02-10:** Adjusted model term construction to reuse the pressure field without moving it (`src/solver/codegen/model.rs`).
+- **2025-02-10:** Verified codegen unit tests after adding the high-level pressure equation (`cargo test codegen --lib`).

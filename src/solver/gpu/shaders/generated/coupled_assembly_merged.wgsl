@@ -163,6 +163,22 @@ fn codegen_assemble_U() {
     term_grad_p_upwind();
 }
 
+// equation: p (scalar)
+
+// term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=field(d_p)
+
+fn term_laplacian_p_upwind() {
+    // TODO: codegen term implementation
+    let scheme_id: u32 = 0u;
+    let discretization_id: u32 = 0u;
+    _ = scheme_id;
+    _ = discretization_id;
+}
+
+fn codegen_assemble_p() {
+    term_laplacian_p_upwind();
+}
+
 fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
     var conv_coeff_diag: f32 = 0.0;
     var conv_coeff_off: f32 = 0.0;

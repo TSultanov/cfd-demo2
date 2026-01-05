@@ -51,6 +51,23 @@ fn assemble_U() {
     term_grad_p_upwind();
 }
 
+// equation: p (scalar)
+
+// term: laplacian target=p field=p discretization=implicit scheme=upwind coeff=field(d_p)
+
+fn term_laplacian_p_upwind() {
+    // TODO: codegen term implementation
+    let scheme_id: u32 = 0u;
+    let discretization_id: u32 = 0u;
+    _ = scheme_id;
+    _ = discretization_id;
+}
+
+fn assemble_p() {
+    term_laplacian_p_upwind();
+}
+
 fn main() {
     assemble_U();
+    assemble_p();
 }

@@ -4,8 +4,8 @@ use super::state_access::{state_scalar_expr, state_vec2_expr};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
+    Param, Stmt, StorageClass, StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -411,10 +411,21 @@ fn main_body(
         dsl::let_("d_p_face", "lambda * d_p_own + (1.0 - lambda) * d_p_neigh"),
         dsl::let_("pressure_coeff_face", &pressure_coeff_face_expr),
         dsl::let_("coeff", "pressure_coeff_face * area / dist"),
-        dsl::let_("mat_idx", "cell_face_matrix_indices[k]"),
-        dsl::if_block(
-            "mat_idx != 4294967295u",
-            dsl::block(vec![dsl::assign("matrix_values[mat_idx]", "-coeff")]),
+        dsl::let_expr(
+            "mat_idx",
+            dsl::array_access("cell_face_matrix_indices", Expr::ident("k")),
+        ),
+        dsl::if_block_expr(
+            Expr::binary(
+                Expr::ident("mat_idx"),
+                BinaryOp::NotEqual,
+                Expr::lit_u32(u32::MAX),
+            ),
+            dsl::block(vec![dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("mat_idx"),
+                Expr::unary(UnaryOp::Negate, Expr::ident("coeff")),
+            )]),
             None,
         ),
         dsl::assign_op(AssignOp::Add, "diag_coeff", "coeff"),
@@ -491,9 +502,20 @@ fn main_body(
         dsl::block(loop_body),
     ));
 
-    stmts.push(dsl::let_("diag_idx", "diagonal_indices[idx]"));
-    stmts.push(dsl::assign("matrix_values[diag_idx]", "diag_coeff"));
-    stmts.push(dsl::assign("rhs[idx]", "rhs_val"));
+    stmts.push(dsl::let_expr(
+        "diag_idx",
+        dsl::array_access("diagonal_indices", Expr::ident("idx")),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("diag_idx"),
+        Expr::ident("diag_coeff"),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "rhs",
+        Expr::ident("idx"),
+        Expr::ident("rhs_val"),
+    ));
 
     Block::new(stmts)
 }

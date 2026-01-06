@@ -306,21 +306,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             neighbor_rank = scalar_mat_idx - scalar_offset;
         }
-        let idx_0_0 = start_row_0 + 3u * neighbor_rank + 0u;
-        let idx_0_1 = start_row_0 + 3u * neighbor_rank + 1u;
-        let idx_0_2 = start_row_0 + 3u * neighbor_rank + 2u;
-        let idx_1_0 = start_row_1 + 3u * neighbor_rank + 0u;
-        let idx_1_1 = start_row_1 + 3u * neighbor_rank + 1u;
-        let idx_1_2 = start_row_1 + 3u * neighbor_rank + 2u;
-        let idx_2_0 = start_row_2 + 3u * neighbor_rank + 0u;
-        let idx_2_1 = start_row_2 + 3u * neighbor_rank + 1u;
-        let idx_2_2 = start_row_2 + 3u * neighbor_rank + 2u;
         if (!is_boundary) {
             let coeff = conv_coeff_off - diff_coeff;
-            matrix_values[idx_0_0] = coeff;
-            matrix_values[idx_0_1] = 0.0;
-            matrix_values[idx_1_0] = 0.0;
-            matrix_values[idx_1_1] = coeff;
             diag_u += diff_coeff + conv_coeff_diag;
             diag_v += diff_coeff + conv_coeff_diag;
             let scheme_id: u32 = 0u;
@@ -401,27 +388,31 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let pg_force_x = area * normal.x;
             let pg_force_y = area * normal.y;
-            matrix_values[idx_0_2] = (1.0 - lambda) * pg_force_x;
-            matrix_values[idx_1_2] = (1.0 - lambda) * pg_force_y;
             sum_diag_up += lambda * pg_force_x;
             sum_diag_vp += lambda * pg_force_y;
             let div_coeff_x = normal.x * area;
             let div_coeff_y = normal.y * area;
-            matrix_values[idx_2_0] = (1.0 - lambda) * div_coeff_x;
-            matrix_values[idx_2_1] = (1.0 - lambda) * div_coeff_y;
             sum_diag_pu += lambda * div_coeff_x;
             sum_diag_pv += lambda * div_coeff_y;
             let d_p_own = state[idx * 8u + 3u];
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             let pressure_coeff_face = constants.density * (lambda * state[idx * 8u + 3u] + (1.0 - lambda) * state[other_idx * 8u + 3u]);
             let lapl_coeff = pressure_coeff_face * area / dist;
-            matrix_values[idx_2_2] = -lapl_coeff;
             sum_diag_pp += lapl_coeff;
             let scalar_coeff = pressure_coeff_face * area / dist;
             if (scalar_mat_idx != 4294967295u) {
                 scalar_matrix_values[scalar_mat_idx] = -scalar_coeff;
             }
             scalar_diag_p += scalar_coeff;
+            matrix_values[start_row_0 + 3u * neighbor_rank + 0u] = coeff;
+            matrix_values[start_row_0 + 3u * neighbor_rank + 1u] = 0.0;
+            matrix_values[start_row_0 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * pg_force_x;
+            matrix_values[start_row_1 + 3u * neighbor_rank + 0u] = 0.0;
+            matrix_values[start_row_1 + 3u * neighbor_rank + 1u] = coeff;
+            matrix_values[start_row_1 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * pg_force_y;
+            matrix_values[start_row_2 + 3u * neighbor_rank + 0u] = (1.0 - lambda) * div_coeff_x;
+            matrix_values[start_row_2 + 3u * neighbor_rank + 1u] = (1.0 - lambda) * div_coeff_y;
+            matrix_values[start_row_2 + 3u * neighbor_rank + 2u] = -lapl_coeff;
         } else {
             if (boundary_type == 1u) {
                 let ramp = smoothstep(0.0, constants.ramp_time, constants.time);

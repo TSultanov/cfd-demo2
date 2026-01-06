@@ -62,20 +62,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
     var diff_p: f32 = 0.0;
     let num_cells = arrayLength(&state) / 8u;
     if (idx < num_cells) {
-        let u_new_val = x[3u * idx + 0u];
-        let v_new_val = x[3u * idx + 1u];
-        let p_new_val = x[3u * idx + 2u];
+        let u_new = vec2<f32>(x[idx * 3u + 0u], x[idx * 3u + 1u]);
+        let p_new_val = x[idx * 3u + 2u];
         let u_old_val = vec2<f32>(state[idx * 8u + 0u], state[idx * 8u + 1u]);
         let p_old_val = state[idx * 8u + 2u];
         let alpha_u = constants.alpha_u;
         let alpha_p = constants.alpha_p;
-        let u_updated_x = u_old_val.x + alpha_u * (u_new_val - u_old_val.x);
-        let u_updated_y = u_old_val.y + alpha_u * (v_new_val - u_old_val.y);
+        let u_updated = u_old_val + alpha_u * (u_new - u_old_val);
         let p_updated = p_old_val + alpha_p * (p_new_val - p_old_val);
-        state[idx * 8u + 0u] = u_updated_x;
-        state[idx * 8u + 1u] = u_updated_y;
+        state[idx * 8u + 0u] = u_updated.x;
+        state[idx * 8u + 1u] = u_updated.y;
         state[idx * 8u + 2u] = p_updated;
-        diff_u = max(abs(u_updated_x - u_old_val.x), abs(u_updated_y - u_old_val.y));
+        diff_u = max(abs(u_updated.x - u_old_val.x), abs(u_updated.y - u_old_val.y));
         diff_p = abs(p_updated - p_old_val);
     }
     shared_max_u[lid] = diff_u;
@@ -89,7 +87,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
         workgroupBarrier();
     }
     if (lid == 0u) {
-        atomicMax(&max_diff_result[0], bitcast<u32>(shared_max_u[0]));
-        atomicMax(&max_diff_result[1], bitcast<u32>(shared_max_p[0]));
+        atomicMax(&max_diff_result[0u], bitcast<u32>(shared_max_u[0u]));
+        atomicMax(&max_diff_result[1u], bitcast<u32>(shared_max_p[0u]));
     }
 }

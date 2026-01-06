@@ -1,9 +1,9 @@
-use super::state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
+use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, Block, Function, GlobalVar, Item, Module, Param, StorageClass,
-    StructDef, StructField, Type,
+    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param,
+    StorageClass, StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -207,9 +207,8 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     }
     let coupled_stride = u_components + p_components;
     let p_offset = u_components;
-    let u_new_expr = format!("x[{coupled_stride}u * idx + 0u]");
-    let v_new_expr = format!("x[{coupled_stride}u * idx + 1u]");
-    let p_new_expr = format!("x[{coupled_stride}u * idx + {p_offset}u]");
+    let coupled_stride_u32 = coupled_stride as u32;
+    let p_offset_u32 = p_offset as u32;
 
     stmts.push(dsl::let_("idx", "global_id.x"));
     stmts.push(dsl::let_("lid", "local_id.x"));
@@ -220,49 +219,126 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
         &format!("arrayLength(&state) / {}u", stride),
     ));
 
-    let u_old_expr = state_vec2_expr(layout, "state", "idx", u_field);
-    let p_old_expr = state_scalar_expr(layout, "state", "idx", p_field);
-
-    let u_x_target = state_component_expr(layout, "state", "idx", u_field, 0);
-    let u_y_target = state_component_expr(layout, "state", "idx", u_field, 1);
-    let p_target = state_component_expr(layout, "state", "idx", p_field, 0);
+    let u_x_target = state_component(layout, "state", "idx", u_field, 0);
+    let u_y_target = state_component(layout, "state", "idx", u_field, 1);
+    let p_target = state_component(layout, "state", "idx", p_field, 0);
 
     stmts.push(dsl::if_block(
         "idx < num_cells",
         dsl::block(vec![
-            dsl::let_("u_new_val", &u_new_expr),
-            dsl::let_("v_new_val", &v_new_expr),
-            dsl::let_("p_new_val", &p_new_expr),
-            dsl::let_("u_old_val", &u_old_expr),
-            dsl::let_("p_old_val", &p_old_expr),
-            dsl::let_("alpha_u", "constants.alpha_u"),
-            dsl::let_("alpha_p", "constants.alpha_p"),
-            dsl::let_(
-                "u_updated_x",
-                "u_old_val.x + alpha_u * (u_new_val - u_old_val.x)",
+            dsl::let_expr(
+                "u_new",
+                Expr::call_named(
+                    "vec2<f32>",
+                    vec![
+                        dsl::array_access_linear(
+                            "x",
+                            Expr::ident("idx"),
+                            coupled_stride_u32,
+                            0,
+                        ),
+                        dsl::array_access_linear(
+                            "x",
+                            Expr::ident("idx"),
+                            coupled_stride_u32,
+                            1,
+                        ),
+                    ],
+                ),
             ),
-            dsl::let_(
-                "u_updated_y",
-                "u_old_val.y + alpha_u * (v_new_val - u_old_val.y)",
+            dsl::let_expr(
+                "p_new_val",
+                dsl::array_access_linear(
+                    "x",
+                    Expr::ident("idx"),
+                    coupled_stride_u32,
+                    p_offset_u32,
+                ),
             ),
-            dsl::let_(
+            dsl::let_expr("u_old_val", state_vec2(layout, "state", "idx", u_field)),
+            dsl::let_expr("p_old_val", state_scalar(layout, "state", "idx", p_field)),
+            dsl::let_expr("alpha_u", Expr::ident("constants").field("alpha_u")),
+            dsl::let_expr("alpha_p", Expr::ident("constants").field("alpha_p")),
+            dsl::let_expr(
+                "u_updated",
+                Expr::binary(
+                    Expr::ident("u_old_val"),
+                    BinaryOp::Add,
+                    Expr::binary(
+                        Expr::ident("alpha_u"),
+                        BinaryOp::Mul,
+                        Expr::binary(Expr::ident("u_new"), BinaryOp::Sub, Expr::ident("u_old_val")),
+                    ),
+                ),
+            ),
+            dsl::let_expr(
                 "p_updated",
-                "p_old_val + alpha_p * (p_new_val - p_old_val)",
+                Expr::binary(
+                    Expr::ident("p_old_val"),
+                    BinaryOp::Add,
+                    Expr::binary(
+                        Expr::ident("alpha_p"),
+                        BinaryOp::Mul,
+                        Expr::binary(
+                            Expr::ident("p_new_val"),
+                            BinaryOp::Sub,
+                            Expr::ident("p_old_val"),
+                        ),
+                    ),
+                ),
             ),
-            dsl::assign(&u_x_target, "u_updated_x"),
-            dsl::assign(&u_y_target, "u_updated_y"),
-            dsl::assign(&p_target, "p_updated"),
-            dsl::assign(
-                "diff_u",
-                "max(abs(u_updated_x - u_old_val.x), abs(u_updated_y - u_old_val.y))",
+            dsl::assign_expr(u_x_target.clone(), Expr::ident("u_updated").field("x")),
+            dsl::assign_expr(u_y_target.clone(), Expr::ident("u_updated").field("y")),
+            dsl::assign_expr(p_target, Expr::ident("p_updated")),
+            dsl::assign_expr(
+                Expr::ident("diff_u"),
+                Expr::call_named(
+                    "max",
+                    vec![
+                        Expr::call_named(
+                            "abs",
+                            vec![Expr::binary(
+                                Expr::ident("u_updated").field("x"),
+                                BinaryOp::Sub,
+                                Expr::ident("u_old_val").field("x"),
+                            )],
+                        ),
+                        Expr::call_named(
+                            "abs",
+                            vec![Expr::binary(
+                                Expr::ident("u_updated").field("y"),
+                                BinaryOp::Sub,
+                                Expr::ident("u_old_val").field("y"),
+                            )],
+                        ),
+                    ],
+                ),
             ),
-            dsl::assign("diff_p", "abs(p_updated - p_old_val)"),
+            dsl::assign_expr(
+                Expr::ident("diff_p"),
+                Expr::call_named(
+                    "abs",
+                    vec![Expr::binary(
+                        Expr::ident("p_updated"),
+                        BinaryOp::Sub,
+                        Expr::ident("p_old_val"),
+                    )],
+                ),
+            ),
         ]),
         None,
     ));
 
-    stmts.push(dsl::assign("shared_max_u[lid]", "diff_u"));
-    stmts.push(dsl::assign("shared_max_p[lid]", "diff_p"));
+    stmts.push(dsl::assign_array_access(
+        "shared_max_u",
+        Expr::ident("lid"),
+        Expr::ident("diff_u"),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "shared_max_p",
+        Expr::ident("lid"),
+        Expr::ident("diff_p"),
+    ));
     stmts.push(dsl::call_stmt("workgroupBarrier()"));
 
     stmts.push(dsl::for_loop(
@@ -273,13 +349,39 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
             dsl::if_block(
                 "lid < stride",
                 dsl::block(vec![
-                    dsl::assign(
-                        "shared_max_u[lid]",
-                        "max(shared_max_u[lid], shared_max_u[lid + stride])",
+                    dsl::assign_expr(
+                        dsl::array_access("shared_max_u", Expr::ident("lid")),
+                        Expr::call_named(
+                            "max",
+                            vec![
+                                dsl::array_access("shared_max_u", Expr::ident("lid")),
+                                dsl::array_access(
+                                    "shared_max_u",
+                                    Expr::binary(
+                                        Expr::ident("lid"),
+                                        BinaryOp::Add,
+                                        Expr::ident("stride"),
+                                    ),
+                                ),
+                            ],
+                        ),
                     ),
-                    dsl::assign(
-                        "shared_max_p[lid]",
-                        "max(shared_max_p[lid], shared_max_p[lid + stride])",
+                    dsl::assign_expr(
+                        dsl::array_access("shared_max_p", Expr::ident("lid")),
+                        Expr::call_named(
+                            "max",
+                            vec![
+                                dsl::array_access("shared_max_p", Expr::ident("lid")),
+                                dsl::array_access(
+                                    "shared_max_p",
+                                    Expr::binary(
+                                        Expr::ident("lid"),
+                                        BinaryOp::Add,
+                                        Expr::ident("stride"),
+                                    ),
+                                ),
+                            ],
+                        ),
                     ),
                 ]),
                 None,
@@ -291,8 +393,32 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     stmts.push(dsl::if_block(
         "lid == 0u",
         dsl::block(vec![
-            dsl::call_stmt("atomicMax(&max_diff_result[0], bitcast<u32>(shared_max_u[0]))"),
-            dsl::call_stmt("atomicMax(&max_diff_result[1], bitcast<u32>(shared_max_p[0]))"),
+            dsl::call_stmt_expr(Expr::call_named(
+                "atomicMax",
+                vec![
+                    Expr::unary(
+                        UnaryOp::AddressOf,
+                        dsl::array_access("max_diff_result", Expr::lit_u32(0)),
+                    ),
+                    Expr::call_named(
+                        "bitcast<u32>",
+                        vec![dsl::array_access("shared_max_u", Expr::lit_u32(0))],
+                    ),
+                ],
+            )),
+            dsl::call_stmt_expr(Expr::call_named(
+                "atomicMax",
+                vec![
+                    Expr::unary(
+                        UnaryOp::AddressOf,
+                        dsl::array_access("max_diff_result", Expr::lit_u32(1)),
+                    ),
+                    Expr::call_named(
+                        "bitcast<u32>",
+                        vec![dsl::array_access("shared_max_p", Expr::lit_u32(0))],
+                    ),
+                ],
+            )),
         ]),
         None,
     ));

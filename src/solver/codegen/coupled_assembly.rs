@@ -359,7 +359,6 @@ fn main_body(
     }
     let coupled_stride = u_components + p_components;
     let p_offset = u_components;
-    let p_offset_u8 = p_offset as u8;
     let coupled_stride_u32 = coupled_stride as u32;
     let p_offset_u32 = p_offset as u32;
     let row_stride_2 = coupled_stride * 2;
@@ -561,15 +560,6 @@ fn main_body(
             )])),
         ));
         let neighbor_entry = block_matrix.row_entry(&Expr::ident("neighbor_rank"));
-        body.push(dsl::let_expr("idx_0_0", neighbor_entry.index_expr(0, 0)));
-        body.push(dsl::let_expr("idx_0_1", neighbor_entry.index_expr(0, 1)));
-        body.push(dsl::let_expr("idx_0_2", neighbor_entry.index_expr(0, p_offset_u8)));
-        body.push(dsl::let_expr("idx_1_0", neighbor_entry.index_expr(1, 0)));
-        body.push(dsl::let_expr("idx_1_1", neighbor_entry.index_expr(1, 1)));
-        body.push(dsl::let_expr("idx_1_2", neighbor_entry.index_expr(1, p_offset_u8)));
-        body.push(dsl::let_expr("idx_2_0", neighbor_entry.index_expr(2, 0)));
-        body.push(dsl::let_expr("idx_2_1", neighbor_entry.index_expr(2, 1)));
-        body.push(dsl::let_expr("idx_2_2", neighbor_entry.index_expr(2, p_offset_u8)));
 
         let u_neigh_expr = state_vec2_expr(layout, "state", "other_idx", u_field);
         let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", d_p_field);
@@ -668,26 +658,6 @@ fn main_body(
                 "coeff",
                 Expr::binary(Expr::ident("conv_coeff_off"), BinaryOp::Sub, Expr::ident("diff_coeff")),
             ),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_0_0"),
-                Expr::ident("coeff"),
-            ),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_0_1"),
-                Expr::lit_f32(0.0),
-            ),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_1_0"),
-                Expr::lit_f32(0.0),
-            ),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_1_1"),
-                Expr::ident("coeff"),
-            ),
             dsl::assign_op(AssignOp::Add, "diag_u", "diff_coeff + conv_coeff_diag"),
             dsl::assign_op(AssignOp::Add, "diag_v", "diff_coeff + conv_coeff_diag"),
         ];
@@ -768,32 +738,6 @@ fn main_body(
             interior_stmts.extend(vec![
                 dsl::let_("pg_force_x", "area * normal.x"),
                 dsl::let_("pg_force_y", "area * normal.y"),
-                dsl::assign_array_access(
-                    "matrix_values",
-                    Expr::ident("idx_0_2"),
-                    Expr::binary(
-                        Expr::binary(
-                            Expr::lit_f32(1.0),
-                            BinaryOp::Sub,
-                            Expr::ident("lambda"),
-                        ),
-                        BinaryOp::Mul,
-                        Expr::ident("pg_force_x"),
-                    ),
-                ),
-                dsl::assign_array_access(
-                    "matrix_values",
-                    Expr::ident("idx_1_2"),
-                    Expr::binary(
-                        Expr::binary(
-                            Expr::lit_f32(1.0),
-                            BinaryOp::Sub,
-                            Expr::ident("lambda"),
-                        ),
-                        BinaryOp::Mul,
-                        Expr::ident("pg_force_y"),
-                    ),
-                ),
                 dsl::assign_op(AssignOp::Add, "sum_diag_up", "lambda * pg_force_x"),
                 dsl::assign_op(AssignOp::Add, "sum_diag_vp", "lambda * pg_force_y"),
             ]);
@@ -802,24 +746,6 @@ fn main_body(
         interior_stmts.extend(vec![
             dsl::let_("div_coeff_x", "normal.x * area"),
             dsl::let_("div_coeff_y", "normal.y * area"),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_2_0"),
-                Expr::binary(
-                    Expr::binary(Expr::lit_f32(1.0), BinaryOp::Sub, Expr::ident("lambda")),
-                    BinaryOp::Mul,
-                    Expr::ident("div_coeff_x"),
-                ),
-            ),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_2_1"),
-                Expr::binary(
-                    Expr::binary(Expr::lit_f32(1.0), BinaryOp::Sub, Expr::ident("lambda")),
-                    BinaryOp::Mul,
-                    Expr::ident("div_coeff_y"),
-                ),
-            ),
             dsl::assign_op(AssignOp::Add, "sum_diag_pu", "lambda * div_coeff_x"),
             dsl::assign_op(AssignOp::Add, "sum_diag_pv", "lambda * div_coeff_y"),
             dsl::let_("d_p_own", &d_p_idx_expr),
@@ -829,11 +755,6 @@ fn main_body(
             ),
             dsl::let_("pressure_coeff_face", &pressure_coeff_face_expr),
             dsl::let_("lapl_coeff", "pressure_coeff_face * area / dist"),
-            dsl::assign_array_access(
-                "matrix_values",
-                Expr::ident("idx_2_2"),
-                Expr::unary(UnaryOp::Negate, Expr::ident("lapl_coeff")),
-            ),
             dsl::assign_op(AssignOp::Add, "sum_diag_pp", "lapl_coeff"),
             dsl::let_("scalar_coeff", "pressure_coeff_face * area / dist"),
             dsl::if_block_expr(
@@ -851,6 +772,33 @@ fn main_body(
             ),
             dsl::assign_op(AssignOp::Add, "scalar_diag_p", "scalar_coeff"),
         ]);
+
+        let offdiag_block = typed::MatExpr::<3, 3>::from_fn(|row, col| {
+            let one_minus_lambda =
+                Expr::binary(Expr::lit_f32(1.0), BinaryOp::Sub, Expr::ident("lambda"));
+            match (row, col) {
+                (0, 0) | (1, 1) => Expr::ident("coeff"),
+                (0, 2) => {
+                    if plan.gradient.is_some() {
+                        Expr::binary(one_minus_lambda, BinaryOp::Mul, Expr::ident("pg_force_x"))
+                    } else {
+                        Expr::lit_f32(0.0)
+                    }
+                }
+                (1, 2) => {
+                    if plan.gradient.is_some() {
+                        Expr::binary(one_minus_lambda, BinaryOp::Mul, Expr::ident("pg_force_y"))
+                    } else {
+                        Expr::lit_f32(0.0)
+                    }
+                }
+                (2, 0) => Expr::binary(one_minus_lambda, BinaryOp::Mul, Expr::ident("div_coeff_x")),
+                (2, 1) => Expr::binary(one_minus_lambda, BinaryOp::Mul, Expr::ident("div_coeff_y")),
+                (2, 2) => Expr::unary(UnaryOp::Negate, Expr::ident("lapl_coeff")),
+                _ => Expr::lit_f32(0.0),
+            }
+        });
+        interior_stmts.extend(offdiag_block.scatter_assign_to_block_entry_scaled(&neighbor_entry, None));
 
         body.push(dsl::if_block(
             "!is_boundary",

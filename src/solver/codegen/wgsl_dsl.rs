@@ -22,11 +22,27 @@ pub fn let_(name: &str, value: &str) -> Stmt {
     }
 }
 
+pub fn let_expr(name: &str, expr: Expr) -> Stmt {
+    Stmt::Let {
+        name: name.to_string(),
+        ty: None,
+        expr,
+    }
+}
+
 pub fn let_typed(name: &str, ty: Type, value: &str) -> Stmt {
     Stmt::Let {
         name: name.to_string(),
         ty: Some(ty),
         expr: expr(value),
+    }
+}
+
+pub fn let_typed_expr(name: &str, ty: Type, expr: Expr) -> Stmt {
+    Stmt::Let {
+        name: name.to_string(),
+        ty: Some(ty),
+        expr,
     }
 }
 
@@ -38,11 +54,27 @@ pub fn var(name: &str, value: &str) -> Stmt {
     }
 }
 
+pub fn var_expr(name: &str, expr: Expr) -> Stmt {
+    Stmt::Var {
+        name: name.to_string(),
+        ty: None,
+        expr: Some(expr),
+    }
+}
+
 pub fn var_typed(name: &str, ty: Type, value: Option<&str>) -> Stmt {
     Stmt::Var {
         name: name.to_string(),
         ty: Some(ty),
         expr: value.map(expr),
+    }
+}
+
+pub fn var_typed_expr(name: &str, ty: Type, expr: Option<Expr>) -> Stmt {
+    Stmt::Var {
+        name: name.to_string(),
+        ty: Some(ty),
+        expr,
     }
 }
 
@@ -53,6 +85,10 @@ pub fn assign(target: &str, value: &str) -> Stmt {
     }
 }
 
+pub fn assign_expr(target: Expr, value: Expr) -> Stmt {
+    Stmt::Assign { target, value }
+}
+
 pub fn assign_op(op: AssignOp, target: &str, value: &str) -> Stmt {
     Stmt::AssignOp {
         target: expr(target),
@@ -61,17 +97,37 @@ pub fn assign_op(op: AssignOp, target: &str, value: &str) -> Stmt {
     }
 }
 
+pub fn assign_op_expr(op: AssignOp, target: Expr, value: Expr) -> Stmt {
+    Stmt::AssignOp { target, op, value }
+}
+
 pub fn increment(expr_str: &str) -> Stmt {
     Stmt::Increment(expr(expr_str))
+}
+
+pub fn increment_expr(expr: Expr) -> Stmt {
+    Stmt::Increment(expr)
 }
 
 pub fn call_stmt(expr_str: &str) -> Stmt {
     Stmt::Call(expr(expr_str))
 }
 
+pub fn call_stmt_expr(expr: Expr) -> Stmt {
+    Stmt::Call(expr)
+}
+
 pub fn if_block(cond: &str, then_block: Block, else_block: Option<Block>) -> Stmt {
     Stmt::If {
         cond: expr(cond),
+        then_block,
+        else_block,
+    }
+}
+
+pub fn if_block_expr(cond: Expr, then_block: Block, else_block: Option<Block>) -> Stmt {
+    Stmt::If {
+        cond,
         then_block,
         else_block,
     }
@@ -86,11 +142,28 @@ pub fn for_loop(init: ForInit, cond: &str, step: ForStep, body: Block) -> Stmt {
     }
 }
 
+pub fn for_loop_expr(init: ForInit, cond: Expr, step: ForStep, body: Block) -> Stmt {
+    Stmt::For {
+        init,
+        cond,
+        step,
+        body,
+    }
+}
+
 pub fn for_init_var(name: &str, value: &str) -> ForInit {
     ForInit::Var {
         name: name.to_string(),
         ty: None,
         expr: expr(value),
+    }
+}
+
+pub fn for_init_var_expr(name: &str, expr: Expr) -> ForInit {
+    ForInit::Var {
+        name: name.to_string(),
+        ty: None,
+        expr,
     }
 }
 
@@ -102,6 +175,14 @@ pub fn for_init_var_typed(name: &str, ty: Type, value: &str) -> ForInit {
     }
 }
 
+pub fn for_init_var_typed_expr(name: &str, ty: Type, expr: Expr) -> ForInit {
+    ForInit::Var {
+        name: name.to_string(),
+        ty: Some(ty),
+        expr,
+    }
+}
+
 pub fn for_init_assign(target: &str, value: &str) -> ForInit {
     ForInit::Assign {
         target: expr(target),
@@ -109,8 +190,16 @@ pub fn for_init_assign(target: &str, value: &str) -> ForInit {
     }
 }
 
+pub fn for_init_assign_expr(target: Expr, value: Expr) -> ForInit {
+    ForInit::Assign { target, value }
+}
+
 pub fn for_step_increment(expr_str: &str) -> ForStep {
     ForStep::Increment(expr(expr_str))
+}
+
+pub fn for_step_increment_expr(expr: Expr) -> ForStep {
+    ForStep::Increment(expr)
 }
 
 pub fn for_step_assign(target: &str, value: &str) -> ForStep {
@@ -120,12 +209,20 @@ pub fn for_step_assign(target: &str, value: &str) -> ForStep {
     }
 }
 
+pub fn for_step_assign_expr(target: Expr, value: Expr) -> ForStep {
+    ForStep::Assign { target, value }
+}
+
 pub fn for_step_assign_op(op: AssignOp, target: &str, value: &str) -> ForStep {
     ForStep::AssignOp {
         target: expr(target),
         op,
         value: expr(value),
     }
+}
+
+pub fn for_step_assign_op_expr(op: AssignOp, target: Expr, value: Expr) -> ForStep {
+    ForStep::AssignOp { target, op, value }
 }
 
 pub fn parse_expr(input: &str) -> Result<Expr, ParseError> {

@@ -791,6 +791,72 @@ impl Expr {
         }
         Ok(expr)
     }
+
+    pub fn ident(name: impl Into<String>) -> Self {
+        Expr::Ident(name.into())
+    }
+
+    pub fn lit_bool(value: bool) -> Self {
+        Expr::Literal(Literal::Bool(value))
+    }
+
+    pub fn lit_i32(value: i32) -> Self {
+        Expr::Literal(Literal::Int(value.to_string()))
+    }
+
+    pub fn lit_u32(value: u32) -> Self {
+        Expr::Literal(Literal::Uint(format!("{value}u")))
+    }
+
+    pub fn lit_f32(value: f32) -> Self {
+        let mut out = if value.is_finite() {
+            format!("{value}")
+        } else if value.is_nan() {
+            "nan()".to_string()
+        } else if value.is_sign_positive() {
+            "inf()".to_string()
+        } else {
+            "-inf()".to_string()
+        };
+        if !out.contains('.') && !out.contains('e') && !out.contains('E') && !out.ends_with(')') {
+            out.push_str(".0");
+        }
+        Expr::Literal(Literal::Float(out))
+    }
+
+    pub fn field(self, field: impl Into<String>) -> Self {
+        Expr::Field(Box::new(self), field.into())
+    }
+
+    pub fn index(self, index: Expr) -> Self {
+        Expr::Index(Box::new(self), Box::new(index))
+    }
+
+    pub fn unary(op: UnaryOp, expr: Expr) -> Self {
+        Expr::Unary {
+            op,
+            expr: Box::new(expr),
+        }
+    }
+
+    pub fn binary(left: Expr, op: BinaryOp, right: Expr) -> Self {
+        Expr::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        }
+    }
+
+    pub fn call(callee: Expr, args: Vec<Expr>) -> Self {
+        Expr::Call {
+            callee: Box::new(callee),
+            args,
+        }
+    }
+
+    pub fn call_named(name: &str, args: Vec<Expr>) -> Self {
+        Expr::call(Expr::ident(name), args)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1278,6 +1344,25 @@ mod tests {
 
         let expr = Expr::parse("vec2<f32>(1.0, 2.0)").unwrap();
         assert_eq!(expr.to_string(), "vec2<f32>(1.0, 2.0)");
+    }
+
+    #[test]
+    fn expr_builders_render_expected_wgsl() {
+        let expr = Expr::binary(
+            Expr::ident("a"),
+            BinaryOp::Add,
+            Expr::binary(Expr::ident("b"), BinaryOp::Mul, Expr::ident("c")),
+        );
+        assert_eq!(expr.to_string(), "a + b * c");
+
+        let expr = Expr::lit_u32(3);
+        assert_eq!(expr.to_string(), "3u");
+
+        let expr = Expr::lit_f32(1.0);
+        assert_eq!(expr.to_string(), "1.0");
+
+        let expr = Expr::call_named("max", vec![Expr::lit_f32(1.0), Expr::ident("x")]);
+        assert_eq!(expr.to_string(), "max(1.0, x)");
     }
 
     #[test]

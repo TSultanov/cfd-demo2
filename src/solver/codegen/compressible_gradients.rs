@@ -306,10 +306,9 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     loop_body.push(dsl::if_block(
         "owner != idx",
-        dsl::block(vec![
-            dsl::assign("normal.x", "-normal.x"),
-            dsl::assign("normal.y", "-normal.y"),
-        ]),
+        dsl::block(dsl::for_each_xy(|axis| {
+            dsl::assign(&format!("normal.{axis}"), &format!("-normal.{axis}"))
+        })),
         None,
     ));
 
@@ -355,46 +354,20 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         None,
     ));
 
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_accum.x",
-        "rho_face * normal.x * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_accum.y",
-        "rho_face * normal.y * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_u_x_accum.x",
-        "rho_u_face_x * normal.x * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_u_x_accum.y",
-        "rho_u_face_x * normal.y * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_u_y_accum.x",
-        "rho_u_face_y * normal.x * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_u_y_accum.y",
-        "rho_u_face_y * normal.y * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_e_accum.x",
-        "rho_e_face * normal.x * area",
-    ));
-    loop_body.push(dsl::assign_op(
-        AssignOp::Add,
-        "grad_rho_e_accum.y",
-        "rho_e_face * normal.y * area",
-    ));
+    for (accum, face_value) in [
+        ("grad_rho_accum", "rho_face"),
+        ("grad_rho_u_x_accum", "rho_u_face_x"),
+        ("grad_rho_u_y_accum", "rho_u_face_y"),
+        ("grad_rho_e_accum", "rho_e_face"),
+    ] {
+        loop_body.extend(dsl::for_each_xy(|axis| {
+            dsl::assign_op(
+                AssignOp::Add,
+                &format!("{accum}.{axis}"),
+                &format!("{face_value} * normal.{axis} * area"),
+            )
+        }));
+    }
 
     stmts.push(dsl::for_loop(
         dsl::for_init_var("k", "start"),
@@ -403,32 +376,19 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::block(loop_body),
     ));
 
-    stmts.push(dsl::assign("grad_rho_accum.x", "grad_rho_accum.x / vol"));
-    stmts.push(dsl::assign("grad_rho_accum.y", "grad_rho_accum.y / vol"));
-    stmts.push(dsl::assign(
-        "grad_rho_u_x_accum.x",
-        "grad_rho_u_x_accum.x / vol",
-    ));
-    stmts.push(dsl::assign(
-        "grad_rho_u_x_accum.y",
-        "grad_rho_u_x_accum.y / vol",
-    ));
-    stmts.push(dsl::assign(
-        "grad_rho_u_y_accum.x",
-        "grad_rho_u_y_accum.x / vol",
-    ));
-    stmts.push(dsl::assign(
-        "grad_rho_u_y_accum.y",
-        "grad_rho_u_y_accum.y / vol",
-    ));
-    stmts.push(dsl::assign(
-        "grad_rho_e_accum.x",
-        "grad_rho_e_accum.x / vol",
-    ));
-    stmts.push(dsl::assign(
-        "grad_rho_e_accum.y",
-        "grad_rho_e_accum.y / vol",
-    ));
+    for accum in [
+        "grad_rho_accum",
+        "grad_rho_u_x_accum",
+        "grad_rho_u_y_accum",
+        "grad_rho_e_accum",
+    ] {
+        stmts.extend(dsl::for_each_xy(|axis| {
+            dsl::assign(
+                &format!("{accum}.{axis}"),
+                &format!("{accum}.{axis} / vol"),
+            )
+        }));
+    }
 
     stmts.push(dsl::assign("grad_rho[idx]", "grad_rho_accum"));
     stmts.push(dsl::assign("grad_rho_u_x[idx]", "grad_rho_u_x_accum"));

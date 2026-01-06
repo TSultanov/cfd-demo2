@@ -132,6 +132,30 @@ pub fn parse_expr(input: &str) -> Result<Expr, ParseError> {
     Expr::parse(input)
 }
 
+pub fn for_each_xy<F>(mut f: F) -> Vec<Stmt>
+where
+    F: FnMut(&str) -> Stmt,
+{
+    vec![f("x"), f("y")]
+}
+
+pub fn for_each_xy_block<F>(mut f: F) -> Vec<Stmt>
+where
+    F: FnMut(&str) -> Vec<Stmt>,
+{
+    let mut out = Vec::new();
+    out.extend(f("x"));
+    out.extend(f("y"));
+    out
+}
+
+pub fn assign_xy(target: &str, x_value: &str, y_value: &str) -> Vec<Stmt> {
+    vec![
+        assign(&format!("{target}.x"), x_value),
+        assign(&format!("{target}.y"), y_value),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

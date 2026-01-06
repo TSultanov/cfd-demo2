@@ -102,3 +102,36 @@ pub fn scalar_reconstruction(
         },
     )
 }
+
+pub fn limited_linear_reconstruct_face(
+    prefix: &str,
+    side: &str,
+    phi_cell: &str,
+    phi_other: &str,
+    grad_cell: &str,
+    r_x: &str,
+    r_y: &str,
+) -> (Vec<Stmt>, String) {
+    let diff = format!("diff_{prefix}_{side}");
+    let min_diff = format!("min_diff_{prefix}_{side}");
+    let max_diff = format!("max_diff_{prefix}_{side}");
+    let delta = format!("delta_{prefix}_{side}");
+    let delta_limited = format!("delta_{prefix}_{side}_limited");
+    let phi_face = format!("{prefix}_{side}_face");
+
+    let mut stmts = Vec::new();
+    stmts.push(dsl::let_(&diff, &format!("{phi_other} - {phi_cell}")));
+    stmts.push(dsl::let_(&min_diff, &format!("min({diff}, 0.0)")));
+    stmts.push(dsl::let_(&max_diff, &format!("max({diff}, 0.0)")));
+    stmts.push(dsl::let_(
+        &delta,
+        &format!("{grad_cell}.x * {r_x} + {grad_cell}.y * {r_y}"),
+    ));
+    stmts.push(dsl::let_(
+        &delta_limited,
+        &format!("min(max({delta}, {min_diff}), {max_diff})"),
+    ));
+    stmts.push(dsl::let_(&phi_face, &format!("{phi_cell} + {delta_limited}")));
+
+    (stmts, phi_face)
+}

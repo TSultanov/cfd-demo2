@@ -1,6 +1,7 @@
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::state_access::{state_scalar_expr, state_vec2_expr};
+use super::reconstruction::limited_linear_reconstruct_face;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
     StructDef, StructField, Type,
@@ -552,132 +553,94 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         block.push(dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"));
         block.push(dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"));
 
-        block.push(dsl::let_("diff_rho_l", "rho_r_cell - rho_l_cell"));
-        block.push(dsl::let_("min_diff_rho_l", "min(diff_rho_l, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_l", "max(diff_rho_l, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_l",
-            "grad_rho_l.x * r_l_x + grad_rho_l.y * r_l_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_l_limited",
-            "min(max(delta_rho_l, min_diff_rho_l), max_diff_rho_l)",
-        ));
+        let (rho_l_stmts, rho_l_face) = limited_linear_reconstruct_face(
+            "rho",
+            "l",
+            "rho_l_cell",
+            "rho_r_cell",
+            "grad_rho_l",
+            "r_l_x",
+            "r_l_y",
+        );
+        block.extend(rho_l_stmts);
+        let (rho_u_x_l_stmts, rho_u_x_l_face) = limited_linear_reconstruct_face(
+            "rho_u_x",
+            "l",
+            "rho_u_l_cell.x",
+            "rho_u_r_cell.x",
+            "grad_rho_u_x_l",
+            "r_l_x",
+            "r_l_y",
+        );
+        block.extend(rho_u_x_l_stmts);
+        let (rho_u_y_l_stmts, rho_u_y_l_face) = limited_linear_reconstruct_face(
+            "rho_u_y",
+            "l",
+            "rho_u_l_cell.y",
+            "rho_u_r_cell.y",
+            "grad_rho_u_y_l",
+            "r_l_x",
+            "r_l_y",
+        );
+        block.extend(rho_u_y_l_stmts);
+        let (rho_e_l_stmts, rho_e_l_face) = limited_linear_reconstruct_face(
+            "rho_e",
+            "l",
+            "rho_e_l_cell",
+            "rho_e_r_cell",
+            "grad_rho_e_l",
+            "r_l_x",
+            "r_l_y",
+        );
+        block.extend(rho_e_l_stmts);
 
-        block.push(dsl::let_("diff_rho_u_x_l", "rho_u_r_cell.x - rho_u_l_cell.x"));
-        block.push(dsl::let_("min_diff_rho_u_x_l", "min(diff_rho_u_x_l, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_u_x_l", "max(diff_rho_u_x_l, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_u_x_l",
-            "grad_rho_u_x_l.x * r_l_x + grad_rho_u_x_l.y * r_l_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_u_x_l_limited",
-            "min(max(delta_rho_u_x_l, min_diff_rho_u_x_l), max_diff_rho_u_x_l)",
-        ));
+        let (rho_r_stmts, rho_r_face) = limited_linear_reconstruct_face(
+            "rho",
+            "r",
+            "rho_r_cell",
+            "rho_l_cell",
+            "grad_rho_r",
+            "r_r_x",
+            "r_r_y",
+        );
+        block.extend(rho_r_stmts);
+        let (rho_u_x_r_stmts, rho_u_x_r_face) = limited_linear_reconstruct_face(
+            "rho_u_x",
+            "r",
+            "rho_u_r_cell.x",
+            "rho_u_l_cell.x",
+            "grad_rho_u_x_r",
+            "r_r_x",
+            "r_r_y",
+        );
+        block.extend(rho_u_x_r_stmts);
+        let (rho_u_y_r_stmts, rho_u_y_r_face) = limited_linear_reconstruct_face(
+            "rho_u_y",
+            "r",
+            "rho_u_r_cell.y",
+            "rho_u_l_cell.y",
+            "grad_rho_u_y_r",
+            "r_r_x",
+            "r_r_y",
+        );
+        block.extend(rho_u_y_r_stmts);
+        let (rho_e_r_stmts, rho_e_r_face) = limited_linear_reconstruct_face(
+            "rho_e",
+            "r",
+            "rho_e_r_cell",
+            "rho_e_l_cell",
+            "grad_rho_e_r",
+            "r_r_x",
+            "r_r_y",
+        );
+        block.extend(rho_e_r_stmts);
 
-        block.push(dsl::let_("diff_rho_u_y_l", "rho_u_r_cell.y - rho_u_l_cell.y"));
-        block.push(dsl::let_("min_diff_rho_u_y_l", "min(diff_rho_u_y_l, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_u_y_l", "max(diff_rho_u_y_l, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_u_y_l",
-            "grad_rho_u_y_l.x * r_l_x + grad_rho_u_y_l.y * r_l_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_u_y_l_limited",
-            "min(max(delta_rho_u_y_l, min_diff_rho_u_y_l), max_diff_rho_u_y_l)",
-        ));
-
-        block.push(dsl::let_("diff_rho_e_l", "rho_e_r_cell - rho_e_l_cell"));
-        block.push(dsl::let_("min_diff_rho_e_l", "min(diff_rho_e_l, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_e_l", "max(diff_rho_e_l, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_e_l",
-            "grad_rho_e_l.x * r_l_x + grad_rho_e_l.y * r_l_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_e_l_limited",
-            "min(max(delta_rho_e_l, min_diff_rho_e_l), max_diff_rho_e_l)",
-        ));
-
-        block.push(dsl::let_("rho_l_face", "rho_l_cell + delta_rho_l_limited"));
-        block.push(dsl::let_(
-            "rho_u_x_l_face",
-            "rho_u_l_cell.x + delta_rho_u_x_l_limited",
-        ));
-        block.push(dsl::let_(
-            "rho_u_y_l_face",
-            "rho_u_l_cell.y + delta_rho_u_y_l_limited",
-        ));
-        block.push(dsl::let_("rho_e_l_face", "rho_e_l_cell + delta_rho_e_l_limited"));
-
-        block.push(dsl::let_("diff_rho_r", "rho_l_cell - rho_r_cell"));
-        block.push(dsl::let_("min_diff_rho_r", "min(diff_rho_r, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_r", "max(diff_rho_r, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_r",
-            "grad_rho_r.x * r_r_x + grad_rho_r.y * r_r_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_r_limited",
-            "min(max(delta_rho_r, min_diff_rho_r), max_diff_rho_r)",
-        ));
-
-        block.push(dsl::let_("diff_rho_u_x_r", "rho_u_l_cell.x - rho_u_r_cell.x"));
-        block.push(dsl::let_("min_diff_rho_u_x_r", "min(diff_rho_u_x_r, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_u_x_r", "max(diff_rho_u_x_r, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_u_x_r",
-            "grad_rho_u_x_r.x * r_r_x + grad_rho_u_x_r.y * r_r_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_u_x_r_limited",
-            "min(max(delta_rho_u_x_r, min_diff_rho_u_x_r), max_diff_rho_u_x_r)",
-        ));
-
-        block.push(dsl::let_("diff_rho_u_y_r", "rho_u_l_cell.y - rho_u_r_cell.y"));
-        block.push(dsl::let_("min_diff_rho_u_y_r", "min(diff_rho_u_y_r, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_u_y_r", "max(diff_rho_u_y_r, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_u_y_r",
-            "grad_rho_u_y_r.x * r_r_x + grad_rho_u_y_r.y * r_r_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_u_y_r_limited",
-            "min(max(delta_rho_u_y_r, min_diff_rho_u_y_r), max_diff_rho_u_y_r)",
-        ));
-
-        block.push(dsl::let_("diff_rho_e_r", "rho_e_l_cell - rho_e_r_cell"));
-        block.push(dsl::let_("min_diff_rho_e_r", "min(diff_rho_e_r, 0.0)"));
-        block.push(dsl::let_("max_diff_rho_e_r", "max(diff_rho_e_r, 0.0)"));
-        block.push(dsl::let_(
-            "delta_rho_e_r",
-            "grad_rho_e_r.x * r_r_x + grad_rho_e_r.y * r_r_y",
-        ));
-        block.push(dsl::let_(
-            "delta_rho_e_r_limited",
-            "min(max(delta_rho_e_r, min_diff_rho_e_r), max_diff_rho_e_r)",
-        ));
-
-        block.push(dsl::let_("rho_r_face", "rho_r_cell + delta_rho_r_limited"));
-        block.push(dsl::let_(
-            "rho_u_x_r_face",
-            "rho_u_r_cell.x + delta_rho_u_x_r_limited",
-        ));
-        block.push(dsl::let_(
-            "rho_u_y_r_face",
-            "rho_u_r_cell.y + delta_rho_u_y_r_limited",
-        ));
-        block.push(dsl::let_("rho_e_r_face", "rho_e_r_cell + delta_rho_e_r_limited"));
-
-        block.push(dsl::assign("rho_l", "rho_l_face"));
-        block.push(dsl::assign("rho_u_l.x", "rho_u_x_l_face"));
-        block.push(dsl::assign("rho_u_l.y", "rho_u_y_l_face"));
-        block.push(dsl::assign("rho_e_l", "rho_e_l_face"));
-        block.push(dsl::assign("rho_r", "rho_r_face"));
-        block.push(dsl::assign("rho_u_r.x", "rho_u_x_r_face"));
-        block.push(dsl::assign("rho_u_r.y", "rho_u_y_r_face"));
-        block.push(dsl::assign("rho_e_r", "rho_e_r_face"));
+        block.push(dsl::assign("rho_l", &rho_l_face));
+        block.extend(dsl::assign_xy("rho_u_l", &rho_u_x_l_face, &rho_u_y_l_face));
+        block.push(dsl::assign("rho_e_l", &rho_e_l_face));
+        block.push(dsl::assign("rho_r", &rho_r_face));
+        block.extend(dsl::assign_xy("rho_u_r", &rho_u_x_r_face, &rho_u_y_r_face));
+        block.push(dsl::assign("rho_e_r", &rho_e_r_face));
 
         dsl::block(block)
     };

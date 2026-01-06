@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::solver::codegen::wgsl_ast::{BinaryOp, Expr, UnaryOp};
 
-use super::{DslType, Shape, UnitDim};
+use super::{DslType, ScalarType, Shape, UnitDim};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DslError {
@@ -152,13 +152,27 @@ impl TypedExpr {
             }),
         }
     }
+
+    pub fn sqrt(&self) -> Result<Self, DslError> {
+        match (self.ty.scalar, self.ty.shape) {
+            (ScalarType::F32, Shape::Scalar | Shape::Vec(_)) => Ok(Self::new(
+                Expr::call_named("sqrt", vec![self.to_wgsl()]),
+                self.ty,
+                self.unit.sqrt(),
+            )),
+            _ => Err(DslError::Unsupported {
+                op: "sqrt",
+                ty: self.ty,
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::codegen::dsl::units::UnitDim;
     use crate::solver::codegen::dsl::types::{DslType, Shape};
+    use crate::solver::codegen::dsl::units::UnitDim;
 
     #[test]
     fn typed_expr_rejects_unit_mismatch_on_add() {
@@ -177,5 +191,12 @@ mod tests {
         assert_eq!(out.unit, UnitDim::new(0, 1, -1));
         assert_eq!(out.expr.to_string(), "2.0 * u");
     }
-}
 
+    #[test]
+    fn typed_expr_sqrt_emits_fractional_units() {
+        let length = TypedExpr::ident("x", DslType::f32(), UnitDim::new(0, 1, 0));
+        let sqrt = length.sqrt().expect("sqrt");
+        assert_eq!(sqrt.unit * sqrt.unit, length.unit);
+        assert_eq!(sqrt.expr.to_string(), "sqrt(x)");
+    }
+}

@@ -78,6 +78,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   4. `compressible_flux_kt` + `compressible_gradients`
 - Progress:
   - `compressible_assembly`: matrix scatter/accumulation helpers now build `wgsl_ast::Expr` directly (no parser for `matrix_values[...]` writes).
+  - `coupled_assembly`: block matrix index expressions now use `BlockCsrSoaMatrix` + `let_expr` (no string formatting/parsing for `row_entry(...)`).
 - Add a “golden WGSL” parity test for migrated kernels (string compare against committed generated files) until the migration is complete.
 - Keep the 1D plot regressions as the runtime validation layer for behavior.
 

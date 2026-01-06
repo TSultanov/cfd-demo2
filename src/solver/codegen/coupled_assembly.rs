@@ -1,4 +1,5 @@
 use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
+use super::dsl as typed;
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::reconstruction::scalar_reconstruction;
@@ -7,7 +8,7 @@ use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
@@ -358,14 +359,20 @@ fn main_body(
     }
     let coupled_stride = u_components + p_components;
     let p_offset = u_components;
+    let p_offset_u8 = p_offset as u8;
     let row_stride_2 = coupled_stride * 2;
     let block_stride = coupled_stride * coupled_stride;
+    let block_shape = typed::BlockShape::new(coupled_stride as u8, coupled_stride as u8);
+    let block_matrix = typed::BlockCsrSoaMatrix::from_start_row_prefix(
+        "matrix_values",
+        "start_row",
+        block_shape,
+        typed::ScalarType::F32,
+        typed::UnitDim::dimensionless(),
+    );
     let start_row_0_expr = format!("{block_stride}u * scalar_offset");
     let start_row_1_expr = format!("start_row_0 + {coupled_stride}u * num_neighbors");
     let start_row_2_expr = format!("start_row_0 + {row_stride_2}u * num_neighbors");
-    let row_entry = |row: &str, rank: &str, comp: usize| {
-        format!("{row} + {coupled_stride}u * {rank} + {comp}u")
-    };
     let u_old_expr = state_vec2_expr(layout, "state_old", "idx", u_field);
     let u_old_old_expr = state_vec2_expr(layout, "state_old_old", "idx", u_field);
 
@@ -551,42 +558,16 @@ fn main_body(
                 "scalar_mat_idx - scalar_offset",
             )])),
         ));
-        body.push(dsl::let_(
-            "idx_0_0",
-            &row_entry("start_row_0", "neighbor_rank", 0),
-        ));
-        body.push(dsl::let_(
-            "idx_0_1",
-            &row_entry("start_row_0", "neighbor_rank", 1),
-        ));
-        body.push(dsl::let_(
-            "idx_0_2",
-            &row_entry("start_row_0", "neighbor_rank", p_offset),
-        ));
-        body.push(dsl::let_(
-            "idx_1_0",
-            &row_entry("start_row_1", "neighbor_rank", 0),
-        ));
-        body.push(dsl::let_(
-            "idx_1_1",
-            &row_entry("start_row_1", "neighbor_rank", 1),
-        ));
-        body.push(dsl::let_(
-            "idx_1_2",
-            &row_entry("start_row_1", "neighbor_rank", p_offset),
-        ));
-        body.push(dsl::let_(
-            "idx_2_0",
-            &row_entry("start_row_2", "neighbor_rank", 0),
-        ));
-        body.push(dsl::let_(
-            "idx_2_1",
-            &row_entry("start_row_2", "neighbor_rank", 1),
-        ));
-        body.push(dsl::let_(
-            "idx_2_2",
-            &row_entry("start_row_2", "neighbor_rank", p_offset),
-        ));
+        let neighbor_entry = block_matrix.row_entry(&Expr::ident("neighbor_rank"));
+        body.push(dsl::let_expr("idx_0_0", neighbor_entry.index_expr(0, 0)));
+        body.push(dsl::let_expr("idx_0_1", neighbor_entry.index_expr(0, 1)));
+        body.push(dsl::let_expr("idx_0_2", neighbor_entry.index_expr(0, p_offset_u8)));
+        body.push(dsl::let_expr("idx_1_0", neighbor_entry.index_expr(1, 0)));
+        body.push(dsl::let_expr("idx_1_1", neighbor_entry.index_expr(1, 1)));
+        body.push(dsl::let_expr("idx_1_2", neighbor_entry.index_expr(1, p_offset_u8)));
+        body.push(dsl::let_expr("idx_2_0", neighbor_entry.index_expr(2, 0)));
+        body.push(dsl::let_expr("idx_2_1", neighbor_entry.index_expr(2, 1)));
+        body.push(dsl::let_expr("idx_2_2", neighbor_entry.index_expr(2, p_offset_u8)));
 
         let u_neigh_expr = state_vec2_expr(layout, "state", "other_idx", u_field);
         let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", d_p_field);
@@ -832,42 +813,16 @@ fn main_body(
     let scalar_diag_idx_expr = format!("diagonal_indices[idx]");
     stmts.push(dsl::let_("scalar_diag_idx", &scalar_diag_idx_expr));
     stmts.push(dsl::let_("diag_rank", "scalar_diag_idx - scalar_offset"));
-    stmts.push(dsl::let_(
-        "d_0_0",
-        &row_entry("start_row_0", "diag_rank", 0),
-    ));
-    stmts.push(dsl::let_(
-        "d_0_1",
-        &row_entry("start_row_0", "diag_rank", 1),
-    ));
-    stmts.push(dsl::let_(
-        "d_0_2",
-        &row_entry("start_row_0", "diag_rank", p_offset),
-    ));
-    stmts.push(dsl::let_(
-        "d_1_0",
-        &row_entry("start_row_1", "diag_rank", 0),
-    ));
-    stmts.push(dsl::let_(
-        "d_1_1",
-        &row_entry("start_row_1", "diag_rank", 1),
-    ));
-    stmts.push(dsl::let_(
-        "d_1_2",
-        &row_entry("start_row_1", "diag_rank", p_offset),
-    ));
-    stmts.push(dsl::let_(
-        "d_2_0",
-        &row_entry("start_row_2", "diag_rank", 0),
-    ));
-    stmts.push(dsl::let_(
-        "d_2_1",
-        &row_entry("start_row_2", "diag_rank", 1),
-    ));
-    stmts.push(dsl::let_(
-        "d_2_2",
-        &row_entry("start_row_2", "diag_rank", p_offset),
-    ));
+    let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
+    stmts.push(dsl::let_expr("d_0_0", diag_entry.index_expr(0, 0)));
+    stmts.push(dsl::let_expr("d_0_1", diag_entry.index_expr(0, 1)));
+    stmts.push(dsl::let_expr("d_0_2", diag_entry.index_expr(0, p_offset_u8)));
+    stmts.push(dsl::let_expr("d_1_0", diag_entry.index_expr(1, 0)));
+    stmts.push(dsl::let_expr("d_1_1", diag_entry.index_expr(1, 1)));
+    stmts.push(dsl::let_expr("d_1_2", diag_entry.index_expr(1, p_offset_u8)));
+    stmts.push(dsl::let_expr("d_2_0", diag_entry.index_expr(2, 0)));
+    stmts.push(dsl::let_expr("d_2_1", diag_entry.index_expr(2, 1)));
+    stmts.push(dsl::let_expr("d_2_2", diag_entry.index_expr(2, p_offset_u8)));
     stmts.push(dsl::assign("matrix_values[d_0_0]", "diag_u"));
     stmts.push(dsl::assign("matrix_values[d_0_1]", "0.0"));
     stmts.push(dsl::assign("matrix_values[d_0_2]", "sum_diag_up"));

@@ -58,6 +58,42 @@ mod solver {
         pub use kernel::{KernelKind, KernelPlan};
     }
     pub mod codegen {
+        pub mod dsl {
+            pub mod expr {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/expr.rs"
+                ));
+            }
+            pub mod matrix {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/matrix.rs"
+                ));
+            }
+            pub mod types {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/types.rs"
+                ));
+            }
+            pub mod units {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/units.rs"
+                ));
+            }
+
+            #[allow(unused_imports)]
+            pub use expr::{DslError, TypedExpr};
+            #[allow(unused_imports)]
+            pub use matrix::{
+                BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix,
+                CsrPattern,
+            };
+            pub use types::{DslType, ScalarType, Shape};
+            pub use units::UnitDim;
+        }
         pub mod compressible_assembly {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -183,7 +219,7 @@ fn main() {
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
-    for entry in glob("src/solver/codegen/*.rs").expect("Failed to read codegen glob") {
+    for entry in glob("src/solver/codegen/**/*.rs").expect("Failed to read codegen glob") {
         match entry {
             Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),

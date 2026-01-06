@@ -4,6 +4,22 @@ pub fn expr(input: &str) -> Expr {
     Expr::parse(input).expect("invalid WGSL expression")
 }
 
+pub fn array_access(array: &str, index: Expr) -> Expr {
+    Expr::ident(array).index(index)
+}
+
+pub fn linear_index(idx: Expr, stride: u32, offset: u32) -> Expr {
+    Expr::binary(
+        Expr::binary(idx, BinaryOp::Mul, Expr::lit_u32(stride)),
+        BinaryOp::Add,
+        Expr::lit_u32(offset),
+    )
+}
+
+pub fn array_access_linear(array: &str, idx: Expr, stride: u32, offset: u32) -> Expr {
+    array_access(array, linear_index(idx, stride, offset))
+}
+
 pub fn block(stmts: Vec<Stmt>) -> Block {
     Block::new(stmts)
 }
@@ -85,6 +101,20 @@ pub fn assign(target: &str, value: &str) -> Stmt {
 
 pub fn assign_expr(target: Expr, value: Expr) -> Stmt {
     Stmt::Assign { target, value }
+}
+
+pub fn assign_array_access(array: &str, index: Expr, value: Expr) -> Stmt {
+    assign_expr(array_access(array, index), value)
+}
+
+pub fn assign_array_access_linear(
+    array: &str,
+    idx: Expr,
+    stride: u32,
+    offset: u32,
+    value: Expr,
+) -> Stmt {
+    assign_expr(array_access_linear(array, idx, stride, offset), value)
 }
 
 pub fn assign_op(op: AssignOp, target: &str, value: &str) -> Stmt {
@@ -416,5 +446,20 @@ mod tests {
         );
         assert_eq!(stmts.len(), 4);
         assert!(stmts.iter().all(|stmt| matches!(stmt, Stmt::Assign { .. })));
+    }
+
+    #[test]
+    fn dsl_builds_linear_array_access() {
+        let expr = array_access_linear("rhs", Expr::ident("idx"), 3, 2);
+        assert_eq!(expr.to_string(), "rhs[idx * 3u + 2u]");
+
+        let stmt = assign_array_access_linear("rhs", Expr::ident("idx"), 3, 2, Expr::ident("x"));
+        match stmt {
+            Stmt::Assign { target, value } => {
+                assert_eq!(target.to_string(), "rhs[idx * 3u + 2u]");
+                assert_eq!(value.to_string(), "x");
+            }
+            _ => panic!("expected assign stmt"),
+        }
     }
 }

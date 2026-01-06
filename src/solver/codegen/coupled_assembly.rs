@@ -8,8 +8,8 @@ use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
+    Param, Stmt, StorageClass, StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -360,6 +360,8 @@ fn main_body(
     let coupled_stride = u_components + p_components;
     let p_offset = u_components;
     let p_offset_u8 = p_offset as u8;
+    let coupled_stride_u32 = coupled_stride as u32;
+    let p_offset_u32 = p_offset as u32;
     let row_stride_2 = coupled_stride * 2;
     let block_stride = coupled_stride * coupled_stride;
     let block_shape = typed::BlockShape::new(coupled_stride as u8, coupled_stride as u8);
@@ -662,11 +664,30 @@ fn main_body(
         );
 
         let mut interior_stmts = vec![
-            dsl::let_("coeff", "-diff_coeff + conv_coeff_off"),
-            dsl::assign("matrix_values[idx_0_0]", "coeff"),
-            dsl::assign("matrix_values[idx_0_1]", "0.0"),
-            dsl::assign("matrix_values[idx_1_0]", "0.0"),
-            dsl::assign("matrix_values[idx_1_1]", "coeff"),
+            dsl::let_expr(
+                "coeff",
+                Expr::binary(Expr::ident("conv_coeff_off"), BinaryOp::Sub, Expr::ident("diff_coeff")),
+            ),
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_0_0"),
+                Expr::ident("coeff"),
+            ),
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_0_1"),
+                Expr::lit_f32(0.0),
+            ),
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_1_0"),
+                Expr::lit_f32(0.0),
+            ),
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_1_1"),
+                Expr::ident("coeff"),
+            ),
             dsl::assign_op(AssignOp::Add, "diag_u", "diff_coeff + conv_coeff_diag"),
             dsl::assign_op(AssignOp::Add, "diag_v", "diff_coeff + conv_coeff_diag"),
         ];
@@ -747,13 +768,31 @@ fn main_body(
             interior_stmts.extend(vec![
                 dsl::let_("pg_force_x", "area * normal.x"),
                 dsl::let_("pg_force_y", "area * normal.y"),
-                dsl::assign(
-                    "matrix_values[idx_0_2]",
-                    "(1.0 - lambda) * pg_force_x",
+                dsl::assign_array_access(
+                    "matrix_values",
+                    Expr::ident("idx_0_2"),
+                    Expr::binary(
+                        Expr::binary(
+                            Expr::lit_f32(1.0),
+                            BinaryOp::Sub,
+                            Expr::ident("lambda"),
+                        ),
+                        BinaryOp::Mul,
+                        Expr::ident("pg_force_x"),
+                    ),
                 ),
-                dsl::assign(
-                    "matrix_values[idx_1_2]",
-                    "(1.0 - lambda) * pg_force_y",
+                dsl::assign_array_access(
+                    "matrix_values",
+                    Expr::ident("idx_1_2"),
+                    Expr::binary(
+                        Expr::binary(
+                            Expr::lit_f32(1.0),
+                            BinaryOp::Sub,
+                            Expr::ident("lambda"),
+                        ),
+                        BinaryOp::Mul,
+                        Expr::ident("pg_force_y"),
+                    ),
                 ),
                 dsl::assign_op(AssignOp::Add, "sum_diag_up", "lambda * pg_force_x"),
                 dsl::assign_op(AssignOp::Add, "sum_diag_vp", "lambda * pg_force_y"),
@@ -763,13 +802,23 @@ fn main_body(
         interior_stmts.extend(vec![
             dsl::let_("div_coeff_x", "normal.x * area"),
             dsl::let_("div_coeff_y", "normal.y * area"),
-            dsl::assign(
-                "matrix_values[idx_2_0]",
-                "(1.0 - lambda) * div_coeff_x",
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_2_0"),
+                Expr::binary(
+                    Expr::binary(Expr::lit_f32(1.0), BinaryOp::Sub, Expr::ident("lambda")),
+                    BinaryOp::Mul,
+                    Expr::ident("div_coeff_x"),
+                ),
             ),
-            dsl::assign(
-                "matrix_values[idx_2_1]",
-                "(1.0 - lambda) * div_coeff_y",
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_2_1"),
+                Expr::binary(
+                    Expr::binary(Expr::lit_f32(1.0), BinaryOp::Sub, Expr::ident("lambda")),
+                    BinaryOp::Mul,
+                    Expr::ident("div_coeff_y"),
+                ),
             ),
             dsl::assign_op(AssignOp::Add, "sum_diag_pu", "lambda * div_coeff_x"),
             dsl::assign_op(AssignOp::Add, "sum_diag_pv", "lambda * div_coeff_y"),
@@ -780,14 +829,23 @@ fn main_body(
             ),
             dsl::let_("pressure_coeff_face", &pressure_coeff_face_expr),
             dsl::let_("lapl_coeff", "pressure_coeff_face * area / dist"),
-            dsl::assign("matrix_values[idx_2_2]", "-lapl_coeff"),
+            dsl::assign_array_access(
+                "matrix_values",
+                Expr::ident("idx_2_2"),
+                Expr::unary(UnaryOp::Negate, Expr::ident("lapl_coeff")),
+            ),
             dsl::assign_op(AssignOp::Add, "sum_diag_pp", "lapl_coeff"),
             dsl::let_("scalar_coeff", "pressure_coeff_face * area / dist"),
-            dsl::if_block(
-                "scalar_mat_idx != 4294967295u",
-                dsl::block(vec![dsl::assign(
-                    "scalar_matrix_values[scalar_mat_idx]",
-                    "-scalar_coeff",
+            dsl::if_block_expr(
+                Expr::binary(
+                    Expr::ident("scalar_mat_idx"),
+                    BinaryOp::NotEqual,
+                    Expr::lit_u32(u32::MAX),
+                ),
+                dsl::block(vec![dsl::assign_array_access(
+                    "scalar_matrix_values",
+                    Expr::ident("scalar_mat_idx"),
+                    Expr::unary(UnaryOp::Negate, Expr::ident("scalar_coeff")),
                 )]),
                 None,
             ),
@@ -810,9 +868,18 @@ fn main_body(
         dsl::block(face_loop_body),
     ));
 
-    let scalar_diag_idx_expr = format!("diagonal_indices[idx]");
-    stmts.push(dsl::let_("scalar_diag_idx", &scalar_diag_idx_expr));
-    stmts.push(dsl::let_("diag_rank", "scalar_diag_idx - scalar_offset"));
+    stmts.push(dsl::let_expr(
+        "scalar_diag_idx",
+        dsl::array_access("diagonal_indices", Expr::ident("idx")),
+    ));
+    stmts.push(dsl::let_expr(
+        "diag_rank",
+        Expr::binary(
+            Expr::ident("scalar_diag_idx"),
+            BinaryOp::Sub,
+            Expr::ident("scalar_offset"),
+        ),
+    ));
     let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
     stmts.push(dsl::let_expr("d_0_0", diag_entry.index_expr(0, 0)));
     stmts.push(dsl::let_expr("d_0_1", diag_entry.index_expr(0, 1)));
@@ -823,42 +890,91 @@ fn main_body(
     stmts.push(dsl::let_expr("d_2_0", diag_entry.index_expr(2, 0)));
     stmts.push(dsl::let_expr("d_2_1", diag_entry.index_expr(2, 1)));
     stmts.push(dsl::let_expr("d_2_2", diag_entry.index_expr(2, p_offset_u8)));
-    stmts.push(dsl::assign("matrix_values[d_0_0]", "diag_u"));
-    stmts.push(dsl::assign("matrix_values[d_0_1]", "0.0"));
-    stmts.push(dsl::assign("matrix_values[d_0_2]", "sum_diag_up"));
-    stmts.push(dsl::assign("matrix_values[d_1_0]", "0.0"));
-    stmts.push(dsl::assign("matrix_values[d_1_1]", "diag_v"));
-    stmts.push(dsl::assign("matrix_values[d_1_2]", "sum_diag_vp"));
-    stmts.push(dsl::assign("matrix_values[d_2_0]", "sum_diag_pu"));
-    stmts.push(dsl::assign("matrix_values[d_2_1]", "sum_diag_pv"));
-    stmts.push(dsl::assign("matrix_values[d_2_2]", "diag_p + sum_diag_pp"));
-    stmts.push(dsl::assign(
-        &format!("rhs[{coupled_stride}u * idx + 0u]"),
-        "rhs_u",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_0_0"),
+        Expr::ident("diag_u"),
     ));
-    stmts.push(dsl::assign(
-        &format!("rhs[{coupled_stride}u * idx + 1u]"),
-        "rhs_v",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_0_1"),
+        Expr::lit_f32(0.0),
     ));
-    stmts.push(dsl::assign(
-        &format!("rhs[{coupled_stride}u * idx + {p_offset}u]"),
-        "rhs_p",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_0_2"),
+        Expr::ident("sum_diag_up"),
     ));
-    stmts.push(dsl::assign(
-        "scalar_matrix_values[scalar_diag_idx]",
-        "scalar_diag_p",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_1_0"),
+        Expr::lit_f32(0.0),
     ));
-    stmts.push(dsl::assign(
-        "diag_u_inv[idx]",
-        "safe_inverse(diag_u)",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_1_1"),
+        Expr::ident("diag_v"),
     ));
-    stmts.push(dsl::assign(
-        "diag_v_inv[idx]",
-        "safe_inverse(diag_v)",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_1_2"),
+        Expr::ident("sum_diag_vp"),
     ));
-    stmts.push(dsl::assign(
-        "diag_p_inv[idx]",
-        "safe_inverse(scalar_diag_p)",
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_2_0"),
+        Expr::ident("sum_diag_pu"),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_2_1"),
+        Expr::ident("sum_diag_pv"),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "matrix_values",
+        Expr::ident("d_2_2"),
+        Expr::binary(Expr::ident("diag_p"), BinaryOp::Add, Expr::ident("sum_diag_pp")),
+    ));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        coupled_stride_u32,
+        0,
+        Expr::ident("rhs_u"),
+    ));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        coupled_stride_u32,
+        1,
+        Expr::ident("rhs_v"),
+    ));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        coupled_stride_u32,
+        p_offset_u32,
+        Expr::ident("rhs_p"),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "scalar_matrix_values",
+        Expr::ident("scalar_diag_idx"),
+        Expr::ident("scalar_diag_p"),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "diag_u_inv",
+        Expr::ident("idx"),
+        Expr::call_named("safe_inverse", vec![Expr::ident("diag_u")]),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "diag_v_inv",
+        Expr::ident("idx"),
+        Expr::call_named("safe_inverse", vec![Expr::ident("diag_v")]),
+    ));
+    stmts.push(dsl::assign_array_access(
+        "diag_p_inv",
+        Expr::ident("idx"),
+        Expr::call_named("safe_inverse", vec![Expr::ident("scalar_diag_p")]),
     ));
 
     Block::new(stmts)

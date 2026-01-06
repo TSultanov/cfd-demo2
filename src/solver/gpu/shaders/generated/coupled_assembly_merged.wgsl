@@ -316,7 +316,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let idx_2_1 = start_row_2 + 3u * neighbor_rank + 1u;
         let idx_2_2 = start_row_2 + 3u * neighbor_rank + 2u;
         if (!is_boundary) {
-            let coeff = -diff_coeff + conv_coeff_off;
+            let coeff = conv_coeff_off - diff_coeff;
             matrix_values[idx_0_0] = coeff;
             matrix_values[idx_0_1] = 0.0;
             matrix_values[idx_1_0] = 0.0;
@@ -493,9 +493,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     matrix_values[d_2_0] = sum_diag_pu;
     matrix_values[d_2_1] = sum_diag_pv;
     matrix_values[d_2_2] = diag_p + sum_diag_pp;
-    rhs[3u * idx + 0u] = rhs_u;
-    rhs[3u * idx + 1u] = rhs_v;
-    rhs[3u * idx + 2u] = rhs_p;
+    rhs[idx * 3u + 0u] = rhs_u;
+    rhs[idx * 3u + 1u] = rhs_v;
+    rhs[idx * 3u + 2u] = rhs_p;
     scalar_matrix_values[scalar_diag_idx] = scalar_diag_p;
     diag_u_inv[idx] = safe_inverse(diag_u);
     diag_v_inv[idx] = safe_inverse(diag_v);

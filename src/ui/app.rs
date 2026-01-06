@@ -429,6 +429,7 @@ impl CFDApp {
                 ));
                 gpu_solver.set_dt(self.timestep as f32);
                 gpu_solver.set_time_scheme(self.time_scheme.gpu_id());
+                gpu_solver.set_scheme(self.selected_scheme.gpu_id());
                 gpu_solver.set_inlet_velocity(self.inlet_velocity);
                 gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
                 let p_ref = self
@@ -952,38 +953,45 @@ impl eframe::App for CFDApp {
                         }
 
                         ui.separator();
-                        if matches!(self.solver_kind, SolverKind::Incompressible) {
-                            ui.label("Discretization Scheme");
-                            if ui
-                                .radio(matches!(self.selected_scheme, Scheme::Upwind), "Upwind")
-                                .clicked()
-                            {
-                                self.selected_scheme = Scheme::Upwind;
-                                self.update_gpu_scheme();
-                            }
-                            if ui
-                                .radio(
-                                    matches!(self.selected_scheme, Scheme::SecondOrderUpwind),
-                                    "Second Order Upwind",
-                                )
-                                .clicked()
-                            {
-                                self.selected_scheme = Scheme::SecondOrderUpwind;
-                                self.update_gpu_scheme();
-                            }
-                            if ui
-                                .radio(matches!(self.selected_scheme, Scheme::QUICK), "QUICK")
-                                .clicked()
-                            {
-                                self.selected_scheme = Scheme::QUICK;
-                                self.update_gpu_scheme();
-                            }
+                        ui.label("Advection Scheme");
+                        if ui
+                            .radio(matches!(self.selected_scheme, Scheme::Upwind), "First order (Upwind)")
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::Upwind;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(
+                                matches!(self.selected_scheme, Scheme::SecondOrderUpwind),
+                                "SOU (Second order upwind)",
+                            )
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::SecondOrderUpwind;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(matches!(self.selected_scheme, Scheme::QUICK), "QUICK")
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::QUICK;
+                            self.update_gpu_scheme();
+                        }
 
-                            ui.separator();
+                        if matches!(self.solver_kind, SolverKind::Compressible) {
+                            ui.label("Compressible solver uses this for KT reconstruction (piecewise-constant vs limited linear).");
+                        }
+
+                        ui.separator();
+                        if matches!(self.solver_kind, SolverKind::Incompressible) {
                             ui.label("Preconditioner");
                             if ui
                                 .radio(
-                                    matches!(self.selected_preconditioner, PreconditionerType::Jacobi),
+                                    matches!(
+                                        self.selected_preconditioner,
+                                        PreconditionerType::Jacobi
+                                    ),
                                     "Jacobi",
                                 )
                                 .clicked()
@@ -1022,8 +1030,6 @@ impl eframe::App for CFDApp {
                             {
                                 self.update_gpu_alpha_p();
                             }
-                        } else {
-                            ui.label("Compressible solver applies the selected advection scheme to KT reconstruction.");
                         }
                     });
 

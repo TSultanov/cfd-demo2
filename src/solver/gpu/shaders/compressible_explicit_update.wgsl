@@ -1,0 +1,145 @@
+// Explicit conservative update for the compressible solver.
+//
+// Uses face fluxes computed by `generated/compressible_flux_kt.wgsl`:
+//   U^{n+1} = U^n - dt/Vol * sum_face (F_face),
+// where each face flux is oriented outwards from `face_owner`.
+
+struct Vector2 {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
+    precond_type: u32,
+    precond_model: u32,
+    precond_theta_floor: f32,
+    pressure_coupling_alpha: f32,
+}
+
+// Group 0: Mesh
+
+@group(0) @binding(0)
+var<storage, read> face_owner: array<u32>;
+
+@group(0) @binding(1)
+var<storage, read> face_neighbor: array<i32>;
+
+@group(0) @binding(2)
+var<storage, read> face_areas: array<f32>;
+
+@group(0) @binding(3)
+var<storage, read> face_normals: array<Vector2>;
+
+@group(0) @binding(4)
+var<storage, read> cell_centers: array<Vector2>;
+
+@group(0) @binding(5)
+var<storage, read> cell_vols: array<f32>;
+
+@group(0) @binding(6)
+var<storage, read> cell_face_offsets: array<u32>;
+
+@group(0) @binding(7)
+var<storage, read> cell_faces: array<u32>;
+
+@group(0) @binding(8)
+var<storage, read> cell_face_matrix_indices: array<u32>;
+
+@group(0) @binding(9)
+var<storage, read> diagonal_indices: array<u32>;
+
+@group(0) @binding(12)
+var<storage, read> face_boundary: array<u32>;
+
+@group(0) @binding(13)
+var<storage, read> face_centers: array<Vector2>;
+
+// Group 1: Fields (consolidated state buffers)
+
+@group(1) @binding(0)
+var<storage, read_write> state: array<f32>;
+
+@group(1) @binding(1)
+var<storage, read> state_old: array<f32>;
+
+@group(1) @binding(2)
+var<storage, read> state_old_old: array<f32>;
+
+// Face fluxes: [rho, rho_u_x, rho_u_y, rho_e] * area
+@group(1) @binding(3)
+var<storage, read_write> fluxes: array<f32>;
+
+@group(1) @binding(4)
+var<uniform> constants: Constants;
+
+@group(1) @binding(5)
+var<storage, read_write> grad_rho: array<Vector2>;
+
+@group(1) @binding(6)
+var<storage, read_write> grad_rho_u_x: array<Vector2>;
+
+@group(1) @binding(7)
+var<storage, read_write> grad_rho_u_y: array<Vector2>;
+
+@group(1) @binding(8)
+var<storage, read_write> grad_rho_e: array<Vector2>;
+
+@group(1) @binding(9)
+var<storage, read> state_iter: array<f32>;
+
+@compute
+@workgroup_size(64)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    if (idx >= arrayLength(&cell_vols)) {
+        return;
+    }
+    let stride = 7u;
+    let vol = max(cell_vols[idx], 1e-12);
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[idx + 1u];
+
+    // Conservative variables from previous step.
+    let rho0 = state_old[idx * stride + 0u];
+    let rho_u0_x = state_old[idx * stride + 1u];
+    let rho_u0_y = state_old[idx * stride + 2u];
+    let rho_e0 = state_old[idx * stride + 3u];
+
+    var sum_rho = 0.0;
+    var sum_rho_u_x = 0.0;
+    var sum_rho_u_y = 0.0;
+    var sum_rho_e = 0.0;
+
+    for (var face_offset = start; face_offset < end; face_offset++) {
+        let face_idx = cell_faces[face_offset];
+        let owner = face_owner[face_idx];
+        // Fluxes are oriented outward from the owner cell.
+        let sign = select(-1.0, 1.0, owner == idx);
+        let base = face_idx * 4u;
+        sum_rho += sign * fluxes[base + 0u];
+        sum_rho_u_x += sign * fluxes[base + 1u];
+        sum_rho_u_y += sign * fluxes[base + 2u];
+        sum_rho_e += sign * fluxes[base + 3u];
+    }
+
+    let factor = constants.dt / vol;
+    state[idx * stride + 0u] = rho0 - factor * sum_rho;
+    state[idx * stride + 1u] = rho_u0_x - factor * sum_rho_u_x;
+    state[idx * stride + 2u] = rho_u0_y - factor * sum_rho_u_y;
+    state[idx * stride + 3u] = rho_e0 - factor * sum_rho_e;
+}
+

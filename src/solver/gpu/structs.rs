@@ -100,7 +100,11 @@ pub struct GpuConstants {
     pub inlet_velocity: f32,
     pub ramp_time: f32,
     pub precond_type: u32, // 0: Jacobi, 1: AMG
-    pub precond_model: u32, // 0: legacy, 1: Weiss-Smith
+    /// Low-Mach preconditioning model:
+    /// - 0: legacy (Mach-scaled wave speed)
+    /// - 1: Weiss-Smith
+    /// - 2: off (rhoCentralFoam-like)
+    pub precond_model: u32,
     pub precond_theta_floor: f32,
     pub pressure_coupling_alpha: f32,
 }

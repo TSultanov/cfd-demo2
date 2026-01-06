@@ -520,8 +520,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         Some(dsl::block(vec![dsl::if_block(
             "boundary_type == 3u",
             dsl::block(vec![
-                dsl::assign("rho_u_r.x", "-rho_u_l.x"),
-                dsl::assign("rho_u_r.y", "-rho_u_l.y"),
+                // Slip wall: reflect only the normal component of momentum.
+                dsl::let_("m_dot_n", "rho_u_l.x * normal.x + rho_u_l.y * normal.y"),
+                dsl::assign("rho_u_r.x", "rho_u_l.x - 2.0 * m_dot_n * normal.x"),
+                dsl::assign("rho_u_r.y", "rho_u_l.y - 2.0 * m_dot_n * normal.y"),
             ]),
             None,
         )])),
@@ -540,118 +542,15 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         block.push(dsl::let_("r_r_x", "f_center.x - center_r.x"));
         block.push(dsl::let_("r_r_y", "f_center.y - center_r.y"));
 
-        block.push(dsl::let_("inv_rho_l_cell", "1.0 / max(rho_l_cell, 1e-8)"));
-        block.push(dsl::let_("u_l_x_cell", "rho_u_l_cell.x * inv_rho_l_cell"));
-        block.push(dsl::let_("u_l_y_cell", "rho_u_l_cell.y * inv_rho_l_cell"));
-        block.push(dsl::let_("u2_l_cell", "u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell"));
-        block.push(dsl::let_(
-            "p_l_cell",
-            &format!("max(0.0, ({gamma} - 1.0) * (rho_e_l_cell - 0.5 * rho_l_cell * u2_l_cell))"),
-        ));
-
-        block.push(dsl::let_("inv_rho_r_cell", "1.0 / max(rho_r_cell, 1e-8)"));
-        block.push(dsl::let_("u_r_x_cell", "rho_u_r_cell.x * inv_rho_r_cell"));
-        block.push(dsl::let_("u_r_y_cell", "rho_u_r_cell.y * inv_rho_r_cell"));
-        block.push(dsl::let_("u2_r_cell", "u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell"));
-        block.push(dsl::let_(
-            "p_r_cell",
-            &format!("max(0.0, ({gamma} - 1.0) * (rho_e_r_cell - 0.5 * rho_r_cell * u2_r_cell))"),
-        ));
-
+        // Reconstruct conservative variables directly for robustness.
         block.push(dsl::let_("grad_rho_l", "grad_rho[idx]"));
         block.push(dsl::let_("grad_rho_u_x_l", "grad_rho_u_x[idx]"));
         block.push(dsl::let_("grad_rho_u_y_l", "grad_rho_u_y[idx]"));
         block.push(dsl::let_("grad_rho_e_l", "grad_rho_e[idx]"));
-
         block.push(dsl::let_("grad_rho_r", "grad_rho[other_idx]"));
         block.push(dsl::let_("grad_rho_u_x_r", "grad_rho_u_x[other_idx]"));
         block.push(dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"));
         block.push(dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"));
-
-        block.push(dsl::let_(
-            "grad_u_x_l_x",
-            "(grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell",
-        ));
-        block.push(dsl::let_(
-            "grad_u_x_l_y",
-            "(grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell",
-        ));
-        block.push(dsl::let_(
-            "grad_u_y_l_x",
-            "(grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell",
-        ));
-        block.push(dsl::let_(
-            "grad_u_y_l_y",
-            "(grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell",
-        ));
-
-        block.push(dsl::let_(
-            "grad_u_x_r_x",
-            "(grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell",
-        ));
-        block.push(dsl::let_(
-            "grad_u_x_r_y",
-            "(grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell",
-        ));
-        block.push(dsl::let_(
-            "grad_u_y_r_x",
-            "(grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell",
-        ));
-        block.push(dsl::let_(
-            "grad_u_y_r_y",
-            "(grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell",
-        ));
-
-        block.push(dsl::let_(
-            "grad_u2_l_x",
-            "2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x",
-        ));
-        block.push(dsl::let_(
-            "grad_u2_l_y",
-            "2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y",
-        ));
-        block.push(dsl::let_(
-            "grad_u2_r_x",
-            "2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x",
-        ));
-        block.push(dsl::let_(
-            "grad_u2_r_y",
-            "2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y",
-        ));
-
-        block.push(dsl::let_(
-            "grad_rho_u2_l_x",
-            "u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x",
-        ));
-        block.push(dsl::let_(
-            "grad_rho_u2_l_y",
-            "u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y",
-        ));
-        block.push(dsl::let_(
-            "grad_rho_u2_r_x",
-            "u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x",
-        ));
-        block.push(dsl::let_(
-            "grad_rho_u2_r_y",
-            "u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y",
-        ));
-
-        block.push(dsl::let_(
-            "grad_p_l_x",
-            &format!("({gamma} - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x)"),
-        ));
-        block.push(dsl::let_(
-            "grad_p_l_y",
-            &format!("({gamma} - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y)"),
-        ));
-        block.push(dsl::let_(
-            "grad_p_r_x",
-            &format!("({gamma} - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x)"),
-        ));
-        block.push(dsl::let_(
-            "grad_p_r_y",
-            &format!("({gamma} - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y)"),
-        ));
 
         block.push(dsl::let_("diff_rho_l", "rho_r_cell - rho_l_cell"));
         block.push(dsl::let_("min_diff_rho_l", "min(diff_rho_l, 0.0)"));
@@ -665,46 +564,52 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "min(max(delta_rho_l, min_diff_rho_l), max_diff_rho_l)",
         ));
 
-        block.push(dsl::let_("diff_u_l_x", "u_r_x_cell - u_l_x_cell"));
-        block.push(dsl::let_("min_diff_u_l_x", "min(diff_u_l_x, 0.0)"));
-        block.push(dsl::let_("max_diff_u_l_x", "max(diff_u_l_x, 0.0)"));
+        block.push(dsl::let_("diff_rho_u_x_l", "rho_u_r_cell.x - rho_u_l_cell.x"));
+        block.push(dsl::let_("min_diff_rho_u_x_l", "min(diff_rho_u_x_l, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_u_x_l", "max(diff_rho_u_x_l, 0.0)"));
         block.push(dsl::let_(
-            "delta_u_l_x",
-            "grad_u_x_l_x * r_l_x + grad_u_x_l_y * r_l_y",
+            "delta_rho_u_x_l",
+            "grad_rho_u_x_l.x * r_l_x + grad_rho_u_x_l.y * r_l_y",
         ));
         block.push(dsl::let_(
-            "delta_u_l_x_limited",
-            "min(max(delta_u_l_x, min_diff_u_l_x), max_diff_u_l_x)",
-        ));
-
-        block.push(dsl::let_("diff_u_l_y", "u_r_y_cell - u_l_y_cell"));
-        block.push(dsl::let_("min_diff_u_l_y", "min(diff_u_l_y, 0.0)"));
-        block.push(dsl::let_("max_diff_u_l_y", "max(diff_u_l_y, 0.0)"));
-        block.push(dsl::let_(
-            "delta_u_l_y",
-            "grad_u_y_l_x * r_l_x + grad_u_y_l_y * r_l_y",
-        ));
-        block.push(dsl::let_(
-            "delta_u_l_y_limited",
-            "min(max(delta_u_l_y, min_diff_u_l_y), max_diff_u_l_y)",
+            "delta_rho_u_x_l_limited",
+            "min(max(delta_rho_u_x_l, min_diff_rho_u_x_l), max_diff_rho_u_x_l)",
         ));
 
-        block.push(dsl::let_("diff_p_l", "p_r_cell - p_l_cell"));
-        block.push(dsl::let_("min_diff_p_l", "min(diff_p_l, 0.0)"));
-        block.push(dsl::let_("max_diff_p_l", "max(diff_p_l, 0.0)"));
+        block.push(dsl::let_("diff_rho_u_y_l", "rho_u_r_cell.y - rho_u_l_cell.y"));
+        block.push(dsl::let_("min_diff_rho_u_y_l", "min(diff_rho_u_y_l, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_u_y_l", "max(diff_rho_u_y_l, 0.0)"));
         block.push(dsl::let_(
-            "delta_p_l",
-            "grad_p_l_x * r_l_x + grad_p_l_y * r_l_y",
+            "delta_rho_u_y_l",
+            "grad_rho_u_y_l.x * r_l_x + grad_rho_u_y_l.y * r_l_y",
         ));
         block.push(dsl::let_(
-            "delta_p_l_limited",
-            "min(max(delta_p_l, min_diff_p_l), max_diff_p_l)",
+            "delta_rho_u_y_l_limited",
+            "min(max(delta_rho_u_y_l, min_diff_rho_u_y_l), max_diff_rho_u_y_l)",
+        ));
+
+        block.push(dsl::let_("diff_rho_e_l", "rho_e_r_cell - rho_e_l_cell"));
+        block.push(dsl::let_("min_diff_rho_e_l", "min(diff_rho_e_l, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_e_l", "max(diff_rho_e_l, 0.0)"));
+        block.push(dsl::let_(
+            "delta_rho_e_l",
+            "grad_rho_e_l.x * r_l_x + grad_rho_e_l.y * r_l_y",
+        ));
+        block.push(dsl::let_(
+            "delta_rho_e_l_limited",
+            "min(max(delta_rho_e_l, min_diff_rho_e_l), max_diff_rho_e_l)",
         ));
 
         block.push(dsl::let_("rho_l_face", "rho_l_cell + delta_rho_l_limited"));
-        block.push(dsl::let_("u_l_x_face", "u_l_x_cell + delta_u_l_x_limited"));
-        block.push(dsl::let_("u_l_y_face", "u_l_y_cell + delta_u_l_y_limited"));
-        block.push(dsl::let_("p_l_face", "p_l_cell + delta_p_l_limited"));
+        block.push(dsl::let_(
+            "rho_u_x_l_face",
+            "rho_u_l_cell.x + delta_rho_u_x_l_limited",
+        ));
+        block.push(dsl::let_(
+            "rho_u_y_l_face",
+            "rho_u_l_cell.y + delta_rho_u_y_l_limited",
+        ));
+        block.push(dsl::let_("rho_e_l_face", "rho_e_l_cell + delta_rho_e_l_limited"));
 
         block.push(dsl::let_("diff_rho_r", "rho_l_cell - rho_r_cell"));
         block.push(dsl::let_("min_diff_rho_r", "min(diff_rho_r, 0.0)"));
@@ -718,67 +623,70 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "min(max(delta_rho_r, min_diff_rho_r), max_diff_rho_r)",
         ));
 
-        block.push(dsl::let_("diff_u_r_x", "u_l_x_cell - u_r_x_cell"));
-        block.push(dsl::let_("min_diff_u_r_x", "min(diff_u_r_x, 0.0)"));
-        block.push(dsl::let_("max_diff_u_r_x", "max(diff_u_r_x, 0.0)"));
+        block.push(dsl::let_("diff_rho_u_x_r", "rho_u_l_cell.x - rho_u_r_cell.x"));
+        block.push(dsl::let_("min_diff_rho_u_x_r", "min(diff_rho_u_x_r, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_u_x_r", "max(diff_rho_u_x_r, 0.0)"));
         block.push(dsl::let_(
-            "delta_u_r_x",
-            "grad_u_x_r_x * r_r_x + grad_u_x_r_y * r_r_y",
+            "delta_rho_u_x_r",
+            "grad_rho_u_x_r.x * r_r_x + grad_rho_u_x_r.y * r_r_y",
         ));
         block.push(dsl::let_(
-            "delta_u_r_x_limited",
-            "min(max(delta_u_r_x, min_diff_u_r_x), max_diff_u_r_x)",
-        ));
-
-        block.push(dsl::let_("diff_u_r_y", "u_l_y_cell - u_r_y_cell"));
-        block.push(dsl::let_("min_diff_u_r_y", "min(diff_u_r_y, 0.0)"));
-        block.push(dsl::let_("max_diff_u_r_y", "max(diff_u_r_y, 0.0)"));
-        block.push(dsl::let_(
-            "delta_u_r_y",
-            "grad_u_y_r_x * r_r_x + grad_u_y_r_y * r_r_y",
-        ));
-        block.push(dsl::let_(
-            "delta_u_r_y_limited",
-            "min(max(delta_u_r_y, min_diff_u_r_y), max_diff_u_r_y)",
+            "delta_rho_u_x_r_limited",
+            "min(max(delta_rho_u_x_r, min_diff_rho_u_x_r), max_diff_rho_u_x_r)",
         ));
 
-        block.push(dsl::let_("diff_p_r", "p_l_cell - p_r_cell"));
-        block.push(dsl::let_("min_diff_p_r", "min(diff_p_r, 0.0)"));
-        block.push(dsl::let_("max_diff_p_r", "max(diff_p_r, 0.0)"));
+        block.push(dsl::let_("diff_rho_u_y_r", "rho_u_l_cell.y - rho_u_r_cell.y"));
+        block.push(dsl::let_("min_diff_rho_u_y_r", "min(diff_rho_u_y_r, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_u_y_r", "max(diff_rho_u_y_r, 0.0)"));
         block.push(dsl::let_(
-            "delta_p_r",
-            "grad_p_r_x * r_r_x + grad_p_r_y * r_r_y",
+            "delta_rho_u_y_r",
+            "grad_rho_u_y_r.x * r_r_x + grad_rho_u_y_r.y * r_r_y",
         ));
         block.push(dsl::let_(
-            "delta_p_r_limited",
-            "min(max(delta_p_r, min_diff_p_r), max_diff_p_r)",
+            "delta_rho_u_y_r_limited",
+            "min(max(delta_rho_u_y_r, min_diff_rho_u_y_r), max_diff_rho_u_y_r)",
+        ));
+
+        block.push(dsl::let_("diff_rho_e_r", "rho_e_l_cell - rho_e_r_cell"));
+        block.push(dsl::let_("min_diff_rho_e_r", "min(diff_rho_e_r, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_e_r", "max(diff_rho_e_r, 0.0)"));
+        block.push(dsl::let_(
+            "delta_rho_e_r",
+            "grad_rho_e_r.x * r_r_x + grad_rho_e_r.y * r_r_y",
+        ));
+        block.push(dsl::let_(
+            "delta_rho_e_r_limited",
+            "min(max(delta_rho_e_r, min_diff_rho_e_r), max_diff_rho_e_r)",
         ));
 
         block.push(dsl::let_("rho_r_face", "rho_r_cell + delta_rho_r_limited"));
-        block.push(dsl::let_("u_r_x_face", "u_r_x_cell + delta_u_r_x_limited"));
-        block.push(dsl::let_("u_r_y_face", "u_r_y_cell + delta_u_r_y_limited"));
-        block.push(dsl::let_("p_r_face", "p_r_cell + delta_p_r_limited"));
+        block.push(dsl::let_(
+            "rho_u_x_r_face",
+            "rho_u_r_cell.x + delta_rho_u_x_r_limited",
+        ));
+        block.push(dsl::let_(
+            "rho_u_y_r_face",
+            "rho_u_r_cell.y + delta_rho_u_y_r_limited",
+        ));
+        block.push(dsl::let_("rho_e_r_face", "rho_e_r_cell + delta_rho_e_r_limited"));
 
         block.push(dsl::assign("rho_l", "rho_l_face"));
-        block.push(dsl::assign("rho_u_l.x", "rho_l_face * u_l_x_face"));
-        block.push(dsl::assign("rho_u_l.y", "rho_l_face * u_l_y_face"));
-        block.push(dsl::assign(
-            "rho_e_l",
-            &format!("p_l_face / ({gamma} - 1.0) + 0.5 * rho_l_face * (u_l_x_face * u_l_x_face + u_l_y_face * u_l_y_face)"),
-        ));
+        block.push(dsl::assign("rho_u_l.x", "rho_u_x_l_face"));
+        block.push(dsl::assign("rho_u_l.y", "rho_u_y_l_face"));
+        block.push(dsl::assign("rho_e_l", "rho_e_l_face"));
         block.push(dsl::assign("rho_r", "rho_r_face"));
-        block.push(dsl::assign("rho_u_r.x", "rho_r_face * u_r_x_face"));
-        block.push(dsl::assign("rho_u_r.y", "rho_r_face * u_r_y_face"));
-        block.push(dsl::assign(
-            "rho_e_r",
-            &format!("p_r_face / ({gamma} - 1.0) + 0.5 * rho_r_face * (u_r_x_face * u_r_x_face + u_r_y_face * u_r_y_face)"),
-        ));
+        block.push(dsl::assign("rho_u_r.x", "rho_u_x_r_face"));
+        block.push(dsl::assign("rho_u_r.y", "rho_u_y_r_face"));
+        block.push(dsl::assign("rho_e_r", "rho_e_r_face"));
 
         dsl::block(block)
     };
 
+    // For compressible KT fluxes, keep reconstruction conservative and stable:
+    // - `scheme=0` and `scheme=2` default to piecewise-constant states.
+    // - `scheme=1` enables limited linear reconstruction.
     loop_body.push(dsl::if_block(
-        "!is_boundary && scheme_id != 0u",
+        "!is_boundary && scheme_id == 1u",
         reconstruct_block,
         None,
     ));
@@ -810,10 +718,16 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("c_bar", "0.5 * (c_l + c_r)"));
     loop_body.push(dsl::let_("mach", "abs(u_face_n) / max(c_bar, 1e-6)"));
     loop_body.push(dsl::let_("mach2", "mach * mach"));
-    loop_body.push(dsl::let_("beta", "mach"));
-    loop_body.push(dsl::var("c_l_eff", "c_l * beta"));
-    loop_body.push(dsl::var("c_r_eff", "c_r * beta"));
-    let precond_block = dsl::block(vec![
+    // Low-Mach preconditioning (optional). Default is `precond_model=2` (off) for
+    // rhoCentralFoam-like transient behavior (e.g., acoustics).
+    loop_body.push(dsl::var("c_l_eff", "c_l"));
+    loop_body.push(dsl::var("c_r_eff", "c_r"));
+
+    let precond_legacy_block = dsl::block(vec![
+        dsl::assign("c_l_eff", "c_l * mach"),
+        dsl::assign("c_r_eff", "c_r * mach"),
+    ]);
+    let precond_weiss_smith_block = dsl::block(vec![
         dsl::let_(
             "theta",
             "min(1.0, max(mach2, constants.precond_theta_floor))",
@@ -828,10 +742,15 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "sqrt(theta * c_r * c_r + one_minus_theta * u_n_r * u_n_r)",
         ),
     ]);
-    loop_body.push(dsl::if_block(
+    let precond_else_block = dsl::block(vec![dsl::if_block(
         "constants.precond_model == 1u",
-        precond_block,
+        precond_weiss_smith_block,
         None,
+    )]);
+    loop_body.push(dsl::if_block(
+        "constants.precond_model == 0u",
+        precond_legacy_block,
+        Some(precond_else_block),
     ));
     loop_body.push(dsl::let_("flux_adv", "u_face_n * area"));
     loop_body.push(dsl::let_("dx", "center_r.x - center.x"));
@@ -912,137 +831,155 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "flux_rho_e",
         "a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l)",
     ));
-    loop_body.push(dsl::let_("inv_rho_l_cell", "1.0 / max(rho_l_cell, 1e-8)"));
-    loop_body.push(dsl::let_("inv_rho_r_cell", "1.0 / max(rho_r_cell, 1e-8)"));
-    loop_body.push(dsl::let_("u_l_x_cell", "rho_u_l_cell.x * inv_rho_l_cell"));
-    loop_body.push(dsl::let_("u_l_y_cell", "rho_u_l_cell.y * inv_rho_l_cell"));
-    loop_body.push(dsl::let_("u_r_x_cell", "rho_u_r_cell.x * inv_rho_r_cell"));
-    loop_body.push(dsl::let_("u_r_y_cell", "rho_u_r_cell.y * inv_rho_r_cell"));
-    loop_body.push(dsl::let_("u2_l_cell", "u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell"));
-    loop_body.push(dsl::let_("u2_r_cell", "u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell"));
 
-    loop_body.push(dsl::let_("grad_rho_l", "grad_rho[idx]"));
-    loop_body.push(dsl::let_("grad_rho_u_x_l", "grad_rho_u_x[idx]"));
-    loop_body.push(dsl::let_("grad_rho_u_y_l", "grad_rho_u_y[idx]"));
-    loop_body.push(dsl::let_("grad_rho_e_l", "grad_rho_e[idx]"));
-    loop_body.push(dsl::let_("grad_rho_r", "grad_rho[other_idx]"));
-    loop_body.push(dsl::let_("grad_rho_u_x_r", "grad_rho_u_x[other_idx]"));
-    loop_body.push(dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"));
-    loop_body.push(dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"));
-
-    loop_body.push(dsl::let_(
-        "grad_u_x_l_x",
-        "(grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell",
+    // Rhie–Chow-style pressure flux coupling is only used with low-Mach preconditioning.
+    // (In the pure KT mode it can introduce dispersive/odd-even pressure ringing.)
+    let pressure_coupling_block = dsl::block(vec![
+        dsl::let_("inv_rho_l_cell", "1.0 / max(rho_l_cell, 1e-8)"),
+        dsl::let_("inv_rho_r_cell", "1.0 / max(rho_r_cell, 1e-8)"),
+        dsl::let_("u_l_x_cell", "rho_u_l_cell.x * inv_rho_l_cell"),
+        dsl::let_("u_l_y_cell", "rho_u_l_cell.y * inv_rho_l_cell"),
+        dsl::let_("u_r_x_cell", "rho_u_r_cell.x * inv_rho_r_cell"),
+        dsl::let_("u_r_y_cell", "rho_u_r_cell.y * inv_rho_r_cell"),
+        dsl::let_(
+            "u2_l_cell",
+            "u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell",
+        ),
+        dsl::let_(
+            "u2_r_cell",
+            "u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell",
+        ),
+        dsl::let_("grad_rho_l", "grad_rho[idx]"),
+        dsl::let_("grad_rho_u_x_l", "grad_rho_u_x[idx]"),
+        dsl::let_("grad_rho_u_y_l", "grad_rho_u_y[idx]"),
+        dsl::let_("grad_rho_e_l", "grad_rho_e[idx]"),
+        dsl::let_("grad_rho_r", "grad_rho[other_idx]"),
+        dsl::let_("grad_rho_u_x_r", "grad_rho_u_x[other_idx]"),
+        dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"),
+        dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"),
+        dsl::let_(
+            "grad_u_x_l_x",
+            "(grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell",
+        ),
+        dsl::let_(
+            "grad_u_x_l_y",
+            "(grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell",
+        ),
+        dsl::let_(
+            "grad_u_y_l_x",
+            "(grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell",
+        ),
+        dsl::let_(
+            "grad_u_y_l_y",
+            "(grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell",
+        ),
+        dsl::let_(
+            "grad_u_x_r_x",
+            "(grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell",
+        ),
+        dsl::let_(
+            "grad_u_x_r_y",
+            "(grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell",
+        ),
+        dsl::let_(
+            "grad_u_y_r_x",
+            "(grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell",
+        ),
+        dsl::let_(
+            "grad_u_y_r_y",
+            "(grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell",
+        ),
+        dsl::let_(
+            "grad_u2_l_x",
+            "2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x",
+        ),
+        dsl::let_(
+            "grad_u2_l_y",
+            "2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y",
+        ),
+        dsl::let_(
+            "grad_u2_r_x",
+            "2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x",
+        ),
+        dsl::let_(
+            "grad_u2_r_y",
+            "2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y",
+        ),
+        dsl::let_(
+            "grad_rho_u2_l_x",
+            "u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x",
+        ),
+        dsl::let_(
+            "grad_rho_u2_l_y",
+            "u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y",
+        ),
+        dsl::let_(
+            "grad_rho_u2_r_x",
+            "u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x",
+        ),
+        dsl::let_(
+            "grad_rho_u2_r_y",
+            "u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y",
+        ),
+        dsl::let_(
+            "grad_p_l_x",
+            &format!("({gamma} - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x)"),
+        ),
+        dsl::let_(
+            "grad_p_l_y",
+            &format!("({gamma} - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y)"),
+        ),
+        dsl::let_(
+            "grad_p_r_x",
+            &format!("({gamma} - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x)"),
+        ),
+        dsl::let_(
+            "grad_p_r_y",
+            &format!("({gamma} - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y)"),
+        ),
+        dsl::let_(
+            "grad_p_l_n",
+            "grad_p_l_x * normal.x + grad_p_l_y * normal.y",
+        ),
+        dsl::let_(
+            "grad_p_r_n",
+            "grad_p_r_x * normal.x + grad_p_r_y * normal.y",
+        ),
+        dsl::let_("grad_p_face_n", "0.5 * (grad_p_l_n + grad_p_r_n)"),
+        dsl::let_("grad_p_jump_n", "(p_r - p_l) / dist"),
+        dsl::let_("rho_face", "0.5 * (rho_l + rho_r)"),
+        dsl::let_("p_bar", "0.5 * (p_l + p_r)"),
+        dsl::let_("dp_rel", "abs(p_r - p_l) / max(p_bar, 1e-6)"),
+        dsl::let_(
+            "pc_theta",
+            "min(1.0, max(mach2, constants.precond_theta_floor))",
+        ),
+        dsl::let_("pc_low_mach", "1.0 - pc_theta"),
+        dsl::let_(
+            "pc_smooth",
+            "1.0 / (1.0 + (dp_rel / 0.2) * (dp_rel / 0.2))",
+        ),
+        dsl::let_(
+            "pc_alpha",
+            "constants.pressure_coupling_alpha * pc_low_mach * pc_smooth",
+        ),
+        dsl::let_(
+            "m_corr",
+            "pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n)",
+        ),
+        dsl::let_("h_l", "(rho_e_l + p_l) * inv_rho_l"),
+        dsl::let_("h_r", "(rho_e_r + p_r) * inv_rho_r"),
+        dsl::let_("h_face", "0.5 * (h_l + h_r)"),
+        dsl::assign_op(AssignOp::Add, "flux_rho", "m_corr"),
+        dsl::assign_op(AssignOp::Add, "flux_rho_u_x", "m_corr * u_face_x"),
+        dsl::assign_op(AssignOp::Add, "flux_rho_u_y", "m_corr * u_face_y"),
+        dsl::assign_op(AssignOp::Add, "flux_rho_e", "m_corr * h_face"),
+    ]);
+    loop_body.push(dsl::if_block(
+        "constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0",
+        pressure_coupling_block,
+        None,
     ));
-    loop_body.push(dsl::let_(
-        "grad_u_x_l_y",
-        "(grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u_y_l_x",
-        "(grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u_y_l_y",
-        "(grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell",
-    ));
-
-    loop_body.push(dsl::let_(
-        "grad_u_x_r_x",
-        "(grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u_x_r_y",
-        "(grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u_y_r_x",
-        "(grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u_y_r_y",
-        "(grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell",
-    ));
-
-    loop_body.push(dsl::let_(
-        "grad_u2_l_x",
-        "2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u2_l_y",
-        "2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u2_r_x",
-        "2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_u2_r_y",
-        "2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y",
-    ));
-
-    loop_body.push(dsl::let_(
-        "grad_rho_u2_l_x",
-        "u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_rho_u2_l_y",
-        "u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_rho_u2_r_x",
-        "u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x",
-    ));
-    loop_body.push(dsl::let_(
-        "grad_rho_u2_r_y",
-        "u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y",
-    ));
-
-    loop_body.push(dsl::let_(
-        "grad_p_l_x",
-        &format!("({gamma} - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x)"),
-    ));
-    loop_body.push(dsl::let_(
-        "grad_p_l_y",
-        &format!("({gamma} - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y)"),
-    ));
-    loop_body.push(dsl::let_(
-        "grad_p_r_x",
-        &format!("({gamma} - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x)"),
-    ));
-    loop_body.push(dsl::let_(
-        "grad_p_r_y",
-        &format!("({gamma} - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y)"),
-    ));
-
-    loop_body.push(dsl::let_("grad_p_l_n", "grad_p_l_x * normal.x + grad_p_l_y * normal.y"));
-    loop_body.push(dsl::let_("grad_p_r_n", "grad_p_r_x * normal.x + grad_p_r_y * normal.y"));
-    loop_body.push(dsl::let_("grad_p_face_n", "0.5 * (grad_p_l_n + grad_p_r_n)"));
-    loop_body.push(dsl::let_("grad_p_jump_n", "(p_r - p_l) / dist"));
-    loop_body.push(dsl::let_("rho_face", "0.5 * (rho_l + rho_r)"));
-    loop_body.push(dsl::let_("p_bar", "0.5 * (p_l + p_r)"));
-    loop_body.push(dsl::let_("dp_rel", "abs(p_r - p_l) / max(p_bar, 1e-6)"));
-    loop_body.push(dsl::let_("pc_theta", "min(1.0, max(mach2, constants.precond_theta_floor))"));
-    loop_body.push(dsl::let_("pc_low_mach", "1.0 - pc_theta"));
-    loop_body.push(dsl::let_(
-        "pc_smooth",
-        "1.0 / (1.0 + (dp_rel / 0.2) * (dp_rel / 0.2))",
-    ));
-    loop_body.push(dsl::let_(
-        "pc_alpha",
-        "constants.pressure_coupling_alpha * pc_low_mach * pc_smooth",
-    ));
-    loop_body.push(dsl::let_(
-        "m_corr",
-        "pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n)",
-    ));
-    loop_body.push(dsl::let_("h_l", "(rho_e_l + p_l) * inv_rho_l"));
-    loop_body.push(dsl::let_("h_r", "(rho_e_r + p_r) * inv_rho_r"));
-    loop_body.push(dsl::let_("h_face", "0.5 * (h_l + h_r)"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho", "m_corr"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho_u_x", "m_corr * u_face_x"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho_u_y", "m_corr * u_face_y"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho_e", "m_corr * h_face"));
     loop_body.push(dsl::assign(
         "flux_rho_e",
         "flux_rho_e + diff_u_x * u_face_x + diff_u_y * u_face_y",

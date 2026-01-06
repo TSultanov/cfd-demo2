@@ -2,13 +2,14 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 894e87572af41ee245dc18eaa515fefceac790b31dc231b4458ad4d0541f615d
+// SourceHash: 3829b686ecdb0c8988b706223dba3dd9cb1621d0103fa5ba6ae8924fd4180aa0
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderEntry {
     Amg,
     CompressibleAmgPack,
+    CompressibleExplicitUpdate,
     CompressiblePrecond,
     DotProduct,
     DotProductPair,
@@ -36,6 +37,9 @@ impl ShaderEntry {
         match self {
             Self::Amg => amg::create_pipeline_layout(device),
             Self::CompressibleAmgPack => compressible_amg_pack::create_pipeline_layout(device),
+            Self::CompressibleExplicitUpdate => {
+                compressible_explicit_update::create_pipeline_layout(device)
+            }
             Self::CompressiblePrecond => compressible_precond::create_pipeline_layout(device),
             Self::DotProduct => dot_product::create_pipeline_layout(device),
             Self::DotProductPair => dot_product_pair::create_pipeline_layout(device),
@@ -86,6 +90,9 @@ impl ShaderEntry {
             Self::Amg => amg::create_shader_module_embed_source(device),
             Self::CompressibleAmgPack => {
                 compressible_amg_pack::create_shader_module_embed_source(device)
+            }
+            Self::CompressibleExplicitUpdate => {
+                compressible_explicit_update::create_shader_module_embed_source(device)
             }
             Self::CompressiblePrecond => {
                 compressible_precond::create_shader_module_embed_source(device)
@@ -171,6 +178,42 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(compressible_amg_pack::PackParams, _pad1) == 8);
         assert!(std::mem::offset_of!(compressible_amg_pack::PackParams, _pad2) == 12);
         assert!(std::mem::size_of::<compressible_amg_pack::PackParams>() == 16);
+    };
+    const COMPRESSIBLE_EXPLICIT_UPDATE_VECTOR2_ASSERTS: () = {
+        assert!(std::mem::offset_of!(compressible_explicit_update::Vector2, x) == 0);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Vector2, y) == 4);
+        assert!(std::mem::size_of::<compressible_explicit_update::Vector2>() == 8);
+    };
+    const COMPRESSIBLE_EXPLICIT_UPDATE_CONSTANTS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, dt) == 0);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, dt_old) == 4);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, dtau) == 8);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, time) == 12);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, viscosity) == 16);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, density) == 20);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, component) == 24);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, alpha_p) == 28);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, scheme) == 32);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, alpha_u) == 36);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, stride_x) == 40);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, time_scheme) == 44);
+        assert!(
+            std::mem::offset_of!(compressible_explicit_update::Constants, inlet_velocity) == 48
+        );
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, ramp_time) == 52);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, precond_type) == 56);
+        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, precond_model) == 60);
+        assert!(
+            std::mem::offset_of!(compressible_explicit_update::Constants, precond_theta_floor)
+                == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                compressible_explicit_update::Constants,
+                pressure_coupling_alpha
+            ) == 68
+        );
+        assert!(std::mem::size_of::<compressible_explicit_update::Constants>() == 72);
     };
     const COMPRESSIBLE_PRECOND_GMRES_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(compressible_precond::GmresParams, n) == 0);
@@ -1352,6 +1395,10 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for amg::AmgParams {}
     unsafe impl bytemuck::Zeroable for compressible_amg_pack::PackParams {}
     unsafe impl bytemuck::Pod for compressible_amg_pack::PackParams {}
+    unsafe impl bytemuck::Zeroable for compressible_explicit_update::Vector2 {}
+    unsafe impl bytemuck::Pod for compressible_explicit_update::Vector2 {}
+    unsafe impl bytemuck::Zeroable for compressible_explicit_update::Constants {}
+    unsafe impl bytemuck::Pod for compressible_explicit_update::Constants {}
     unsafe impl bytemuck::Zeroable for compressible_precond::GmresParams {}
     unsafe impl bytemuck::Pod for compressible_precond::GmresParams {}
     unsafe impl bytemuck::Zeroable for compressible_precond::IterParams {}
@@ -1708,6 +1755,791 @@ fn unpack_component(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     let base_1 = ((idx_1 * 4u) + _e10);
     let _e16 = input_buf[idx_1];
     output_buf[base_1] = _e16;
+    return;
+}
+"#;
+}
+pub mod compressible_explicit_update {
+    use super::{_root, _root::*};
+    #[repr(C, align(4))]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct Vector2 {
+        #[doc = "offset: 0, size: 4, type: `f32`"]
+        pub x: f32,
+        #[doc = "offset: 4, size: 4, type: `f32`"]
+        pub y: f32,
+    }
+    impl Vector2 {
+        pub const fn new(x: f32, y: f32) -> Self {
+            Self { x, y }
+        }
+    }
+    #[repr(C, align(4))]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct Constants {
+        #[doc = "offset: 0, size: 4, type: `f32`"]
+        pub dt: f32,
+        #[doc = "offset: 4, size: 4, type: `f32`"]
+        pub dt_old: f32,
+        #[doc = "offset: 8, size: 4, type: `f32`"]
+        pub dtau: f32,
+        #[doc = "offset: 12, size: 4, type: `f32`"]
+        pub time: f32,
+        #[doc = "offset: 16, size: 4, type: `f32`"]
+        pub viscosity: f32,
+        #[doc = "offset: 20, size: 4, type: `f32`"]
+        pub density: f32,
+        #[doc = "offset: 24, size: 4, type: `u32`"]
+        pub component: u32,
+        #[doc = "offset: 28, size: 4, type: `f32`"]
+        pub alpha_p: f32,
+        #[doc = "offset: 32, size: 4, type: `u32`"]
+        pub scheme: u32,
+        #[doc = "offset: 36, size: 4, type: `f32`"]
+        pub alpha_u: f32,
+        #[doc = "offset: 40, size: 4, type: `u32`"]
+        pub stride_x: u32,
+        #[doc = "offset: 44, size: 4, type: `u32`"]
+        pub time_scheme: u32,
+        #[doc = "offset: 48, size: 4, type: `f32`"]
+        pub inlet_velocity: f32,
+        #[doc = "offset: 52, size: 4, type: `f32`"]
+        pub ramp_time: f32,
+        #[doc = "offset: 56, size: 4, type: `u32`"]
+        pub precond_type: u32,
+        #[doc = "offset: 60, size: 4, type: `u32`"]
+        pub precond_model: u32,
+        #[doc = "offset: 64, size: 4, type: `f32`"]
+        pub precond_theta_floor: f32,
+        #[doc = "offset: 68, size: 4, type: `f32`"]
+        pub pressure_coupling_alpha: f32,
+    }
+    impl Constants {
+        pub const fn new(
+            dt: f32,
+            dt_old: f32,
+            dtau: f32,
+            time: f32,
+            viscosity: f32,
+            density: f32,
+            component: u32,
+            alpha_p: f32,
+            scheme: u32,
+            alpha_u: f32,
+            stride_x: u32,
+            time_scheme: u32,
+            inlet_velocity: f32,
+            ramp_time: f32,
+            precond_type: u32,
+            precond_model: u32,
+            precond_theta_floor: f32,
+            pressure_coupling_alpha: f32,
+        ) -> Self {
+            Self {
+                dt,
+                dt_old,
+                dtau,
+                time,
+                viscosity,
+                density,
+                component,
+                alpha_p,
+                scheme,
+                alpha_u,
+                stride_x,
+                time_scheme,
+                inlet_velocity,
+                ramp_time,
+                precond_type,
+                precond_model,
+                precond_theta_floor,
+                pressure_coupling_alpha,
+            }
+        }
+    }
+    pub mod compute {
+        use super::{_root, _root::*};
+        pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_main_pipeline_embed_source(device: &wgpu::Device) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline main"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+    }
+    pub const ENTRY_MAIN: &str = "main";
+    #[derive(Debug)]
+    pub struct WgpuBindGroup0EntriesParams<'a> {
+        pub face_owner: wgpu::BufferBinding<'a>,
+        pub face_neighbor: wgpu::BufferBinding<'a>,
+        pub face_areas: wgpu::BufferBinding<'a>,
+        pub face_normals: wgpu::BufferBinding<'a>,
+        pub cell_centers: wgpu::BufferBinding<'a>,
+        pub cell_vols: wgpu::BufferBinding<'a>,
+        pub cell_face_offsets: wgpu::BufferBinding<'a>,
+        pub cell_faces: wgpu::BufferBinding<'a>,
+        pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
+        pub diagonal_indices: wgpu::BufferBinding<'a>,
+        pub face_boundary: wgpu::BufferBinding<'a>,
+        pub face_centers: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup0Entries<'a> {
+        pub face_owner: wgpu::BindGroupEntry<'a>,
+        pub face_neighbor: wgpu::BindGroupEntry<'a>,
+        pub face_areas: wgpu::BindGroupEntry<'a>,
+        pub face_normals: wgpu::BindGroupEntry<'a>,
+        pub cell_centers: wgpu::BindGroupEntry<'a>,
+        pub cell_vols: wgpu::BindGroupEntry<'a>,
+        pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+        pub cell_faces: wgpu::BindGroupEntry<'a>,
+        pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
+        pub diagonal_indices: wgpu::BindGroupEntry<'a>,
+        pub face_boundary: wgpu::BindGroupEntry<'a>,
+        pub face_centers: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup0Entries<'a> {
+        pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+            Self {
+                face_owner: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.face_owner),
+                },
+                face_neighbor: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                },
+                face_areas: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.face_areas),
+                },
+                face_normals: wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(params.face_normals),
+                },
+                cell_centers: wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                },
+                cell_vols: wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                },
+                cell_face_offsets: wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                },
+                cell_faces: wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                },
+                cell_face_matrix_indices: wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
+                },
+                diagonal_indices: wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
+                },
+                face_boundary: wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                },
+                face_centers: wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: wgpu::BindingResource::Buffer(params.face_centers),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
+            [
+                self.face_owner,
+                self.face_neighbor,
+                self.face_areas,
+                self.face_normals,
+                self.cell_centers,
+                self.cell_vols,
+                self.cell_face_offsets,
+                self.cell_faces,
+                self.cell_face_matrix_indices,
+                self.diagonal_indices,
+                self.face_boundary,
+                self.face_centers,
+            ]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup0(wgpu::BindGroup);
+    impl WgpuBindGroup0 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("CompressibleExplicitUpdate::BindGroup0::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"face_owner\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"face_neighbor\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"face_areas\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(3): \"face_normals\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(4): \"cell_centers\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(5): \"cell_vols\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(6): \"cell_face_offsets\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(7): \"cell_faces\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(8): \"cell_face_matrix_indices\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(9): \"diagonal_indices\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(12): \"face_boundary\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 12,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(13): \"face_centers\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 13,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("CompressibleExplicitUpdate::BindGroup0"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(0, &self.0, &[]);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup1EntriesParams<'a> {
+        pub state: wgpu::BufferBinding<'a>,
+        pub state_old: wgpu::BufferBinding<'a>,
+        pub state_old_old: wgpu::BufferBinding<'a>,
+        pub fluxes: wgpu::BufferBinding<'a>,
+        pub constants: wgpu::BufferBinding<'a>,
+        pub grad_rho: wgpu::BufferBinding<'a>,
+        pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+        pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+        pub grad_rho_e: wgpu::BufferBinding<'a>,
+        pub state_iter: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup1Entries<'a> {
+        pub state: wgpu::BindGroupEntry<'a>,
+        pub state_old: wgpu::BindGroupEntry<'a>,
+        pub state_old_old: wgpu::BindGroupEntry<'a>,
+        pub fluxes: wgpu::BindGroupEntry<'a>,
+        pub constants: wgpu::BindGroupEntry<'a>,
+        pub grad_rho: wgpu::BindGroupEntry<'a>,
+        pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+        pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+        pub grad_rho_e: wgpu::BindGroupEntry<'a>,
+        pub state_iter: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup1Entries<'a> {
+        pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+            Self {
+                state: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.state),
+                },
+                state_old: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.state_old),
+                },
+                state_old_old: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                },
+                fluxes: wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(params.fluxes),
+                },
+                constants: wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(params.constants),
+                },
+                grad_rho: wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                },
+                grad_rho_u_x: wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                },
+                grad_rho_u_y: wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                },
+                grad_rho_e: wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                },
+                state_iter: wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Buffer(params.state_iter),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            [
+                self.state,
+                self.state_old,
+                self.state_old_old,
+                self.fluxes,
+                self.constants,
+                self.grad_rho,
+                self.grad_rho_u_x,
+                self.grad_rho_u_y,
+                self.grad_rho_e,
+                self.state_iter,
+            ]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup1(wgpu::BindGroup);
+    impl WgpuBindGroup1 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("CompressibleExplicitUpdate::BindGroup1::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"state\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"state_old\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"state_old_old\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(3): \"fluxes\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(4): \"constants\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                _root::compressible_explicit_update::Constants,
+                            >(
+                            )
+                                as _),
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(5): \"grad_rho\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(6): \"grad_rho_u_x\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(7): \"grad_rho_u_y\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(8): \"grad_rho_e\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(9): \"state_iter\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("CompressibleExplicitUpdate::BindGroup1"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(1, &self.0, &[]);
+        }
+    }
+    #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+    #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+    #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+    #[doc = "   - Bind group 1: More frequent updates"]
+    #[doc = "   - Bind group 2: More frequent updates"]
+    #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+    #[derive(Debug, Copy, Clone)]
+    pub struct WgpuBindGroups<'a> {
+        pub bind_group0: &'a WgpuBindGroup0,
+        pub bind_group1: &'a WgpuBindGroup1,
+    }
+    impl<'a> WgpuBindGroups<'a> {
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            self.bind_group0.set(pass);
+            self.bind_group1.set(pass);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuPipelineLayout;
+    impl WgpuPipelineLayout {
+        pub fn bind_group_layout_entries(
+            entries: [wgpu::BindGroupLayout; 2],
+        ) -> [wgpu::BindGroupLayout; 2] {
+            entries
+        }
+    }
+    pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("CompressibleExplicitUpdate::PipelineLayout"),
+            bind_group_layouts: &[
+                &WgpuBindGroup0::get_bind_group_layout(device),
+                &WgpuBindGroup1::get_bind_group_layout(device),
+            ],
+            push_constant_ranges: &[],
+        })
+    }
+    pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+        let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("compressible_explicit_update.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(source),
+        })
+    }
+    pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
+    precond_type: u32,
+    precond_model: u32,
+    precond_theta_floor: f32,
+    pressure_coupling_alpha: f32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(0) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(0) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(0) @binding(8) 
+var<storage> cell_face_matrix_indices: array<u32>;
+@group(0) @binding(9) 
+var<storage> diagonal_indices: array<u32>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) 
+var<uniform> constants: Constants;
+@group(1) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(1) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(1) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
+@group(1) @binding(9) 
+var<storage> state_iter: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var sum_rho: f32 = 0f;
+    var sum_rho_u_x: f32 = 0f;
+    var sum_rho_u_y: f32 = 0f;
+    var sum_rho_e: f32 = 0f;
+    var face_offset: u32;
+
+    let idx = global_id.x;
+    if (idx >= arrayLength((&cell_vols))) {
+        return;
+    }
+    let _e8 = cell_vols[idx];
+    let vol = max(_e8, 0.000000000001f);
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    let rho0_ = state_old[((idx * 7u) + 0u)];
+    let rho_u0_x = state_old[((idx * 7u) + 1u)];
+    let rho_u0_y = state_old[((idx * 7u) + 2u)];
+    let rho_e0_ = state_old[((idx * 7u) + 3u)];
+    face_offset = start;
+    loop {
+        let _e45 = face_offset;
+        if (_e45 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e48 = face_offset;
+            let face_idx = cell_faces[_e48];
+            let owner = face_owner[face_idx];
+            let sign = select(-1f, 1f, (owner == idx));
+            let base = (face_idx * 4u);
+            let _e65 = fluxes[(base + 0u)];
+            let _e67 = sum_rho;
+            sum_rho = (_e67 + (sign * _e65));
+            let _e74 = fluxes[(base + 1u)];
+            let _e76 = sum_rho_u_x;
+            sum_rho_u_x = (_e76 + (sign * _e74));
+            let _e83 = fluxes[(base + 2u)];
+            let _e85 = sum_rho_u_y;
+            sum_rho_u_y = (_e85 + (sign * _e83));
+            let _e92 = fluxes[(base + 3u)];
+            let _e94 = sum_rho_e;
+            sum_rho_e = (_e94 + (sign * _e92));
+        }
+        continuing {
+            let _e97 = face_offset;
+            face_offset = (_e97 + 1u);
+        }
+    }
+    let _e101 = constants.dt;
+    let factor = (_e101 / vol);
+    let _e108 = sum_rho;
+    state[((idx * 7u) + 0u)] = (rho0_ - (factor * _e108));
+    let _e116 = sum_rho_u_x;
+    state[((idx * 7u) + 1u)] = (rho_u0_x - (factor * _e116));
+    let _e124 = sum_rho_u_y;
+    state[((idx * 7u) + 2u)] = (rho_u0_y - (factor * _e124));
+    let _e132 = sum_rho_e;
+    state[((idx * 7u) + 3u)] = (rho_e0_ - (factor * _e132));
     return;
 }
 "#;
@@ -4984,390 +5816,377 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     rho_u_r.y = 0f;
                 } else {
                     if (boundary_type == 3u) {
-                        let _e392 = rho_u_l.x;
-                        rho_u_r.x = -(_e392);
+                        let _e391 = rho_u_l.x;
+                        let _e393 = normal.x;
                         let _e396 = rho_u_l.y;
-                        rho_u_r.y = -(_e396);
+                        let _e398 = normal.y;
+                        let m_dot_n = ((_e391 * _e393) + (_e396 * _e398));
+                        let _e403 = rho_u_l.x;
+                        let _e407 = normal.x;
+                        rho_u_r.x = (_e403 - ((2f * m_dot_n) * _e407));
+                        let _e412 = rho_u_l.y;
+                        let _e416 = normal.y;
+                        rho_u_r.y = (_e412 - ((2f * m_dot_n) * _e416));
                     }
                 }
             }
             let rho_r_cell = rho_r;
             let rho_u_r_cell = rho_u_r;
             let rho_e_r_cell = rho_e_r;
-            let _e401 = is_boundary;
-            if (!(_e401) && (scheme_id != 0u)) {
+            let _e422 = is_boundary;
+            if (!(_e422) && (scheme_id == 1u)) {
                 let r_l_x = (f_center.x - center.x);
                 let r_l_y = (f_center.y - center.y);
-                let _e414 = center_r.x;
-                let r_r_x = (f_center.x - _e414);
-                let _e418 = center_r.y;
-                let r_r_y = (f_center.y - _e418);
-                let inv_rho_l_cell = (1f / max(rho_l_cell, 0.00000001f));
-                let u_l_x_cell = (rho_u_l_cell.x * inv_rho_l_cell);
-                let u_l_y_cell = (rho_u_l_cell.y * inv_rho_l_cell);
-                let u2_l_cell = ((u_l_x_cell * u_l_x_cell) + (u_l_y_cell * u_l_y_cell));
-                let p_l_cell = max(0f, (0.4f * (rho_e_l_cell - ((0.5f * rho_l_cell) * u2_l_cell))));
-                let inv_rho_r_cell = (1f / max(rho_r_cell, 0.00000001f));
-                let u_r_x_cell = (rho_u_r_cell.x * inv_rho_r_cell);
-                let u_r_y_cell = (rho_u_r_cell.y * inv_rho_r_cell);
-                let u2_r_cell = ((u_r_x_cell * u_r_x_cell) + (u_r_y_cell * u_r_y_cell));
-                let p_r_cell = max(0f, (0.4f * (rho_e_r_cell - ((0.5f * rho_r_cell) * u2_r_cell))));
+                let _e435 = center_r.x;
+                let r_r_x = (f_center.x - _e435);
+                let _e439 = center_r.y;
+                let r_r_y = (f_center.y - _e439);
                 let grad_rho_l = grad_rho[idx];
                 let grad_rho_u_x_l = grad_rho_u_x[idx];
                 let grad_rho_u_y_l = grad_rho_u_y[idx];
                 let grad_rho_e_l = grad_rho_e[idx];
-                let _e471 = other_idx;
-                let grad_rho_r = grad_rho[_e471];
-                let _e475 = other_idx;
-                let grad_rho_u_x_r = grad_rho_u_x[_e475];
-                let _e479 = other_idx;
-                let grad_rho_u_y_r = grad_rho_u_y[_e479];
-                let _e483 = other_idx;
-                let grad_rho_e_r = grad_rho_e[_e483];
-                let grad_u_x_l_x = ((grad_rho_u_x_l.x - (u_l_x_cell * grad_rho_l.x)) * inv_rho_l_cell);
-                let grad_u_x_l_y = ((grad_rho_u_x_l.y - (u_l_x_cell * grad_rho_l.y)) * inv_rho_l_cell);
-                let grad_u_y_l_x = ((grad_rho_u_y_l.x - (u_l_y_cell * grad_rho_l.x)) * inv_rho_l_cell);
-                let grad_u_y_l_y = ((grad_rho_u_y_l.y - (u_l_y_cell * grad_rho_l.y)) * inv_rho_l_cell);
-                let grad_u_x_r_x = ((grad_rho_u_x_r.x - (u_r_x_cell * grad_rho_r.x)) * inv_rho_r_cell);
-                let grad_u_x_r_y = ((grad_rho_u_x_r.y - (u_r_x_cell * grad_rho_r.y)) * inv_rho_r_cell);
-                let grad_u_y_r_x = ((grad_rho_u_y_r.x - (u_r_y_cell * grad_rho_r.x)) * inv_rho_r_cell);
-                let grad_u_y_r_y = ((grad_rho_u_y_r.y - (u_r_y_cell * grad_rho_r.y)) * inv_rho_r_cell);
-                let grad_u2_l_x = (((2f * u_l_x_cell) * grad_u_x_l_x) + ((2f * u_l_y_cell) * grad_u_y_l_x));
-                let grad_u2_l_y = (((2f * u_l_x_cell) * grad_u_x_l_y) + ((2f * u_l_y_cell) * grad_u_y_l_y));
-                let grad_u2_r_x = (((2f * u_r_x_cell) * grad_u_x_r_x) + ((2f * u_r_y_cell) * grad_u_y_r_x));
-                let grad_u2_r_y = (((2f * u_r_x_cell) * grad_u_x_r_y) + ((2f * u_r_y_cell) * grad_u_y_r_y));
-                let grad_rho_u2_l_x = ((u2_l_cell * grad_rho_l.x) + (rho_l_cell * grad_u2_l_x));
-                let grad_rho_u2_l_y = ((u2_l_cell * grad_rho_l.y) + (rho_l_cell * grad_u2_l_y));
-                let grad_rho_u2_r_x = ((u2_r_cell * grad_rho_r.x) + (rho_r_cell * grad_u2_r_x));
-                let grad_rho_u2_r_y = ((u2_r_cell * grad_rho_r.y) + (rho_r_cell * grad_u2_r_y));
-                let grad_p_l_x = (0.4f * (grad_rho_e_l.x - (0.5f * grad_rho_u2_l_x)));
-                let grad_p_l_y = (0.4f * (grad_rho_e_l.y - (0.5f * grad_rho_u2_l_y)));
-                let grad_p_r_x = (0.4f * (grad_rho_e_r.x - (0.5f * grad_rho_u2_r_x)));
-                let grad_p_r_y = (0.4f * (grad_rho_e_r.y - (0.5f * grad_rho_u2_r_y)));
+                let _e454 = other_idx;
+                let grad_rho_r = grad_rho[_e454];
+                let _e458 = other_idx;
+                let grad_rho_u_x_r = grad_rho_u_x[_e458];
+                let _e462 = other_idx;
+                let grad_rho_u_y_r = grad_rho_u_y[_e462];
+                let _e466 = other_idx;
+                let grad_rho_e_r = grad_rho_e[_e466];
                 let diff_rho_l = (rho_r_cell - rho_l_cell);
                 let min_diff_rho_l = min(diff_rho_l, 0f);
                 let max_diff_rho_l = max(diff_rho_l, 0f);
                 let delta_rho_l = ((grad_rho_l.x * r_l_x) + (grad_rho_l.y * r_l_y));
                 let delta_rho_l_limited = min(max(delta_rho_l, min_diff_rho_l), max_diff_rho_l);
-                let diff_u_l_x = (u_r_x_cell - u_l_x_cell);
-                let min_diff_u_l_x = min(diff_u_l_x, 0f);
-                let max_diff_u_l_x = max(diff_u_l_x, 0f);
-                let delta_u_l_x = ((grad_u_x_l_x * r_l_x) + (grad_u_x_l_y * r_l_y));
-                let delta_u_l_x_limited = min(max(delta_u_l_x, min_diff_u_l_x), max_diff_u_l_x);
-                let diff_u_l_y = (u_r_y_cell - u_l_y_cell);
-                let min_diff_u_l_y = min(diff_u_l_y, 0f);
-                let max_diff_u_l_y = max(diff_u_l_y, 0f);
-                let delta_u_l_y = ((grad_u_y_l_x * r_l_x) + (grad_u_y_l_y * r_l_y));
-                let delta_u_l_y_limited = min(max(delta_u_l_y, min_diff_u_l_y), max_diff_u_l_y);
-                let diff_p_l = (p_r_cell - p_l_cell);
-                let min_diff_p_l = min(diff_p_l, 0f);
-                let max_diff_p_l = max(diff_p_l, 0f);
-                let delta_p_l = ((grad_p_l_x * r_l_x) + (grad_p_l_y * r_l_y));
-                let delta_p_l_limited = min(max(delta_p_l, min_diff_p_l), max_diff_p_l);
+                let diff_rho_u_x_l = (rho_u_r_cell.x - rho_u_l_cell.x);
+                let min_diff_rho_u_x_l = min(diff_rho_u_x_l, 0f);
+                let max_diff_rho_u_x_l = max(diff_rho_u_x_l, 0f);
+                let delta_rho_u_x_l = ((grad_rho_u_x_l.x * r_l_x) + (grad_rho_u_x_l.y * r_l_y));
+                let delta_rho_u_x_l_limited = min(max(delta_rho_u_x_l, min_diff_rho_u_x_l), max_diff_rho_u_x_l);
+                let diff_rho_u_y_l = (rho_u_r_cell.y - rho_u_l_cell.y);
+                let min_diff_rho_u_y_l = min(diff_rho_u_y_l, 0f);
+                let max_diff_rho_u_y_l = max(diff_rho_u_y_l, 0f);
+                let delta_rho_u_y_l = ((grad_rho_u_y_l.x * r_l_x) + (grad_rho_u_y_l.y * r_l_y));
+                let delta_rho_u_y_l_limited = min(max(delta_rho_u_y_l, min_diff_rho_u_y_l), max_diff_rho_u_y_l);
+                let diff_rho_e_l = (rho_e_r_cell - rho_e_l_cell);
+                let min_diff_rho_e_l = min(diff_rho_e_l, 0f);
+                let max_diff_rho_e_l = max(diff_rho_e_l, 0f);
+                let delta_rho_e_l = ((grad_rho_e_l.x * r_l_x) + (grad_rho_e_l.y * r_l_y));
+                let delta_rho_e_l_limited = min(max(delta_rho_e_l, min_diff_rho_e_l), max_diff_rho_e_l);
                 let rho_l_face = (rho_l_cell + delta_rho_l_limited);
-                let u_l_x_face = (u_l_x_cell + delta_u_l_x_limited);
-                let u_l_y_face = (u_l_y_cell + delta_u_l_y_limited);
-                let p_l_face = (p_l_cell + delta_p_l_limited);
+                let rho_u_x_l_face = (rho_u_l_cell.x + delta_rho_u_x_l_limited);
+                let rho_u_y_l_face = (rho_u_l_cell.y + delta_rho_u_y_l_limited);
+                let rho_e_l_face = (rho_e_l_cell + delta_rho_e_l_limited);
                 let diff_rho_r = (rho_l_cell - rho_r_cell);
                 let min_diff_rho_r = min(diff_rho_r, 0f);
                 let max_diff_rho_r = max(diff_rho_r, 0f);
                 let delta_rho_r = ((grad_rho_r.x * r_r_x) + (grad_rho_r.y * r_r_y));
                 let delta_rho_r_limited = min(max(delta_rho_r, min_diff_rho_r), max_diff_rho_r);
-                let diff_u_r_x = (u_l_x_cell - u_r_x_cell);
-                let min_diff_u_r_x = min(diff_u_r_x, 0f);
-                let max_diff_u_r_x = max(diff_u_r_x, 0f);
-                let delta_u_r_x = ((grad_u_x_r_x * r_r_x) + (grad_u_x_r_y * r_r_y));
-                let delta_u_r_x_limited = min(max(delta_u_r_x, min_diff_u_r_x), max_diff_u_r_x);
-                let diff_u_r_y = (u_l_y_cell - u_r_y_cell);
-                let min_diff_u_r_y = min(diff_u_r_y, 0f);
-                let max_diff_u_r_y = max(diff_u_r_y, 0f);
-                let delta_u_r_y = ((grad_u_y_r_x * r_r_x) + (grad_u_y_r_y * r_r_y));
-                let delta_u_r_y_limited = min(max(delta_u_r_y, min_diff_u_r_y), max_diff_u_r_y);
-                let diff_p_r = (p_l_cell - p_r_cell);
-                let min_diff_p_r = min(diff_p_r, 0f);
-                let max_diff_p_r = max(diff_p_r, 0f);
-                let delta_p_r = ((grad_p_r_x * r_r_x) + (grad_p_r_y * r_r_y));
-                let delta_p_r_limited = min(max(delta_p_r, min_diff_p_r), max_diff_p_r);
+                let diff_rho_u_x_r = (rho_u_l_cell.x - rho_u_r_cell.x);
+                let min_diff_rho_u_x_r = min(diff_rho_u_x_r, 0f);
+                let max_diff_rho_u_x_r = max(diff_rho_u_x_r, 0f);
+                let delta_rho_u_x_r = ((grad_rho_u_x_r.x * r_r_x) + (grad_rho_u_x_r.y * r_r_y));
+                let delta_rho_u_x_r_limited = min(max(delta_rho_u_x_r, min_diff_rho_u_x_r), max_diff_rho_u_x_r);
+                let diff_rho_u_y_r = (rho_u_l_cell.y - rho_u_r_cell.y);
+                let min_diff_rho_u_y_r = min(diff_rho_u_y_r, 0f);
+                let max_diff_rho_u_y_r = max(diff_rho_u_y_r, 0f);
+                let delta_rho_u_y_r = ((grad_rho_u_y_r.x * r_r_x) + (grad_rho_u_y_r.y * r_r_y));
+                let delta_rho_u_y_r_limited = min(max(delta_rho_u_y_r, min_diff_rho_u_y_r), max_diff_rho_u_y_r);
+                let diff_rho_e_r = (rho_e_l_cell - rho_e_r_cell);
+                let min_diff_rho_e_r = min(diff_rho_e_r, 0f);
+                let max_diff_rho_e_r = max(diff_rho_e_r, 0f);
+                let delta_rho_e_r = ((grad_rho_e_r.x * r_r_x) + (grad_rho_e_r.y * r_r_y));
+                let delta_rho_e_r_limited = min(max(delta_rho_e_r, min_diff_rho_e_r), max_diff_rho_e_r);
                 let rho_r_face = (rho_r_cell + delta_rho_r_limited);
-                let u_r_x_face = (u_r_x_cell + delta_u_r_x_limited);
-                let u_r_y_face = (u_r_y_cell + delta_u_r_y_limited);
-                let p_r_face = (p_r_cell + delta_p_r_limited);
+                let rho_u_x_r_face = (rho_u_r_cell.x + delta_rho_u_x_r_limited);
+                let rho_u_y_r_face = (rho_u_r_cell.y + delta_rho_u_y_r_limited);
+                let rho_e_r_face = (rho_e_r_cell + delta_rho_e_r_limited);
                 rho_l = rho_l_face;
-                rho_u_l.x = (rho_l_face * u_l_x_face);
-                rho_u_l.y = (rho_l_face * u_l_y_face);
-                rho_e_l = ((p_l_face / 0.4f) + ((0.5f * rho_l_face) * ((u_l_x_face * u_l_x_face) + (u_l_y_face * u_l_y_face))));
+                rho_u_l.x = rho_u_x_l_face;
+                rho_u_l.y = rho_u_y_l_face;
+                rho_e_l = rho_e_l_face;
                 rho_r = rho_r_face;
-                rho_u_r.x = (rho_r_face * u_r_x_face);
-                rho_u_r.y = (rho_r_face * u_r_y_face);
-                rho_e_r = ((p_r_face / 0.4f) + ((0.5f * rho_r_face) * ((u_r_x_face * u_r_x_face) + (u_r_y_face * u_r_y_face))));
+                rho_u_r.x = rho_u_x_r_face;
+                rho_u_r.y = rho_u_y_r_face;
+                rho_e_r = rho_e_r_face;
             }
-            let _e712 = rho_l;
-            let du_ly_drv = (1f / max(_e712, 0.00000001f));
-            let _e718 = rho_u_l.x;
-            let u_l_x = (_e718 * du_ly_drv);
-            let _e721 = rho_u_l.y;
-            let u_l_y = (_e721 * du_ly_drv);
-            let _e723 = rho_l;
-            let ke_l = ((0.5f * _e723) * ((u_l_x * u_l_x) + (u_l_y * u_l_y)));
-            let _e730 = rho_e_l;
-            let p_l = max(0f, (0.4f * (_e730 - ke_l)));
-            let _e737 = normal.x;
-            let _e740 = normal.y;
-            let u_n_l = ((u_l_x * _e737) + (u_l_y * _e740));
+            let _e589 = rho_l;
+            let du_ly_drv = (1f / max(_e589, 0.00000001f));
+            let _e595 = rho_u_l.x;
+            let u_l_x = (_e595 * du_ly_drv);
+            let _e598 = rho_u_l.y;
+            let u_l_y = (_e598 * du_ly_drv);
+            let _e600 = rho_l;
+            let ke_l = ((0.5f * _e600) * ((u_l_x * u_l_x) + (u_l_y * u_l_y)));
+            let _e607 = rho_e_l;
+            let p_l = max(0f, (0.4f * (_e607 - ke_l)));
+            let _e614 = normal.x;
+            let _e617 = normal.y;
+            let u_n_l = ((u_l_x * _e614) + (u_l_y * _e617));
             let c_l = sqrt(((1.4f * p_l) * du_ly_drv));
-            let _e747 = rho_r;
-            let du_ry_drv = (1f / max(_e747, 0.00000001f));
-            let _e753 = rho_u_r.x;
-            let u_r_x = (_e753 * du_ry_drv);
-            let _e756 = rho_u_r.y;
-            let u_r_y = (_e756 * du_ry_drv);
-            let _e758 = rho_r;
-            let ke_r = ((0.5f * _e758) * ((u_r_x * u_r_x) + (u_r_y * u_r_y)));
-            let _e765 = rho_e_r;
-            let p_r = max(0f, (0.4f * (_e765 - ke_r)));
-            let _e772 = normal.x;
-            let _e775 = normal.y;
-            let u_n_r = ((u_r_x * _e772) + (u_r_y * _e775));
+            let _e624 = rho_r;
+            let du_ry_drv = (1f / max(_e624, 0.00000001f));
+            let _e630 = rho_u_r.x;
+            let u_r_x = (_e630 * du_ry_drv);
+            let _e633 = rho_u_r.y;
+            let u_r_y = (_e633 * du_ry_drv);
+            let _e635 = rho_r;
+            let ke_r = ((0.5f * _e635) * ((u_r_x * u_r_x) + (u_r_y * u_r_y)));
+            let _e642 = rho_e_r;
+            let p_r = max(0f, (0.4f * (_e642 - ke_r)));
+            let _e649 = normal.x;
+            let _e652 = normal.y;
+            let u_n_r = ((u_r_x * _e649) + (u_r_y * _e652));
             let c_r = sqrt(((1.4f * p_r) * du_ry_drv));
             let u_face_x = (0.5f * (u_l_x + u_r_x));
             let u_face_y = (0.5f * (u_l_y + u_r_y));
-            let _e789 = normal.x;
-            let _e792 = normal.y;
-            let u_face_n = ((u_face_x * _e789) + (u_face_y * _e792));
+            let _e666 = normal.x;
+            let _e669 = normal.y;
+            let u_face_n = ((u_face_x * _e666) + (u_face_y * _e669));
             let c_bar = (0.5f * (c_l + c_r));
-            let beta = (abs(u_face_n) / max(c_bar, 0.000001f));
-            let mach2_ = (beta * beta);
-            c_l_eff = (c_l * beta);
-            c_r_eff = (c_r * beta);
-            let _e809 = constants.precond_model;
-            if (_e809 == 1u) {
-                let _e814 = constants.precond_theta_floor;
-                let theta = min(1f, max(mach2_, _e814));
-                let one_minus_theta = (1f - theta);
-                c_l_eff = sqrt((((theta * c_l) * c_l) + ((one_minus_theta * u_n_l) * u_n_l)));
-                c_r_eff = sqrt((((theta * c_r) * c_r) + ((one_minus_theta * u_n_r) * u_n_r)));
+            let mach = (abs(u_face_n) / max(c_bar, 0.000001f));
+            let mach2_ = (mach * mach);
+            c_l_eff = c_l;
+            c_r_eff = c_r;
+            let _e684 = constants.precond_model;
+            if (_e684 == 0u) {
+                c_l_eff = (c_l * mach);
+                c_r_eff = (c_r * mach);
+            } else {
+                let _e691 = constants.precond_model;
+                if (_e691 == 1u) {
+                    let _e696 = constants.precond_theta_floor;
+                    let theta = min(1f, max(mach2_, _e696));
+                    let one_minus_theta = (1f - theta);
+                    c_l_eff = sqrt((((theta * c_l) * c_l) + ((one_minus_theta * u_n_l) * u_n_l)));
+                    c_r_eff = sqrt((((theta * c_r) * c_r) + ((one_minus_theta * u_n_r) * u_n_r)));
+                }
             }
             let flux_adv = (u_face_n * area);
-            let _e834 = center_r.x;
-            let dx = (_e834 - center.x);
-            let _e838 = center_r.y;
-            let dy = (_e838 - center.y);
+            let _e716 = center_r.x;
+            let dx = (_e716 - center.x);
+            let _e720 = center_r.y;
+            let dy = (_e720 - center.y);
             let dist = max(sqrt(((dx * dx) + (dy * dy))), 0.000001f);
             let mu = constants.viscosity;
-            let _e850 = c_l_eff;
-            let _e852 = c_r_eff;
-            let a_plus = max(0f, max((u_n_l + _e850), (u_n_r + _e852)));
-            let _e857 = c_l_eff;
-            let _e859 = c_r_eff;
-            let a_minus = min(0f, min((u_n_l - _e857), (u_n_r - _e859)));
+            let _e732 = c_l_eff;
+            let _e734 = c_r_eff;
+            let a_plus = max(0f, max((u_n_l + _e732), (u_n_r + _e734)));
+            let _e739 = c_l_eff;
+            let _e741 = c_r_eff;
+            let a_minus = min(0f, min((u_n_l - _e739), (u_n_r - _e741)));
             let denom = max((a_plus - a_minus), 0.000001f);
             let a_prod = (a_plus * a_minus);
             let a_pos = (a_plus / denom);
             let a_neg = (1f - a_pos);
             let a_prod_scaled = (a_prod / denom);
-            let _e872 = rho_l;
-            let flux_rho_l = (_e872 * u_n_l);
-            let _e874 = rho_r;
-            let flux_rho_r = (_e874 * u_n_r);
-            let _e879 = rho_r;
-            let _e880 = rho_l;
-            flux_rho = (((a_pos * flux_rho_l) + (a_neg * flux_rho_r)) + (a_prod_scaled * (_e879 - _e880)));
-            let _e886 = rho_u_l.x;
-            let _e889 = normal.x;
-            let flux_rho_u_x_l = ((_e886 * u_n_l) + (p_l * _e889));
-            let _e893 = rho_u_r.x;
-            let _e896 = normal.x;
-            let flux_rho_u_x_r = ((_e893 * u_n_r) + (p_r * _e896));
-            let _e903 = rho_u_r.x;
-            let _e905 = rho_u_l.x;
-            flux_rho_u_x = (((a_pos * flux_rho_u_x_l) + (a_neg * flux_rho_u_x_r)) + (a_prod_scaled * (_e903 - _e905)));
-            let _e911 = rho_u_l.y;
-            let _e914 = normal.y;
-            let flux_rho_u_y_l = ((_e911 * u_n_l) + (p_l * _e914));
-            let _e918 = rho_u_r.y;
-            let _e921 = normal.y;
-            let flux_rho_u_y_r = ((_e918 * u_n_r) + (p_r * _e921));
-            let _e928 = rho_u_r.y;
-            let _e930 = rho_u_l.y;
-            flux_rho_u_y = (((a_pos * flux_rho_u_y_l) + (a_neg * flux_rho_u_y_r)) + (a_prod_scaled * (_e928 - _e930)));
+            let _e754 = rho_l;
+            let flux_rho_l = (_e754 * u_n_l);
+            let _e756 = rho_r;
+            let flux_rho_r = (_e756 * u_n_r);
+            let _e761 = rho_r;
+            let _e762 = rho_l;
+            flux_rho = (((a_pos * flux_rho_l) + (a_neg * flux_rho_r)) + (a_prod_scaled * (_e761 - _e762)));
+            let _e768 = rho_u_l.x;
+            let _e771 = normal.x;
+            let flux_rho_u_x_l = ((_e768 * u_n_l) + (p_l * _e771));
+            let _e775 = rho_u_r.x;
+            let _e778 = normal.x;
+            let flux_rho_u_x_r = ((_e775 * u_n_r) + (p_r * _e778));
+            let _e785 = rho_u_r.x;
+            let _e787 = rho_u_l.x;
+            flux_rho_u_x = (((a_pos * flux_rho_u_x_l) + (a_neg * flux_rho_u_x_r)) + (a_prod_scaled * (_e785 - _e787)));
+            let _e793 = rho_u_l.y;
+            let _e796 = normal.y;
+            let flux_rho_u_y_l = ((_e793 * u_n_l) + (p_l * _e796));
+            let _e800 = rho_u_r.y;
+            let _e803 = normal.y;
+            let flux_rho_u_y_r = ((_e800 * u_n_r) + (p_r * _e803));
+            let _e810 = rho_u_r.y;
+            let _e812 = rho_u_l.y;
+            flux_rho_u_y = (((a_pos * flux_rho_u_y_l) + (a_neg * flux_rho_u_y_r)) + (a_prod_scaled * (_e810 - _e812)));
             let diff_u_x = ((-(mu) * (u_r_x - u_l_x)) / dist);
             let diff_u_y = ((-(mu) * (u_r_y - u_l_y)) / dist);
-            let _e943 = flux_rho_u_x;
-            flux_rho_u_x = (_e943 + diff_u_x);
-            let _e945 = flux_rho_u_y;
-            flux_rho_u_y = (_e945 + diff_u_y);
-            let _e947 = rho_e_l;
-            let flux_rho_e_l = ((_e947 + p_l) * u_n_l);
-            let _e950 = rho_e_r;
-            let flux_rho_e_r = ((_e950 + p_r) * u_n_r);
-            let _e956 = rho_e_r;
-            let _e957 = rho_e_l;
-            flux_rho_e = (((a_pos * flux_rho_e_l) + (a_neg * flux_rho_e_r)) + (a_prod_scaled * (_e956 - _e957)));
-            let inv_rho_l_cell_1 = (1f / max(rho_l_cell, 0.00000001f));
-            let inv_rho_r_cell_1 = (1f / max(rho_r_cell, 0.00000001f));
-            let u_l_x_cell_1 = (rho_u_l_cell.x * inv_rho_l_cell_1);
-            let u_l_y_cell_1 = (rho_u_l_cell.y * inv_rho_l_cell_1);
-            let u_r_x_cell_1 = (rho_u_r_cell.x * inv_rho_r_cell_1);
-            let u_r_y_cell_1 = (rho_u_r_cell.y * inv_rho_r_cell_1);
-            let u2_l_cell_1 = ((u_l_x_cell_1 * u_l_x_cell_1) + (u_l_y_cell_1 * u_l_y_cell_1));
-            let u2_r_cell_1 = ((u_r_x_cell_1 * u_r_x_cell_1) + (u_r_y_cell_1 * u_r_y_cell_1));
-            let grad_rho_l_1 = grad_rho[idx];
-            let grad_rho_u_x_l_1 = grad_rho_u_x[idx];
-            let grad_rho_u_y_l_1 = grad_rho_u_y[idx];
-            let grad_rho_e_l_1 = grad_rho_e[idx];
-            let _e997 = other_idx;
-            let grad_rho_r_1 = grad_rho[_e997];
-            let _e1001 = other_idx;
-            let grad_rho_u_x_r_1 = grad_rho_u_x[_e1001];
-            let _e1005 = other_idx;
-            let grad_rho_u_y_r_1 = grad_rho_u_y[_e1005];
-            let _e1009 = other_idx;
-            let grad_rho_e_r_1 = grad_rho_e[_e1009];
-            let grad_u_x_l_x_1 = ((grad_rho_u_x_l_1.x - (u_l_x_cell_1 * grad_rho_l_1.x)) * inv_rho_l_cell_1);
-            let grad_u_x_l_y_1 = ((grad_rho_u_x_l_1.y - (u_l_x_cell_1 * grad_rho_l_1.y)) * inv_rho_l_cell_1);
-            let grad_u_y_l_x_1 = ((grad_rho_u_y_l_1.x - (u_l_y_cell_1 * grad_rho_l_1.x)) * inv_rho_l_cell_1);
-            let grad_u_y_l_y_1 = ((grad_rho_u_y_l_1.y - (u_l_y_cell_1 * grad_rho_l_1.y)) * inv_rho_l_cell_1);
-            let grad_u_x_r_x_1 = ((grad_rho_u_x_r_1.x - (u_r_x_cell_1 * grad_rho_r_1.x)) * inv_rho_r_cell_1);
-            let grad_u_x_r_y_1 = ((grad_rho_u_x_r_1.y - (u_r_x_cell_1 * grad_rho_r_1.y)) * inv_rho_r_cell_1);
-            let grad_u_y_r_x_1 = ((grad_rho_u_y_r_1.x - (u_r_y_cell_1 * grad_rho_r_1.x)) * inv_rho_r_cell_1);
-            let grad_u_y_r_y_1 = ((grad_rho_u_y_r_1.y - (u_r_y_cell_1 * grad_rho_r_1.y)) * inv_rho_r_cell_1);
-            let grad_u2_l_x_1 = (((2f * u_l_x_cell_1) * grad_u_x_l_x_1) + ((2f * u_l_y_cell_1) * grad_u_y_l_x_1));
-            let grad_u2_l_y_1 = (((2f * u_l_x_cell_1) * grad_u_x_l_y_1) + ((2f * u_l_y_cell_1) * grad_u_y_l_y_1));
-            let grad_u2_r_x_1 = (((2f * u_r_x_cell_1) * grad_u_x_r_x_1) + ((2f * u_r_y_cell_1) * grad_u_y_r_x_1));
-            let grad_u2_r_y_1 = (((2f * u_r_x_cell_1) * grad_u_x_r_y_1) + ((2f * u_r_y_cell_1) * grad_u_y_r_y_1));
-            let grad_rho_u2_l_x_1 = ((u2_l_cell_1 * grad_rho_l_1.x) + (rho_l_cell * grad_u2_l_x_1));
-            let grad_rho_u2_l_y_1 = ((u2_l_cell_1 * grad_rho_l_1.y) + (rho_l_cell * grad_u2_l_y_1));
-            let grad_rho_u2_r_x_1 = ((u2_r_cell_1 * grad_rho_r_1.x) + (rho_r_cell * grad_u2_r_x_1));
-            let grad_rho_u2_r_y_1 = ((u2_r_cell_1 * grad_rho_r_1.y) + (rho_r_cell * grad_u2_r_y_1));
-            let grad_p_l_x_1 = (0.4f * (grad_rho_e_l_1.x - (0.5f * grad_rho_u2_l_x_1)));
-            let grad_p_l_y_1 = (0.4f * (grad_rho_e_l_1.y - (0.5f * grad_rho_u2_l_y_1)));
-            let grad_p_r_x_1 = (0.4f * (grad_rho_e_r_1.x - (0.5f * grad_rho_u2_r_x_1)));
-            let grad_p_r_y_1 = (0.4f * (grad_rho_e_r_1.y - (0.5f * grad_rho_u2_r_y_1)));
-            let _e1121 = normal.x;
-            let _e1124 = normal.y;
-            let grad_p_l_n = ((grad_p_l_x_1 * _e1121) + (grad_p_l_y_1 * _e1124));
-            let _e1128 = normal.x;
-            let _e1131 = normal.y;
-            let grad_p_r_n = ((grad_p_r_x_1 * _e1128) + (grad_p_r_y_1 * _e1131));
-            let grad_p_face_n = (0.5f * (grad_p_l_n + grad_p_r_n));
-            let grad_p_jump_n = ((p_r - p_l) / dist);
-            let _e1139 = rho_l;
-            let _e1140 = rho_r;
-            let rho_face = (0.5f * (_e1139 + _e1140));
-            let p_bar = (0.5f * (p_l + p_r));
-            let dp_rel = (abs((p_r - p_l)) / max(p_bar, 0.000001f));
-            let _e1154 = constants.precond_theta_floor;
-            let pc_theta = min(1f, max(mach2_, _e1154));
-            let pc_low_mach = (1f - pc_theta);
-            let pc_smooth = (1f / (1f + (((dp_rel / 0.2f) * dp_rel) / 0.2f)));
-            let _e1171 = constants.pressure_coupling_alpha;
-            let pc_alpha = ((_e1171 * pc_low_mach) * pc_smooth);
-            let _e1176 = constants.dt;
-            let m_corr = (((pc_alpha * _e1176) / max(rho_face, 0.00000001f)) * (grad_p_face_n - grad_p_jump_n));
-            let _e1183 = rho_e_l;
-            let h_l = ((_e1183 + p_l) * du_ly_drv);
-            let _e1186 = rho_e_r;
-            let h_r = ((_e1186 + p_r) * du_ry_drv);
-            let h_face = (0.5f * (h_l + h_r));
-            let _e1192 = flux_rho;
-            flux_rho = (_e1192 + m_corr);
-            let _e1195 = flux_rho_u_x;
-            flux_rho_u_x = (_e1195 + (m_corr * u_face_x));
-            let _e1198 = flux_rho_u_y;
-            flux_rho_u_y = (_e1198 + (m_corr * u_face_y));
-            let _e1201 = flux_rho_e;
-            flux_rho_e = (_e1201 + (m_corr * h_face));
-            let _e1203 = flux_rho_e;
-            flux_rho_e = ((_e1203 + (diff_u_x * u_face_x)) + (diff_u_y * u_face_y));
-            let _e1209 = flux_rho;
-            let _e1211 = sum_rho;
-            sum_rho = (_e1211 + (_e1209 * area));
-            let _e1214 = flux_rho_u_x;
-            let _e1216 = sum_rho_u_x;
-            sum_rho_u_x = (_e1216 + (_e1214 * area));
-            let _e1219 = flux_rho_u_y;
-            let _e1221 = sum_rho_u_y;
-            sum_rho_u_y = (_e1221 + (_e1219 * area));
-            let _e1224 = flux_rho_e;
-            let _e1226 = sum_rho_e;
-            sum_rho_e = (_e1226 + (_e1224 * area));
+            let _e825 = flux_rho_u_x;
+            flux_rho_u_x = (_e825 + diff_u_x);
+            let _e827 = flux_rho_u_y;
+            flux_rho_u_y = (_e827 + diff_u_y);
+            let _e829 = rho_e_l;
+            let flux_rho_e_l = ((_e829 + p_l) * u_n_l);
+            let _e832 = rho_e_r;
+            let flux_rho_e_r = ((_e832 + p_r) * u_n_r);
+            let _e838 = rho_e_r;
+            let _e839 = rho_e_l;
+            flux_rho_e = (((a_pos * flux_rho_e_l) + (a_neg * flux_rho_e_r)) + (a_prod_scaled * (_e838 - _e839)));
+            let _e846 = constants.precond_model;
+            let _e851 = constants.pressure_coupling_alpha;
+            if ((_e846 != 2u) && (_e851 > 0f)) {
+                let inv_rho_l_cell = (1f / max(rho_l_cell, 0.00000001f));
+                let inv_rho_r_cell = (1f / max(rho_r_cell, 0.00000001f));
+                let u_l_x_cell = (rho_u_l_cell.x * inv_rho_l_cell);
+                let u_l_y_cell = (rho_u_l_cell.y * inv_rho_l_cell);
+                let u_r_x_cell = (rho_u_r_cell.x * inv_rho_r_cell);
+                let u_r_y_cell = (rho_u_r_cell.y * inv_rho_r_cell);
+                let u2_l_cell = ((u_l_x_cell * u_l_x_cell) + (u_l_y_cell * u_l_y_cell));
+                let u2_r_cell = ((u_r_x_cell * u_r_x_cell) + (u_r_y_cell * u_r_y_cell));
+                let grad_rho_l_1 = grad_rho[idx];
+                let grad_rho_u_x_l_1 = grad_rho_u_x[idx];
+                let grad_rho_u_y_l_1 = grad_rho_u_y[idx];
+                let grad_rho_e_l_1 = grad_rho_e[idx];
+                let _e890 = other_idx;
+                let grad_rho_r_1 = grad_rho[_e890];
+                let _e894 = other_idx;
+                let grad_rho_u_x_r_1 = grad_rho_u_x[_e894];
+                let _e898 = other_idx;
+                let grad_rho_u_y_r_1 = grad_rho_u_y[_e898];
+                let _e902 = other_idx;
+                let grad_rho_e_r_1 = grad_rho_e[_e902];
+                let grad_u_x_l_x = ((grad_rho_u_x_l_1.x - (u_l_x_cell * grad_rho_l_1.x)) * inv_rho_l_cell);
+                let grad_u_x_l_y = ((grad_rho_u_x_l_1.y - (u_l_x_cell * grad_rho_l_1.y)) * inv_rho_l_cell);
+                let grad_u_y_l_x = ((grad_rho_u_y_l_1.x - (u_l_y_cell * grad_rho_l_1.x)) * inv_rho_l_cell);
+                let grad_u_y_l_y = ((grad_rho_u_y_l_1.y - (u_l_y_cell * grad_rho_l_1.y)) * inv_rho_l_cell);
+                let grad_u_x_r_x = ((grad_rho_u_x_r_1.x - (u_r_x_cell * grad_rho_r_1.x)) * inv_rho_r_cell);
+                let grad_u_x_r_y = ((grad_rho_u_x_r_1.y - (u_r_x_cell * grad_rho_r_1.y)) * inv_rho_r_cell);
+                let grad_u_y_r_x = ((grad_rho_u_y_r_1.x - (u_r_y_cell * grad_rho_r_1.x)) * inv_rho_r_cell);
+                let grad_u_y_r_y = ((grad_rho_u_y_r_1.y - (u_r_y_cell * grad_rho_r_1.y)) * inv_rho_r_cell);
+                let grad_u2_l_x = (((2f * u_l_x_cell) * grad_u_x_l_x) + ((2f * u_l_y_cell) * grad_u_y_l_x));
+                let grad_u2_l_y = (((2f * u_l_x_cell) * grad_u_x_l_y) + ((2f * u_l_y_cell) * grad_u_y_l_y));
+                let grad_u2_r_x = (((2f * u_r_x_cell) * grad_u_x_r_x) + ((2f * u_r_y_cell) * grad_u_y_r_x));
+                let grad_u2_r_y = (((2f * u_r_x_cell) * grad_u_x_r_y) + ((2f * u_r_y_cell) * grad_u_y_r_y));
+                let grad_rho_u2_l_x = ((u2_l_cell * grad_rho_l_1.x) + (rho_l_cell * grad_u2_l_x));
+                let grad_rho_u2_l_y = ((u2_l_cell * grad_rho_l_1.y) + (rho_l_cell * grad_u2_l_y));
+                let grad_rho_u2_r_x = ((u2_r_cell * grad_rho_r_1.x) + (rho_r_cell * grad_u2_r_x));
+                let grad_rho_u2_r_y = ((u2_r_cell * grad_rho_r_1.y) + (rho_r_cell * grad_u2_r_y));
+                let grad_p_l_x = (0.4f * (grad_rho_e_l_1.x - (0.5f * grad_rho_u2_l_x)));
+                let grad_p_l_y = (0.4f * (grad_rho_e_l_1.y - (0.5f * grad_rho_u2_l_y)));
+                let grad_p_r_x = (0.4f * (grad_rho_e_r_1.x - (0.5f * grad_rho_u2_r_x)));
+                let grad_p_r_y = (0.4f * (grad_rho_e_r_1.y - (0.5f * grad_rho_u2_r_y)));
+                let _e1014 = normal.x;
+                let _e1017 = normal.y;
+                let grad_p_l_n = ((grad_p_l_x * _e1014) + (grad_p_l_y * _e1017));
+                let _e1021 = normal.x;
+                let _e1024 = normal.y;
+                let grad_p_r_n = ((grad_p_r_x * _e1021) + (grad_p_r_y * _e1024));
+                let grad_p_face_n = (0.5f * (grad_p_l_n + grad_p_r_n));
+                let grad_p_jump_n = ((p_r - p_l) / dist);
+                let _e1032 = rho_l;
+                let _e1033 = rho_r;
+                let rho_face = (0.5f * (_e1032 + _e1033));
+                let p_bar = (0.5f * (p_l + p_r));
+                let dp_rel = (abs((p_r - p_l)) / max(p_bar, 0.000001f));
+                let _e1047 = constants.precond_theta_floor;
+                let pc_theta = min(1f, max(mach2_, _e1047));
+                let pc_low_mach = (1f - pc_theta);
+                let pc_smooth = (1f / (1f + (((dp_rel / 0.2f) * dp_rel) / 0.2f)));
+                let _e1064 = constants.pressure_coupling_alpha;
+                let pc_alpha = ((_e1064 * pc_low_mach) * pc_smooth);
+                let _e1069 = constants.dt;
+                let m_corr = (((pc_alpha * _e1069) / max(rho_face, 0.00000001f)) * (grad_p_face_n - grad_p_jump_n));
+                let _e1076 = rho_e_l;
+                let h_l = ((_e1076 + p_l) * du_ly_drv);
+                let _e1079 = rho_e_r;
+                let h_r = ((_e1079 + p_r) * du_ry_drv);
+                let h_face = (0.5f * (h_l + h_r));
+                let _e1085 = flux_rho;
+                flux_rho = (_e1085 + m_corr);
+                let _e1088 = flux_rho_u_x;
+                flux_rho_u_x = (_e1088 + (m_corr * u_face_x));
+                let _e1091 = flux_rho_u_y;
+                flux_rho_u_y = (_e1091 + (m_corr * u_face_y));
+                let _e1094 = flux_rho_e;
+                flux_rho_e = (_e1094 + (m_corr * h_face));
+            }
+            let _e1096 = flux_rho_e;
+            flux_rho_e = ((_e1096 + (diff_u_x * u_face_x)) + (diff_u_y * u_face_y));
+            let _e1102 = flux_rho;
+            let _e1104 = sum_rho;
+            sum_rho = (_e1104 + (_e1102 * area));
+            let _e1107 = flux_rho_u_x;
+            let _e1109 = sum_rho_u_x;
+            sum_rho_u_x = (_e1109 + (_e1107 * area));
+            let _e1112 = flux_rho_u_y;
+            let _e1114 = sum_rho_u_y;
+            sum_rho_u_y = (_e1114 + (_e1112 * area));
+            let _e1117 = flux_rho_e;
+            let _e1119 = sum_rho_e;
+            sum_rho_e = (_e1119 + (_e1117 * area));
             let q_l = ((u_l_x * u_l_x) + (u_l_y * u_l_y));
             let dp_drho_l = (0.2f * q_l);
             let dp_dru_l = (-0.4f * u_l_x);
             let dp_drv_l = (-0.4f * u_l_y);
-            let _e1237 = rho_e_l;
-            let H_l = ((_e1237 + p_l) * du_ly_drv);
+            let _e1130 = rho_e_l;
+            let H_l = ((_e1130 + p_l) * du_ly_drv);
             let q_r = ((u_r_x * u_r_x) + (u_r_y * u_r_y));
             let dp_drho_r = (0.2f * q_r);
             let dp_dru_r = (-0.4f * u_r_x);
             let dp_drv_r = (-0.4f * u_r_y);
-            let _e1249 = rho_e_r;
-            let H_r = ((_e1249 + p_r) * du_ry_drv);
+            let _e1142 = rho_e_r;
+            let H_r = ((_e1142 + p_r) * du_ry_drv);
             let a_l = (a_plus / denom);
             let a_r = (-(a_minus) / denom);
             jac_l_00_ = -(a_prod_scaled);
-            let _e1258 = normal.x;
-            jac_l_01_ = (a_l * _e1258);
-            let _e1262 = normal.y;
-            jac_l_02_ = (a_l * _e1262);
+            let _e1151 = normal.x;
+            jac_l_01_ = (a_l * _e1151);
+            let _e1155 = normal.y;
+            jac_l_02_ = (a_l * _e1155);
             jac_l_03_ = 0f;
             jac_r_00_ = a_prod_scaled;
-            let _e1269 = normal.x;
-            jac_r_01_ = (a_r * _e1269);
-            let _e1273 = normal.y;
-            jac_r_02_ = (a_r * _e1273);
+            let _e1162 = normal.x;
+            jac_r_01_ = (a_r * _e1162);
+            let _e1166 = normal.y;
+            jac_r_02_ = (a_r * _e1166);
             jac_r_03_ = 0f;
-            let _e1281 = normal.x;
-            let A_l_10_ = ((-(u_l_x) * u_n_l) + (dp_drho_l * _e1281));
-            let _e1285 = normal.x;
-            let _e1289 = normal.x;
-            let A_l_11_ = ((u_n_l + (u_l_x * _e1285)) + (dp_dru_l * _e1289));
-            let _e1293 = normal.y;
-            let _e1296 = normal.x;
-            let A_l_12_ = ((u_l_x * _e1293) + (dp_drv_l * _e1296));
-            let _e1301 = normal.x;
-            let A_l_13_ = (0.4f * _e1301);
-            let _e1306 = normal.y;
-            let A_l_20_ = ((-(u_l_y) * u_n_l) + (dp_drho_l * _e1306));
-            let _e1310 = normal.x;
-            let _e1313 = normal.y;
-            let A_l_21_ = ((u_l_y * _e1310) + (dp_dru_l * _e1313));
-            let _e1317 = normal.y;
-            let _e1321 = normal.y;
-            let A_l_22_ = ((u_n_l + (u_l_y * _e1317)) + (dp_drv_l * _e1321));
-            let _e1325 = normal.y;
-            let A_l_23_ = (0.4f * _e1325);
+            let _e1174 = normal.x;
+            let A_l_10_ = ((-(u_l_x) * u_n_l) + (dp_drho_l * _e1174));
+            let _e1178 = normal.x;
+            let _e1182 = normal.x;
+            let A_l_11_ = ((u_n_l + (u_l_x * _e1178)) + (dp_dru_l * _e1182));
+            let _e1186 = normal.y;
+            let _e1189 = normal.x;
+            let A_l_12_ = ((u_l_x * _e1186) + (dp_drv_l * _e1189));
+            let _e1194 = normal.x;
+            let A_l_13_ = (0.4f * _e1194);
+            let _e1199 = normal.y;
+            let A_l_20_ = ((-(u_l_y) * u_n_l) + (dp_drho_l * _e1199));
+            let _e1203 = normal.x;
+            let _e1206 = normal.y;
+            let A_l_21_ = ((u_l_y * _e1203) + (dp_dru_l * _e1206));
+            let _e1210 = normal.y;
+            let _e1214 = normal.y;
+            let A_l_22_ = ((u_n_l + (u_l_y * _e1210)) + (dp_drv_l * _e1214));
+            let _e1218 = normal.y;
+            let A_l_23_ = (0.4f * _e1218);
             let A_l_30_ = ((-(H_l) * u_n_l) + (dp_drho_l * u_n_l));
-            let _e1332 = normal.x;
-            let A_l_31_ = ((H_l * _e1332) + (dp_dru_l * u_n_l));
-            let _e1337 = normal.y;
-            let A_l_32_ = ((H_l * _e1337) + (dp_drv_l * u_n_l));
+            let _e1225 = normal.x;
+            let A_l_31_ = ((H_l * _e1225) + (dp_dru_l * u_n_l));
+            let _e1230 = normal.y;
+            let A_l_32_ = ((H_l * _e1230) + (dp_drv_l * u_n_l));
             let A_l_33_ = (1.4f * u_n_l);
-            let _e1346 = normal.x;
-            let A_r_10_ = ((-(u_r_x) * u_n_r) + (dp_drho_r * _e1346));
-            let _e1350 = normal.x;
-            let _e1354 = normal.x;
-            let A_r_11_ = ((u_n_r + (u_r_x * _e1350)) + (dp_dru_r * _e1354));
-            let _e1358 = normal.y;
-            let _e1361 = normal.x;
-            let A_r_12_ = ((u_r_x * _e1358) + (dp_drv_r * _e1361));
-            let _e1366 = normal.x;
-            let A_r_13_ = (0.4f * _e1366);
-            let _e1371 = normal.y;
-            let A_r_20_ = ((-(u_r_y) * u_n_r) + (dp_drho_r * _e1371));
-            let _e1375 = normal.x;
-            let _e1378 = normal.y;
-            let A_r_21_ = ((u_r_y * _e1375) + (dp_dru_r * _e1378));
-            let _e1382 = normal.y;
-            let _e1386 = normal.y;
-            let A_r_22_ = ((u_n_r + (u_r_y * _e1382)) + (dp_drv_r * _e1386));
-            let _e1390 = normal.y;
-            let A_r_23_ = (0.4f * _e1390);
+            let _e1239 = normal.x;
+            let A_r_10_ = ((-(u_r_x) * u_n_r) + (dp_drho_r * _e1239));
+            let _e1243 = normal.x;
+            let _e1247 = normal.x;
+            let A_r_11_ = ((u_n_r + (u_r_x * _e1243)) + (dp_dru_r * _e1247));
+            let _e1251 = normal.y;
+            let _e1254 = normal.x;
+            let A_r_12_ = ((u_r_x * _e1251) + (dp_drv_r * _e1254));
+            let _e1259 = normal.x;
+            let A_r_13_ = (0.4f * _e1259);
+            let _e1264 = normal.y;
+            let A_r_20_ = ((-(u_r_y) * u_n_r) + (dp_drho_r * _e1264));
+            let _e1268 = normal.x;
+            let _e1271 = normal.y;
+            let A_r_21_ = ((u_r_y * _e1268) + (dp_dru_r * _e1271));
+            let _e1275 = normal.y;
+            let _e1279 = normal.y;
+            let A_r_22_ = ((u_n_r + (u_r_y * _e1275)) + (dp_drv_r * _e1279));
+            let _e1283 = normal.y;
+            let A_r_23_ = (0.4f * _e1283);
             let A_r_30_ = ((-(H_r) * u_n_r) + (dp_drho_r * u_n_r));
-            let _e1397 = normal.x;
-            let A_r_31_ = ((H_r * _e1397) + (dp_dru_r * u_n_r));
-            let _e1402 = normal.y;
-            let A_r_32_ = ((H_r * _e1402) + (dp_drv_r * u_n_r));
+            let _e1290 = normal.x;
+            let A_r_31_ = ((H_r * _e1290) + (dp_dru_r * u_n_r));
+            let _e1295 = normal.y;
+            let A_r_32_ = ((H_r * _e1295) + (dp_drv_r * u_n_r));
             let A_r_33_ = (1.4f * u_n_r);
             jac_l_10_ = (a_l * A_l_10_);
             jac_l_11_ = ((a_l * A_l_11_) - a_prod_scaled);
@@ -5406,38 +6225,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_diff_x_r_ru = (-(mu_over_dist) * du_ry_drv);
             let d_diff_y_r_rho = (-(mu_over_dist) * du_ry_drho);
             let d_diff_y_r_rv = (-(mu_over_dist) * du_ry_drv);
-            let _e1483 = jac_l_10_;
-            jac_l_10_ = (_e1483 + d_diff_x_l_rho);
-            let _e1485 = jac_l_11_;
-            jac_l_11_ = (_e1485 + d_diff_x_l_ru);
-            let _e1488 = jac_l_12_;
-            jac_l_12_ = (_e1488 + 0f);
-            let _e1491 = jac_l_13_;
-            jac_l_13_ = (_e1491 + 0f);
-            let _e1493 = jac_l_20_;
-            jac_l_20_ = (_e1493 + d_diff_y_l_rho);
-            let _e1496 = jac_l_21_;
-            jac_l_21_ = (_e1496 + 0f);
-            let _e1498 = jac_l_22_;
-            jac_l_22_ = (_e1498 + d_diff_y_l_rv);
-            let _e1501 = jac_l_23_;
-            jac_l_23_ = (_e1501 + 0f);
-            let _e1503 = jac_r_10_;
-            jac_r_10_ = (_e1503 + d_diff_x_r_rho);
-            let _e1505 = jac_r_11_;
-            jac_r_11_ = (_e1505 + d_diff_x_r_ru);
-            let _e1508 = jac_r_12_;
-            jac_r_12_ = (_e1508 + 0f);
-            let _e1511 = jac_r_13_;
-            jac_r_13_ = (_e1511 + 0f);
-            let _e1513 = jac_r_20_;
-            jac_r_20_ = (_e1513 + d_diff_y_r_rho);
-            let _e1516 = jac_r_21_;
-            jac_r_21_ = (_e1516 + 0f);
-            let _e1518 = jac_r_22_;
-            jac_r_22_ = (_e1518 + d_diff_y_r_rv);
-            let _e1521 = jac_r_23_;
-            jac_r_23_ = (_e1521 + 0f);
+            let _e1376 = jac_l_10_;
+            jac_l_10_ = (_e1376 + d_diff_x_l_rho);
+            let _e1378 = jac_l_11_;
+            jac_l_11_ = (_e1378 + d_diff_x_l_ru);
+            let _e1381 = jac_l_12_;
+            jac_l_12_ = (_e1381 + 0f);
+            let _e1384 = jac_l_13_;
+            jac_l_13_ = (_e1384 + 0f);
+            let _e1386 = jac_l_20_;
+            jac_l_20_ = (_e1386 + d_diff_y_l_rho);
+            let _e1389 = jac_l_21_;
+            jac_l_21_ = (_e1389 + 0f);
+            let _e1391 = jac_l_22_;
+            jac_l_22_ = (_e1391 + d_diff_y_l_rv);
+            let _e1394 = jac_l_23_;
+            jac_l_23_ = (_e1394 + 0f);
+            let _e1396 = jac_r_10_;
+            jac_r_10_ = (_e1396 + d_diff_x_r_rho);
+            let _e1398 = jac_r_11_;
+            jac_r_11_ = (_e1398 + d_diff_x_r_ru);
+            let _e1401 = jac_r_12_;
+            jac_r_12_ = (_e1401 + 0f);
+            let _e1404 = jac_r_13_;
+            jac_r_13_ = (_e1404 + 0f);
+            let _e1406 = jac_r_20_;
+            jac_r_20_ = (_e1406 + d_diff_y_r_rho);
+            let _e1409 = jac_r_21_;
+            jac_r_21_ = (_e1409 + 0f);
+            let _e1411 = jac_r_22_;
+            jac_r_22_ = (_e1411 + d_diff_y_r_rv);
+            let _e1414 = jac_r_23_;
+            jac_r_23_ = (_e1414 + 0f);
             let du_face_x_l_rho = (0.5f * du_lx_drho);
             let du_face_x_l_ru = (0.5f * du_ly_drv);
             let du_face_y_l_rho = (0.5f * du_ly_drho);
@@ -5454,419 +6273,419 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_e_visc_r_ru = ((((d_diff_x_r_ru * u_face_x) + (diff_u_x * du_face_x_r_ru)) + (0f * u_face_y)) + (diff_u_y * 0f));
             let d_e_visc_r_rv = ((((0f * u_face_x) + (diff_u_x * 0f)) + (d_diff_y_r_rv * u_face_y)) + (diff_u_y * du_face_y_r_rv));
             let d_e_visc_r_re = ((((0f * u_face_x) + (diff_u_x * 0f)) + (0f * u_face_y)) + (diff_u_y * 0f));
-            let _e1603 = jac_l_30_;
-            jac_l_30_ = (_e1603 + d_e_visc_l_rho);
-            let _e1605 = jac_l_31_;
-            jac_l_31_ = (_e1605 + d_e_visc_l_ru);
-            let _e1607 = jac_l_32_;
-            jac_l_32_ = (_e1607 + d_e_visc_l_rv);
-            let _e1609 = jac_l_33_;
-            jac_l_33_ = (_e1609 + d_e_visc_l_re);
-            let _e1611 = jac_r_30_;
-            jac_r_30_ = (_e1611 + d_e_visc_r_rho);
-            let _e1613 = jac_r_31_;
-            jac_r_31_ = (_e1613 + d_e_visc_r_ru);
-            let _e1615 = jac_r_32_;
-            jac_r_32_ = (_e1615 + d_e_visc_r_rv);
-            let _e1617 = jac_r_33_;
-            jac_r_33_ = (_e1617 + d_e_visc_r_re);
-            let _e1619 = is_boundary;
-            if !(_e1619) {
-                let _e1622 = face_offset;
-                let scalar_mat_idx = cell_face_matrix_indices[_e1622];
+            let _e1496 = jac_l_30_;
+            jac_l_30_ = (_e1496 + d_e_visc_l_rho);
+            let _e1498 = jac_l_31_;
+            jac_l_31_ = (_e1498 + d_e_visc_l_ru);
+            let _e1500 = jac_l_32_;
+            jac_l_32_ = (_e1500 + d_e_visc_l_rv);
+            let _e1502 = jac_l_33_;
+            jac_l_33_ = (_e1502 + d_e_visc_l_re);
+            let _e1504 = jac_r_30_;
+            jac_r_30_ = (_e1504 + d_e_visc_r_rho);
+            let _e1506 = jac_r_31_;
+            jac_r_31_ = (_e1506 + d_e_visc_r_ru);
+            let _e1508 = jac_r_32_;
+            jac_r_32_ = (_e1508 + d_e_visc_r_rv);
+            let _e1510 = jac_r_33_;
+            jac_r_33_ = (_e1510 + d_e_visc_r_re);
+            let _e1512 = is_boundary;
+            if !(_e1512) {
+                let _e1515 = face_offset;
+                let scalar_mat_idx = cell_face_matrix_indices[_e1515];
                 neighbor_rank = 0u;
                 if (scalar_mat_idx != 4294967295u) {
                     neighbor_rank = (scalar_mat_idx - scalar_offset);
                 } else {
                     neighbor_rank = (scalar_mat_idx - scalar_offset);
                 }
-                let _e1632 = neighbor_rank;
-                let base_0_ = (start_row_0_ + (4u * _e1632));
-                let _e1636 = neighbor_rank;
-                let base_1_ = (start_row_1_ + (4u * _e1636));
-                let _e1640 = neighbor_rank;
-                let base_2_ = (start_row_2_ + (4u * _e1640));
-                let _e1644 = neighbor_rank;
-                let base_3_ = (start_row_3_ + (4u * _e1644));
-                let _e1651 = jac_r_00_;
-                matrix_values[(base_0_ + 0u)] = (_e1651 * area);
-                let _e1657 = jac_r_01_;
-                matrix_values[(base_0_ + 1u)] = (_e1657 * area);
-                let _e1663 = jac_r_02_;
-                matrix_values[(base_0_ + 2u)] = (_e1663 * area);
-                let _e1669 = jac_r_03_;
-                matrix_values[(base_0_ + 3u)] = (_e1669 * area);
-                let _e1675 = jac_r_10_;
-                matrix_values[(base_1_ + 0u)] = (_e1675 * area);
-                let _e1681 = jac_r_11_;
-                matrix_values[(base_1_ + 1u)] = (_e1681 * area);
-                let _e1687 = jac_r_12_;
-                matrix_values[(base_1_ + 2u)] = (_e1687 * area);
-                let _e1693 = jac_r_13_;
-                matrix_values[(base_1_ + 3u)] = (_e1693 * area);
-                let _e1699 = jac_r_20_;
-                matrix_values[(base_2_ + 0u)] = (_e1699 * area);
-                let _e1705 = jac_r_21_;
-                matrix_values[(base_2_ + 1u)] = (_e1705 * area);
-                let _e1711 = jac_r_22_;
-                matrix_values[(base_2_ + 2u)] = (_e1711 * area);
-                let _e1717 = jac_r_23_;
-                matrix_values[(base_2_ + 3u)] = (_e1717 * area);
-                let _e1723 = jac_r_30_;
-                matrix_values[(base_3_ + 0u)] = (_e1723 * area);
-                let _e1729 = jac_r_31_;
-                matrix_values[(base_3_ + 1u)] = (_e1729 * area);
-                let _e1735 = jac_r_32_;
-                matrix_values[(base_3_ + 2u)] = (_e1735 * area);
-                let _e1741 = jac_r_33_;
-                matrix_values[(base_3_ + 3u)] = (_e1741 * area);
-                let _e1744 = jac_l_00_;
-                let _e1746 = diag_00_;
-                diag_00_ = (_e1746 + (_e1744 * area));
-                let _e1749 = jac_l_01_;
-                let _e1751 = diag_01_;
-                diag_01_ = (_e1751 + (_e1749 * area));
-                let _e1754 = jac_l_02_;
-                let _e1756 = diag_02_;
-                diag_02_ = (_e1756 + (_e1754 * area));
-                let _e1759 = jac_l_03_;
-                let _e1761 = diag_03_;
-                diag_03_ = (_e1761 + (_e1759 * area));
-                let _e1764 = jac_l_10_;
-                let _e1766 = diag_10_;
-                diag_10_ = (_e1766 + (_e1764 * area));
-                let _e1769 = jac_l_11_;
-                let _e1771 = diag_11_;
-                diag_11_ = (_e1771 + (_e1769 * area));
-                let _e1774 = jac_l_12_;
-                let _e1776 = diag_12_;
-                diag_12_ = (_e1776 + (_e1774 * area));
-                let _e1779 = jac_l_13_;
-                let _e1781 = diag_13_;
-                diag_13_ = (_e1781 + (_e1779 * area));
-                let _e1784 = jac_l_20_;
-                let _e1786 = diag_20_;
-                diag_20_ = (_e1786 + (_e1784 * area));
-                let _e1789 = jac_l_21_;
-                let _e1791 = diag_21_;
-                diag_21_ = (_e1791 + (_e1789 * area));
-                let _e1794 = jac_l_22_;
-                let _e1796 = diag_22_;
-                diag_22_ = (_e1796 + (_e1794 * area));
-                let _e1799 = jac_l_23_;
-                let _e1801 = diag_23_;
-                diag_23_ = (_e1801 + (_e1799 * area));
-                let _e1804 = jac_l_30_;
-                let _e1806 = diag_30_;
-                diag_30_ = (_e1806 + (_e1804 * area));
-                let _e1809 = jac_l_31_;
-                let _e1811 = diag_31_;
-                diag_31_ = (_e1811 + (_e1809 * area));
-                let _e1814 = jac_l_32_;
-                let _e1816 = diag_32_;
-                diag_32_ = (_e1816 + (_e1814 * area));
-                let _e1819 = jac_l_33_;
-                let _e1821 = diag_33_;
-                diag_33_ = (_e1821 + (_e1819 * area));
+                let _e1525 = neighbor_rank;
+                let base_0_ = (start_row_0_ + (4u * _e1525));
+                let _e1529 = neighbor_rank;
+                let base_1_ = (start_row_1_ + (4u * _e1529));
+                let _e1533 = neighbor_rank;
+                let base_2_ = (start_row_2_ + (4u * _e1533));
+                let _e1537 = neighbor_rank;
+                let base_3_ = (start_row_3_ + (4u * _e1537));
+                let _e1544 = jac_r_00_;
+                matrix_values[(base_0_ + 0u)] = (_e1544 * area);
+                let _e1550 = jac_r_01_;
+                matrix_values[(base_0_ + 1u)] = (_e1550 * area);
+                let _e1556 = jac_r_02_;
+                matrix_values[(base_0_ + 2u)] = (_e1556 * area);
+                let _e1562 = jac_r_03_;
+                matrix_values[(base_0_ + 3u)] = (_e1562 * area);
+                let _e1568 = jac_r_10_;
+                matrix_values[(base_1_ + 0u)] = (_e1568 * area);
+                let _e1574 = jac_r_11_;
+                matrix_values[(base_1_ + 1u)] = (_e1574 * area);
+                let _e1580 = jac_r_12_;
+                matrix_values[(base_1_ + 2u)] = (_e1580 * area);
+                let _e1586 = jac_r_13_;
+                matrix_values[(base_1_ + 3u)] = (_e1586 * area);
+                let _e1592 = jac_r_20_;
+                matrix_values[(base_2_ + 0u)] = (_e1592 * area);
+                let _e1598 = jac_r_21_;
+                matrix_values[(base_2_ + 1u)] = (_e1598 * area);
+                let _e1604 = jac_r_22_;
+                matrix_values[(base_2_ + 2u)] = (_e1604 * area);
+                let _e1610 = jac_r_23_;
+                matrix_values[(base_2_ + 3u)] = (_e1610 * area);
+                let _e1616 = jac_r_30_;
+                matrix_values[(base_3_ + 0u)] = (_e1616 * area);
+                let _e1622 = jac_r_31_;
+                matrix_values[(base_3_ + 1u)] = (_e1622 * area);
+                let _e1628 = jac_r_32_;
+                matrix_values[(base_3_ + 2u)] = (_e1628 * area);
+                let _e1634 = jac_r_33_;
+                matrix_values[(base_3_ + 3u)] = (_e1634 * area);
+                let _e1637 = jac_l_00_;
+                let _e1639 = diag_00_;
+                diag_00_ = (_e1639 + (_e1637 * area));
+                let _e1642 = jac_l_01_;
+                let _e1644 = diag_01_;
+                diag_01_ = (_e1644 + (_e1642 * area));
+                let _e1647 = jac_l_02_;
+                let _e1649 = diag_02_;
+                diag_02_ = (_e1649 + (_e1647 * area));
+                let _e1652 = jac_l_03_;
+                let _e1654 = diag_03_;
+                diag_03_ = (_e1654 + (_e1652 * area));
+                let _e1657 = jac_l_10_;
+                let _e1659 = diag_10_;
+                diag_10_ = (_e1659 + (_e1657 * area));
+                let _e1662 = jac_l_11_;
+                let _e1664 = diag_11_;
+                diag_11_ = (_e1664 + (_e1662 * area));
+                let _e1667 = jac_l_12_;
+                let _e1669 = diag_12_;
+                diag_12_ = (_e1669 + (_e1667 * area));
+                let _e1672 = jac_l_13_;
+                let _e1674 = diag_13_;
+                diag_13_ = (_e1674 + (_e1672 * area));
+                let _e1677 = jac_l_20_;
+                let _e1679 = diag_20_;
+                diag_20_ = (_e1679 + (_e1677 * area));
+                let _e1682 = jac_l_21_;
+                let _e1684 = diag_21_;
+                diag_21_ = (_e1684 + (_e1682 * area));
+                let _e1687 = jac_l_22_;
+                let _e1689 = diag_22_;
+                diag_22_ = (_e1689 + (_e1687 * area));
+                let _e1692 = jac_l_23_;
+                let _e1694 = diag_23_;
+                diag_23_ = (_e1694 + (_e1692 * area));
+                let _e1697 = jac_l_30_;
+                let _e1699 = diag_30_;
+                diag_30_ = (_e1699 + (_e1697 * area));
+                let _e1702 = jac_l_31_;
+                let _e1704 = diag_31_;
+                diag_31_ = (_e1704 + (_e1702 * area));
+                let _e1707 = jac_l_32_;
+                let _e1709 = diag_32_;
+                diag_32_ = (_e1709 + (_e1707 * area));
+                let _e1712 = jac_l_33_;
+                let _e1714 = diag_33_;
+                diag_33_ = (_e1714 + (_e1712 * area));
             } else {
-                let _e1823 = jac_l_00_;
-                let _e1824 = jac_r_00_;
-                eff_00_ = (_e1823 + _e1824);
-                let _e1827 = jac_l_01_;
-                let _e1828 = jac_r_01_;
-                eff_01_ = (_e1827 + _e1828);
-                let _e1831 = jac_l_02_;
-                let _e1832 = jac_r_02_;
-                eff_02_ = (_e1831 + _e1832);
-                let _e1835 = jac_l_03_;
-                let _e1836 = jac_r_03_;
-                eff_03_ = (_e1835 + _e1836);
-                let _e1839 = jac_l_10_;
-                let _e1840 = jac_r_10_;
-                eff_10_ = (_e1839 + _e1840);
-                let _e1843 = jac_l_11_;
-                let _e1844 = jac_r_11_;
-                eff_11_ = (_e1843 + _e1844);
-                let _e1847 = jac_l_12_;
-                let _e1848 = jac_r_12_;
-                eff_12_ = (_e1847 + _e1848);
-                let _e1851 = jac_l_13_;
-                let _e1852 = jac_r_13_;
-                eff_13_ = (_e1851 + _e1852);
-                let _e1855 = jac_l_20_;
-                let _e1856 = jac_r_20_;
-                eff_20_ = (_e1855 + _e1856);
-                let _e1859 = jac_l_21_;
-                let _e1860 = jac_r_21_;
-                eff_21_ = (_e1859 + _e1860);
-                let _e1863 = jac_l_22_;
-                let _e1864 = jac_r_22_;
-                eff_22_ = (_e1863 + _e1864);
-                let _e1867 = jac_l_23_;
-                let _e1868 = jac_r_23_;
-                eff_23_ = (_e1867 + _e1868);
-                let _e1871 = jac_l_30_;
-                let _e1872 = jac_r_30_;
-                eff_30_ = (_e1871 + _e1872);
-                let _e1875 = jac_l_31_;
-                let _e1876 = jac_r_31_;
-                eff_31_ = (_e1875 + _e1876);
-                let _e1879 = jac_l_32_;
-                let _e1880 = jac_r_32_;
-                eff_32_ = (_e1879 + _e1880);
-                let _e1883 = jac_l_33_;
-                let _e1884 = jac_r_33_;
-                eff_33_ = (_e1883 + _e1884);
+                let _e1716 = jac_l_00_;
+                let _e1717 = jac_r_00_;
+                eff_00_ = (_e1716 + _e1717);
+                let _e1720 = jac_l_01_;
+                let _e1721 = jac_r_01_;
+                eff_01_ = (_e1720 + _e1721);
+                let _e1724 = jac_l_02_;
+                let _e1725 = jac_r_02_;
+                eff_02_ = (_e1724 + _e1725);
+                let _e1728 = jac_l_03_;
+                let _e1729 = jac_r_03_;
+                eff_03_ = (_e1728 + _e1729);
+                let _e1732 = jac_l_10_;
+                let _e1733 = jac_r_10_;
+                eff_10_ = (_e1732 + _e1733);
+                let _e1736 = jac_l_11_;
+                let _e1737 = jac_r_11_;
+                eff_11_ = (_e1736 + _e1737);
+                let _e1740 = jac_l_12_;
+                let _e1741 = jac_r_12_;
+                eff_12_ = (_e1740 + _e1741);
+                let _e1744 = jac_l_13_;
+                let _e1745 = jac_r_13_;
+                eff_13_ = (_e1744 + _e1745);
+                let _e1748 = jac_l_20_;
+                let _e1749 = jac_r_20_;
+                eff_20_ = (_e1748 + _e1749);
+                let _e1752 = jac_l_21_;
+                let _e1753 = jac_r_21_;
+                eff_21_ = (_e1752 + _e1753);
+                let _e1756 = jac_l_22_;
+                let _e1757 = jac_r_22_;
+                eff_22_ = (_e1756 + _e1757);
+                let _e1760 = jac_l_23_;
+                let _e1761 = jac_r_23_;
+                eff_23_ = (_e1760 + _e1761);
+                let _e1764 = jac_l_30_;
+                let _e1765 = jac_r_30_;
+                eff_30_ = (_e1764 + _e1765);
+                let _e1768 = jac_l_31_;
+                let _e1769 = jac_r_31_;
+                eff_31_ = (_e1768 + _e1769);
+                let _e1772 = jac_l_32_;
+                let _e1773 = jac_r_32_;
+                eff_32_ = (_e1772 + _e1773);
+                let _e1776 = jac_l_33_;
+                let _e1777 = jac_r_33_;
+                eff_33_ = (_e1776 + _e1777);
                 if (boundary_type == 1u) {
-                    let _e1889 = jac_l_00_;
-                    let _e1890 = jac_r_00_;
-                    let _e1892 = jac_r_01_;
-                    let _e1895 = constants.inlet_velocity;
-                    eff_00_ = ((_e1889 + _e1890) + (_e1892 * _e1895));
-                    let _e1898 = jac_l_01_;
-                    eff_01_ = _e1898;
-                    let _e1899 = jac_l_02_;
-                    eff_02_ = _e1899;
-                    let _e1900 = jac_l_03_;
-                    let _e1901 = jac_r_03_;
-                    eff_03_ = (_e1900 + _e1901);
-                    let _e1903 = jac_l_10_;
-                    let _e1904 = jac_r_10_;
-                    let _e1906 = jac_r_11_;
-                    let _e1909 = constants.inlet_velocity;
-                    eff_10_ = ((_e1903 + _e1904) + (_e1906 * _e1909));
-                    let _e1912 = jac_l_11_;
-                    eff_11_ = _e1912;
-                    let _e1913 = jac_l_12_;
-                    eff_12_ = _e1913;
-                    let _e1914 = jac_l_13_;
-                    let _e1915 = jac_r_13_;
-                    eff_13_ = (_e1914 + _e1915);
-                    let _e1917 = jac_l_20_;
-                    let _e1918 = jac_r_20_;
-                    let _e1920 = jac_r_21_;
-                    let _e1923 = constants.inlet_velocity;
-                    eff_20_ = ((_e1917 + _e1918) + (_e1920 * _e1923));
-                    let _e1926 = jac_l_21_;
-                    eff_21_ = _e1926;
-                    let _e1927 = jac_l_22_;
-                    eff_22_ = _e1927;
-                    let _e1928 = jac_l_23_;
-                    let _e1929 = jac_r_23_;
-                    eff_23_ = (_e1928 + _e1929);
-                    let _e1931 = jac_l_30_;
-                    let _e1932 = jac_r_30_;
-                    let _e1934 = jac_r_31_;
-                    let _e1937 = constants.inlet_velocity;
-                    eff_30_ = ((_e1931 + _e1932) + (_e1934 * _e1937));
-                    let _e1940 = jac_l_31_;
-                    eff_31_ = _e1940;
-                    let _e1941 = jac_l_32_;
-                    eff_32_ = _e1941;
-                    let _e1942 = jac_l_33_;
-                    let _e1943 = jac_r_33_;
-                    eff_33_ = (_e1942 + _e1943);
+                    let _e1782 = jac_l_00_;
+                    let _e1783 = jac_r_00_;
+                    let _e1785 = jac_r_01_;
+                    let _e1788 = constants.inlet_velocity;
+                    eff_00_ = ((_e1782 + _e1783) + (_e1785 * _e1788));
+                    let _e1791 = jac_l_01_;
+                    eff_01_ = _e1791;
+                    let _e1792 = jac_l_02_;
+                    eff_02_ = _e1792;
+                    let _e1793 = jac_l_03_;
+                    let _e1794 = jac_r_03_;
+                    eff_03_ = (_e1793 + _e1794);
+                    let _e1796 = jac_l_10_;
+                    let _e1797 = jac_r_10_;
+                    let _e1799 = jac_r_11_;
+                    let _e1802 = constants.inlet_velocity;
+                    eff_10_ = ((_e1796 + _e1797) + (_e1799 * _e1802));
+                    let _e1805 = jac_l_11_;
+                    eff_11_ = _e1805;
+                    let _e1806 = jac_l_12_;
+                    eff_12_ = _e1806;
+                    let _e1807 = jac_l_13_;
+                    let _e1808 = jac_r_13_;
+                    eff_13_ = (_e1807 + _e1808);
+                    let _e1810 = jac_l_20_;
+                    let _e1811 = jac_r_20_;
+                    let _e1813 = jac_r_21_;
+                    let _e1816 = constants.inlet_velocity;
+                    eff_20_ = ((_e1810 + _e1811) + (_e1813 * _e1816));
+                    let _e1819 = jac_l_21_;
+                    eff_21_ = _e1819;
+                    let _e1820 = jac_l_22_;
+                    eff_22_ = _e1820;
+                    let _e1821 = jac_l_23_;
+                    let _e1822 = jac_r_23_;
+                    eff_23_ = (_e1821 + _e1822);
+                    let _e1824 = jac_l_30_;
+                    let _e1825 = jac_r_30_;
+                    let _e1827 = jac_r_31_;
+                    let _e1830 = constants.inlet_velocity;
+                    eff_30_ = ((_e1824 + _e1825) + (_e1827 * _e1830));
+                    let _e1833 = jac_l_31_;
+                    eff_31_ = _e1833;
+                    let _e1834 = jac_l_32_;
+                    eff_32_ = _e1834;
+                    let _e1835 = jac_l_33_;
+                    let _e1836 = jac_r_33_;
+                    eff_33_ = (_e1835 + _e1836);
                 } else {
                     if (boundary_type == 3u) {
-                        let _e1947 = jac_l_00_;
-                        let _e1948 = jac_r_00_;
-                        eff_00_ = (_e1947 + _e1948);
-                        let _e1950 = jac_l_01_;
-                        let _e1951 = jac_r_01_;
-                        eff_01_ = (_e1950 - _e1951);
-                        let _e1953 = jac_l_02_;
-                        let _e1954 = jac_r_02_;
-                        eff_02_ = (_e1953 - _e1954);
-                        let _e1956 = jac_l_03_;
-                        let _e1957 = jac_r_03_;
-                        eff_03_ = (_e1956 + _e1957);
-                        let _e1959 = jac_l_10_;
-                        let _e1960 = jac_r_10_;
-                        eff_10_ = (_e1959 + _e1960);
-                        let _e1962 = jac_l_11_;
-                        let _e1963 = jac_r_11_;
-                        eff_11_ = (_e1962 - _e1963);
-                        let _e1965 = jac_l_12_;
-                        let _e1966 = jac_r_12_;
-                        eff_12_ = (_e1965 - _e1966);
-                        let _e1968 = jac_l_13_;
-                        let _e1969 = jac_r_13_;
-                        eff_13_ = (_e1968 + _e1969);
-                        let _e1971 = jac_l_20_;
-                        let _e1972 = jac_r_20_;
-                        eff_20_ = (_e1971 + _e1972);
-                        let _e1974 = jac_l_21_;
-                        let _e1975 = jac_r_21_;
-                        eff_21_ = (_e1974 - _e1975);
-                        let _e1977 = jac_l_22_;
-                        let _e1978 = jac_r_22_;
-                        eff_22_ = (_e1977 - _e1978);
-                        let _e1980 = jac_l_23_;
-                        let _e1981 = jac_r_23_;
-                        eff_23_ = (_e1980 + _e1981);
-                        let _e1983 = jac_l_30_;
-                        let _e1984 = jac_r_30_;
-                        eff_30_ = (_e1983 + _e1984);
-                        let _e1986 = jac_l_31_;
-                        let _e1987 = jac_r_31_;
-                        eff_31_ = (_e1986 - _e1987);
-                        let _e1989 = jac_l_32_;
-                        let _e1990 = jac_r_32_;
-                        eff_32_ = (_e1989 - _e1990);
-                        let _e1992 = jac_l_33_;
-                        let _e1993 = jac_r_33_;
-                        eff_33_ = (_e1992 + _e1993);
+                        let _e1840 = jac_l_00_;
+                        let _e1841 = jac_r_00_;
+                        eff_00_ = (_e1840 + _e1841);
+                        let _e1843 = jac_l_01_;
+                        let _e1844 = jac_r_01_;
+                        eff_01_ = (_e1843 - _e1844);
+                        let _e1846 = jac_l_02_;
+                        let _e1847 = jac_r_02_;
+                        eff_02_ = (_e1846 - _e1847);
+                        let _e1849 = jac_l_03_;
+                        let _e1850 = jac_r_03_;
+                        eff_03_ = (_e1849 + _e1850);
+                        let _e1852 = jac_l_10_;
+                        let _e1853 = jac_r_10_;
+                        eff_10_ = (_e1852 + _e1853);
+                        let _e1855 = jac_l_11_;
+                        let _e1856 = jac_r_11_;
+                        eff_11_ = (_e1855 - _e1856);
+                        let _e1858 = jac_l_12_;
+                        let _e1859 = jac_r_12_;
+                        eff_12_ = (_e1858 - _e1859);
+                        let _e1861 = jac_l_13_;
+                        let _e1862 = jac_r_13_;
+                        eff_13_ = (_e1861 + _e1862);
+                        let _e1864 = jac_l_20_;
+                        let _e1865 = jac_r_20_;
+                        eff_20_ = (_e1864 + _e1865);
+                        let _e1867 = jac_l_21_;
+                        let _e1868 = jac_r_21_;
+                        eff_21_ = (_e1867 - _e1868);
+                        let _e1870 = jac_l_22_;
+                        let _e1871 = jac_r_22_;
+                        eff_22_ = (_e1870 - _e1871);
+                        let _e1873 = jac_l_23_;
+                        let _e1874 = jac_r_23_;
+                        eff_23_ = (_e1873 + _e1874);
+                        let _e1876 = jac_l_30_;
+                        let _e1877 = jac_r_30_;
+                        eff_30_ = (_e1876 + _e1877);
+                        let _e1879 = jac_l_31_;
+                        let _e1880 = jac_r_31_;
+                        eff_31_ = (_e1879 - _e1880);
+                        let _e1882 = jac_l_32_;
+                        let _e1883 = jac_r_32_;
+                        eff_32_ = (_e1882 - _e1883);
+                        let _e1885 = jac_l_33_;
+                        let _e1886 = jac_r_33_;
+                        eff_33_ = (_e1885 + _e1886);
                     }
                 }
-                let _e1995 = eff_00_;
-                let _e1997 = diag_00_;
-                diag_00_ = (_e1997 + (_e1995 * area));
-                let _e1999 = eff_01_;
-                let _e2001 = diag_01_;
-                diag_01_ = (_e2001 + (_e1999 * area));
-                let _e2003 = eff_02_;
-                let _e2005 = diag_02_;
-                diag_02_ = (_e2005 + (_e2003 * area));
-                let _e2007 = eff_03_;
-                let _e2009 = diag_03_;
-                diag_03_ = (_e2009 + (_e2007 * area));
-                let _e2011 = eff_10_;
-                let _e2013 = diag_10_;
-                diag_10_ = (_e2013 + (_e2011 * area));
-                let _e2015 = eff_11_;
-                let _e2017 = diag_11_;
-                diag_11_ = (_e2017 + (_e2015 * area));
-                let _e2019 = eff_12_;
-                let _e2021 = diag_12_;
-                diag_12_ = (_e2021 + (_e2019 * area));
-                let _e2023 = eff_13_;
-                let _e2025 = diag_13_;
-                diag_13_ = (_e2025 + (_e2023 * area));
-                let _e2027 = eff_20_;
-                let _e2029 = diag_20_;
-                diag_20_ = (_e2029 + (_e2027 * area));
-                let _e2031 = eff_21_;
-                let _e2033 = diag_21_;
-                diag_21_ = (_e2033 + (_e2031 * area));
-                let _e2035 = eff_22_;
-                let _e2037 = diag_22_;
-                diag_22_ = (_e2037 + (_e2035 * area));
-                let _e2039 = eff_23_;
-                let _e2041 = diag_23_;
-                diag_23_ = (_e2041 + (_e2039 * area));
-                let _e2043 = eff_30_;
-                let _e2045 = diag_30_;
-                diag_30_ = (_e2045 + (_e2043 * area));
-                let _e2047 = eff_31_;
-                let _e2049 = diag_31_;
-                diag_31_ = (_e2049 + (_e2047 * area));
-                let _e2051 = eff_32_;
-                let _e2053 = diag_32_;
-                diag_32_ = (_e2053 + (_e2051 * area));
-                let _e2055 = eff_33_;
-                let _e2057 = diag_33_;
-                diag_33_ = (_e2057 + (_e2055 * area));
+                let _e1888 = eff_00_;
+                let _e1890 = diag_00_;
+                diag_00_ = (_e1890 + (_e1888 * area));
+                let _e1892 = eff_01_;
+                let _e1894 = diag_01_;
+                diag_01_ = (_e1894 + (_e1892 * area));
+                let _e1896 = eff_02_;
+                let _e1898 = diag_02_;
+                diag_02_ = (_e1898 + (_e1896 * area));
+                let _e1900 = eff_03_;
+                let _e1902 = diag_03_;
+                diag_03_ = (_e1902 + (_e1900 * area));
+                let _e1904 = eff_10_;
+                let _e1906 = diag_10_;
+                diag_10_ = (_e1906 + (_e1904 * area));
+                let _e1908 = eff_11_;
+                let _e1910 = diag_11_;
+                diag_11_ = (_e1910 + (_e1908 * area));
+                let _e1912 = eff_12_;
+                let _e1914 = diag_12_;
+                diag_12_ = (_e1914 + (_e1912 * area));
+                let _e1916 = eff_13_;
+                let _e1918 = diag_13_;
+                diag_13_ = (_e1918 + (_e1916 * area));
+                let _e1920 = eff_20_;
+                let _e1922 = diag_20_;
+                diag_20_ = (_e1922 + (_e1920 * area));
+                let _e1924 = eff_21_;
+                let _e1926 = diag_21_;
+                diag_21_ = (_e1926 + (_e1924 * area));
+                let _e1928 = eff_22_;
+                let _e1930 = diag_22_;
+                diag_22_ = (_e1930 + (_e1928 * area));
+                let _e1932 = eff_23_;
+                let _e1934 = diag_23_;
+                diag_23_ = (_e1934 + (_e1932 * area));
+                let _e1936 = eff_30_;
+                let _e1938 = diag_30_;
+                diag_30_ = (_e1938 + (_e1936 * area));
+                let _e1940 = eff_31_;
+                let _e1942 = diag_31_;
+                diag_31_ = (_e1942 + (_e1940 * area));
+                let _e1944 = eff_32_;
+                let _e1946 = diag_32_;
+                diag_32_ = (_e1946 + (_e1944 * area));
+                let _e1948 = eff_33_;
+                let _e1950 = diag_33_;
+                diag_33_ = (_e1950 + (_e1948 * area));
             }
         }
         continuing {
-            let _e2060 = face_offset;
-            face_offset = (_e2060 + 1u);
+            let _e1953 = face_offset;
+            face_offset = (_e1953 + 1u);
         }
     }
-    let _e2062 = rhs_time_rho;
-    let _e2063 = rhs_pseudo_rho;
-    let _e2065 = coeff_time;
-    let _e2066 = coeff_pseudo;
-    let _e2070 = sum_rho;
-    rhs_rho = (((_e2062 + _e2063) - ((_e2065 + _e2066) * rho)) - _e2070);
-    let _e2073 = rhs_time_rho_u_x;
-    let _e2074 = rhs_pseudo_rho_u_x;
-    let _e2076 = coeff_time;
-    let _e2077 = coeff_pseudo;
-    let _e2082 = sum_rho_u_x;
-    rhs_rho_u_x = (((_e2073 + _e2074) - ((_e2076 + _e2077) * rho_u.x)) - _e2082);
-    let _e2085 = rhs_time_rho_u_y;
-    let _e2086 = rhs_pseudo_rho_u_y;
-    let _e2088 = coeff_time;
-    let _e2089 = coeff_pseudo;
-    let _e2094 = sum_rho_u_y;
-    rhs_rho_u_y = (((_e2085 + _e2086) - ((_e2088 + _e2089) * rho_u.y)) - _e2094);
-    let _e2097 = rhs_time_rho_e;
-    let _e2098 = rhs_pseudo_rho_e;
-    let _e2100 = coeff_time;
-    let _e2101 = coeff_pseudo;
-    let _e2105 = sum_rho_e;
-    rhs_rho_e = (((_e2097 + _e2098) - ((_e2100 + _e2101) * rho_e)) - _e2105);
-    let _e2108 = coeff_time;
-    let _e2109 = diag_00_;
-    diag_00_ = (_e2109 + _e2108);
-    let _e2111 = coeff_time;
-    let _e2112 = diag_11_;
-    diag_11_ = (_e2112 + _e2111);
-    let _e2114 = coeff_time;
-    let _e2115 = diag_22_;
-    diag_22_ = (_e2115 + _e2114);
-    let _e2117 = coeff_time;
-    let _e2118 = diag_33_;
-    diag_33_ = (_e2118 + _e2117);
-    let _e2120 = coeff_pseudo;
-    let _e2121 = diag_00_;
-    diag_00_ = (_e2121 + _e2120);
-    let _e2123 = coeff_pseudo;
-    let _e2124 = diag_11_;
-    diag_11_ = (_e2124 + _e2123);
-    let _e2126 = coeff_pseudo;
-    let _e2127 = diag_22_;
-    diag_22_ = (_e2127 + _e2126);
-    let _e2129 = coeff_pseudo;
-    let _e2130 = diag_33_;
-    diag_33_ = (_e2130 + _e2129);
+    let _e1955 = rhs_time_rho;
+    let _e1956 = rhs_pseudo_rho;
+    let _e1958 = coeff_time;
+    let _e1959 = coeff_pseudo;
+    let _e1963 = sum_rho;
+    rhs_rho = (((_e1955 + _e1956) - ((_e1958 + _e1959) * rho)) - _e1963);
+    let _e1966 = rhs_time_rho_u_x;
+    let _e1967 = rhs_pseudo_rho_u_x;
+    let _e1969 = coeff_time;
+    let _e1970 = coeff_pseudo;
+    let _e1975 = sum_rho_u_x;
+    rhs_rho_u_x = (((_e1966 + _e1967) - ((_e1969 + _e1970) * rho_u.x)) - _e1975);
+    let _e1978 = rhs_time_rho_u_y;
+    let _e1979 = rhs_pseudo_rho_u_y;
+    let _e1981 = coeff_time;
+    let _e1982 = coeff_pseudo;
+    let _e1987 = sum_rho_u_y;
+    rhs_rho_u_y = (((_e1978 + _e1979) - ((_e1981 + _e1982) * rho_u.y)) - _e1987);
+    let _e1990 = rhs_time_rho_e;
+    let _e1991 = rhs_pseudo_rho_e;
+    let _e1993 = coeff_time;
+    let _e1994 = coeff_pseudo;
+    let _e1998 = sum_rho_e;
+    rhs_rho_e = (((_e1990 + _e1991) - ((_e1993 + _e1994) * rho_e)) - _e1998);
+    let _e2001 = coeff_time;
+    let _e2002 = diag_00_;
+    diag_00_ = (_e2002 + _e2001);
+    let _e2004 = coeff_time;
+    let _e2005 = diag_11_;
+    diag_11_ = (_e2005 + _e2004);
+    let _e2007 = coeff_time;
+    let _e2008 = diag_22_;
+    diag_22_ = (_e2008 + _e2007);
+    let _e2010 = coeff_time;
+    let _e2011 = diag_33_;
+    diag_33_ = (_e2011 + _e2010);
+    let _e2013 = coeff_pseudo;
+    let _e2014 = diag_00_;
+    diag_00_ = (_e2014 + _e2013);
+    let _e2016 = coeff_pseudo;
+    let _e2017 = diag_11_;
+    diag_11_ = (_e2017 + _e2016);
+    let _e2019 = coeff_pseudo;
+    let _e2020 = diag_22_;
+    diag_22_ = (_e2020 + _e2019);
+    let _e2022 = coeff_pseudo;
+    let _e2023 = diag_33_;
+    diag_33_ = (_e2023 + _e2022);
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = (scalar_diag_idx - scalar_offset);
     let diag_base_0_ = (start_row_0_ + (4u * diag_rank));
     let diag_base_1_ = (start_row_1_ + (4u * diag_rank));
     let diag_base_2_ = (start_row_2_ + (4u * diag_rank));
     let diag_base_3_ = (start_row_3_ + (4u * diag_rank));
-    let _e2152 = diag_00_;
-    matrix_values[(diag_base_0_ + 0u)] = _e2152;
-    let _e2157 = diag_01_;
-    matrix_values[(diag_base_0_ + 1u)] = _e2157;
-    let _e2162 = diag_02_;
-    matrix_values[(diag_base_0_ + 2u)] = _e2162;
-    let _e2167 = diag_03_;
-    matrix_values[(diag_base_0_ + 3u)] = _e2167;
-    let _e2172 = diag_10_;
-    matrix_values[(diag_base_1_ + 0u)] = _e2172;
-    let _e2177 = diag_11_;
-    matrix_values[(diag_base_1_ + 1u)] = _e2177;
-    let _e2182 = diag_12_;
-    matrix_values[(diag_base_1_ + 2u)] = _e2182;
-    let _e2187 = diag_13_;
-    matrix_values[(diag_base_1_ + 3u)] = _e2187;
-    let _e2192 = diag_20_;
-    matrix_values[(diag_base_2_ + 0u)] = _e2192;
-    let _e2197 = diag_21_;
-    matrix_values[(diag_base_2_ + 1u)] = _e2197;
-    let _e2202 = diag_22_;
-    matrix_values[(diag_base_2_ + 2u)] = _e2202;
-    let _e2207 = diag_23_;
-    matrix_values[(diag_base_2_ + 3u)] = _e2207;
-    let _e2212 = diag_30_;
-    matrix_values[(diag_base_3_ + 0u)] = _e2212;
-    let _e2217 = diag_31_;
-    matrix_values[(diag_base_3_ + 1u)] = _e2217;
-    let _e2222 = diag_32_;
-    matrix_values[(diag_base_3_ + 2u)] = _e2222;
-    let _e2227 = diag_33_;
-    matrix_values[(diag_base_3_ + 3u)] = _e2227;
-    let _e2234 = rhs_rho;
-    rhs[((4u * idx) + 0u)] = _e2234;
-    let _e2241 = rhs_rho_u_x;
-    rhs[((4u * idx) + 1u)] = _e2241;
-    let _e2248 = rhs_rho_u_y;
-    rhs[((4u * idx) + 2u)] = _e2248;
-    let _e2255 = rhs_rho_e;
-    rhs[((4u * idx) + 3u)] = _e2255;
+    let _e2045 = diag_00_;
+    matrix_values[(diag_base_0_ + 0u)] = _e2045;
+    let _e2050 = diag_01_;
+    matrix_values[(diag_base_0_ + 1u)] = _e2050;
+    let _e2055 = diag_02_;
+    matrix_values[(diag_base_0_ + 2u)] = _e2055;
+    let _e2060 = diag_03_;
+    matrix_values[(diag_base_0_ + 3u)] = _e2060;
+    let _e2065 = diag_10_;
+    matrix_values[(diag_base_1_ + 0u)] = _e2065;
+    let _e2070 = diag_11_;
+    matrix_values[(diag_base_1_ + 1u)] = _e2070;
+    let _e2075 = diag_12_;
+    matrix_values[(diag_base_1_ + 2u)] = _e2075;
+    let _e2080 = diag_13_;
+    matrix_values[(diag_base_1_ + 3u)] = _e2080;
+    let _e2085 = diag_20_;
+    matrix_values[(diag_base_2_ + 0u)] = _e2085;
+    let _e2090 = diag_21_;
+    matrix_values[(diag_base_2_ + 1u)] = _e2090;
+    let _e2095 = diag_22_;
+    matrix_values[(diag_base_2_ + 2u)] = _e2095;
+    let _e2100 = diag_23_;
+    matrix_values[(diag_base_2_ + 3u)] = _e2100;
+    let _e2105 = diag_30_;
+    matrix_values[(diag_base_3_ + 0u)] = _e2105;
+    let _e2110 = diag_31_;
+    matrix_values[(diag_base_3_ + 1u)] = _e2110;
+    let _e2115 = diag_32_;
+    matrix_values[(diag_base_3_ + 2u)] = _e2115;
+    let _e2120 = diag_33_;
+    matrix_values[(diag_base_3_ + 3u)] = _e2120;
+    let _e2127 = rhs_rho;
+    rhs[((4u * idx) + 0u)] = _e2127;
+    let _e2134 = rhs_rho_u_x;
+    rhs[((4u * idx) + 1u)] = _e2134;
+    let _e2141 = rhs_rho_u_y;
+    rhs[((4u * idx) + 2u)] = _e2141;
+    let _e2148 = rhs_rho_e;
+    rhs[((4u * idx) + 3u)] = _e2148;
     return;
 }
 "#;
@@ -6664,310 +7483,297 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             rho_u_r.y = 0f;
         } else {
             if (boundary_type == 3u) {
-                let _e129 = rho_u_l.x;
-                rho_u_r.x = -(_e129);
+                let _e128 = rho_u_l.x;
+                let _e130 = normal.x;
                 let _e133 = rho_u_l.y;
-                rho_u_r.y = -(_e133);
+                let _e135 = normal.y;
+                let m_dot_n = ((_e128 * _e130) + (_e133 * _e135));
+                let _e140 = rho_u_l.x;
+                let _e144 = normal.x;
+                rho_u_r.x = (_e140 - ((2f * m_dot_n) * _e144));
+                let _e149 = rho_u_l.y;
+                let _e153 = normal.y;
+                rho_u_r.y = (_e149 - ((2f * m_dot_n) * _e153));
             }
         }
     }
     let rho_r_cell = rho_r;
     let rho_u_r_cell = rho_u_r;
     let rho_e_r_cell = rho_e_r;
-    let _e138 = is_boundary;
-    let _e142 = constants.scheme;
-    if (!(_e138) && (_e142 != 0u)) {
+    let _e159 = is_boundary;
+    let _e163 = constants.scheme;
+    if (!(_e159) && (_e163 == 1u)) {
         let r_l_x = (face_center.x - center_owner.x);
         let r_l_y = (face_center.y - center_owner.y);
-        let _e154 = center_r.x;
-        let r_r_x = (face_center.x - _e154);
-        let _e158 = center_r.y;
-        let r_r_y = (face_center.y - _e158);
-        let inv_rho_l_cell = (1f / max(rho_l_cell, 0.00000001f));
-        let u_l_x_cell = (rho_u_l_cell.x * inv_rho_l_cell);
-        let u_l_y_cell = (rho_u_l_cell.y * inv_rho_l_cell);
-        let u2_l_cell = ((u_l_x_cell * u_l_x_cell) + (u_l_y_cell * u_l_y_cell));
-        let p_l_cell = max(0f, (0.4f * (rho_e_l_cell - ((0.5f * rho_l_cell) * u2_l_cell))));
-        let inv_rho_r_cell = (1f / max(rho_r_cell, 0.00000001f));
-        let u_r_x_cell = (rho_u_r_cell.x * inv_rho_r_cell);
-        let u_r_y_cell = (rho_u_r_cell.y * inv_rho_r_cell);
-        let u2_r_cell = ((u_r_x_cell * u_r_x_cell) + (u_r_y_cell * u_r_y_cell));
-        let p_r_cell = max(0f, (0.4f * (rho_e_r_cell - ((0.5f * rho_r_cell) * u2_r_cell))));
+        let _e175 = center_r.x;
+        let r_r_x = (face_center.x - _e175);
+        let _e179 = center_r.y;
+        let r_r_y = (face_center.y - _e179);
         let grad_rho_l = grad_rho[owner];
         let grad_rho_u_x_l = grad_rho_u_x[owner];
         let grad_rho_u_y_l = grad_rho_u_y[owner];
         let grad_rho_e_l = grad_rho_e[owner];
-        let _e211 = other_idx;
-        let grad_rho_r = grad_rho[_e211];
-        let _e215 = other_idx;
-        let grad_rho_u_x_r = grad_rho_u_x[_e215];
-        let _e219 = other_idx;
-        let grad_rho_u_y_r = grad_rho_u_y[_e219];
-        let _e223 = other_idx;
-        let grad_rho_e_r = grad_rho_e[_e223];
-        let grad_u_x_l_x = ((grad_rho_u_x_l.x - (u_l_x_cell * grad_rho_l.x)) * inv_rho_l_cell);
-        let grad_u_x_l_y = ((grad_rho_u_x_l.y - (u_l_x_cell * grad_rho_l.y)) * inv_rho_l_cell);
-        let grad_u_y_l_x = ((grad_rho_u_y_l.x - (u_l_y_cell * grad_rho_l.x)) * inv_rho_l_cell);
-        let grad_u_y_l_y = ((grad_rho_u_y_l.y - (u_l_y_cell * grad_rho_l.y)) * inv_rho_l_cell);
-        let grad_u_x_r_x = ((grad_rho_u_x_r.x - (u_r_x_cell * grad_rho_r.x)) * inv_rho_r_cell);
-        let grad_u_x_r_y = ((grad_rho_u_x_r.y - (u_r_x_cell * grad_rho_r.y)) * inv_rho_r_cell);
-        let grad_u_y_r_x = ((grad_rho_u_y_r.x - (u_r_y_cell * grad_rho_r.x)) * inv_rho_r_cell);
-        let grad_u_y_r_y = ((grad_rho_u_y_r.y - (u_r_y_cell * grad_rho_r.y)) * inv_rho_r_cell);
-        let grad_u2_l_x = (((2f * u_l_x_cell) * grad_u_x_l_x) + ((2f * u_l_y_cell) * grad_u_y_l_x));
-        let grad_u2_l_y = (((2f * u_l_x_cell) * grad_u_x_l_y) + ((2f * u_l_y_cell) * grad_u_y_l_y));
-        let grad_u2_r_x = (((2f * u_r_x_cell) * grad_u_x_r_x) + ((2f * u_r_y_cell) * grad_u_y_r_x));
-        let grad_u2_r_y = (((2f * u_r_x_cell) * grad_u_x_r_y) + ((2f * u_r_y_cell) * grad_u_y_r_y));
-        let grad_rho_u2_l_x = ((u2_l_cell * grad_rho_l.x) + (rho_l_cell * grad_u2_l_x));
-        let grad_rho_u2_l_y = ((u2_l_cell * grad_rho_l.y) + (rho_l_cell * grad_u2_l_y));
-        let grad_rho_u2_r_x = ((u2_r_cell * grad_rho_r.x) + (rho_r_cell * grad_u2_r_x));
-        let grad_rho_u2_r_y = ((u2_r_cell * grad_rho_r.y) + (rho_r_cell * grad_u2_r_y));
-        let grad_p_l_x = (0.4f * (grad_rho_e_l.x - (0.5f * grad_rho_u2_l_x)));
-        let grad_p_l_y = (0.4f * (grad_rho_e_l.y - (0.5f * grad_rho_u2_l_y)));
-        let grad_p_r_x = (0.4f * (grad_rho_e_r.x - (0.5f * grad_rho_u2_r_x)));
-        let grad_p_r_y = (0.4f * (grad_rho_e_r.y - (0.5f * grad_rho_u2_r_y)));
+        let _e194 = other_idx;
+        let grad_rho_r = grad_rho[_e194];
+        let _e198 = other_idx;
+        let grad_rho_u_x_r = grad_rho_u_x[_e198];
+        let _e202 = other_idx;
+        let grad_rho_u_y_r = grad_rho_u_y[_e202];
+        let _e206 = other_idx;
+        let grad_rho_e_r = grad_rho_e[_e206];
         let diff_rho_l = (rho_r_cell - rho_l_cell);
         let min_diff_rho_l = min(diff_rho_l, 0f);
         let max_diff_rho_l = max(diff_rho_l, 0f);
         let delta_rho_l = ((grad_rho_l.x * r_l_x) + (grad_rho_l.y * r_l_y));
         let delta_rho_l_limited = min(max(delta_rho_l, min_diff_rho_l), max_diff_rho_l);
-        let diff_u_l_x = (u_r_x_cell - u_l_x_cell);
-        let min_diff_u_l_x = min(diff_u_l_x, 0f);
-        let max_diff_u_l_x = max(diff_u_l_x, 0f);
-        let delta_u_l_x = ((grad_u_x_l_x * r_l_x) + (grad_u_x_l_y * r_l_y));
-        let delta_u_l_x_limited = min(max(delta_u_l_x, min_diff_u_l_x), max_diff_u_l_x);
-        let diff_u_l_y = (u_r_y_cell - u_l_y_cell);
-        let min_diff_u_l_y = min(diff_u_l_y, 0f);
-        let max_diff_u_l_y = max(diff_u_l_y, 0f);
-        let delta_u_l_y = ((grad_u_y_l_x * r_l_x) + (grad_u_y_l_y * r_l_y));
-        let delta_u_l_y_limited = min(max(delta_u_l_y, min_diff_u_l_y), max_diff_u_l_y);
-        let diff_p_l = (p_r_cell - p_l_cell);
-        let min_diff_p_l = min(diff_p_l, 0f);
-        let max_diff_p_l = max(diff_p_l, 0f);
-        let delta_p_l = ((grad_p_l_x * r_l_x) + (grad_p_l_y * r_l_y));
-        let delta_p_l_limited = min(max(delta_p_l, min_diff_p_l), max_diff_p_l);
+        let diff_rho_u_x_l = (rho_u_r_cell.x - rho_u_l_cell.x);
+        let min_diff_rho_u_x_l = min(diff_rho_u_x_l, 0f);
+        let max_diff_rho_u_x_l = max(diff_rho_u_x_l, 0f);
+        let delta_rho_u_x_l = ((grad_rho_u_x_l.x * r_l_x) + (grad_rho_u_x_l.y * r_l_y));
+        let delta_rho_u_x_l_limited = min(max(delta_rho_u_x_l, min_diff_rho_u_x_l), max_diff_rho_u_x_l);
+        let diff_rho_u_y_l = (rho_u_r_cell.y - rho_u_l_cell.y);
+        let min_diff_rho_u_y_l = min(diff_rho_u_y_l, 0f);
+        let max_diff_rho_u_y_l = max(diff_rho_u_y_l, 0f);
+        let delta_rho_u_y_l = ((grad_rho_u_y_l.x * r_l_x) + (grad_rho_u_y_l.y * r_l_y));
+        let delta_rho_u_y_l_limited = min(max(delta_rho_u_y_l, min_diff_rho_u_y_l), max_diff_rho_u_y_l);
+        let diff_rho_e_l = (rho_e_r_cell - rho_e_l_cell);
+        let min_diff_rho_e_l = min(diff_rho_e_l, 0f);
+        let max_diff_rho_e_l = max(diff_rho_e_l, 0f);
+        let delta_rho_e_l = ((grad_rho_e_l.x * r_l_x) + (grad_rho_e_l.y * r_l_y));
+        let delta_rho_e_l_limited = min(max(delta_rho_e_l, min_diff_rho_e_l), max_diff_rho_e_l);
         let rho_l_face = (rho_l_cell + delta_rho_l_limited);
-        let u_l_x_face = (u_l_x_cell + delta_u_l_x_limited);
-        let u_l_y_face = (u_l_y_cell + delta_u_l_y_limited);
-        let p_l_face = (p_l_cell + delta_p_l_limited);
+        let rho_u_x_l_face = (rho_u_l_cell.x + delta_rho_u_x_l_limited);
+        let rho_u_y_l_face = (rho_u_l_cell.y + delta_rho_u_y_l_limited);
+        let rho_e_l_face = (rho_e_l_cell + delta_rho_e_l_limited);
         let diff_rho_r = (rho_l_cell - rho_r_cell);
         let min_diff_rho_r = min(diff_rho_r, 0f);
         let max_diff_rho_r = max(diff_rho_r, 0f);
         let delta_rho_r = ((grad_rho_r.x * r_r_x) + (grad_rho_r.y * r_r_y));
         let delta_rho_r_limited = min(max(delta_rho_r, min_diff_rho_r), max_diff_rho_r);
-        let diff_u_r_x = (u_l_x_cell - u_r_x_cell);
-        let min_diff_u_r_x = min(diff_u_r_x, 0f);
-        let max_diff_u_r_x = max(diff_u_r_x, 0f);
-        let delta_u_r_x = ((grad_u_x_r_x * r_r_x) + (grad_u_x_r_y * r_r_y));
-        let delta_u_r_x_limited = min(max(delta_u_r_x, min_diff_u_r_x), max_diff_u_r_x);
-        let diff_u_r_y = (u_l_y_cell - u_r_y_cell);
-        let min_diff_u_r_y = min(diff_u_r_y, 0f);
-        let max_diff_u_r_y = max(diff_u_r_y, 0f);
-        let delta_u_r_y = ((grad_u_y_r_x * r_r_x) + (grad_u_y_r_y * r_r_y));
-        let delta_u_r_y_limited = min(max(delta_u_r_y, min_diff_u_r_y), max_diff_u_r_y);
-        let diff_p_r = (p_l_cell - p_r_cell);
-        let min_diff_p_r = min(diff_p_r, 0f);
-        let max_diff_p_r = max(diff_p_r, 0f);
-        let delta_p_r = ((grad_p_r_x * r_r_x) + (grad_p_r_y * r_r_y));
-        let delta_p_r_limited = min(max(delta_p_r, min_diff_p_r), max_diff_p_r);
+        let diff_rho_u_x_r = (rho_u_l_cell.x - rho_u_r_cell.x);
+        let min_diff_rho_u_x_r = min(diff_rho_u_x_r, 0f);
+        let max_diff_rho_u_x_r = max(diff_rho_u_x_r, 0f);
+        let delta_rho_u_x_r = ((grad_rho_u_x_r.x * r_r_x) + (grad_rho_u_x_r.y * r_r_y));
+        let delta_rho_u_x_r_limited = min(max(delta_rho_u_x_r, min_diff_rho_u_x_r), max_diff_rho_u_x_r);
+        let diff_rho_u_y_r = (rho_u_l_cell.y - rho_u_r_cell.y);
+        let min_diff_rho_u_y_r = min(diff_rho_u_y_r, 0f);
+        let max_diff_rho_u_y_r = max(diff_rho_u_y_r, 0f);
+        let delta_rho_u_y_r = ((grad_rho_u_y_r.x * r_r_x) + (grad_rho_u_y_r.y * r_r_y));
+        let delta_rho_u_y_r_limited = min(max(delta_rho_u_y_r, min_diff_rho_u_y_r), max_diff_rho_u_y_r);
+        let diff_rho_e_r = (rho_e_l_cell - rho_e_r_cell);
+        let min_diff_rho_e_r = min(diff_rho_e_r, 0f);
+        let max_diff_rho_e_r = max(diff_rho_e_r, 0f);
+        let delta_rho_e_r = ((grad_rho_e_r.x * r_r_x) + (grad_rho_e_r.y * r_r_y));
+        let delta_rho_e_r_limited = min(max(delta_rho_e_r, min_diff_rho_e_r), max_diff_rho_e_r);
         let rho_r_face = (rho_r_cell + delta_rho_r_limited);
-        let u_r_x_face = (u_r_x_cell + delta_u_r_x_limited);
-        let u_r_y_face = (u_r_y_cell + delta_u_r_y_limited);
-        let p_r_face = (p_r_cell + delta_p_r_limited);
+        let rho_u_x_r_face = (rho_u_r_cell.x + delta_rho_u_x_r_limited);
+        let rho_u_y_r_face = (rho_u_r_cell.y + delta_rho_u_y_r_limited);
+        let rho_e_r_face = (rho_e_r_cell + delta_rho_e_r_limited);
         rho_l = rho_l_face;
-        rho_u_l.x = (rho_l_face * u_l_x_face);
-        rho_u_l.y = (rho_l_face * u_l_y_face);
-        rho_e_l = ((p_l_face / 0.4f) + ((0.5f * rho_l_face) * ((u_l_x_face * u_l_x_face) + (u_l_y_face * u_l_y_face))));
+        rho_u_l.x = rho_u_x_l_face;
+        rho_u_l.y = rho_u_y_l_face;
+        rho_e_l = rho_e_l_face;
         rho_r = rho_r_face;
-        rho_u_r.x = (rho_r_face * u_r_x_face);
-        rho_u_r.y = (rho_r_face * u_r_y_face);
-        rho_e_r = ((p_r_face / 0.4f) + ((0.5f * rho_r_face) * ((u_r_x_face * u_r_x_face) + (u_r_y_face * u_r_y_face))));
+        rho_u_r.x = rho_u_x_r_face;
+        rho_u_r.y = rho_u_y_r_face;
+        rho_e_r = rho_e_r_face;
     }
-    let _e452 = rho_l;
-    let inv_rho_l = (1f / max(_e452, 0.00000001f));
-    let _e458 = rho_u_l.x;
-    let u_l_x = (_e458 * inv_rho_l);
-    let _e461 = rho_u_l.y;
-    let u_l_y = (_e461 * inv_rho_l);
-    let _e463 = rho_l;
-    let ke_l = ((0.5f * _e463) * ((u_l_x * u_l_x) + (u_l_y * u_l_y)));
-    let _e470 = rho_e_l;
-    let p_l = max(0f, (0.4f * (_e470 - ke_l)));
-    let _e477 = normal.x;
-    let _e480 = normal.y;
-    let u_n_l = ((u_l_x * _e477) + (u_l_y * _e480));
+    let _e329 = rho_l;
+    let inv_rho_l = (1f / max(_e329, 0.00000001f));
+    let _e335 = rho_u_l.x;
+    let u_l_x = (_e335 * inv_rho_l);
+    let _e338 = rho_u_l.y;
+    let u_l_y = (_e338 * inv_rho_l);
+    let _e340 = rho_l;
+    let ke_l = ((0.5f * _e340) * ((u_l_x * u_l_x) + (u_l_y * u_l_y)));
+    let _e347 = rho_e_l;
+    let p_l = max(0f, (0.4f * (_e347 - ke_l)));
+    let _e354 = normal.x;
+    let _e357 = normal.y;
+    let u_n_l = ((u_l_x * _e354) + (u_l_y * _e357));
     let c_l = sqrt(((1.4f * p_l) * inv_rho_l));
-    let _e487 = rho_r;
-    let inv_rho_r = (1f / max(_e487, 0.00000001f));
-    let _e493 = rho_u_r.x;
-    let u_r_x = (_e493 * inv_rho_r);
-    let _e496 = rho_u_r.y;
-    let u_r_y = (_e496 * inv_rho_r);
-    let _e498 = rho_r;
-    let ke_r = ((0.5f * _e498) * ((u_r_x * u_r_x) + (u_r_y * u_r_y)));
-    let _e505 = rho_e_r;
-    let p_r = max(0f, (0.4f * (_e505 - ke_r)));
-    let _e512 = normal.x;
-    let _e515 = normal.y;
-    let u_n_r = ((u_r_x * _e512) + (u_r_y * _e515));
+    let _e364 = rho_r;
+    let inv_rho_r = (1f / max(_e364, 0.00000001f));
+    let _e370 = rho_u_r.x;
+    let u_r_x = (_e370 * inv_rho_r);
+    let _e373 = rho_u_r.y;
+    let u_r_y = (_e373 * inv_rho_r);
+    let _e375 = rho_r;
+    let ke_r = ((0.5f * _e375) * ((u_r_x * u_r_x) + (u_r_y * u_r_y)));
+    let _e382 = rho_e_r;
+    let p_r = max(0f, (0.4f * (_e382 - ke_r)));
+    let _e389 = normal.x;
+    let _e392 = normal.y;
+    let u_n_r = ((u_r_x * _e389) + (u_r_y * _e392));
     let c_r = sqrt(((1.4f * p_r) * inv_rho_r));
     let u_face_x = (0.5f * (u_l_x + u_r_x));
     let u_face_y = (0.5f * (u_l_y + u_r_y));
-    let _e529 = normal.x;
-    let _e532 = normal.y;
-    let u_face_n = ((u_face_x * _e529) + (u_face_y * _e532));
+    let _e406 = normal.x;
+    let _e409 = normal.y;
+    let u_face_n = ((u_face_x * _e406) + (u_face_y * _e409));
     let c_bar = (0.5f * (c_l + c_r));
-    let beta = (abs(u_face_n) / max(c_bar, 0.000001f));
-    let mach2_ = (beta * beta);
-    c_l_eff = (c_l * beta);
-    c_r_eff = (c_r * beta);
-    let _e549 = constants.precond_model;
-    if (_e549 == 1u) {
-        let _e554 = constants.precond_theta_floor;
-        let theta = min(1f, max(mach2_, _e554));
-        let one_minus_theta = (1f - theta);
-        c_l_eff = sqrt((((theta * c_l) * c_l) + ((one_minus_theta * u_n_l) * u_n_l)));
-        c_r_eff = sqrt((((theta * c_r) * c_r) + ((one_minus_theta * u_n_r) * u_n_r)));
+    let mach = (abs(u_face_n) / max(c_bar, 0.000001f));
+    let mach2_ = (mach * mach);
+    c_l_eff = c_l;
+    c_r_eff = c_r;
+    let _e424 = constants.precond_model;
+    if (_e424 == 0u) {
+        c_l_eff = (c_l * mach);
+        c_r_eff = (c_r * mach);
+    } else {
+        let _e431 = constants.precond_model;
+        if (_e431 == 1u) {
+            let _e436 = constants.precond_theta_floor;
+            let theta = min(1f, max(mach2_, _e436));
+            let one_minus_theta = (1f - theta);
+            c_l_eff = sqrt((((theta * c_l) * c_l) + ((one_minus_theta * u_n_l) * u_n_l)));
+            c_r_eff = sqrt((((theta * c_r) * c_r) + ((one_minus_theta * u_n_r) * u_n_r)));
+        }
     }
-    let _e573 = center_r.x;
-    let dx = (_e573 - center_owner.x);
-    let _e577 = center_r.y;
-    let dy = (_e577 - center_owner.y);
+    let _e455 = center_r.x;
+    let dx = (_e455 - center_owner.x);
+    let _e459 = center_r.y;
+    let dy = (_e459 - center_owner.y);
     let dist = max(sqrt(((dx * dx) + (dy * dy))), 0.000001f);
     let mu = constants.viscosity;
-    let _e589 = c_l_eff;
-    let _e591 = c_r_eff;
-    let a_plus = max(0f, max((u_n_l + _e589), (u_n_r + _e591)));
-    let _e596 = c_l_eff;
-    let _e598 = c_r_eff;
-    let a_minus = min(0f, min((u_n_l - _e596), (u_n_r - _e598)));
+    let _e471 = c_l_eff;
+    let _e473 = c_r_eff;
+    let a_plus = max(0f, max((u_n_l + _e471), (u_n_r + _e473)));
+    let _e478 = c_l_eff;
+    let _e480 = c_r_eff;
+    let a_minus = min(0f, min((u_n_l - _e478), (u_n_r - _e480)));
     let denom = max((a_plus - a_minus), 0.000001f);
     let a_prod = (a_plus * a_minus);
     let a_pos = (a_plus / denom);
     let a_neg = (1f - a_pos);
     let a_prod_scaled = (a_prod / denom);
-    let _e611 = rho_l;
-    let flux_rho_l = (_e611 * u_n_l);
-    let _e613 = rho_r;
-    let flux_rho_r = (_e613 * u_n_r);
-    let _e618 = rho_r;
-    let _e619 = rho_l;
-    flux_rho = (((a_pos * flux_rho_l) + (a_neg * flux_rho_r)) + (a_prod_scaled * (_e618 - _e619)));
-    let _e625 = rho_u_l.x;
-    let _e628 = normal.x;
-    let flux_rho_u_x_l = ((_e625 * u_n_l) + (p_l * _e628));
-    let _e632 = rho_u_r.x;
-    let _e635 = normal.x;
-    let flux_rho_u_x_r = ((_e632 * u_n_r) + (p_r * _e635));
-    let _e642 = rho_u_r.x;
-    let _e644 = rho_u_l.x;
-    flux_rho_u_x = (((a_pos * flux_rho_u_x_l) + (a_neg * flux_rho_u_x_r)) + (a_prod_scaled * (_e642 - _e644)));
-    let _e650 = rho_u_l.y;
-    let _e653 = normal.y;
-    let flux_rho_u_y_l = ((_e650 * u_n_l) + (p_l * _e653));
-    let _e657 = rho_u_r.y;
-    let _e660 = normal.y;
-    let flux_rho_u_y_r = ((_e657 * u_n_r) + (p_r * _e660));
-    let _e667 = rho_u_r.y;
-    let _e669 = rho_u_l.y;
-    flux_rho_u_y = (((a_pos * flux_rho_u_y_l) + (a_neg * flux_rho_u_y_r)) + (a_prod_scaled * (_e667 - _e669)));
+    let _e493 = rho_l;
+    let flux_rho_l = (_e493 * u_n_l);
+    let _e495 = rho_r;
+    let flux_rho_r = (_e495 * u_n_r);
+    let _e500 = rho_r;
+    let _e501 = rho_l;
+    flux_rho = (((a_pos * flux_rho_l) + (a_neg * flux_rho_r)) + (a_prod_scaled * (_e500 - _e501)));
+    let _e507 = rho_u_l.x;
+    let _e510 = normal.x;
+    let flux_rho_u_x_l = ((_e507 * u_n_l) + (p_l * _e510));
+    let _e514 = rho_u_r.x;
+    let _e517 = normal.x;
+    let flux_rho_u_x_r = ((_e514 * u_n_r) + (p_r * _e517));
+    let _e524 = rho_u_r.x;
+    let _e526 = rho_u_l.x;
+    flux_rho_u_x = (((a_pos * flux_rho_u_x_l) + (a_neg * flux_rho_u_x_r)) + (a_prod_scaled * (_e524 - _e526)));
+    let _e532 = rho_u_l.y;
+    let _e535 = normal.y;
+    let flux_rho_u_y_l = ((_e532 * u_n_l) + (p_l * _e535));
+    let _e539 = rho_u_r.y;
+    let _e542 = normal.y;
+    let flux_rho_u_y_r = ((_e539 * u_n_r) + (p_r * _e542));
+    let _e549 = rho_u_r.y;
+    let _e551 = rho_u_l.y;
+    flux_rho_u_y = (((a_pos * flux_rho_u_y_l) + (a_neg * flux_rho_u_y_r)) + (a_prod_scaled * (_e549 - _e551)));
     let diff_u_x = ((-(mu) * (u_r_x - u_l_x)) / dist);
     let diff_u_y = ((-(mu) * (u_r_y - u_l_y)) / dist);
-    let _e682 = flux_rho_u_x;
-    flux_rho_u_x = (_e682 + diff_u_x);
-    let _e684 = flux_rho_u_y;
-    flux_rho_u_y = (_e684 + diff_u_y);
-    let _e686 = rho_e_l;
-    let flux_rho_e_l = ((_e686 + p_l) * u_n_l);
-    let _e689 = rho_e_r;
-    let flux_rho_e_r = ((_e689 + p_r) * u_n_r);
-    let _e695 = rho_e_r;
-    let _e696 = rho_e_l;
-    flux_rho_e = (((a_pos * flux_rho_e_l) + (a_neg * flux_rho_e_r)) + (a_prod_scaled * (_e695 - _e696)));
-    let inv_rho_l_cell_1 = (1f / max(rho_l_cell, 0.00000001f));
-    let inv_rho_r_cell_1 = (1f / max(rho_r_cell, 0.00000001f));
-    let u_l_x_cell_1 = (rho_u_l_cell.x * inv_rho_l_cell_1);
-    let u_l_y_cell_1 = (rho_u_l_cell.y * inv_rho_l_cell_1);
-    let u_r_x_cell_1 = (rho_u_r_cell.x * inv_rho_r_cell_1);
-    let u_r_y_cell_1 = (rho_u_r_cell.y * inv_rho_r_cell_1);
-    let u2_l_cell_1 = ((u_l_x_cell_1 * u_l_x_cell_1) + (u_l_y_cell_1 * u_l_y_cell_1));
-    let u2_r_cell_1 = ((u_r_x_cell_1 * u_r_x_cell_1) + (u_r_y_cell_1 * u_r_y_cell_1));
+    let _e564 = flux_rho_u_x;
+    flux_rho_u_x = (_e564 + diff_u_x);
+    let _e566 = flux_rho_u_y;
+    flux_rho_u_y = (_e566 + diff_u_y);
+    let _e568 = rho_e_l;
+    let flux_rho_e_l = ((_e568 + p_l) * u_n_l);
+    let _e571 = rho_e_r;
+    let flux_rho_e_r = ((_e571 + p_r) * u_n_r);
+    let _e577 = rho_e_r;
+    let _e578 = rho_e_l;
+    flux_rho_e = (((a_pos * flux_rho_e_l) + (a_neg * flux_rho_e_r)) + (a_prod_scaled * (_e577 - _e578)));
+    let inv_rho_l_cell = (1f / max(rho_l_cell, 0.00000001f));
+    let inv_rho_r_cell = (1f / max(rho_r_cell, 0.00000001f));
+    let u_l_x_cell = (rho_u_l_cell.x * inv_rho_l_cell);
+    let u_l_y_cell = (rho_u_l_cell.y * inv_rho_l_cell);
+    let u_r_x_cell = (rho_u_r_cell.x * inv_rho_r_cell);
+    let u_r_y_cell = (rho_u_r_cell.y * inv_rho_r_cell);
+    let u2_l_cell = ((u_l_x_cell * u_l_x_cell) + (u_l_y_cell * u_l_y_cell));
+    let u2_r_cell = ((u_r_x_cell * u_r_x_cell) + (u_r_y_cell * u_r_y_cell));
     let grad_rho_l_1 = grad_rho[owner];
     let grad_rho_u_x_l_1 = grad_rho_u_x[owner];
     let grad_rho_u_y_l_1 = grad_rho_u_y[owner];
     let grad_rho_e_l_1 = grad_rho_e[owner];
-    let _e736 = other_idx;
-    let grad_rho_r_1 = grad_rho[_e736];
-    let _e740 = other_idx;
-    let grad_rho_u_x_r_1 = grad_rho_u_x[_e740];
-    let _e744 = other_idx;
-    let grad_rho_u_y_r_1 = grad_rho_u_y[_e744];
-    let _e748 = other_idx;
-    let grad_rho_e_r_1 = grad_rho_e[_e748];
-    let grad_u_x_l_x_1 = ((grad_rho_u_x_l_1.x - (u_l_x_cell_1 * grad_rho_l_1.x)) * inv_rho_l_cell_1);
-    let grad_u_x_l_y_1 = ((grad_rho_u_x_l_1.y - (u_l_x_cell_1 * grad_rho_l_1.y)) * inv_rho_l_cell_1);
-    let grad_u_y_l_x_1 = ((grad_rho_u_y_l_1.x - (u_l_y_cell_1 * grad_rho_l_1.x)) * inv_rho_l_cell_1);
-    let grad_u_y_l_y_1 = ((grad_rho_u_y_l_1.y - (u_l_y_cell_1 * grad_rho_l_1.y)) * inv_rho_l_cell_1);
-    let grad_u_x_r_x_1 = ((grad_rho_u_x_r_1.x - (u_r_x_cell_1 * grad_rho_r_1.x)) * inv_rho_r_cell_1);
-    let grad_u_x_r_y_1 = ((grad_rho_u_x_r_1.y - (u_r_x_cell_1 * grad_rho_r_1.y)) * inv_rho_r_cell_1);
-    let grad_u_y_r_x_1 = ((grad_rho_u_y_r_1.x - (u_r_y_cell_1 * grad_rho_r_1.x)) * inv_rho_r_cell_1);
-    let grad_u_y_r_y_1 = ((grad_rho_u_y_r_1.y - (u_r_y_cell_1 * grad_rho_r_1.y)) * inv_rho_r_cell_1);
-    let grad_u2_l_x_1 = (((2f * u_l_x_cell_1) * grad_u_x_l_x_1) + ((2f * u_l_y_cell_1) * grad_u_y_l_x_1));
-    let grad_u2_l_y_1 = (((2f * u_l_x_cell_1) * grad_u_x_l_y_1) + ((2f * u_l_y_cell_1) * grad_u_y_l_y_1));
-    let grad_u2_r_x_1 = (((2f * u_r_x_cell_1) * grad_u_x_r_x_1) + ((2f * u_r_y_cell_1) * grad_u_y_r_x_1));
-    let grad_u2_r_y_1 = (((2f * u_r_x_cell_1) * grad_u_x_r_y_1) + ((2f * u_r_y_cell_1) * grad_u_y_r_y_1));
-    let grad_rho_u2_l_x_1 = ((u2_l_cell_1 * grad_rho_l_1.x) + (rho_l_cell * grad_u2_l_x_1));
-    let grad_rho_u2_l_y_1 = ((u2_l_cell_1 * grad_rho_l_1.y) + (rho_l_cell * grad_u2_l_y_1));
-    let grad_rho_u2_r_x_1 = ((u2_r_cell_1 * grad_rho_r_1.x) + (rho_r_cell * grad_u2_r_x_1));
-    let grad_rho_u2_r_y_1 = ((u2_r_cell_1 * grad_rho_r_1.y) + (rho_r_cell * grad_u2_r_y_1));
-    let grad_p_l_x_1 = (0.4f * (grad_rho_e_l_1.x - (0.5f * grad_rho_u2_l_x_1)));
-    let grad_p_l_y_1 = (0.4f * (grad_rho_e_l_1.y - (0.5f * grad_rho_u2_l_y_1)));
-    let grad_p_r_x_1 = (0.4f * (grad_rho_e_r_1.x - (0.5f * grad_rho_u2_r_x_1)));
-    let grad_p_r_y_1 = (0.4f * (grad_rho_e_r_1.y - (0.5f * grad_rho_u2_r_y_1)));
-    let _e860 = normal.x;
-    let _e863 = normal.y;
-    let grad_p_l_n = ((grad_p_l_x_1 * _e860) + (grad_p_l_y_1 * _e863));
-    let _e867 = normal.x;
-    let _e870 = normal.y;
-    let grad_p_r_n = ((grad_p_r_x_1 * _e867) + (grad_p_r_y_1 * _e870));
+    let _e618 = other_idx;
+    let grad_rho_r_1 = grad_rho[_e618];
+    let _e622 = other_idx;
+    let grad_rho_u_x_r_1 = grad_rho_u_x[_e622];
+    let _e626 = other_idx;
+    let grad_rho_u_y_r_1 = grad_rho_u_y[_e626];
+    let _e630 = other_idx;
+    let grad_rho_e_r_1 = grad_rho_e[_e630];
+    let grad_u_x_l_x = ((grad_rho_u_x_l_1.x - (u_l_x_cell * grad_rho_l_1.x)) * inv_rho_l_cell);
+    let grad_u_x_l_y = ((grad_rho_u_x_l_1.y - (u_l_x_cell * grad_rho_l_1.y)) * inv_rho_l_cell);
+    let grad_u_y_l_x = ((grad_rho_u_y_l_1.x - (u_l_y_cell * grad_rho_l_1.x)) * inv_rho_l_cell);
+    let grad_u_y_l_y = ((grad_rho_u_y_l_1.y - (u_l_y_cell * grad_rho_l_1.y)) * inv_rho_l_cell);
+    let grad_u_x_r_x = ((grad_rho_u_x_r_1.x - (u_r_x_cell * grad_rho_r_1.x)) * inv_rho_r_cell);
+    let grad_u_x_r_y = ((grad_rho_u_x_r_1.y - (u_r_x_cell * grad_rho_r_1.y)) * inv_rho_r_cell);
+    let grad_u_y_r_x = ((grad_rho_u_y_r_1.x - (u_r_y_cell * grad_rho_r_1.x)) * inv_rho_r_cell);
+    let grad_u_y_r_y = ((grad_rho_u_y_r_1.y - (u_r_y_cell * grad_rho_r_1.y)) * inv_rho_r_cell);
+    let grad_u2_l_x = (((2f * u_l_x_cell) * grad_u_x_l_x) + ((2f * u_l_y_cell) * grad_u_y_l_x));
+    let grad_u2_l_y = (((2f * u_l_x_cell) * grad_u_x_l_y) + ((2f * u_l_y_cell) * grad_u_y_l_y));
+    let grad_u2_r_x = (((2f * u_r_x_cell) * grad_u_x_r_x) + ((2f * u_r_y_cell) * grad_u_y_r_x));
+    let grad_u2_r_y = (((2f * u_r_x_cell) * grad_u_x_r_y) + ((2f * u_r_y_cell) * grad_u_y_r_y));
+    let grad_rho_u2_l_x = ((u2_l_cell * grad_rho_l_1.x) + (rho_l_cell * grad_u2_l_x));
+    let grad_rho_u2_l_y = ((u2_l_cell * grad_rho_l_1.y) + (rho_l_cell * grad_u2_l_y));
+    let grad_rho_u2_r_x = ((u2_r_cell * grad_rho_r_1.x) + (rho_r_cell * grad_u2_r_x));
+    let grad_rho_u2_r_y = ((u2_r_cell * grad_rho_r_1.y) + (rho_r_cell * grad_u2_r_y));
+    let grad_p_l_x = (0.4f * (grad_rho_e_l_1.x - (0.5f * grad_rho_u2_l_x)));
+    let grad_p_l_y = (0.4f * (grad_rho_e_l_1.y - (0.5f * grad_rho_u2_l_y)));
+    let grad_p_r_x = (0.4f * (grad_rho_e_r_1.x - (0.5f * grad_rho_u2_r_x)));
+    let grad_p_r_y = (0.4f * (grad_rho_e_r_1.y - (0.5f * grad_rho_u2_r_y)));
+    let _e742 = normal.x;
+    let _e745 = normal.y;
+    let grad_p_l_n = ((grad_p_l_x * _e742) + (grad_p_l_y * _e745));
+    let _e749 = normal.x;
+    let _e752 = normal.y;
+    let grad_p_r_n = ((grad_p_r_x * _e749) + (grad_p_r_y * _e752));
     let grad_p_face_n = (0.5f * (grad_p_l_n + grad_p_r_n));
     let grad_p_jump_n = ((p_r - p_l) / dist);
-    let _e878 = rho_l;
-    let _e879 = rho_r;
-    let rho_face = (0.5f * (_e878 + _e879));
+    let _e760 = rho_l;
+    let _e761 = rho_r;
+    let rho_face = (0.5f * (_e760 + _e761));
     let p_bar = (0.5f * (p_l + p_r));
     let dp_rel = (abs((p_r - p_l)) / max(p_bar, 0.000001f));
-    let _e893 = constants.precond_theta_floor;
-    let pc_theta = min(1f, max(mach2_, _e893));
-    let pc_low_mach = (1f - pc_theta);
-    let pc_smooth = (1f / (1f + (((dp_rel / 0.2f) * dp_rel) / 0.2f)));
-    let _e910 = constants.pressure_coupling_alpha;
-    let pc_alpha = ((_e910 * pc_low_mach) * pc_smooth);
-    let _e915 = constants.dt;
-    let m_corr = (((pc_alpha * _e915) / max(rho_face, 0.00000001f)) * (grad_p_face_n - grad_p_jump_n));
-    let _e922 = rho_e_l;
-    let h_l = ((_e922 + p_l) * inv_rho_l);
-    let _e925 = rho_e_r;
-    let h_r = ((_e925 + p_r) * inv_rho_r);
-    let h_face = (0.5f * (h_l + h_r));
-    let _e931 = flux_rho;
-    flux_rho = (_e931 + m_corr);
-    let _e933 = flux_rho_u_x;
-    flux_rho_u_x = (_e933 + (m_corr * u_face_x));
-    let _e936 = flux_rho_u_y;
-    flux_rho_u_y = (_e936 + (m_corr * u_face_y));
-    let _e939 = flux_rho_e;
-    flux_rho_e = (_e939 + (m_corr * h_face));
-    let _e942 = flux_rho_e;
-    flux_rho_e = ((_e942 + (diff_u_x * u_face_x)) + (diff_u_y * u_face_y));
+    let _e775 = constants.precond_model;
+    let _e780 = constants.pressure_coupling_alpha;
+    if ((_e775 != 2u) && (_e780 > 0f)) {
+        let _e786 = constants.precond_theta_floor;
+        let pc_theta = min(1f, max(mach2_, _e786));
+        let pc_low_mach = (1f - pc_theta);
+        let pc_smooth = (1f / (1f + (((dp_rel / 0.2f) * dp_rel) / 0.2f)));
+        let _e803 = constants.pressure_coupling_alpha;
+        let pc_alpha = ((_e803 * pc_low_mach) * pc_smooth);
+        let _e808 = constants.dt;
+        let m_corr = (((pc_alpha * _e808) / max(rho_face, 0.00000001f)) * (grad_p_face_n - grad_p_jump_n));
+        let _e815 = rho_e_l;
+        let h_l = ((_e815 + p_l) * inv_rho_l);
+        let _e818 = rho_e_r;
+        let h_r = ((_e818 + p_r) * inv_rho_r);
+        let h_face = (0.5f * (h_l + h_r));
+        let _e824 = flux_rho;
+        flux_rho = (_e824 + m_corr);
+        let _e826 = flux_rho_u_x;
+        flux_rho_u_x = (_e826 + (m_corr * u_face_x));
+        let _e829 = flux_rho_u_y;
+        flux_rho_u_y = (_e829 + (m_corr * u_face_y));
+        let _e832 = flux_rho_e;
+        flux_rho_e = (_e832 + (m_corr * h_face));
+    }
+    let _e835 = flux_rho_e;
+    flux_rho_e = ((_e835 + (diff_u_x * u_face_x)) + (diff_u_y * u_face_y));
     let base = (idx * 4u);
-    let _e953 = flux_rho;
-    fluxes[(base + 0u)] = (_e953 * area);
-    let _e959 = flux_rho_u_x;
-    fluxes[(base + 1u)] = (_e959 * area);
-    let _e965 = flux_rho_u_y;
-    fluxes[(base + 2u)] = (_e965 * area);
-    let _e971 = flux_rho_e;
-    fluxes[(base + 3u)] = (_e971 * area);
+    let _e846 = flux_rho;
+    fluxes[(base + 0u)] = (_e846 * area);
+    let _e852 = flux_rho_u_x;
+    fluxes[(base + 1u)] = (_e852 * area);
+    let _e858 = flux_rho_u_y;
+    fluxes[(base + 2u)] = (_e858 * area);
+    let _e864 = flux_rho_e;
+    fluxes[(base + 3u)] = (_e864 * area);
     return;
 }
 "#;

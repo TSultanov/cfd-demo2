@@ -129,7 +129,9 @@ pub fn init_compressible_field_buffers(
         inlet_velocity: 0.0,
         ramp_time: 0.0,
         precond_type: 0,
-        precond_model: 1,
+        // Default to no low-Mach preconditioning so transient acoustics behave like rhoCentralFoam.
+        // Use `set_precond_model(0|1)` to enable low-Mach variants.
+        precond_model: 2,
         precond_theta_floor: 1e-6,
         pressure_coupling_alpha: 1.0,
     };

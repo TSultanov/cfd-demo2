@@ -55,6 +55,7 @@ fn constants_struct() -> StructDef {
         vec![
             StructField::new("dt", Type::F32),
             StructField::new("dt_old", Type::F32),
+            StructField::new("dtau", Type::F32),
             StructField::new("time", Type::F32),
             StructField::new("viscosity", Type::F32),
             StructField::new("density", Type::F32),

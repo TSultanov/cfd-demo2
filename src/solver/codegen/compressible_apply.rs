@@ -48,6 +48,7 @@ fn constants_struct() -> StructDef {
         vec![
             StructField::new("dt", Type::F32),
             StructField::new("dt_old", Type::F32),
+            StructField::new("dtau", Type::F32),
             StructField::new("time", Type::F32),
             StructField::new("viscosity", Type::F32),
             StructField::new("density", Type::F32),
@@ -60,6 +61,8 @@ fn constants_struct() -> StructDef {
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
             StructField::new("precond_type", Type::U32),
+            StructField::new("precond_model", Type::U32),
+            StructField::new("precond_theta_floor", Type::F32),
         ],
     )
 }
@@ -122,6 +125,13 @@ fn state_bindings() -> Vec<Item> {
             0,
             8,
             AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "state_iter",
+            Type::array(Type::F32),
+            0,
+            9,
+            AccessMode::Read,
         ),
     ]
 }
@@ -210,13 +220,17 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("delta_rho_u_y", "solution[base + 2u]"));
     stmts.push(dsl::let_("delta_rho_e", "solution[base + 3u]"));
 
-    stmts.push(dsl::var("rho_new", "rho_base + delta_rho"));
-    stmts.push(dsl::var("rho_u_new_x", "rho_u_base.x + delta_rho_u_x"));
-    stmts.push(dsl::var("rho_u_new_y", "rho_u_base.y + delta_rho_u_y"));
-    stmts.push(dsl::var("rho_e_new", "rho_e_base + delta_rho_e"));
-
-    stmts.push(dsl::assign("rho_new", "max(rho_new, 1e-8)"));
-    stmts.push(dsl::assign("rho_e_new", "max(rho_e_new, 1e-8)"));
+    stmts.push(dsl::let_("relax", "constants.alpha_u"));
+    stmts.push(dsl::var("rho_new", "rho_base + relax * delta_rho"));
+    stmts.push(dsl::var(
+        "rho_u_new_x",
+        "rho_u_base.x + relax * delta_rho_u_x",
+    ));
+    stmts.push(dsl::var(
+        "rho_u_new_y",
+        "rho_u_base.y + relax * delta_rho_u_y",
+    ));
+    stmts.push(dsl::var("rho_e_new", "rho_e_base + relax * delta_rho_e"));
 
     stmts.push(dsl::assign(&rho_target, "rho_new"));
     stmts.push(dsl::assign(&rho_u_x_target, "rho_u_new_x"));

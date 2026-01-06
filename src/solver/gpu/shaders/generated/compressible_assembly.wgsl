@@ -10,6 +10,7 @@ struct Vector2 {
 struct Constants {
     dt: f32,
     dt_old: f32,
+    dtau: f32,
     time: f32,
     viscosity: f32,
     density: f32,
@@ -22,6 +23,8 @@ struct Constants {
     inlet_velocity: f32,
     ramp_time: f32,
     precond_type: u32,
+    precond_model: u32,
+    precond_theta_floor: f32,
 }
 
 // Group 0: Mesh
@@ -91,6 +94,9 @@ var<storage, read_write> grad_rho_u_y: array<Vector2>;
 @group(1) @binding(8) 
 var<storage, read_write> grad_rho_e: array<Vector2>;
 
+@group(1) @binding(9) 
+var<storage, read> state_iter: array<f32>;
+
 // Group 2: Solver
 
 @group(2) @binding(0) 
@@ -152,6 +158,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_time_rho_u_x = coeff_time * rho_u_old.x;
     var rhs_time_rho_u_y = coeff_time * rho_u_old.y;
     var rhs_time_rho_e = coeff_time * rho_e_old;
+    var coeff_pseudo = 0.0;
+    var rhs_pseudo_rho = 0.0;
+    var rhs_pseudo_rho_u_x = 0.0;
+    var rhs_pseudo_rho_u_y = 0.0;
+    var rhs_pseudo_rho_e = 0.0;
+    if (constants.dtau > 0.0) {
+        let rho_iter = state_iter[idx * 7u + 0u];
+        let rho_u_iter = vec2<f32>(state_iter[idx * 7u + 1u], state_iter[idx * 7u + 2u]);
+        let rho_e_iter = state_iter[idx * 7u + 3u];
+        coeff_pseudo = vol / constants.dtau;
+        rhs_pseudo_rho = coeff_pseudo * rho_iter;
+        rhs_pseudo_rho_u_x = coeff_pseudo * rho_u_iter.x;
+        rhs_pseudo_rho_u_y = coeff_pseudo * rho_u_iter.y;
+        rhs_pseudo_rho_e = coeff_pseudo * rho_e_iter;
+    }
     if (constants.time_scheme == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
@@ -182,9 +203,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             normal.x = -normal.x;
             normal.y = -normal.y;
         }
-        let rho_l = state[idx * 7u + 0u];
-        let rho_u_l = vec2<f32>(state[idx * 7u + 1u], state[idx * 7u + 2u]);
-        let rho_e_l = state[idx * 7u + 3u];
+        let rho_l_cell = state[idx * 7u + 0u];
+        let rho_u_l_cell = vec2<f32>(state[idx * 7u + 1u], state[idx * 7u + 2u]);
+        let rho_e_l_cell = state[idx * 7u + 3u];
+        var rho_l = rho_l_cell;
+        var rho_u_l = rho_u_l_cell;
+        var rho_e_l = rho_e_l_cell;
         var rho_r = rho_l;
         var rho_u_r = rho_u_l;
         var rho_e_r = rho_e_l;
@@ -218,6 +242,109 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
+        let rho_r_cell = rho_r;
+        let rho_u_r_cell = rho_u_r;
+        let rho_e_r_cell = rho_e_r;
+        if (!is_boundary && scheme_id != 0u) {
+            let r_l_x = f_center.x - center.x;
+            let r_l_y = f_center.y - center.y;
+            let r_r_x = f_center.x - center_r.x;
+            let r_r_y = f_center.y - center_r.y;
+            let inv_rho_l_cell = 1.0 / max(rho_l_cell, 1e-8);
+            let u_l_x_cell = rho_u_l_cell.x * inv_rho_l_cell;
+            let u_l_y_cell = rho_u_l_cell.y * inv_rho_l_cell;
+            let u2_l_cell = u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell;
+            let p_l_cell = max(0.0, (1.4 - 1.0) * (rho_e_l_cell - 0.5 * rho_l_cell * u2_l_cell));
+            let inv_rho_r_cell = 1.0 / max(rho_r_cell, 1e-8);
+            let u_r_x_cell = rho_u_r_cell.x * inv_rho_r_cell;
+            let u_r_y_cell = rho_u_r_cell.y * inv_rho_r_cell;
+            let u2_r_cell = u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell;
+            let p_r_cell = max(0.0, (1.4 - 1.0) * (rho_e_r_cell - 0.5 * rho_r_cell * u2_r_cell));
+            let grad_rho_l = grad_rho[idx];
+            let grad_rho_u_x_l = grad_rho_u_x[idx];
+            let grad_rho_u_y_l = grad_rho_u_y[idx];
+            let grad_rho_e_l = grad_rho_e[idx];
+            let grad_rho_r = grad_rho[other_idx];
+            let grad_rho_u_x_r = grad_rho_u_x[other_idx];
+            let grad_rho_u_y_r = grad_rho_u_y[other_idx];
+            let grad_rho_e_r = grad_rho_e[other_idx];
+            let grad_u_x_l_x = (grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell;
+            let grad_u_x_l_y = (grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell;
+            let grad_u_y_l_x = (grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell;
+            let grad_u_y_l_y = (grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell;
+            let grad_u_x_r_x = (grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell;
+            let grad_u_x_r_y = (grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell;
+            let grad_u_y_r_x = (grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell;
+            let grad_u_y_r_y = (grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell;
+            let grad_u2_l_x = 2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x;
+            let grad_u2_l_y = 2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y;
+            let grad_u2_r_x = 2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x;
+            let grad_u2_r_y = 2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y;
+            let grad_rho_u2_l_x = u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x;
+            let grad_rho_u2_l_y = u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y;
+            let grad_rho_u2_r_x = u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x;
+            let grad_rho_u2_r_y = u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y;
+            let grad_p_l_x = (1.4 - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x);
+            let grad_p_l_y = (1.4 - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y);
+            let grad_p_r_x = (1.4 - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x);
+            let grad_p_r_y = (1.4 - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y);
+            let diff_rho_l = rho_r_cell - rho_l_cell;
+            let min_diff_rho_l = min(diff_rho_l, 0.0);
+            let max_diff_rho_l = max(diff_rho_l, 0.0);
+            let delta_rho_l = grad_rho_l.x * r_l_x + grad_rho_l.y * r_l_y;
+            let delta_rho_l_limited = min(max(delta_rho_l, min_diff_rho_l), max_diff_rho_l);
+            let diff_u_l_x = u_r_x_cell - u_l_x_cell;
+            let min_diff_u_l_x = min(diff_u_l_x, 0.0);
+            let max_diff_u_l_x = max(diff_u_l_x, 0.0);
+            let delta_u_l_x = grad_u_x_l_x * r_l_x + grad_u_x_l_y * r_l_y;
+            let delta_u_l_x_limited = min(max(delta_u_l_x, min_diff_u_l_x), max_diff_u_l_x);
+            let diff_u_l_y = u_r_y_cell - u_l_y_cell;
+            let min_diff_u_l_y = min(diff_u_l_y, 0.0);
+            let max_diff_u_l_y = max(diff_u_l_y, 0.0);
+            let delta_u_l_y = grad_u_y_l_x * r_l_x + grad_u_y_l_y * r_l_y;
+            let delta_u_l_y_limited = min(max(delta_u_l_y, min_diff_u_l_y), max_diff_u_l_y);
+            let diff_p_l = p_r_cell - p_l_cell;
+            let min_diff_p_l = min(diff_p_l, 0.0);
+            let max_diff_p_l = max(diff_p_l, 0.0);
+            let delta_p_l = grad_p_l_x * r_l_x + grad_p_l_y * r_l_y;
+            let delta_p_l_limited = min(max(delta_p_l, min_diff_p_l), max_diff_p_l);
+            let rho_l_face = rho_l_cell + delta_rho_l_limited;
+            let u_l_x_face = u_l_x_cell + delta_u_l_x_limited;
+            let u_l_y_face = u_l_y_cell + delta_u_l_y_limited;
+            let p_l_face = p_l_cell + delta_p_l_limited;
+            let diff_rho_r = rho_l_cell - rho_r_cell;
+            let min_diff_rho_r = min(diff_rho_r, 0.0);
+            let max_diff_rho_r = max(diff_rho_r, 0.0);
+            let delta_rho_r = grad_rho_r.x * r_r_x + grad_rho_r.y * r_r_y;
+            let delta_rho_r_limited = min(max(delta_rho_r, min_diff_rho_r), max_diff_rho_r);
+            let diff_u_r_x = u_l_x_cell - u_r_x_cell;
+            let min_diff_u_r_x = min(diff_u_r_x, 0.0);
+            let max_diff_u_r_x = max(diff_u_r_x, 0.0);
+            let delta_u_r_x = grad_u_x_r_x * r_r_x + grad_u_x_r_y * r_r_y;
+            let delta_u_r_x_limited = min(max(delta_u_r_x, min_diff_u_r_x), max_diff_u_r_x);
+            let diff_u_r_y = u_l_y_cell - u_r_y_cell;
+            let min_diff_u_r_y = min(diff_u_r_y, 0.0);
+            let max_diff_u_r_y = max(diff_u_r_y, 0.0);
+            let delta_u_r_y = grad_u_y_r_x * r_r_x + grad_u_y_r_y * r_r_y;
+            let delta_u_r_y_limited = min(max(delta_u_r_y, min_diff_u_r_y), max_diff_u_r_y);
+            let diff_p_r = p_l_cell - p_r_cell;
+            let min_diff_p_r = min(diff_p_r, 0.0);
+            let max_diff_p_r = max(diff_p_r, 0.0);
+            let delta_p_r = grad_p_r_x * r_r_x + grad_p_r_y * r_r_y;
+            let delta_p_r_limited = min(max(delta_p_r, min_diff_p_r), max_diff_p_r);
+            let rho_r_face = rho_r_cell + delta_rho_r_limited;
+            let u_r_x_face = u_r_x_cell + delta_u_r_x_limited;
+            let u_r_y_face = u_r_y_cell + delta_u_r_y_limited;
+            let p_r_face = p_r_cell + delta_p_r_limited;
+            rho_l = rho_l_face;
+            rho_u_l.x = rho_l_face * u_l_x_face;
+            rho_u_l.y = rho_l_face * u_l_y_face;
+            rho_e_l = p_l_face / (1.4 - 1.0) + 0.5 * rho_l_face * (u_l_x_face * u_l_x_face + u_l_y_face * u_l_y_face);
+            rho_r = rho_r_face;
+            rho_u_r.x = rho_r_face * u_r_x_face;
+            rho_u_r.y = rho_r_face * u_r_y_face;
+            rho_e_r = p_r_face / (1.4 - 1.0) + 0.5 * rho_r_face * (u_r_x_face * u_r_x_face + u_r_y_face * u_r_y_face);
+        }
         let inv_rho_l = 1.0 / max(rho_l, 1e-8);
         let u_l_x = rho_u_l.x * inv_rho_l;
         let u_l_y = rho_u_l.y * inv_rho_l;
@@ -237,9 +364,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let u_face_n = u_face_x * normal.x + u_face_y * normal.y;
         let c_bar = 0.5 * (c_l + c_r);
         let mach = abs(u_face_n) / max(c_bar, 1e-6);
-        let beta = max(mach, 0.01);
-        let c_l_eff = c_l * beta;
-        let c_r_eff = c_r * beta;
+        let mach2 = mach * mach;
+        let beta = mach;
+        var c_l_eff = c_l * beta;
+        var c_r_eff = c_r * beta;
+        if (constants.precond_model == 1u) {
+            let theta = min(1.0, max(mach2, constants.precond_theta_floor));
+            let one_minus_theta = 1.0 - theta;
+            c_l_eff = sqrt(theta * c_l * c_l + one_minus_theta * u_n_l * u_n_l);
+            c_r_eff = sqrt(theta * c_r * c_r + one_minus_theta * u_n_r * u_n_r);
+        }
         let flux_adv = u_face_n * area;
         let dx = center_r.x - center.x;
         let dy = center_r.y - center.y;
@@ -251,18 +385,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let a_prod = a_plus * a_minus;
         let a_pos = a_plus / denom;
         let a_neg = 1.0 - a_pos;
-        let aSf = a_minus * a_pos;
-        let aphiv_pos = u_n_l - aSf;
-        let aphiv_neg = u_n_r + aSf;
-        let flux_rho = aphiv_pos * rho_l + aphiv_neg * rho_r;
-        let p_face = a_pos * p_l + a_neg * p_r;
-        var flux_rho_u_x = aphiv_pos * rho_u_l.x + aphiv_neg * rho_u_r.x + p_face * normal.x;
-        var flux_rho_u_y = aphiv_pos * rho_u_l.y + aphiv_neg * rho_u_r.y + p_face * normal.y;
+        let a_prod_scaled = a_prod / denom;
+        let flux_rho_l = rho_l * u_n_l;
+        let flux_rho_r = rho_r * u_n_r;
+        let flux_rho = a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l);
+        let flux_rho_u_x_l = rho_u_l.x * u_n_l + p_l * normal.x;
+        let flux_rho_u_x_r = rho_u_r.x * u_n_r + p_r * normal.x;
+        var flux_rho_u_x = a_pos * flux_rho_u_x_l + a_neg * flux_rho_u_x_r + a_prod_scaled * (rho_u_r.x - rho_u_l.x);
+        let flux_rho_u_y_l = rho_u_l.y * u_n_l + p_l * normal.y;
+        let flux_rho_u_y_r = rho_u_r.y * u_n_r + p_r * normal.y;
+        var flux_rho_u_y = a_pos * flux_rho_u_y_l + a_neg * flux_rho_u_y_r + a_prod_scaled * (rho_u_r.y - rho_u_l.y);
         let diff_u_x = -mu * (u_r_x - u_l_x) / dist;
         let diff_u_y = -mu * (u_r_y - u_l_y) / dist;
         flux_rho_u_x = flux_rho_u_x + diff_u_x;
         flux_rho_u_y = flux_rho_u_y + diff_u_y;
-        var flux_rho_e = aphiv_pos * (rho_e_l + p_l) + aphiv_neg * (rho_e_r + p_r) + aSf * (p_l - p_r);
+        let flux_rho_e_l = (rho_e_l + p_l) * u_n_l;
+        let flux_rho_e_r = (rho_e_r + p_r) * u_n_r;
+        var flux_rho_e = a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l);
         flux_rho_e = flux_rho_e + diff_u_x * u_face_x + diff_u_y * u_face_y;
         sum_rho += flux_rho * area;
         sum_rho_u_x += flux_rho_u_x * area;
@@ -282,7 +421,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let H_r = (rho_e_r + p_r) * inv_rho_r;
         let a_l = a_plus / denom;
         let a_r = -a_minus / denom;
-        let a_prod_scaled = a_prod / denom;
         var jac_l_00 = -a_prod_scaled;
         var jac_l_01 = a_l * normal.x;
         var jac_l_02 = a_l * normal.y;
@@ -428,136 +566,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let base_1 = start_row_1 + 4u * neighbor_rank;
             let base_2 = start_row_2 + 4u * neighbor_rank;
             let base_3 = start_row_3 + 4u * neighbor_rank;
-            if (scheme_id != 0u) {
-                var phi_upwind_rho = rho_l;
-                if (flux_adv < 0.0) {
-                    phi_upwind_rho = rho_r;
-                }
-                var phi_ho_rho = phi_upwind_rho;
-                if (scheme_id == 1u) {
-                    if (flux_adv > 0.0) {
-                        let r_rho_x = f_center.x - center.x;
-                        let r_rho_y = f_center.y - center.y;
-                        phi_ho_rho = rho_l + grad_rho[idx].x * r_rho_x + grad_rho[idx].y * r_rho_y;
-                    } else {
-                        let r_rho_x = f_center.x - center_r.x;
-                        let r_rho_y = f_center.y - center_r.y;
-                        phi_ho_rho = rho_r + grad_rho[other_idx].x * r_rho_x + grad_rho[other_idx].y * r_rho_y;
-                    }
-                } else {
-                    if (scheme_id == 2u) {
-                        if (flux_adv > 0.0) {
-                            let d_cd_rho_x = center_r.x - center.x;
-                            let d_cd_rho_y = center_r.y - center.y;
-                            let grad_term_rho = grad_rho[idx].x * d_cd_rho_x + grad_rho[idx].y * d_cd_rho_y;
-                            phi_ho_rho = 0.625 * rho_l + 0.375 * rho_r + 0.125 * grad_term_rho;
-                        } else {
-                            let d_cd_rho_x = center.x - center_r.x;
-                            let d_cd_rho_y = center.y - center_r.y;
-                            let grad_term_rho = grad_rho[other_idx].x * d_cd_rho_x + grad_rho[other_idx].y * d_cd_rho_y;
-                            phi_ho_rho = 0.625 * rho_r + 0.375 * rho_l + 0.125 * grad_term_rho;
-                        }
-                    }
-                }
-                var phi_upwind_ru = rho_u_l.x;
-                if (flux_adv < 0.0) {
-                    phi_upwind_ru = rho_u_r.x;
-                }
-                var phi_ho_ru = phi_upwind_ru;
-                if (scheme_id == 1u) {
-                    if (flux_adv > 0.0) {
-                        let r_ru_x = f_center.x - center.x;
-                        let r_ru_y = f_center.y - center.y;
-                        phi_ho_ru = rho_u_l.x + grad_rho_u_x[idx].x * r_ru_x + grad_rho_u_x[idx].y * r_ru_y;
-                    } else {
-                        let r_ru_x = f_center.x - center_r.x;
-                        let r_ru_y = f_center.y - center_r.y;
-                        phi_ho_ru = rho_u_r.x + grad_rho_u_x[other_idx].x * r_ru_x + grad_rho_u_x[other_idx].y * r_ru_y;
-                    }
-                } else {
-                    if (scheme_id == 2u) {
-                        if (flux_adv > 0.0) {
-                            let d_cd_ru_x = center_r.x - center.x;
-                            let d_cd_ru_y = center_r.y - center.y;
-                            let grad_term_ru = grad_rho_u_x[idx].x * d_cd_ru_x + grad_rho_u_x[idx].y * d_cd_ru_y;
-                            phi_ho_ru = 0.625 * rho_u_l.x + 0.375 * rho_u_r.x + 0.125 * grad_term_ru;
-                        } else {
-                            let d_cd_ru_x = center.x - center_r.x;
-                            let d_cd_ru_y = center.y - center_r.y;
-                            let grad_term_ru = grad_rho_u_x[other_idx].x * d_cd_ru_x + grad_rho_u_x[other_idx].y * d_cd_ru_y;
-                            phi_ho_ru = 0.625 * rho_u_r.x + 0.375 * rho_u_l.x + 0.125 * grad_term_ru;
-                        }
-                    }
-                }
-                var phi_upwind_rv = rho_u_l.y;
-                if (flux_adv < 0.0) {
-                    phi_upwind_rv = rho_u_r.y;
-                }
-                var phi_ho_rv = phi_upwind_rv;
-                if (scheme_id == 1u) {
-                    if (flux_adv > 0.0) {
-                        let r_rv_x = f_center.x - center.x;
-                        let r_rv_y = f_center.y - center.y;
-                        phi_ho_rv = rho_u_l.y + grad_rho_u_y[idx].x * r_rv_x + grad_rho_u_y[idx].y * r_rv_y;
-                    } else {
-                        let r_rv_x = f_center.x - center_r.x;
-                        let r_rv_y = f_center.y - center_r.y;
-                        phi_ho_rv = rho_u_r.y + grad_rho_u_y[other_idx].x * r_rv_x + grad_rho_u_y[other_idx].y * r_rv_y;
-                    }
-                } else {
-                    if (scheme_id == 2u) {
-                        if (flux_adv > 0.0) {
-                            let d_cd_rv_x = center_r.x - center.x;
-                            let d_cd_rv_y = center_r.y - center.y;
-                            let grad_term_rv = grad_rho_u_y[idx].x * d_cd_rv_x + grad_rho_u_y[idx].y * d_cd_rv_y;
-                            phi_ho_rv = 0.625 * rho_u_l.y + 0.375 * rho_u_r.y + 0.125 * grad_term_rv;
-                        } else {
-                            let d_cd_rv_x = center.x - center_r.x;
-                            let d_cd_rv_y = center.y - center_r.y;
-                            let grad_term_rv = grad_rho_u_y[other_idx].x * d_cd_rv_x + grad_rho_u_y[other_idx].y * d_cd_rv_y;
-                            phi_ho_rv = 0.625 * rho_u_r.y + 0.375 * rho_u_l.y + 0.125 * grad_term_rv;
-                        }
-                    }
-                }
-                var phi_upwind_re = rho_e_l;
-                if (flux_adv < 0.0) {
-                    phi_upwind_re = rho_e_r;
-                }
-                var phi_ho_re = phi_upwind_re;
-                if (scheme_id == 1u) {
-                    if (flux_adv > 0.0) {
-                        let r_re_x = f_center.x - center.x;
-                        let r_re_y = f_center.y - center.y;
-                        phi_ho_re = rho_e_l + grad_rho_e[idx].x * r_re_x + grad_rho_e[idx].y * r_re_y;
-                    } else {
-                        let r_re_x = f_center.x - center_r.x;
-                        let r_re_y = f_center.y - center_r.y;
-                        phi_ho_re = rho_e_r + grad_rho_e[other_idx].x * r_re_x + grad_rho_e[other_idx].y * r_re_y;
-                    }
-                } else {
-                    if (scheme_id == 2u) {
-                        if (flux_adv > 0.0) {
-                            let d_cd_re_x = center_r.x - center.x;
-                            let d_cd_re_y = center_r.y - center.y;
-                            let grad_term_re = grad_rho_e[idx].x * d_cd_re_x + grad_rho_e[idx].y * d_cd_re_y;
-                            phi_ho_re = 0.625 * rho_e_l + 0.375 * rho_e_r + 0.125 * grad_term_re;
-                        } else {
-                            let d_cd_re_x = center.x - center_r.x;
-                            let d_cd_re_y = center.y - center_r.y;
-                            let grad_term_re = grad_rho_e[other_idx].x * d_cd_re_x + grad_rho_e[other_idx].y * d_cd_re_y;
-                            phi_ho_re = 0.625 * rho_e_r + 0.375 * rho_e_l + 0.125 * grad_term_re;
-                        }
-                    }
-                }
-                let correction_rho = flux_adv * (phi_ho_rho - phi_upwind_rho);
-                let correction_rho_u_x = flux_adv * (phi_ho_ru - phi_upwind_ru);
-                let correction_rho_u_y = flux_adv * (phi_ho_rv - phi_upwind_rv);
-                let correction_rho_e = flux_adv * (phi_ho_re - phi_upwind_re);
-                sum_rho += correction_rho;
-                sum_rho_u_x += correction_rho_u_x;
-                sum_rho_u_y += correction_rho_u_y;
-                sum_rho_e += correction_rho_e;
-            }
             matrix_values[base_0 + 0u] = jac_r_00 * area;
             matrix_values[base_0 + 1u] = jac_r_01 * area;
             matrix_values[base_0 + 2u] = jac_r_02 * area;
@@ -662,14 +670,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_33 += eff_33 * area;
         }
     }
-    var rhs_rho = rhs_time_rho - coeff_time * rho - sum_rho;
-    var rhs_rho_u_x = rhs_time_rho_u_x - coeff_time * rho_u.x - sum_rho_u_x;
-    var rhs_rho_u_y = rhs_time_rho_u_y - coeff_time * rho_u.y - sum_rho_u_y;
-    var rhs_rho_e = rhs_time_rho_e - coeff_time * rho_e - sum_rho_e;
+    var rhs_rho = rhs_time_rho + rhs_pseudo_rho - (coeff_time + coeff_pseudo) * rho - sum_rho;
+    var rhs_rho_u_x = rhs_time_rho_u_x + rhs_pseudo_rho_u_x - (coeff_time + coeff_pseudo) * rho_u.x - sum_rho_u_x;
+    var rhs_rho_u_y = rhs_time_rho_u_y + rhs_pseudo_rho_u_y - (coeff_time + coeff_pseudo) * rho_u.y - sum_rho_u_y;
+    var rhs_rho_e = rhs_time_rho_e + rhs_pseudo_rho_e - (coeff_time + coeff_pseudo) * rho_e - sum_rho_e;
     diag_00 += coeff_time;
     diag_11 += coeff_time;
     diag_22 += coeff_time;
     diag_33 += coeff_time;
+    diag_00 += coeff_pseudo;
+    diag_11 += coeff_pseudo;
+    diag_22 += coeff_pseudo;
+    diag_33 += coeff_pseudo;
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = scalar_diag_idx - scalar_offset;
     let diag_base_0 = start_row_0 + 4u * diag_rank;

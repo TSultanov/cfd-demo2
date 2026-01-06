@@ -10,6 +10,7 @@ struct Vector2 {
 struct Constants {
     dt: f32,
     dt_old: f32,
+    dtau: f32,
     time: f32,
     viscosity: f32,
     density: f32,
@@ -22,6 +23,8 @@ struct Constants {
     inlet_velocity: f32,
     ramp_time: f32,
     precond_type: u32,
+    precond_model: u32,
+    precond_theta_floor: f32,
 }
 
 // Group 0: Fields (consolidated state buffers)
@@ -52,6 +55,9 @@ var<storage, read_write> grad_rho_u_y: array<Vector2>;
 
 @group(0) @binding(8) 
 var<storage, read_write> grad_rho_e: array<Vector2>;
+
+@group(0) @binding(9) 
+var<storage, read> state_iter: array<f32>;
 
 @compute
 @workgroup_size(64)

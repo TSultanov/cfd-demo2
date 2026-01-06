@@ -12,6 +12,7 @@ pub struct CompressibleFieldBuffers {
     pub b_state: wgpu::Buffer,
     pub b_state_old: wgpu::Buffer,
     pub b_state_old_old: wgpu::Buffer,
+    pub b_state_iter: wgpu::Buffer,
     pub state_buffers: Vec<wgpu::Buffer>,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_rho: wgpu::Buffer,
@@ -27,6 +28,7 @@ pub struct CompressibleFieldResources {
     pub b_state: wgpu::Buffer,
     pub b_state_old: wgpu::Buffer,
     pub b_state_old_old: wgpu::Buffer,
+    pub b_state_iter: wgpu::Buffer,
     pub state_buffers: Vec<wgpu::Buffer>,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_rho: wgpu::Buffer,
@@ -71,6 +73,13 @@ pub fn init_compressible_field_buffers(
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
     });
+    let b_state_iter = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Compressible State Iter Buffer"),
+        contents: bytemuck::cast_slice(&zero_state),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+    });
 
     let flux_len = num_faces as usize * config.flux_stride as usize;
     let zero_fluxes = vec![0.0f32; flux_len];
@@ -107,6 +116,7 @@ pub fn init_compressible_field_buffers(
     let constants = GpuConstants {
         dt: 0.0001,
         dt_old: 0.0001,
+        dtau: 0.0,
         time: 0.0,
         viscosity: 0.0,
         density: 1.0,
@@ -119,6 +129,8 @@ pub fn init_compressible_field_buffers(
         inlet_velocity: 0.0,
         ramp_time: 0.0,
         precond_type: 0,
+        precond_model: 1,
+        precond_theta_floor: 1e-6,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Compressible Constants Buffer"),
@@ -136,6 +148,7 @@ pub fn init_compressible_field_buffers(
         b_state,
         b_state_old,
         b_state_old_old,
+        b_state_iter,
         state_buffers,
         b_fluxes,
         b_grad_rho,
@@ -202,6 +215,10 @@ pub fn create_compressible_field_bind_groups(
                     binding: 8,
                     resource: buffers.b_grad_rho_e.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: buffers.b_state_iter.as_entire_binding(),
+                },
             ],
         });
         bg_fields_ping_pong.push(bg);
@@ -213,6 +230,7 @@ pub fn create_compressible_field_bind_groups(
         b_state: buffers.b_state,
         b_state_old: buffers.b_state_old,
         b_state_old_old: buffers.b_state_old_old,
+        b_state_iter: buffers.b_state_iter,
         state_buffers: buffers.state_buffers,
         b_fluxes: buffers.b_fluxes,
         b_grad_rho: buffers.b_grad_rho,

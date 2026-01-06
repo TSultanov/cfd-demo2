@@ -50,6 +50,7 @@ fn constants_struct() -> StructDef {
         vec![
             StructField::new("dt", Type::F32),
             StructField::new("dt_old", Type::F32),
+            StructField::new("dtau", Type::F32),
             StructField::new("time", Type::F32),
             StructField::new("viscosity", Type::F32),
             StructField::new("density", Type::F32),
@@ -62,6 +63,8 @@ fn constants_struct() -> StructDef {
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
             StructField::new("precond_type", Type::U32),
+            StructField::new("precond_model", Type::U32),
+            StructField::new("precond_theta_floor", Type::F32),
         ],
     )
 }
@@ -214,6 +217,13 @@ fn state_bindings() -> Vec<Item> {
             8,
             AccessMode::ReadWrite,
         ),
+        storage_var(
+            "state_iter",
+            Type::array(Type::F32),
+            1,
+            9,
+            AccessMode::Read,
+        ),
     ]
 }
 
@@ -283,13 +293,18 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("face_center", "face_centers[idx]"));
     stmts.push(dsl::let_("center_owner", "cell_centers[owner]"));
     stmts.push(dsl::var("normal", "face_normals[idx]"));
+    stmts.push(dsl::var("is_boundary", "false"));
+    stmts.push(dsl::var("other_idx", "owner"));
 
     let rho_l_expr = state_scalar_expr(layout, "state_old", "owner", rho_field);
     let rho_u_l_expr = state_vec2_expr(layout, "state_old", "owner", rho_u_field);
     let rho_e_l_expr = state_scalar_expr(layout, "state_old", "owner", rho_e_field);
-    stmts.push(dsl::let_("rho_l", &rho_l_expr));
-    stmts.push(dsl::let_("rho_u_l", &rho_u_l_expr));
-    stmts.push(dsl::let_("rho_e_l", &rho_e_l_expr));
+    stmts.push(dsl::let_("rho_l_cell", &rho_l_expr));
+    stmts.push(dsl::let_("rho_u_l_cell", &rho_u_l_expr));
+    stmts.push(dsl::let_("rho_e_l_cell", &rho_e_l_expr));
+    stmts.push(dsl::var("rho_l", "rho_l_cell"));
+    stmts.push(dsl::var("rho_u_l", "rho_u_l_cell"));
+    stmts.push(dsl::var("rho_e_l", "rho_e_l_cell"));
     stmts.push(dsl::var("rho_r", "rho_l"));
     stmts.push(dsl::var("rho_u_r", "rho_u_l"));
     stmts.push(dsl::var("rho_e_r", "rho_e_l"));
@@ -301,6 +316,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         let rho_e_neigh_expr = state_scalar_expr(layout, "state_old", "neigh_idx", rho_e_field);
         dsl::block(vec![
             dsl::let_("neigh_idx", "u32(neighbor)"),
+            dsl::assign("other_idx", "neigh_idx"),
             dsl::let_("rho_neigh", &rho_neigh_expr),
             dsl::let_("rho_u_neigh", &rho_u_neigh_expr),
             dsl::let_("rho_e_neigh", &rho_e_neigh_expr),
@@ -312,26 +328,283 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ])
     };
 
-    let boundary_block = dsl::block(vec![dsl::if_block(
-        "boundary_type == 1u",
-        dsl::block(vec![
-            dsl::assign("rho_u_r.x", "rho_r * constants.inlet_velocity"),
-            dsl::assign("rho_u_r.y", "0.0"),
-        ]),
-        Some(dsl::block(vec![dsl::if_block(
-            "boundary_type == 3u",
+    let boundary_block = dsl::block(vec![
+        dsl::assign("is_boundary", "true"),
+        dsl::if_block(
+            "boundary_type == 1u",
             dsl::block(vec![
-                dsl::assign("rho_u_r.x", "-rho_u_l.x"),
-                dsl::assign("rho_u_r.y", "-rho_u_l.y"),
+                dsl::assign("rho_u_r.x", "rho_r * constants.inlet_velocity"),
+                dsl::assign("rho_u_r.y", "0.0"),
             ]),
-            None,
-        )])),
-    )]);
+            Some(dsl::block(vec![dsl::if_block(
+                "boundary_type == 3u",
+                dsl::block(vec![
+                    dsl::assign("rho_u_r.x", "-rho_u_l.x"),
+                    dsl::assign("rho_u_r.y", "-rho_u_l.y"),
+                ]),
+                None,
+            )])),
+        ),
+    ]);
 
     stmts.push(dsl::if_block(
         "neighbor != -1",
         interior_block,
         Some(boundary_block),
+    ));
+
+    stmts.push(dsl::let_("rho_r_cell", "rho_r"));
+    stmts.push(dsl::let_("rho_u_r_cell", "rho_u_r"));
+    stmts.push(dsl::let_("rho_e_r_cell", "rho_e_r"));
+
+    let reconstruct_block = {
+        let mut block = Vec::new();
+        block.push(dsl::let_("r_l_x", "face_center.x - center_owner.x"));
+        block.push(dsl::let_("r_l_y", "face_center.y - center_owner.y"));
+        block.push(dsl::let_("r_r_x", "face_center.x - center_r.x"));
+        block.push(dsl::let_("r_r_y", "face_center.y - center_r.y"));
+
+        block.push(dsl::let_("inv_rho_l_cell", "1.0 / max(rho_l_cell, 1e-8)"));
+        block.push(dsl::let_("u_l_x_cell", "rho_u_l_cell.x * inv_rho_l_cell"));
+        block.push(dsl::let_("u_l_y_cell", "rho_u_l_cell.y * inv_rho_l_cell"));
+        block.push(dsl::let_("u2_l_cell", "u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell"));
+        block.push(dsl::let_(
+            "p_l_cell",
+            &format!("max(0.0, ({gamma} - 1.0) * (rho_e_l_cell - 0.5 * rho_l_cell * u2_l_cell))"),
+        ));
+
+        block.push(dsl::let_("inv_rho_r_cell", "1.0 / max(rho_r_cell, 1e-8)"));
+        block.push(dsl::let_("u_r_x_cell", "rho_u_r_cell.x * inv_rho_r_cell"));
+        block.push(dsl::let_("u_r_y_cell", "rho_u_r_cell.y * inv_rho_r_cell"));
+        block.push(dsl::let_("u2_r_cell", "u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell"));
+        block.push(dsl::let_(
+            "p_r_cell",
+            &format!("max(0.0, ({gamma} - 1.0) * (rho_e_r_cell - 0.5 * rho_r_cell * u2_r_cell))"),
+        ));
+
+        block.push(dsl::let_("grad_rho_l", "grad_rho[owner]"));
+        block.push(dsl::let_("grad_rho_u_x_l", "grad_rho_u_x[owner]"));
+        block.push(dsl::let_("grad_rho_u_y_l", "grad_rho_u_y[owner]"));
+        block.push(dsl::let_("grad_rho_e_l", "grad_rho_e[owner]"));
+
+        block.push(dsl::let_("grad_rho_r", "grad_rho[other_idx]"));
+        block.push(dsl::let_("grad_rho_u_x_r", "grad_rho_u_x[other_idx]"));
+        block.push(dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"));
+        block.push(dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"));
+
+        block.push(dsl::let_(
+            "grad_u_x_l_x",
+            "(grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell",
+        ));
+        block.push(dsl::let_(
+            "grad_u_x_l_y",
+            "(grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell",
+        ));
+        block.push(dsl::let_(
+            "grad_u_y_l_x",
+            "(grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell",
+        ));
+        block.push(dsl::let_(
+            "grad_u_y_l_y",
+            "(grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell",
+        ));
+
+        block.push(dsl::let_(
+            "grad_u_x_r_x",
+            "(grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell",
+        ));
+        block.push(dsl::let_(
+            "grad_u_x_r_y",
+            "(grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell",
+        ));
+        block.push(dsl::let_(
+            "grad_u_y_r_x",
+            "(grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell",
+        ));
+        block.push(dsl::let_(
+            "grad_u_y_r_y",
+            "(grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell",
+        ));
+
+        block.push(dsl::let_(
+            "grad_u2_l_x",
+            "2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x",
+        ));
+        block.push(dsl::let_(
+            "grad_u2_l_y",
+            "2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y",
+        ));
+        block.push(dsl::let_(
+            "grad_u2_r_x",
+            "2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x",
+        ));
+        block.push(dsl::let_(
+            "grad_u2_r_y",
+            "2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y",
+        ));
+
+        block.push(dsl::let_(
+            "grad_rho_u2_l_x",
+            "u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x",
+        ));
+        block.push(dsl::let_(
+            "grad_rho_u2_l_y",
+            "u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y",
+        ));
+        block.push(dsl::let_(
+            "grad_rho_u2_r_x",
+            "u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x",
+        ));
+        block.push(dsl::let_(
+            "grad_rho_u2_r_y",
+            "u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y",
+        ));
+
+        block.push(dsl::let_(
+            "grad_p_l_x",
+            &format!("({gamma} - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x)"),
+        ));
+        block.push(dsl::let_(
+            "grad_p_l_y",
+            &format!("({gamma} - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y)"),
+        ));
+        block.push(dsl::let_(
+            "grad_p_r_x",
+            &format!("({gamma} - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x)"),
+        ));
+        block.push(dsl::let_(
+            "grad_p_r_y",
+            &format!("({gamma} - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y)"),
+        ));
+
+        block.push(dsl::let_("diff_rho_l", "rho_r_cell - rho_l_cell"));
+        block.push(dsl::let_("min_diff_rho_l", "min(diff_rho_l, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_l", "max(diff_rho_l, 0.0)"));
+        block.push(dsl::let_(
+            "delta_rho_l",
+            "grad_rho_l.x * r_l_x + grad_rho_l.y * r_l_y",
+        ));
+        block.push(dsl::let_(
+            "delta_rho_l_limited",
+            "min(max(delta_rho_l, min_diff_rho_l), max_diff_rho_l)",
+        ));
+
+        block.push(dsl::let_("diff_u_l_x", "u_r_x_cell - u_l_x_cell"));
+        block.push(dsl::let_("min_diff_u_l_x", "min(diff_u_l_x, 0.0)"));
+        block.push(dsl::let_("max_diff_u_l_x", "max(diff_u_l_x, 0.0)"));
+        block.push(dsl::let_(
+            "delta_u_l_x",
+            "grad_u_x_l_x * r_l_x + grad_u_x_l_y * r_l_y",
+        ));
+        block.push(dsl::let_(
+            "delta_u_l_x_limited",
+            "min(max(delta_u_l_x, min_diff_u_l_x), max_diff_u_l_x)",
+        ));
+
+        block.push(dsl::let_("diff_u_l_y", "u_r_y_cell - u_l_y_cell"));
+        block.push(dsl::let_("min_diff_u_l_y", "min(diff_u_l_y, 0.0)"));
+        block.push(dsl::let_("max_diff_u_l_y", "max(diff_u_l_y, 0.0)"));
+        block.push(dsl::let_(
+            "delta_u_l_y",
+            "grad_u_y_l_x * r_l_x + grad_u_y_l_y * r_l_y",
+        ));
+        block.push(dsl::let_(
+            "delta_u_l_y_limited",
+            "min(max(delta_u_l_y, min_diff_u_l_y), max_diff_u_l_y)",
+        ));
+
+        block.push(dsl::let_("diff_p_l", "p_r_cell - p_l_cell"));
+        block.push(dsl::let_("min_diff_p_l", "min(diff_p_l, 0.0)"));
+        block.push(dsl::let_("max_diff_p_l", "max(diff_p_l, 0.0)"));
+        block.push(dsl::let_(
+            "delta_p_l",
+            "grad_p_l_x * r_l_x + grad_p_l_y * r_l_y",
+        ));
+        block.push(dsl::let_(
+            "delta_p_l_limited",
+            "min(max(delta_p_l, min_diff_p_l), max_diff_p_l)",
+        ));
+
+        block.push(dsl::let_("rho_l_face", "rho_l_cell + delta_rho_l_limited"));
+        block.push(dsl::let_("u_l_x_face", "u_l_x_cell + delta_u_l_x_limited"));
+        block.push(dsl::let_("u_l_y_face", "u_l_y_cell + delta_u_l_y_limited"));
+        block.push(dsl::let_("p_l_face", "p_l_cell + delta_p_l_limited"));
+
+        block.push(dsl::let_("diff_rho_r", "rho_l_cell - rho_r_cell"));
+        block.push(dsl::let_("min_diff_rho_r", "min(diff_rho_r, 0.0)"));
+        block.push(dsl::let_("max_diff_rho_r", "max(diff_rho_r, 0.0)"));
+        block.push(dsl::let_(
+            "delta_rho_r",
+            "grad_rho_r.x * r_r_x + grad_rho_r.y * r_r_y",
+        ));
+        block.push(dsl::let_(
+            "delta_rho_r_limited",
+            "min(max(delta_rho_r, min_diff_rho_r), max_diff_rho_r)",
+        ));
+
+        block.push(dsl::let_("diff_u_r_x", "u_l_x_cell - u_r_x_cell"));
+        block.push(dsl::let_("min_diff_u_r_x", "min(diff_u_r_x, 0.0)"));
+        block.push(dsl::let_("max_diff_u_r_x", "max(diff_u_r_x, 0.0)"));
+        block.push(dsl::let_(
+            "delta_u_r_x",
+            "grad_u_x_r_x * r_r_x + grad_u_x_r_y * r_r_y",
+        ));
+        block.push(dsl::let_(
+            "delta_u_r_x_limited",
+            "min(max(delta_u_r_x, min_diff_u_r_x), max_diff_u_r_x)",
+        ));
+
+        block.push(dsl::let_("diff_u_r_y", "u_l_y_cell - u_r_y_cell"));
+        block.push(dsl::let_("min_diff_u_r_y", "min(diff_u_r_y, 0.0)"));
+        block.push(dsl::let_("max_diff_u_r_y", "max(diff_u_r_y, 0.0)"));
+        block.push(dsl::let_(
+            "delta_u_r_y",
+            "grad_u_y_r_x * r_r_x + grad_u_y_r_y * r_r_y",
+        ));
+        block.push(dsl::let_(
+            "delta_u_r_y_limited",
+            "min(max(delta_u_r_y, min_diff_u_r_y), max_diff_u_r_y)",
+        ));
+
+        block.push(dsl::let_("diff_p_r", "p_l_cell - p_r_cell"));
+        block.push(dsl::let_("min_diff_p_r", "min(diff_p_r, 0.0)"));
+        block.push(dsl::let_("max_diff_p_r", "max(diff_p_r, 0.0)"));
+        block.push(dsl::let_(
+            "delta_p_r",
+            "grad_p_r_x * r_r_x + grad_p_r_y * r_r_y",
+        ));
+        block.push(dsl::let_(
+            "delta_p_r_limited",
+            "min(max(delta_p_r, min_diff_p_r), max_diff_p_r)",
+        ));
+
+        block.push(dsl::let_("rho_r_face", "rho_r_cell + delta_rho_r_limited"));
+        block.push(dsl::let_("u_r_x_face", "u_r_x_cell + delta_u_r_x_limited"));
+        block.push(dsl::let_("u_r_y_face", "u_r_y_cell + delta_u_r_y_limited"));
+        block.push(dsl::let_("p_r_face", "p_r_cell + delta_p_r_limited"));
+
+        block.push(dsl::assign("rho_l", "rho_l_face"));
+        block.push(dsl::assign("rho_u_l.x", "rho_l_face * u_l_x_face"));
+        block.push(dsl::assign("rho_u_l.y", "rho_l_face * u_l_y_face"));
+        block.push(dsl::assign(
+            "rho_e_l",
+            &format!("p_l_face / ({gamma} - 1.0) + 0.5 * rho_l_face * (u_l_x_face * u_l_x_face + u_l_y_face * u_l_y_face)"),
+        ));
+        block.push(dsl::assign("rho_r", "rho_r_face"));
+        block.push(dsl::assign("rho_u_r.x", "rho_r_face * u_r_x_face"));
+        block.push(dsl::assign("rho_u_r.y", "rho_r_face * u_r_y_face"));
+        block.push(dsl::assign(
+            "rho_e_r",
+            &format!("p_r_face / ({gamma} - 1.0) + 0.5 * rho_r_face * (u_r_x_face * u_r_x_face + u_r_y_face * u_r_y_face)"),
+        ));
+
+        dsl::block(block)
+    };
+
+    stmts.push(dsl::if_block(
+        "!is_boundary && constants.scheme != 0u",
+        reconstruct_block,
+        None,
     ));
 
     stmts.push(dsl::let_("inv_rho_l", "1.0 / max(rho_l, 1e-8)"));
@@ -360,9 +633,30 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("u_face_n", "u_face_x * normal.x + u_face_y * normal.y"));
     stmts.push(dsl::let_("c_bar", "0.5 * (c_l + c_r)"));
     stmts.push(dsl::let_("mach", "abs(u_face_n) / max(c_bar, 1e-6)"));
-    stmts.push(dsl::let_("beta", "max(mach, 0.01)"));
-    stmts.push(dsl::let_("c_l_eff", "c_l * beta"));
-    stmts.push(dsl::let_("c_r_eff", "c_r * beta"));
+    stmts.push(dsl::let_("mach2", "mach * mach"));
+    stmts.push(dsl::let_("beta", "mach"));
+    stmts.push(dsl::var("c_l_eff", "c_l * beta"));
+    stmts.push(dsl::var("c_r_eff", "c_r * beta"));
+    let precond_block = dsl::block(vec![
+        dsl::let_(
+            "theta",
+            "min(1.0, max(mach2, constants.precond_theta_floor))",
+        ),
+        dsl::let_("one_minus_theta", "1.0 - theta"),
+        dsl::assign(
+            "c_l_eff",
+            "sqrt(theta * c_l * c_l + one_minus_theta * u_n_l * u_n_l)",
+        ),
+        dsl::assign(
+            "c_r_eff",
+            "sqrt(theta * c_r * c_r + one_minus_theta * u_n_r * u_n_r)",
+        ),
+    ]);
+    stmts.push(dsl::if_block(
+        "constants.precond_model == 1u",
+        precond_block,
+        None,
+    ));
     stmts.push(dsl::let_("dx", "center_r.x - center_owner.x"));
     stmts.push(dsl::let_("dy", "center_r.y - center_owner.y"));
     stmts.push(dsl::let_("dist", "max(sqrt(dx * dx + dy * dy), 1e-6)"));
@@ -380,22 +674,37 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("a_prod", "a_plus * a_minus"));
     stmts.push(dsl::let_("a_pos", "a_plus / denom"));
     stmts.push(dsl::let_("a_neg", "1.0 - a_pos"));
-    stmts.push(dsl::let_("aSf", "a_minus * a_pos"));
-    stmts.push(dsl::let_("aphiv_pos", "u_n_l - aSf"));
-    stmts.push(dsl::let_("aphiv_neg", "u_n_r + aSf"));
+    stmts.push(dsl::let_("a_prod_scaled", "a_prod / denom"));
 
+    stmts.push(dsl::let_("flux_rho_l", "rho_l * u_n_l"));
+    stmts.push(dsl::let_("flux_rho_r", "rho_r * u_n_r"));
     stmts.push(dsl::let_(
         "flux_rho",
-        "aphiv_pos * rho_l + aphiv_neg * rho_r",
+        "a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l)",
     ));
-    stmts.push(dsl::let_("p_face", "a_pos * p_l + a_neg * p_r"));
+    stmts.push(dsl::let_(
+        "flux_rho_u_x_l",
+        "rho_u_l.x * u_n_l + p_l * normal.x",
+    ));
+    stmts.push(dsl::let_(
+        "flux_rho_u_x_r",
+        "rho_u_r.x * u_n_r + p_r * normal.x",
+    ));
     stmts.push(dsl::var(
         "flux_rho_u_x",
-        "aphiv_pos * rho_u_l.x + aphiv_neg * rho_u_r.x + p_face * normal.x",
+        "a_pos * flux_rho_u_x_l + a_neg * flux_rho_u_x_r + a_prod_scaled * (rho_u_r.x - rho_u_l.x)",
+    ));
+    stmts.push(dsl::let_(
+        "flux_rho_u_y_l",
+        "rho_u_l.y * u_n_l + p_l * normal.y",
+    ));
+    stmts.push(dsl::let_(
+        "flux_rho_u_y_r",
+        "rho_u_r.y * u_n_r + p_r * normal.y",
     ));
     stmts.push(dsl::var(
         "flux_rho_u_y",
-        "aphiv_pos * rho_u_l.y + aphiv_neg * rho_u_r.y + p_face * normal.y",
+        "a_pos * flux_rho_u_y_l + a_neg * flux_rho_u_y_r + a_prod_scaled * (rho_u_r.y - rho_u_l.y)",
     ));
     stmts.push(dsl::let_(
         "diff_u_x",
@@ -414,9 +723,17 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "flux_rho_u_y + diff_u_y",
     ));
 
+    stmts.push(dsl::let_(
+        "flux_rho_e_l",
+        "(rho_e_l + p_l) * u_n_l",
+    ));
+    stmts.push(dsl::let_(
+        "flux_rho_e_r",
+        "(rho_e_r + p_r) * u_n_r",
+    ));
     stmts.push(dsl::var(
         "flux_rho_e",
-        "aphiv_pos * (rho_e_l + p_l) + aphiv_neg * (rho_e_r + p_r) + aSf * (p_l - p_r)",
+        "a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l)",
     ));
     stmts.push(dsl::assign(
         "flux_rho_e",

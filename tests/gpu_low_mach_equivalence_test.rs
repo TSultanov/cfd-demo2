@@ -117,6 +117,30 @@ fn vorticity(mesh: &Mesh, u: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
+fn checkerboard_metric(mesh: &Mesh, values: &[f64], norm: f64) -> f64 {
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    for cell in 0..mesh.num_cells() {
+        let neighs = neighbors(mesh, cell);
+        if neighs.is_empty() {
+            continue;
+        }
+        let mut avg = 0.0f64;
+        for &n in &neighs {
+            avg += values[n];
+        }
+        avg /= neighs.len() as f64;
+        let diff = values[cell] - avg;
+        sum += diff * diff;
+        count += 1;
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    let rms = (sum / count as f64).sqrt();
+    rms / norm.max(1e-12)
+}
+
 fn mesh_bounds(mesh: &Mesh) -> (f64, f64, f64, f64) {
     let min_x = mesh.vx.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_x = mesh.vx.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -275,13 +299,18 @@ fn low_mach_equivalence_vortex_street() {
     let save_plots = env_bool("CFD2_SAVE_PLOTS");
     let steps = env_usize("CFD2_LOW_MACH_STEPS", 1200);
     let dt = env_f64("CFD2_LOW_MACH_DT", 0.001);
+    let dtau = env_f64("CFD2_LOW_MACH_DTAU", 0.0);
+    let alpha_u = env_f64("CFD2_LOW_MACH_ALPHA_U", 1.0);
+    let precond_model = env_usize("CFD2_LOW_MACH_PRECOND_MODEL", 1) as u32;
+    let precond_theta_floor = env_f64("CFD2_LOW_MACH_PRECOND_THETA_FLOOR", 1e-6);
+    let checker_max = env_f64("CFD2_LOW_MACH_CB_MAX", 2.0);
     let cell = env_f64("CFD2_LOW_MACH_CELL", 0.05);
     let smooth_alpha = env_f64("CFD2_LOW_MACH_SMOOTH_ALPHA", 0.3);
     let smooth_iters = env_usize("CFD2_LOW_MACH_SMOOTH_ITERS", 40);
     let base_pressure = env_f64("CFD2_LOW_MACH_BASE_P", 25.0);
     let perturb_amp = env_f64("CFD2_LOW_MACH_PERTURB", 5e-3);
     let incomp_iters = env_usize("CFD2_LOW_MACH_INCOMP_ITERS", 20);
-    let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 20);
+    let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 30);
     let probe_stride = env_usize("CFD2_LOW_MACH_PROBE_STRIDE", 10);
     let plot_width = env_usize("CFD2_PLOT_WIDTH", 480);
     let plot_height = env_usize("CFD2_PLOT_HEIGHT", 160);
@@ -313,11 +342,15 @@ fn low_mach_equivalence_vortex_street() {
 
     let mut comp = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
     comp.set_dt(dt as f32);
+    comp.set_dtau(dtau as f32);
     comp.set_time_scheme(1);
     comp.set_density(density);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
     comp.set_scheme(2);
+    comp.set_alpha_u(alpha_u as f32);
+    comp.set_precond_model(precond_model);
+    comp.set_precond_theta_floor(precond_theta_floor as f32);
     comp.set_outer_iters(comp_iters);
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure as f32; mesh.num_cells()];
@@ -353,9 +386,13 @@ fn low_mach_equivalence_vortex_street() {
     }
 
     let u_incomp = best_u_incomp.unwrap_or_else(|| pollster::block_on(incomp.get_u()));
-    let _p_incomp = pollster::block_on(incomp.get_p());
+    let p_incomp = pollster::block_on(incomp.get_p());
     let u_comp = best_u_comp.unwrap_or_else(|| pollster::block_on(comp.get_u()));
-    let _p_comp = pollster::block_on(comp.get_p());
+    let p_comp = pollster::block_on(comp.get_p());
+    let dyn_pressure = 0.5 * density as f64 * (u_in as f64).powi(2);
+    let norm = dyn_pressure.max(1e-8);
+    let checker_incomp = checkerboard_metric(&mesh, &p_incomp, norm);
+    let checker_comp = checkerboard_metric(&mesh, &p_comp, norm);
 
     let rms_num = u_incomp
         .iter()
@@ -439,7 +476,7 @@ fn low_mach_equivalence_vortex_street() {
         let mut nu_num_sum = 0.0f64;
         let mut nu_num_count = 0usize;
         let mut nu_num_max = 0.0f64;
-        for (i, (u_val, p_val)) in u_comp.iter().zip(_p_comp.iter()).enumerate() {
+        for (i, (u_val, p_val)) in u_comp.iter().zip(p_comp.iter()).enumerate() {
             if !p_val.is_finite() {
                 continue;
             }
@@ -449,7 +486,13 @@ fn low_mach_equivalence_vortex_street() {
                 continue;
             }
             let mach = speed / c;
-            let c_eff = c * mach.max(0.01);
+            let mach2 = mach * mach;
+            let theta = if precond_model == 1 {
+                mach2.max(precond_theta_floor).min(1.0)
+            } else {
+                mach2
+            };
+            let c_eff = (theta * c * c + (1.0 - theta) * speed * speed).sqrt();
             let h = mesh.cell_vol[i].sqrt();
             let nu_num = 0.5 * (speed + c_eff) * h;
             if nu_num.is_finite() {
@@ -473,10 +516,20 @@ fn low_mach_equivalence_vortex_street() {
             "nu_num_mean={:.3e}\nnu_num_max={:.3e}\n",
             nu_num_mean, nu_num_max
         ));
+        summary.push_str(&format!(
+            "checker_incomp={:.3e}\nchecker_comp={:.3e}\n",
+            checker_incomp, checker_comp
+        ));
         let _ = fs::write(out_dir.join("low_mach_summary.txt"), summary);
     }
 
     assert!(std_incomp > 1e-4, "incompressible probe std too low");
     assert!(std_comp > 1e-5, "compressible probe std too low");
     assert!(rel_rms < 0.6, "relative RMS difference {:.3} too large", rel_rms);
+    assert!(
+        checker_comp < checker_max,
+        "checkerboarding metric {:.3} exceeds {:.3}",
+        checker_comp,
+        checker_max
+    );
 }

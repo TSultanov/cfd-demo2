@@ -87,6 +87,7 @@ pub struct CoupledSolverResources {
 pub struct GpuConstants {
     pub dt: f32,
     pub dt_old: f32,
+    pub dtau: f32,
     pub time: f32,
     pub viscosity: f32,
     pub density: f32,
@@ -99,6 +100,8 @@ pub struct GpuConstants {
     pub inlet_velocity: f32,
     pub ramp_time: f32,
     pub precond_type: u32, // 0: Jacobi, 1: AMG
+    pub precond_model: u32, // 0: legacy, 1: Weiss-Smith
+    pub precond_theta_floor: f32,
 }
 
 #[repr(C)]

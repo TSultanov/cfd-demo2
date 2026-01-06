@@ -48,6 +48,7 @@ fn constants_struct() -> StructDef {
         vec![
             StructField::new("dt", Type::F32),
             StructField::new("dt_old", Type::F32),
+            StructField::new("dtau", Type::F32),
             StructField::new("time", Type::F32),
             StructField::new("viscosity", Type::F32),
             StructField::new("density", Type::F32),
@@ -60,6 +61,8 @@ fn constants_struct() -> StructDef {
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
             StructField::new("precond_type", Type::U32),
+            StructField::new("precond_model", Type::U32),
+            StructField::new("precond_theta_floor", Type::F32),
         ],
     )
 }
@@ -211,6 +214,13 @@ fn state_bindings() -> Vec<Item> {
             1,
             8,
             AccessMode::ReadWrite,
+        ),
+        storage_var(
+            "state_iter",
+            Type::array(Type::F32),
+            1,
+            9,
+            AccessMode::Read,
         ),
     ]
 }

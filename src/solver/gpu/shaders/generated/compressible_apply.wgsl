@@ -10,6 +10,7 @@ struct Vector2 {
 struct Constants {
     dt: f32,
     dt_old: f32,
+    dtau: f32,
     time: f32,
     viscosity: f32,
     density: f32,
@@ -22,6 +23,8 @@ struct Constants {
     inlet_velocity: f32,
     ramp_time: f32,
     precond_type: u32,
+    precond_model: u32,
+    precond_theta_floor: f32,
 }
 
 // Group 0: Fields (consolidated state buffers)
@@ -53,6 +56,9 @@ var<storage, read_write> grad_rho_u_y: array<Vector2>;
 @group(0) @binding(8) 
 var<storage, read_write> grad_rho_e: array<Vector2>;
 
+@group(0) @binding(9) 
+var<storage, read> state_iter: array<f32>;
+
 // Group 1: Solver
 
 @group(1) @binding(0) 
@@ -75,12 +81,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let delta_rho_u_x = solution[base + 1u];
     let delta_rho_u_y = solution[base + 2u];
     let delta_rho_e = solution[base + 3u];
-    var rho_new = rho_base + delta_rho;
-    var rho_u_new_x = rho_u_base.x + delta_rho_u_x;
-    var rho_u_new_y = rho_u_base.y + delta_rho_u_y;
-    var rho_e_new = rho_e_base + delta_rho_e;
-    rho_new = max(rho_new, 1e-8);
-    rho_e_new = max(rho_e_new, 1e-8);
+    let relax = constants.alpha_u;
+    var rho_new = rho_base + relax * delta_rho;
+    var rho_u_new_x = rho_u_base.x + relax * delta_rho_u_x;
+    var rho_u_new_y = rho_u_base.y + relax * delta_rho_u_y;
+    var rho_e_new = rho_e_base + relax * delta_rho_e;
     state[idx * 7u + 0u] = rho_new;
     state[idx * 7u + 1u] = rho_u_new_x;
     state[idx * 7u + 2u] = rho_u_new_y;

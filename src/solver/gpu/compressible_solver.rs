@@ -40,6 +40,7 @@ pub struct GpuCompressibleSolver {
     pub b_state: wgpu::Buffer,
     pub b_state_old: wgpu::Buffer,
     pub b_state_old_old: wgpu::Buffer,
+    pub b_state_iter: wgpu::Buffer,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_rho: wgpu::Buffer,
     pub b_grad_rho_u_x: wgpu::Buffer,
@@ -209,6 +210,7 @@ impl GpuCompressibleSolver {
                         state_old: fields_res.state_buffers[idx_old].as_entire_buffer_binding(),
                         state_old_old: fields_res.state_buffers[idx_old_old]
                             .as_entire_buffer_binding(),
+                        state_iter: fields_res.b_state_iter.as_entire_buffer_binding(),
                         fluxes: fields_res.b_fluxes.as_entire_buffer_binding(),
                         constants: fields_res.b_constants.as_entire_buffer_binding(),
                         grad_rho: fields_res.b_grad_rho.as_entire_buffer_binding(),
@@ -250,6 +252,7 @@ impl GpuCompressibleSolver {
             b_state: fields_res.b_state,
             b_state_old: fields_res.b_state_old,
             b_state_old_old: fields_res.b_state_old_old,
+            b_state_iter: fields_res.b_state_iter,
             b_fluxes: fields_res.b_fluxes,
             b_grad_rho: fields_res.b_grad_rho,
             b_grad_rho_u_x: fields_res.b_grad_rho_u_x,
@@ -300,6 +303,11 @@ impl GpuCompressibleSolver {
         self.update_constants();
     }
 
+    pub fn set_dtau(&mut self, dtau: f32) {
+        self.constants.dtau = dtau;
+        self.update_constants();
+    }
+
     pub fn set_viscosity(&mut self, mu: f32) {
         self.constants.viscosity = mu;
         self.update_constants();
@@ -322,6 +330,21 @@ impl GpuCompressibleSolver {
 
     pub fn set_scheme(&mut self, scheme: u32) {
         self.constants.scheme = scheme;
+        self.update_constants();
+    }
+
+    pub fn set_alpha_u(&mut self, alpha_u: f32) {
+        self.constants.alpha_u = alpha_u;
+        self.update_constants();
+    }
+
+    pub fn set_precond_model(&mut self, model: u32) {
+        self.constants.precond_model = model;
+        self.update_constants();
+    }
+
+    pub fn set_precond_theta_floor(&mut self, floor: f32) {
+        self.constants.precond_theta_floor = floor;
         self.update_constants();
     }
 
@@ -403,6 +426,7 @@ impl GpuCompressibleSolver {
                 });
         let state_size = self.num_cells as u64 * self.offsets.stride as u64 * 4;
         encoder.copy_buffer_to_buffer(&self.b_state_old, 0, &self.b_state, 0, state_size);
+        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, state_size);
 
         self.context.queue.submit(Some(encoder.finish()));
 
@@ -448,7 +472,16 @@ impl GpuCompressibleSolver {
 
             self.context.queue.submit(Some(encoder.finish()));
 
-            let _ = self.solve_compressible_fgmres(30, 1e-7);
+            let _ = self.solve_compressible_fgmres(60, 1e-8);
+
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Compressible Iter Snapshot Encoder"),
+                    });
+            encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, state_size);
+            self.context.queue.submit(Some(encoder.finish()));
 
             let mut encoder =
                 self.context

@@ -101,6 +101,7 @@ pub fn init_field_buffers(device: &wgpu::Device, num_cells: u32, num_faces: u32)
     let constants = GpuConstants {
         dt: 0.0001,
         dt_old: 0.0001,
+        dtau: 0.0,
         time: 0.0,
         viscosity: 0.01,
         density: 1.0,
@@ -113,6 +114,8 @@ pub fn init_field_buffers(device: &wgpu::Device, num_cells: u32, num_faces: u32)
         inlet_velocity: 1.0,
         ramp_time: 0.1,
         precond_type: 0,
+        precond_model: 0,
+        precond_theta_floor: 1e-6,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Constants Buffer"),

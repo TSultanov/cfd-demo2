@@ -8,6 +8,8 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Typed DSL scaffolding exists (`src/solver/codegen/dsl/*`):
   - `DslType`/`Shape` + `TypedExpr`
   - `UnitDim` uses **SI base dimensions** (M/L/T) and supports **rational exponents** (e.g. `sqrt`).
+- Dense tensor helpers exist in the DSL (`src/solver/codegen/dsl/tensor.rs`):
+  - `MatExpr<const R, const C>` for building small dense matrix expressions and emitting unrolled assigns/scatters.
 - Sparse matrix types exist in the DSL (`src/solver/codegen/dsl/matrix.rs`):
   - `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, `BlockCsrSoaEntry`, `BlockShape`
 - Migration is in progress:
@@ -28,8 +30,8 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 
 - Keep adding small AST helpers where repeated patterns show up (array indexing, block scatters, component swizzles).
 - Migrate kernels one-by-one, preferring the most string-fragile sections first:
-  - `coupled_assembly`: remove remaining string-based assigns/conditions where feasible.
-  - `compressible_assembly`: continue replacing string-based indexing and matrix scatter plumbing.
+  - `coupled_assembly`: continue replacing remaining string-based math; diagonal block scatter is now `MatExpr`-based.
+  - `compressible_assembly`: continue replacing remaining string-based math; CSR-SoA scatters and boundary block ops are now `MatExpr`-based.
   - `pressure_assembly`, `update_fields_from_coupled`, `compressible_flux_kt`, `compressible_gradients`.
 - Once migrations are sufficiently complete, gate `wgsl_dsl::expr(&str)` behind tests/debug (or deprecate it).
 
@@ -51,9 +53,15 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 **Deliverable:** matrix-heavy kernels stop hand-writing `_00/_01/...` patterns.
 
 - Unify sparse storage layouts behind a small API (contiguous vs row-split SoA) and provide safe scatter/accumulate helpers.
-- Add `Mat<R,C>`/`Vec<N>` conveniences on top of `TypedExpr` where it reduces boilerplate.
+- Expand dense tensor support:
+  - Current: `MatExpr<const R, const C>` is an Expr-level helper for unrolled ops/scatters.
+  - Missing: a typed variant (`TypedMat`) that tracks per-entry `DslType`/`UnitDim` and supports more ops (e.g. block transforms and structured assembly).
+  - Missing: vector helpers (`VecExpr` / typed component access) to avoid `.x/.y` string usage in kernels.
 
-### 5) Kernel Migration Tracker + Parity Tests
+### 5) Discovery Notes (Gotchas)
+- `build.rs` manually `include!()`s the codegen DSL modules; new DSL files must be added there as well (e.g. `dsl/tensor.rs`).
+
+### 6) Kernel Migration Tracker + Parity Tests
 **Deliverable:** migrated kernels remain behaviorally stable while removing strings.
 
 - Track per-kernel migration status (AST-only vs mixed vs string-heavy).

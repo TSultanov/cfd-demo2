@@ -1,10 +1,11 @@
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
+use super::dsl as typed;
 use super::state_access::{state_scalar_expr, state_vec2_expr};
 use super::reconstruction::limited_linear_reconstruct_face;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
+    Param, Stmt, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -300,6 +301,14 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let gamma = "1.4";
     let block_size = 4u32;
     let block_stride = block_size * block_size;
+    let block_shape = typed::BlockShape::new(block_size as u8, block_size as u8);
+    let block_matrix = typed::BlockCsrSoaMatrix::from_start_row_prefix(
+        "matrix_values",
+        "start_row",
+        block_shape,
+        typed::ScalarType::F32,
+        typed::UnitDim::dimensionless(),
+    );
 
     stmts.push(dsl::let_("idx", "global_id.x"));
     stmts.push(dsl::if_block(
@@ -1192,96 +1201,141 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
                 "scalar_mat_idx - scalar_offset",
             )])),
         ),
-        dsl::let_("base_0", "start_row_0 + 4u * neighbor_rank"),
-        dsl::let_("base_1", "start_row_1 + 4u * neighbor_rank"),
-        dsl::let_("base_2", "start_row_2 + 4u * neighbor_rank"),
-        dsl::let_("base_3", "start_row_3 + 4u * neighbor_rank"),
     ];
 
-    interior_matrix_stmts.extend(dsl::assign_matrix_array_from_prefix_scaled_expr(
-        "matrix_values",
-        "base",
-        "jac_r",
-        block_size as usize,
+    let neighbor_entry = block_matrix.row_entry(&Expr::ident("neighbor_rank"));
+    let jac_l = typed::MatExpr::<4, 4>::from_prefix("jac_l");
+    let jac_r = typed::MatExpr::<4, 4>::from_prefix("jac_r");
+    interior_matrix_stmts.extend(jac_r.scatter_assign_to_block_entry_scaled(
+        &neighbor_entry,
         Some(Expr::ident("area")),
     ));
-    interior_matrix_stmts.extend(dsl::assign_op_matrix_from_prefix_scaled_expr(
+    interior_matrix_stmts.extend(jac_l.assign_op_to_prefix_scaled(
         AssignOp::Add,
         "diag",
-        "jac_l",
-        block_size as usize,
         Some(Expr::ident("area")),
     ));
 
     let interior_matrix = dsl::block(interior_matrix_stmts);
 
     let boundary_matrix = {
-        let mut body = Vec::new();
-        body.extend(dsl::var_matrix_expr("eff", block_size as usize, |row, col| {
-            format!("jac_l_{row}{col} + jac_r_{row}{col}")
-        }));
+        let area = Expr::ident("area");
+        let eff_default = jac_l.add(&jac_r);
+        let default_block = dsl::block(eff_default.assign_op_to_prefix_scaled(
+            AssignOp::Add,
+            "diag",
+            Some(area.clone()),
+        ));
 
-        let inlet_block = {
-            let mut inlet = Vec::new();
-            inlet.extend(dsl::for_each_mat_entry_block(block_size as usize, |row, col| {
-                let target = format!("eff_{row}{col}");
-                let expr = if col == 0 {
-                    format!(
-                        "jac_l_{row}0 + jac_r_{row}0 + jac_r_{row}1 * constants.inlet_velocity"
-                    )
-                } else if col == 3 {
-                    format!("jac_l_{row}{col} + jac_r_{row}{col}")
-                } else {
-                    format!("jac_l_{row}{col}")
-                };
-                vec![dsl::assign(&target, &expr)]
-            }));
-            dsl::block(inlet)
-        };
+        let inlet_velocity = Expr::ident("constants").field("inlet_velocity");
+        let eff_inlet = typed::MatExpr::<4, 4>::from_fn(|row, col| match col {
+            0 => {
+                let base = Expr::binary(jac_l.entry(row, 0), BinaryOp::Add, jac_r.entry(row, 0));
+                let extra = Expr::binary(jac_r.entry(row, 1), BinaryOp::Mul, inlet_velocity.clone());
+                Expr::binary(base, BinaryOp::Add, extra)
+            }
+            3 => Expr::binary(jac_l.entry(row, col), BinaryOp::Add, jac_r.entry(row, col)),
+            _ => jac_l.entry(row, col),
+        });
+        let inlet_block = dsl::block(eff_inlet.assign_op_to_prefix_scaled(
+            AssignOp::Add,
+            "diag",
+            Some(area.clone()),
+        ));
 
         let wall_block = {
             let mut wall = Vec::new();
             // Wall BC couples the right state to the left state:
             //   m_r = m_l - 2 (m_l · n) n
             // This requires applying the momentum reflection matrix to the right-state Jacobian.
+            let normal = Expr::ident("normal");
+            let nx = normal.clone().field("x");
+            let ny = normal.clone().field("y");
+            let nx_sq = Expr::binary(nx.clone(), BinaryOp::Mul, nx.clone());
+            let ny_sq = Expr::binary(ny.clone(), BinaryOp::Mul, ny.clone());
             wall.extend([
-                dsl::let_("r11", "1.0 - 2.0 * normal.x * normal.x"),
-                dsl::let_("r12", "-2.0 * normal.x * normal.y"),
-                dsl::let_("r21", "-2.0 * normal.y * normal.x"),
-                dsl::let_("r22", "1.0 - 2.0 * normal.y * normal.y"),
+                dsl::let_expr(
+                    "r11",
+                    Expr::binary(
+                        Expr::lit_f32(1.0),
+                        BinaryOp::Sub,
+                        Expr::binary(Expr::lit_f32(2.0), BinaryOp::Mul, nx_sq),
+                    ),
+                ),
+                dsl::let_expr(
+                    "r12",
+                    Expr::binary(
+                        Expr::lit_f32(-2.0),
+                        BinaryOp::Mul,
+                        Expr::binary(nx.clone(), BinaryOp::Mul, ny.clone()),
+                    ),
+                ),
+                dsl::let_expr(
+                    "r21",
+                    Expr::binary(
+                        Expr::lit_f32(-2.0),
+                        BinaryOp::Mul,
+                        Expr::binary(ny.clone(), BinaryOp::Mul, nx.clone()),
+                    ),
+                ),
+                dsl::let_expr(
+                    "r22",
+                    Expr::binary(
+                        Expr::lit_f32(1.0),
+                        BinaryOp::Sub,
+                        Expr::binary(Expr::lit_f32(2.0), BinaryOp::Mul, ny_sq),
+                    ),
+                ),
             ]);
-            wall.extend(dsl::for_each_mat_entry_block(block_size as usize, |row, col| {
-                let target = format!("eff_{row}{col}");
-                let expr = if col == 1 {
-                    format!("jac_l_{row}1 + jac_r_{row}1 * r11 + jac_r_{row}2 * r21")
-                } else if col == 2 {
-                    format!("jac_l_{row}2 + jac_r_{row}1 * r12 + jac_r_{row}2 * r22")
-                } else {
-                    format!("jac_l_{row}{col} + jac_r_{row}{col}")
-                };
-                vec![dsl::assign(&target, &expr)]
-            }));
+
+            let eff_wall = typed::MatExpr::<4, 4>::from_fn(|row, col| match col {
+                1 => {
+                    let term1 = Expr::binary(jac_r.entry(row, 1), BinaryOp::Mul, Expr::ident("r11"));
+                    let term2 = Expr::binary(jac_r.entry(row, 2), BinaryOp::Mul, Expr::ident("r21"));
+                    Expr::binary(
+                        jac_l.entry(row, 1),
+                        BinaryOp::Add,
+                        Expr::binary(term1, BinaryOp::Add, term2),
+                    )
+                }
+                2 => {
+                    let term1 = Expr::binary(jac_r.entry(row, 1), BinaryOp::Mul, Expr::ident("r12"));
+                    let term2 = Expr::binary(jac_r.entry(row, 2), BinaryOp::Mul, Expr::ident("r22"));
+                    Expr::binary(
+                        jac_l.entry(row, 2),
+                        BinaryOp::Add,
+                        Expr::binary(term1, BinaryOp::Add, term2),
+                    )
+                }
+                _ => Expr::binary(jac_l.entry(row, col), BinaryOp::Add, jac_r.entry(row, col)),
+            });
+            wall.extend(eff_wall.assign_op_to_prefix_scaled(
+                AssignOp::Add,
+                "diag",
+                Some(area.clone()),
+            ));
             dsl::block(wall)
         };
 
-        body.push(dsl::if_block(
-            "boundary_type == 1u",
+        let boundary_stmt = dsl::if_block_expr(
+            Expr::binary(
+                Expr::ident("boundary_type"),
+                BinaryOp::Equal,
+                Expr::lit_u32(1),
+            ),
             inlet_block,
-            Some(dsl::block(vec![dsl::if_block(
-                "boundary_type == 3u",
+            Some(dsl::block(vec![dsl::if_block_expr(
+                Expr::binary(
+                    Expr::ident("boundary_type"),
+                    BinaryOp::Equal,
+                    Expr::lit_u32(3),
+                ),
                 wall_block,
-                None,
+                Some(default_block),
             )])),
-        ));
+        );
 
-        body.extend(dsl::assign_op_matrix_from_prefix_scaled_expr(
-            AssignOp::Add,
-            "diag",
-            "eff",
-            block_size as usize,
-            Some(Expr::ident("area")),
-        ));
-        dsl::block(body)
+        dsl::block(vec![boundary_stmt])
     };
 
     loop_body.push(dsl::if_block(
@@ -1327,25 +1381,50 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "coeff_pseudo",
     ));
 
-    stmts.push(dsl::let_("scalar_diag_idx", "diagonal_indices[idx]"));
-    stmts.push(dsl::let_("diag_rank", "scalar_diag_idx - scalar_offset"));
-    stmts.push(dsl::let_("diag_base_0", "start_row_0 + 4u * diag_rank"));
-    stmts.push(dsl::let_("diag_base_1", "start_row_1 + 4u * diag_rank"));
-    stmts.push(dsl::let_("diag_base_2", "start_row_2 + 4u * diag_rank"));
-    stmts.push(dsl::let_("diag_base_3", "start_row_3 + 4u * diag_rank"));
-
-    stmts.extend(dsl::assign_matrix_array_from_prefix_scaled_expr(
-        "matrix_values",
-        "diag_base",
-        "diag",
-        block_size as usize,
-        None,
+    stmts.push(dsl::let_expr(
+        "scalar_diag_idx",
+        dsl::array_access("diagonal_indices", Expr::ident("idx")),
     ));
+    stmts.push(dsl::let_expr(
+        "diag_rank",
+        Expr::binary(
+            Expr::ident("scalar_diag_idx"),
+            BinaryOp::Sub,
+            Expr::ident("scalar_offset"),
+        ),
+    ));
+    let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
+    let diag_mat = typed::MatExpr::<4, 4>::from_prefix("diag");
+    stmts.extend(diag_mat.scatter_assign_to_block_entry_scaled(&diag_entry, None));
 
-    stmts.push(dsl::assign("rhs[4u * idx + 0u]", "rhs_rho"));
-    stmts.push(dsl::assign("rhs[4u * idx + 1u]", "rhs_rho_u_x"));
-    stmts.push(dsl::assign("rhs[4u * idx + 2u]", "rhs_rho_u_y"));
-    stmts.push(dsl::assign("rhs[4u * idx + 3u]", "rhs_rho_e"));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        4,
+        0,
+        Expr::ident("rhs_rho"),
+    ));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        4,
+        1,
+        Expr::ident("rhs_rho_u_x"),
+    ));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        4,
+        2,
+        Expr::ident("rhs_rho_u_y"),
+    ));
+    stmts.push(dsl::assign_array_access_linear(
+        "rhs",
+        Expr::ident("idx"),
+        4,
+        3,
+        Expr::ident("rhs_rho_e"),
+    ));
 
     Block::new(stmts)
 }

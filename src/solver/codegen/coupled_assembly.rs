@@ -881,60 +881,28 @@ fn main_body(
         ),
     ));
     let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
-    stmts.push(dsl::let_expr("d_0_0", diag_entry.index_expr(0, 0)));
-    stmts.push(dsl::let_expr("d_0_1", diag_entry.index_expr(0, 1)));
-    stmts.push(dsl::let_expr("d_0_2", diag_entry.index_expr(0, p_offset_u8)));
-    stmts.push(dsl::let_expr("d_1_0", diag_entry.index_expr(1, 0)));
-    stmts.push(dsl::let_expr("d_1_1", diag_entry.index_expr(1, 1)));
-    stmts.push(dsl::let_expr("d_1_2", diag_entry.index_expr(1, p_offset_u8)));
-    stmts.push(dsl::let_expr("d_2_0", diag_entry.index_expr(2, 0)));
-    stmts.push(dsl::let_expr("d_2_1", diag_entry.index_expr(2, 1)));
-    stmts.push(dsl::let_expr("d_2_2", diag_entry.index_expr(2, p_offset_u8)));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_0_0"),
-        Expr::ident("diag_u"),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_0_1"),
-        Expr::lit_f32(0.0),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_0_2"),
-        Expr::ident("sum_diag_up"),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_1_0"),
-        Expr::lit_f32(0.0),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_1_1"),
-        Expr::ident("diag_v"),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_1_2"),
-        Expr::ident("sum_diag_vp"),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_2_0"),
-        Expr::ident("sum_diag_pu"),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_2_1"),
-        Expr::ident("sum_diag_pv"),
-    ));
-    stmts.push(dsl::assign_array_access(
-        "matrix_values",
-        Expr::ident("d_2_2"),
-        Expr::binary(Expr::ident("diag_p"), BinaryOp::Add, Expr::ident("sum_diag_pp")),
-    ));
+    let diag_block = typed::MatExpr::<3, 3>::from_fn(|row, col| match row {
+        0 => match col {
+            0 => Expr::ident("diag_u"),
+            1 => Expr::lit_f32(0.0),
+            2 => Expr::ident("sum_diag_up"),
+            _ => Expr::lit_f32(0.0),
+        },
+        1 => match col {
+            0 => Expr::lit_f32(0.0),
+            1 => Expr::ident("diag_v"),
+            2 => Expr::ident("sum_diag_vp"),
+            _ => Expr::lit_f32(0.0),
+        },
+        2 => match col {
+            0 => Expr::ident("sum_diag_pu"),
+            1 => Expr::ident("sum_diag_pv"),
+            2 => Expr::binary(Expr::ident("diag_p"), BinaryOp::Add, Expr::ident("sum_diag_pp")),
+            _ => Expr::lit_f32(0.0),
+        },
+        _ => Expr::lit_f32(0.0),
+    });
+    stmts.extend(diag_block.scatter_assign_to_block_entry_scaled(&diag_entry, None));
     stmts.push(dsl::assign_array_access_linear(
         "rhs",
         Expr::ident("idx"),

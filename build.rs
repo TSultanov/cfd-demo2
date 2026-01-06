@@ -77,6 +77,12 @@ mod solver {
                     "/src/solver/codegen/dsl/types.rs"
                 ));
             }
+            pub mod tensor {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/tensor.rs"
+                ));
+            }
             pub mod units {
                 include!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
@@ -91,6 +97,7 @@ mod solver {
                 BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix,
                 CsrPattern,
             };
+            pub use tensor::MatExpr;
             pub use types::{DslType, ScalarType, Shape};
             pub use units::UnitDim;
         }

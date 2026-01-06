@@ -269,22 +269,26 @@ mod tests {
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_output_path() -> PathBuf {
+    static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn unique_suffix() -> String {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("cfd2_codegen_{}.wgsl", nanos))
+        let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{nanos}_{counter}")
+    }
+
+    fn temp_output_path() -> PathBuf {
+        std::env::temp_dir().join(format!("cfd2_codegen_{}.wgsl", unique_suffix()))
     }
 
     fn temp_base_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("cfd2_codegen_base_{}", nanos))
+        std::env::temp_dir().join(format!("cfd2_codegen_base_{}", unique_suffix()))
     }
 
     #[test]

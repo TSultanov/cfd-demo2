@@ -7,6 +7,8 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - There is a WGSL AST (`src/solver/codegen/wgsl_ast.rs`) for items/statements/expressions with a precedence-aware renderer.
 - **But** most kernels still build expressions by string formatting + parsing (`wgsl_dsl::expr("a + b")`). This is fragile and makes higher-level operations (matrices/tensors) awkward.
 - Some “higher-order” helpers exist to reduce repetition (e.g., component loops and 4×4 matrix helpers), but they still operate on strings.
+- A typed DSL scaffold exists (`src/solver/codegen/dsl/*`) with `DslType`/`UnitDim` and a `TypedExpr` wrapper that can be lowered to WGSL AST expressions.
+- The DSL now includes **CSR / Block-CSR matrix types** (metadata + AST indexing helpers) to represent sparse linear operators in a structured way.
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and should be the primary safety net for future refactors.
 
 ## Goals
@@ -25,31 +27,27 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 ### Phase 1: Make `wgsl_ast::Expr` Buildable (No Parser in the Hot Path)
 **Deliverable:** codegen can build expressions without parsing strings.
 
-- Add constructors/builders for `wgsl_ast::Expr`:
-  - `Expr::ident("foo")`, `Expr::lit_f32(1.0)`, `Expr::field(base, "x")`, `Expr::index(base, idx)`,
-  - `Expr::call("min", [a, b])`, `Expr::binary(a, Add, b)`, `Expr::unary(Negate, a)`, etc.
-- Update `wgsl_dsl` to support `*_expr` variants that accept `Expr` directly:
-  - `let_expr(name, Expr)`, `assign_expr(target: Expr, value: Expr)`, etc.
-- Keep the string parser as a **test/debug** tool only (or behind a feature flag), not as the primary API.
-- Add unit tests that ensure builder-rendered WGSL matches the previous string-based output for representative expressions.
+- Implemented:
+  - `wgsl_ast::Expr` builder APIs (ident/literals/call/binary/unary/index/field).
+  - `wgsl_dsl` `*_expr` variants that accept `Expr` directly.
+  - AST-based state access helpers alongside the existing string helpers.
+- Remaining:
+  - Incrementally migrate kernels so expression construction is AST-first.
+  - Move the string parser to **test/debug only** once migrations are complete.
 
 ### Phase 2: Introduce a Typed DSL IR (Shapes + Units) Above WGSL
 **Deliverable:** a new IR that can express matrix/tensor operations and type-check them before lowering.
 
-- Add a new DSL layer (e.g., `src/solver/codegen/dsl/*`) with:
-  - `DslType`: scalar/vec2/vec3/matNxM (+ element type).
-  - `UnitDim`: dimension exponents for base units (M, L, T, Θ, …) or a minimal subset to start.
-  - `TypedExpr { ty: DslType, unit: UnitDim, expr: DslExpr }`.
-  - `DslExpr`: identifiers, literals, calls, indexing/fields, unary/binary ops, select/if, etc.
-- Implement a type-checker/inferencer for `DslExpr`:
-  - Addition/subtraction requires identical units and shapes.
-  - Multiplication/division combines units and checks compatible shapes.
-  - Comparisons require compatible units (usually equal units).
-  - Function calls validate argument counts/types/units for a supported set (`min/max/abs/sqrt`, etc.).
-- Implement lowering: `TypedExpr -> wgsl_ast::Expr` (units erased, shape mapped to WGSL types).
+- Implemented:
+  - DSL scaffolding in `src/solver/codegen/dsl/*` with `UnitDim`, `DslType` and a `TypedExpr` wrapper.
+  - Basic unit/type checks for a small set of ops (e.g., `add/sub/mul/div` for scalar↔vector).
+- Remaining:
+  - Introduce a real DSL AST (`DslExpr`) that is *not* WGSL-shaped (so we can represent tensor ops, CSR ops, and high-level intrinsics cleanly).
+  - Expand type-checking/inference over `DslExpr` (including function signatures + comparisons).
+  - Implement systematic lowering: `DslExpr -> wgsl_ast::Expr` and `DslStmt -> wgsl_ast::Stmt` (units erased; shapes mapped to WGSL types).
 
 ### Phase 3: First-Class Matrix/Tensor Operations in the DSL
-**Deliverable:** matrix-heavy kernels can be expressed without manual `_00/_01/...` variables.
+**Deliverable:** matrix-heavy kernels can be expressed without manual `_00/_01/...` variables, and sparse matrices are first-class.
 
 - Provide a small tensor library on top of `TypedExpr`:
   - `Vec<N>` and `Mat<R,C>` with indexing, component access, and common ops (`mul`, `mad`, `transpose`, `diag`, `outer`).
@@ -57,6 +55,9 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
     - scatter a block `Mat<R,C>` into `matrix_values` given base indices,
     - accumulate diagonal blocks cleanly,
     - write RHS vectors with proper strides.
+- Add DSL-level sparse matrix types:
+  - Implemented: `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockShape` (metadata + AST indexing helpers).
+  - Remaining: model storage layouts explicitly (packed block layouts vs contiguous blocks) and provide safe assembly/scatter helpers.
 - Lower these ops to explicit WGSL AST statements (loops unrolled at codegen time when dimensions are const).
 
 ### Phase 4: Attach Units to Model Fields (and Enforce Them)

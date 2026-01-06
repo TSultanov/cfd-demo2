@@ -509,6 +509,7 @@ impl GpuSolver {
 
         // Update time
         self.constants.time += self.constants.dt;
+        self.constants.dt_old = self.constants.dt;
         self.update_constants();
 
         // Check evolution (Steady State / Degeneracy)

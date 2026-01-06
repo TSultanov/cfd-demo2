@@ -405,10 +405,10 @@ impl GpuCompressibleSolver {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        if self.constants.dt > 0.0 {
-            self.constants.dt_old = self.constants.dt;
-        } else {
+        if self.constants.time <= 0.0 {
             self.constants.dt_old = dt;
+        } else {
+            self.constants.dt_old = self.constants.dt;
         }
         self.constants.dt = dt;
         self.update_constants();
@@ -642,6 +642,8 @@ impl GpuCompressibleSolver {
                 explicit_update_secs + primitive_update_secs,
                 0,
             );
+            self.constants.dt_old = self.constants.dt;
+            self.update_constants();
             return Vec::new();
         }
 
@@ -802,6 +804,8 @@ impl GpuCompressibleSolver {
             update_secs,
             fgmres_iters,
         );
+        self.constants.dt_old = self.constants.dt;
+        self.update_constants();
         stats
     }
 

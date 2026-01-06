@@ -422,6 +422,23 @@ fn out_dir(sub: &str) -> PathBuf {
     dir
 }
 
+fn scheme_tag(scheme: u32) -> &'static str {
+    match scheme {
+        0 => "upwind",
+        1 => "sou",
+        2 => "quick",
+        _ => "unknown",
+    }
+}
+
+fn time_scheme_tag(scheme: u32) -> &'static str {
+    match scheme {
+        0 => "euler",
+        1 => "bdf2",
+        _ => "unknown",
+    }
+}
+
 #[test]
 fn incompressible_structured_mesh_preserves_rest_state() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -506,129 +523,191 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
         p0[i] = p[i] as f64;
     }
 
-    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
-    let dt = 0.002f32;
-    let steps = 70usize;
-    solver.set_dt(dt);
-    solver.set_time_scheme(0);
-    solver.set_viscosity(0.0);
-    solver.set_inlet_velocity(0.0);
-    solver.set_scheme(2);
-    solver.set_outer_iters(3);
-    solver.set_state_fields(&rho, &u, &p);
-    solver.initialize_history();
+    let out = out_dir("acoustic");
+    let mut failures = Vec::new();
 
-    for _ in 0..steps {
-        solver.step();
+    // Keep CFL comfortably below the 2nd-order KT stability limit for reconstruction sweeps.
+    let dt_euler = 0.0016f32;
+    let steps_euler = 88usize;
+    let t_total = dt_euler as f64 * steps_euler as f64;
+
+    for &time_scheme in &[0u32, 1u32] {
+        let (dt, steps) = if time_scheme == 1 {
+            (2.0 * dt_euler, steps_euler / 2)
+        } else {
+            (dt_euler, steps_euler)
+        };
+        let t = dt as f64 * steps as f64;
+        assert!(
+            (t - t_total).abs() < 1e-8,
+            "acoustic total time mismatch t={t} t_total={t_total}"
+        );
+        for &scheme in &[0u32, 1u32, 2u32] {
+            let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+            solver.set_dt(dt);
+            solver.set_time_scheme(0);
+            solver.set_viscosity(0.0);
+            solver.set_inlet_velocity(0.0);
+            solver.set_scheme(scheme);
+            solver.set_outer_iters(if time_scheme == 1 { 2 } else { 1 });
+            solver.set_state_fields(&rho, &u, &p);
+            solver.initialize_history();
+
+            if time_scheme == 1 {
+                solver.step();
+                solver.set_time_scheme(1);
+                for _ in 1..steps {
+                    solver.step();
+                }
+            } else {
+                for _ in 0..steps {
+                    solver.step();
+                }
+            }
+
+            let p_out = pollster::block_on(solver.get_p());
+            assert!(p_out.iter().all(|v| v.is_finite()));
+
+            let expected_shift = c0 * t;
+            let expected_center = mid + expected_shift;
+            let (peak_idx, peak_p) = p_out
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, p)| (i, *p))
+                .unwrap();
+            let peak_x = mesh.cell_cx[peak_idx];
+            let shift = peak_x - mid;
+
+            let p_final: Vec<f64> = p_out.iter().copied().collect();
+            let p_expected: Vec<f64> = x
+                .iter()
+                .map(|&xi| {
+                    let dx = xi - expected_center;
+                    base_p + amp * (-(dx * dx) / (2.0 * sigma * sigma)).exp()
+                })
+                .collect();
+
+            let max_p = p_final
+                .iter()
+                .cloned()
+                .fold(f64::NEG_INFINITY, f64::max);
+            let min_p = p_final.iter().cloned().fold(f64::INFINITY, f64::min);
+            let rel_l2 = l2_error(&p_final, &p_expected) / amp.max(1e-12);
+            let tv_norm = total_variation(&p_final) / amp.max(1e-12);
+            let extrema = count_local_extrema(&p_final, 1e-6 * amp.max(1e-12));
+            let noise: Vec<f64> = p_final
+                .iter()
+                .zip(p_expected.iter())
+                .map(|(a, b)| a - b)
+                .collect();
+            let noise_rms = rms(&noise) / amp.max(1e-12);
+
+            let suffix = format!("{}_{}", time_scheme_tag(time_scheme), scheme_tag(scheme));
+            save_line_plot(
+                &out.join(format!("p_vs_x_{suffix}.png")),
+                &x,
+                &[
+                    (&p0, Rgb([0, 120, 255])),
+                    (&p_expected, Rgb([0, 170, 0])),
+                    (&p_final, Rgb([220, 60, 60])),
+                ],
+                &format!("compressible acoustic pulse (structured 1D) [{suffix}]"),
+                "x",
+                "p",
+            );
+            if time_scheme == 0 && scheme == 2 {
+                save_line_plot(
+                    &out.join("p_vs_x.png"),
+                    &x,
+                    &[
+                        (&p0, Rgb([0, 120, 255])),
+                        (&p_expected, Rgb([0, 170, 0])),
+                        (&p_final, Rgb([220, 60, 60])),
+                    ],
+                    "compressible acoustic pulse (structured 1D)",
+                    "x",
+                    "p",
+                );
+            }
+
+            let summary = format!(
+                "combo={suffix}\nc0={:.6}\ndt={:.6}\nsteps={}\nt={:.6}\nexpected_shift={:.6}\nexpected_center={:.6}\npeak_x={:.6}\nshift={:.6}\npeak_p={:.6}\nmin_p={:.6}\nmax_p={:.6}\nrel_l2_over_amp={:.6}\ntv_over_amp={:.6}\nextrema={}\nnoise_rms_over_amp={:.6}\n",
+                c0,
+                dt,
+                steps,
+                t,
+                expected_shift,
+                expected_center,
+                peak_x,
+                shift,
+                peak_p,
+                min_p,
+                max_p,
+                rel_l2,
+                tv_norm,
+                extrema,
+                noise_rms
+            );
+            let _ = fs::write(out.join(format!("summary_{suffix}.txt")), &summary);
+            if time_scheme == 0 && scheme == 2 {
+                let _ = fs::write(out.join("summary.txt"), &summary);
+            }
+
+            println!(
+                "acoustic_metrics[{suffix}]: rel_l2={:.3} tv={:.3} extrema={} min_p={:.6} max_p={:.6} noise_rms={:.3}",
+                rel_l2, tv_norm, extrema, min_p, max_p, noise_rms
+            );
+
+            let strict = time_scheme == 0 && scheme == 2;
+            let min_shift = 0.55 * expected_shift;
+            let rel_l2_max = if strict { 0.6 } else { 1.2 };
+            let tv_max = if strict { 6.0 } else { 15.0 };
+            let extrema_max = if strict { 6 } else { 80 };
+            let min_p_floor = if strict { base_p - 0.2 * amp } else { base_p - 0.5 * amp };
+            let max_p_ceiling = if strict {
+                base_p + 1.6 * amp
+            } else {
+                base_p + 3.0 * amp
+            };
+
+            if shift <= min_shift {
+                failures.push(format!(
+                    "[{suffix}] pulse peak shift {shift:.6} below expected {expected_shift:.6}"
+                ));
+            }
+            if rel_l2 >= rel_l2_max {
+                failures.push(format!(
+                    "[{suffix}] waveform distortion rel_l2_over_amp={rel_l2:.3} >= {rel_l2_max:.3}"
+                ));
+            }
+            if tv_norm >= tv_max {
+                failures.push(format!(
+                    "[{suffix}] excessive total variation tv_over_amp={tv_norm:.3} >= {tv_max:.3}"
+                ));
+            }
+            if extrema > extrema_max {
+                failures.push(format!(
+                    "[{suffix}] too many local extrema {extrema} > {extrema_max}"
+                ));
+            }
+            if min_p < min_p_floor {
+                failures.push(format!(
+                    "[{suffix}] pressure undershoot min_p={min_p:.6} < {min_p_floor:.6}"
+                ));
+            }
+            if max_p > max_p_ceiling {
+                failures.push(format!(
+                    "[{suffix}] pressure overshoot max_p={max_p:.6} > {max_p_ceiling:.6}"
+                ));
+            }
+        }
     }
 
-    let p_out = pollster::block_on(solver.get_p());
-    let t = dt as f64 * steps as f64;
-    let expected_shift = c0 * t;
-    let expected_center = mid + expected_shift;
-    let (peak_idx, peak_p) = p_out
-        .iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-        .map(|(i, p)| (i, *p))
-        .unwrap();
-    let peak_x = mesh.cell_cx[peak_idx];
-    let shift = peak_x - mid;
-
-    let out = out_dir("acoustic");
-    let p_final: Vec<f64> = p_out.iter().copied().collect();
-    let p_expected: Vec<f64> = x
-        .iter()
-        .map(|&xi| {
-            let dx = xi - expected_center;
-            base_p + amp * (-(dx * dx) / (2.0 * sigma * sigma)).exp()
-        })
-        .collect();
-    save_line_plot(
-        &out.join("p_vs_x.png"),
-        &x,
-        &[
-            (&p0, Rgb([0, 120, 255])),
-            (&p_expected, Rgb([0, 170, 0])),
-            (&p_final, Rgb([220, 60, 60])),
-        ],
-        "compressible acoustic pulse (structured 1D)",
-        "x",
-        "p",
-    );
-
-    let max_p = p_final
-        .iter()
-        .cloned()
-        .fold(f64::NEG_INFINITY, f64::max);
-    let min_p = p_final.iter().cloned().fold(f64::INFINITY, f64::min);
-    let rel_l2 = l2_error(&p_final, &p_expected) / amp.max(1e-12);
-    let tv_norm = total_variation(&p_final) / amp.max(1e-12);
-    let extrema = count_local_extrema(&p_final, 1e-6 * amp.max(1e-12));
-    let noise: Vec<f64> = p_final
-        .iter()
-        .zip(p_expected.iter())
-        .map(|(a, b)| a - b)
-        .collect();
-    let noise_rms = rms(&noise) / amp.max(1e-12);
-    let summary = format!(
-        "c0={:.6}\ndt={:.6}\nsteps={}\nt={:.6}\nexpected_shift={:.6}\nexpected_center={:.6}\npeak_x={:.6}\nshift={:.6}\npeak_p={:.6}\nmin_p={:.6}\nmax_p={:.6}\nrel_l2_over_amp={:.6}\ntv_over_amp={:.6}\nextrema={}\nnoise_rms_over_amp={:.6}\n",
-        c0,
-        dt,
-        steps,
-        t,
-        expected_shift,
-        expected_center,
-        peak_x,
-        shift,
-        peak_p,
-        min_p,
-        max_p,
-        rel_l2,
-        tv_norm,
-        extrema,
-        noise_rms
-    );
-    let _ = fs::write(out.join("summary.txt"), summary);
-
-    println!(
-        "acoustic_metrics: rel_l2={:.3} tv={:.3} extrema={} min_p={:.6} max_p={:.6} noise_rms={:.3}",
-        rel_l2, tv_norm, extrema, min_p, max_p, noise_rms
-    );
-
     assert!(
-        shift > 0.55 * expected_shift,
-        "pulse peak shift {:.4} below expected {:.4}",
-        shift,
-        expected_shift
-    );
-
-    // This is a smooth, small-amplitude linear acoustic wave; strong oscillations/overshoots
-    // should fail the regression even if the peak advects.
-    assert!(
-        rel_l2 < 0.6,
-        "waveform distortion too large (rel_l2_over_amp {:.3})",
-        rel_l2
-    );
-    assert!(
-        tv_norm < 6.0,
-        "excess total variation indicates oscillations (tv_over_amp {:.3})",
-        tv_norm
-    );
-    assert!(
-        extrema <= 6,
-        "too many local extrema ({}), indicates dispersive ringing",
-        extrema
-    );
-    assert!(
-        min_p >= base_p - 0.2 * amp,
-        "pressure undershoot too large (min_p {:.6})",
-        min_p
-    );
-    assert!(
-        max_p <= base_p + 1.6 * amp,
-        "pressure overshoot too large (max_p {:.6})",
-        max_p
+        failures.is_empty(),
+        "acoustic sweep failures:\n{}",
+        failures.join("\n")
     );
 }
 
@@ -851,86 +930,152 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
         p0[i] = init.p;
     }
 
-    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
-    let dt = 0.0005f32;
-    let steps = 200usize;
-    solver.set_dt(dt);
-    solver.set_time_scheme(0);
-    solver.set_viscosity(0.0);
-    solver.set_inlet_velocity(0.0);
-    solver.set_scheme(1);
-    solver.set_outer_iters(1);
-    solver.set_state_fields(&rho, &u, &p);
-    solver.initialize_history();
-
-    for _ in 0..steps {
-        solver.step();
-    }
-
-    let rho_out = pollster::block_on(solver.get_rho());
-    let p_out = pollster::block_on(solver.get_p());
-    let t = dt as f64 * steps as f64;
-
-    let mut rho_expected = vec![0.0f64; n];
-    let mut p_expected = vec![0.0f64; n];
-    for i in 0..n {
-        let s = sod_sample(x[i], t, x0, left, right, gamma);
-        rho_expected[i] = s.rho;
-        p_expected[i] = s.p;
-    }
-
     let out = out_dir("shock_tube");
-    save_line_plot(
-        &out.join("rho_vs_x.png"),
-        &x,
-        &[
-            (&rho0, Rgb([0, 120, 255])),
-            (&rho_expected, Rgb([0, 170, 0])),
-            (&rho_out, Rgb([220, 60, 60])),
-        ],
-        "Sod shock tube (structured 1D): density",
-        "x",
-        "rho",
-    );
-    save_line_plot(
-        &out.join("p_vs_x.png"),
-        &x,
-        &[
-            (&p0, Rgb([0, 120, 255])),
-            (&p_expected, Rgb([0, 170, 0])),
-            (&p_out, Rgb([220, 60, 60])),
-        ],
-        "Sod shock tube (structured 1D): pressure",
-        "x",
-        "p",
-    );
 
-    assert!(rho_out.iter().all(|v| v.is_finite() && *v > 0.0));
-    assert!(p_out.iter().all(|v| v.is_finite() && *v > 0.0));
+    let dt_euler = 0.0005f32;
+    let steps_euler = 200usize;
+    let t_total = dt_euler as f64 * steps_euler as f64;
 
-    let rho_scale = (left.rho - right.rho).abs().max(1e-12);
-    let p_scale = (left.p - right.p).abs().max(1e-12);
-    let rel_l2_rho = l2_error(&rho_out, &rho_expected) / rho_scale;
-    let rel_l2_p = l2_error(&p_out, &p_expected) / p_scale;
-    let extrema_rho = count_local_extrema(&rho_out, 1e-6 * rho_scale);
-    let extrema_p = count_local_extrema(&p_out, 1e-6 * p_scale);
-    let tv_rho = total_variation(&rho_out) / rho_scale;
-    let tv_p = total_variation(&p_out) / p_scale;
+    for &time_scheme in &[0u32, 1u32] {
+        let (dt, steps) = if time_scheme == 1 {
+            (2.0 * dt_euler, steps_euler / 2)
+        } else {
+            (dt_euler, steps_euler)
+        };
+        let t = dt as f64 * steps as f64;
+        assert!(
+            (t - t_total).abs() < 1e-10,
+            "shock tube total time mismatch t={t} t_total={t_total}"
+        );
 
-    let summary = format!(
-        "dt={:.6}\nsteps={}\nt={:.6}\nrel_l2_rho={:.6}\nrel_l2_p={:.6}\ntv_rho={:.6}\ntv_p={:.6}\nextrema_rho={}\nextrema_p={}\n",
-        dt, steps, t, rel_l2_rho, rel_l2_p, tv_rho, tv_p, extrema_rho, extrema_p
-    );
-    let _ = fs::write(out.join("summary.txt"), summary);
-    println!(
-        "shock_tube_metrics: rel_l2_rho={:.3} rel_l2_p={:.3} tv_rho={:.3} tv_p={:.3} extrema_rho={} extrema_p={}",
-        rel_l2_rho, rel_l2_p, tv_rho, tv_p, extrema_rho, extrema_p
-    );
+        let mut rho_expected = vec![0.0f64; n];
+        let mut p_expected = vec![0.0f64; n];
+        for i in 0..n {
+            let s = sod_sample(x[i], t, x0, left, right, gamma);
+            rho_expected[i] = s.rho;
+            p_expected[i] = s.p;
+        }
 
-    assert!(rel_l2_rho < 0.12, "rho error too large ({rel_l2_rho:.3})");
-    assert!(rel_l2_p < 0.18, "p error too large ({rel_l2_p:.3})");
-    assert!(extrema_rho <= 70, "rho has too many extrema ({extrema_rho})");
-    assert!(extrema_p <= 80, "p has too many extrema ({extrema_p})");
-    assert!(tv_rho < 6.0, "rho TV too high ({tv_rho:.3})");
-    assert!(tv_p < 8.0, "p TV too high ({tv_p:.3})");
+        for &scheme in &[0u32, 1u32, 2u32] {
+            let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+            solver.set_dt(dt);
+            solver.set_time_scheme(0);
+            solver.set_viscosity(0.0);
+            solver.set_inlet_velocity(0.0);
+            solver.set_scheme(scheme);
+            solver.set_outer_iters(if time_scheme == 1 { 3 } else { 1 });
+            solver.set_state_fields(&rho, &u, &p);
+            solver.initialize_history();
+
+            if time_scheme == 1 {
+                solver.step();
+                solver.set_time_scheme(1);
+                for _ in 1..steps {
+                    solver.step();
+                }
+            } else {
+                for _ in 0..steps {
+                    solver.step();
+                }
+            }
+
+            let rho_out = pollster::block_on(solver.get_rho());
+            let p_out = pollster::block_on(solver.get_p());
+
+            assert!(rho_out.iter().all(|v| v.is_finite() && *v > 0.0));
+            assert!(p_out.iter().all(|v| v.is_finite() && *v > 0.0));
+
+            let rho_scale = (left.rho - right.rho).abs().max(1e-12);
+            let p_scale = (left.p - right.p).abs().max(1e-12);
+            let rel_l2_rho = l2_error(&rho_out, &rho_expected) / rho_scale;
+            let rel_l2_p = l2_error(&p_out, &p_expected) / p_scale;
+            let extrema_rho = count_local_extrema(&rho_out, 1e-6 * rho_scale);
+            let extrema_p = count_local_extrema(&p_out, 1e-6 * p_scale);
+            let tv_rho = total_variation(&rho_out) / rho_scale;
+            let tv_p = total_variation(&p_out) / p_scale;
+
+            let suffix = format!("{}_{}", time_scheme_tag(time_scheme), scheme_tag(scheme));
+            save_line_plot(
+                &out.join(format!("rho_vs_x_{suffix}.png")),
+                &x,
+                &[
+                    (&rho0, Rgb([0, 120, 255])),
+                    (&rho_expected, Rgb([0, 170, 0])),
+                    (&rho_out, Rgb([220, 60, 60])),
+                ],
+                &format!("Sod shock tube (structured 1D): density [{suffix}]"),
+                "x",
+                "rho",
+            );
+            save_line_plot(
+                &out.join(format!("p_vs_x_{suffix}.png")),
+                &x,
+                &[
+                    (&p0, Rgb([0, 120, 255])),
+                    (&p_expected, Rgb([0, 170, 0])),
+                    (&p_out, Rgb([220, 60, 60])),
+                ],
+                &format!("Sod shock tube (structured 1D): pressure [{suffix}]"),
+                "x",
+                "p",
+            );
+            if time_scheme == 0 && scheme == 1 {
+                save_line_plot(
+                    &out.join("rho_vs_x.png"),
+                    &x,
+                    &[
+                        (&rho0, Rgb([0, 120, 255])),
+                        (&rho_expected, Rgb([0, 170, 0])),
+                        (&rho_out, Rgb([220, 60, 60])),
+                    ],
+                    "Sod shock tube (structured 1D): density",
+                    "x",
+                    "rho",
+                );
+                save_line_plot(
+                    &out.join("p_vs_x.png"),
+                    &x,
+                    &[
+                        (&p0, Rgb([0, 120, 255])),
+                        (&p_expected, Rgb([0, 170, 0])),
+                        (&p_out, Rgb([220, 60, 60])),
+                    ],
+                    "Sod shock tube (structured 1D): pressure",
+                    "x",
+                    "p",
+                );
+            }
+
+            let summary = format!(
+                "combo={suffix}\ndt={:.6}\nsteps={}\nt={:.6}\nrel_l2_rho={:.6}\nrel_l2_p={:.6}\ntv_rho={:.6}\ntv_p={:.6}\nextrema_rho={}\nextrema_p={}\n",
+                dt, steps, t, rel_l2_rho, rel_l2_p, tv_rho, tv_p, extrema_rho, extrema_p
+            );
+            let _ = fs::write(out.join(format!("summary_{suffix}.txt")), &summary);
+            if time_scheme == 0 && scheme == 1 {
+                let _ = fs::write(out.join("summary.txt"), &summary);
+            }
+            println!(
+                "shock_tube_metrics[{suffix}]: rel_l2_rho={:.3} rel_l2_p={:.3} tv_rho={:.3} tv_p={:.3} extrema_rho={} extrema_p={}",
+                rel_l2_rho, rel_l2_p, tv_rho, tv_p, extrema_rho, extrema_p
+            );
+
+            if time_scheme == 0 && scheme == 1 {
+                assert!(rel_l2_rho < 0.12, "rho error too large ({rel_l2_rho:.3})");
+                assert!(rel_l2_p < 0.18, "p error too large ({rel_l2_p:.3})");
+                assert!(extrema_rho <= 70, "rho has too many extrema ({extrema_rho})");
+                assert!(extrema_p <= 80, "p has too many extrema ({extrema_p})");
+                assert!(tv_rho < 6.0, "rho TV too high ({tv_rho:.3})");
+                assert!(tv_p < 8.0, "p TV too high ({tv_p:.3})");
+            } else {
+                assert!(
+                    extrema_rho <= 250 && extrema_p <= 300,
+                    "[{suffix}] excessive extrema indicates oscillations (rho={extrema_rho}, p={extrema_p})"
+                );
+                assert!(
+                    tv_rho < 25.0 && tv_p < 32.0,
+                    "[{suffix}] excessive total variation (tv_rho={tv_rho:.3}, tv_p={tv_p:.3})"
+                );
+            }
+        }
+    }
 }

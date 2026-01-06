@@ -34,10 +34,10 @@ impl GpuSolver {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        if self.constants.dt > 0.0 {
-            self.constants.dt_old = self.constants.dt;
-        } else {
+        if self.constants.time <= 0.0 {
             self.constants.dt_old = dt;
+        } else {
+            self.constants.dt_old = self.constants.dt;
         }
         self.constants.dt = dt;
         self.update_constants();

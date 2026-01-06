@@ -6,9 +6,9 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - WGSL codegen exists and emits generated shaders via `build.rs` into `src/solver/gpu/shaders/generated/*`.
 - There is a WGSL AST (`src/solver/codegen/wgsl_ast.rs`) for items/statements/expressions with a precedence-aware renderer.
 - **But** most kernels still build expressions by string formatting + parsing (`wgsl_dsl::expr("a + b")`). This is fragile and makes higher-level operations (matrices/tensors) awkward.
-- Some “higher-order” helpers exist to reduce repetition (e.g., component loops and 4×4 matrix helpers), but they still operate on strings.
+- Some “higher-order” helpers exist to reduce repetition (e.g., component loops and 4×4 matrix helpers). Some hot paths now have AST-first helpers, but many call sites are still string-based.
 - A typed DSL scaffold exists (`src/solver/codegen/dsl/*`) with `DslType`/`UnitDim` and a `TypedExpr` wrapper that can be lowered to WGSL AST expressions.
-- The DSL now includes **CSR / Block-CSR matrix types** (metadata + AST indexing helpers) to represent sparse linear operators in a structured way.
+- The DSL now includes **CSR / Block-CSR matrix types** (including row-split SoA layouts) to represent sparse linear operators in a structured way.
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and should be the primary safety net for future refactors.
 
 ## Goals
@@ -56,8 +56,8 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
     - accumulate diagonal blocks cleanly,
     - write RHS vectors with proper strides.
 - Add DSL-level sparse matrix types:
-  - Implemented: `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockShape` (metadata + AST indexing helpers).
-  - Remaining: model storage layouts explicitly (packed block layouts vs contiguous blocks) and provide safe assembly/scatter helpers.
+  - Implemented: `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, `BlockCsrSoaEntry`, `BlockShape` (metadata + AST indexing helpers for both contiguous and row-split layouts).
+  - Remaining: unify storage-layout modeling behind a common API and provide safe assembly/scatter helpers.
 - Lower these ops to explicit WGSL AST statements (loops unrolled at codegen time when dimensions are const).
 
 ### Phase 4: Attach Units to Model Fields (and Enforce Them)
@@ -76,6 +76,8 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   2. `coupled_assembly` (block matrix + reconstruction terms)
   3. `pressure_assembly`
   4. `compressible_flux_kt` + `compressible_gradients`
+- Progress:
+  - `compressible_assembly`: matrix scatter/accumulation helpers now build `wgsl_ast::Expr` directly (no parser for `matrix_values[...]` writes).
 - Add a “golden WGSL” parity test for migrated kernels (string compare against committed generated files) until the migration is complete.
 - Keep the 1D plot regressions as the runtime validation layer for behavior.
 

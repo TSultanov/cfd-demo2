@@ -1,8 +1,8 @@
 use crate::solver::codegen::wgsl_ast::{BinaryOp, Expr};
 
-use super::{DslType, UnitDim};
-use super::types::{ScalarType, Shape};
 use super::expr::TypedExpr;
+use super::types::{ScalarType, Shape};
+use super::{DslType, UnitDim};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockShape {
@@ -125,6 +125,121 @@ impl BlockCsrMatrix {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockCsrSoaMatrix {
+    pub values: Expr,
+    pub start_rows: Vec<Expr>,
+    pub block: BlockShape,
+    pub scalar: ScalarType,
+    pub entry_unit: UnitDim,
+}
+
+impl BlockCsrSoaMatrix {
+    pub fn new(
+        values: Expr,
+        start_rows: Vec<Expr>,
+        block: BlockShape,
+        scalar: ScalarType,
+        entry_unit: UnitDim,
+    ) -> Self {
+        assert!(
+            start_rows.len() == block.rows as usize,
+            "start_rows must match block row count"
+        );
+        Self {
+            values,
+            start_rows,
+            block,
+            scalar,
+            entry_unit,
+        }
+    }
+
+    pub fn from_start_row_prefix(
+        values: &str,
+        start_row_prefix: &str,
+        block: BlockShape,
+        scalar: ScalarType,
+        entry_unit: UnitDim,
+    ) -> Self {
+        let start_rows = (0..block.rows)
+            .map(|row| Expr::ident(format!("{start_row_prefix}_{row}")))
+            .collect();
+        Self::new(Expr::ident(values), start_rows, block, scalar, entry_unit)
+    }
+
+    pub fn row_entry(&self, rank: &Expr) -> BlockCsrSoaEntry {
+        let cols = Expr::lit_u32(self.block.cols as u32);
+        let bases = self
+            .start_rows
+            .iter()
+            .cloned()
+            .map(|start| {
+                let offset = Expr::binary(cols.clone(), BinaryOp::Mul, rank.clone());
+                Expr::binary(start, BinaryOp::Add, offset)
+            })
+            .collect();
+        BlockCsrSoaEntry::new(
+            self.values.clone(),
+            bases,
+            self.block,
+            self.scalar,
+            self.entry_unit,
+        )
+    }
+
+    pub fn entry(&self, rank: &Expr, row: u8, col: u8) -> TypedExpr {
+        self.row_entry(rank).entry(row, col)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockCsrSoaEntry {
+    pub values: Expr,
+    pub row_bases: Vec<Expr>,
+    pub block: BlockShape,
+    pub scalar: ScalarType,
+    pub entry_unit: UnitDim,
+}
+
+impl BlockCsrSoaEntry {
+    pub fn new(
+        values: Expr,
+        row_bases: Vec<Expr>,
+        block: BlockShape,
+        scalar: ScalarType,
+        entry_unit: UnitDim,
+    ) -> Self {
+        assert!(
+            row_bases.len() == block.rows as usize,
+            "row_bases must match block row count"
+        );
+        Self {
+            values,
+            row_bases,
+            block,
+            scalar,
+            entry_unit,
+        }
+    }
+
+    pub fn entry(&self, row: u8, col: u8) -> TypedExpr {
+        let ty = DslType::new(self.scalar, Shape::Scalar);
+        TypedExpr::new(self.access_expr(row, col), ty, self.entry_unit)
+    }
+
+    pub fn index_expr(&self, row: u8, col: u8) -> Expr {
+        assert!(row < self.block.rows, "block row out of bounds");
+        assert!(col < self.block.cols, "block col out of bounds");
+        let base = self.row_bases[row as usize].clone();
+        Expr::binary(base, BinaryOp::Add, Expr::lit_u32(col as u32))
+    }
+
+    pub fn access_expr(&self, row: u8, col: u8) -> Expr {
+        self.values.clone().index(self.index_expr(row, col))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +267,18 @@ mod tests {
         let expr = mat.entry(&nnz, 3, 2).expr.to_string();
         assert_eq!(expr, "matrix_values[nnz * 16u + 14u]");
     }
-}
 
+    #[test]
+    fn block_csr_soa_entry_indexes_row_splits() {
+        let block = BlockShape::new(4, 4);
+        let entry = BlockCsrSoaEntry::new(
+            Expr::ident("matrix_values"),
+            (0..4).map(|r| Expr::ident(format!("base_{r}"))).collect(),
+            block,
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let expr = entry.entry(2, 3).expr.to_string();
+        assert_eq!(expr, "matrix_values[base_2 + 3u]");
+    }
+}

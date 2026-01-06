@@ -3,7 +3,7 @@ use crate::solver::model::backend::StateLayout;
 use super::state_access::{state_scalar_expr, state_vec2_expr};
 use super::reconstruction::limited_linear_reconstruct_face;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
@@ -1198,19 +1198,19 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::let_("base_3", "start_row_3 + 4u * neighbor_rank"),
     ];
 
-    interior_matrix_stmts.extend(dsl::assign_matrix_array_from_prefix_scaled(
+    interior_matrix_stmts.extend(dsl::assign_matrix_array_from_prefix_scaled_expr(
         "matrix_values",
         "base",
         "jac_r",
         block_size as usize,
-        Some("area"),
+        Some(Expr::ident("area")),
     ));
-    interior_matrix_stmts.extend(dsl::assign_op_matrix_from_prefix_scaled(
+    interior_matrix_stmts.extend(dsl::assign_op_matrix_from_prefix_scaled_expr(
         AssignOp::Add,
         "diag",
         "jac_l",
         block_size as usize,
-        Some("area"),
+        Some(Expr::ident("area")),
     ));
 
     let interior_matrix = dsl::block(interior_matrix_stmts);
@@ -1274,12 +1274,12 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             )])),
         ));
 
-        body.extend(dsl::assign_op_matrix_from_prefix_scaled(
+        body.extend(dsl::assign_op_matrix_from_prefix_scaled_expr(
             AssignOp::Add,
             "diag",
             "eff",
             block_size as usize,
-            Some("area"),
+            Some(Expr::ident("area")),
         ));
         dsl::block(body)
     };
@@ -1334,7 +1334,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("diag_base_2", "start_row_2 + 4u * diag_rank"));
     stmts.push(dsl::let_("diag_base_3", "start_row_3 + 4u * diag_rank"));
 
-    stmts.extend(dsl::assign_matrix_array_from_prefix_scaled(
+    stmts.extend(dsl::assign_matrix_array_from_prefix_scaled_expr(
         "matrix_values",
         "diag_base",
         "diag",

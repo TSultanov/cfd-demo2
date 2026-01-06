@@ -1,6 +1,4 @@
-use super::wgsl_ast::{
-    AssignOp, Block, Expr, ForInit, ForStep, ParseError, Stmt, Type,
-};
+use super::wgsl_ast::{AssignOp, BinaryOp, Block, Expr, ForInit, ForStep, ParseError, Stmt, Type};
 
 pub fn expr(input: &str) -> Expr {
     Expr::parse(input).expect("invalid WGSL expression")
@@ -311,6 +309,23 @@ pub fn assign_op_matrix_from_prefix_scaled(
     })
 }
 
+pub fn assign_op_matrix_from_prefix_scaled_expr(
+    op: AssignOp,
+    dest_prefix: &str,
+    src_prefix: &str,
+    n: usize,
+    scale: Option<Expr>,
+) -> Vec<Stmt> {
+    for_each_mat_entry(n, |row, col| {
+        let target = Expr::ident(format!("{dest_prefix}_{row}{col}"));
+        let mut value = Expr::ident(format!("{src_prefix}_{row}{col}"));
+        if let Some(scale) = scale.clone() {
+            value = Expr::binary(value, BinaryOp::Mul, scale);
+        }
+        assign_op_expr(op, target, value)
+    })
+}
+
 pub fn assign_op_matrix_diag(op: AssignOp, prefix: &str, n: usize, value: &str) -> Vec<Stmt> {
     let mut out = Vec::new();
     for idx in 0..n {
@@ -335,6 +350,25 @@ pub fn assign_matrix_array_from_prefix_scaled(
             value.push_str(scale);
         }
         assign(&target, &value)
+    })
+}
+
+pub fn assign_matrix_array_from_prefix_scaled_expr(
+    matrix_array: &str,
+    base_prefix: &str,
+    src_prefix: &str,
+    n: usize,
+    scale: Option<Expr>,
+) -> Vec<Stmt> {
+    for_each_mat_entry(n, |row, col| {
+        let base = Expr::ident(format!("{base_prefix}_{row}"));
+        let index = Expr::binary(base, BinaryOp::Add, Expr::lit_u32(col as u32));
+        let target = Expr::ident(matrix_array).index(index);
+        let mut value = Expr::ident(format!("{src_prefix}_{row}{col}"));
+        if let Some(scale) = scale.clone() {
+            value = Expr::binary(value, BinaryOp::Mul, scale);
+        }
+        assign_expr(target, value)
     })
 }
 
@@ -366,8 +400,21 @@ mod tests {
         let stmts = var_matrix("diag", 2, "0.0");
         assert_eq!(stmts.len(), 4);
         assert!(stmts.iter().all(|stmt| matches!(stmt, Stmt::Var { .. })));
-        let stmts = assign_op_matrix_from_prefix_scaled(AssignOp::Add, "diag", "jac", 2, Some("area"));
+        let stmts =
+            assign_op_matrix_from_prefix_scaled(AssignOp::Add, "diag", "jac", 2, Some("area"));
         assert_eq!(stmts.len(), 4);
-        assert!(stmts.iter().all(|stmt| matches!(stmt, Stmt::AssignOp { .. })));
+        assert!(stmts
+            .iter()
+            .all(|stmt| matches!(stmt, Stmt::AssignOp { .. })));
+
+        let stmts = assign_matrix_array_from_prefix_scaled_expr(
+            "matrix_values",
+            "base",
+            "jac",
+            2,
+            Some(Expr::ident("area")),
+        );
+        assert_eq!(stmts.len(), 4);
+        assert!(stmts.iter().all(|stmt| matches!(stmt, Stmt::Assign { .. })));
     }
 }

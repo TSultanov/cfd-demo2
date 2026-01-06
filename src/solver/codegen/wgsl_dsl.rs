@@ -156,6 +156,91 @@ pub fn assign_xy(target: &str, x_value: &str, y_value: &str) -> Vec<Stmt> {
     ]
 }
 
+pub fn for_each_mat_entry<F>(n: usize, mut f: F) -> Vec<Stmt>
+where
+    F: FnMut(usize, usize) -> Stmt,
+{
+    let mut out = Vec::new();
+    for row in 0..n {
+        for col in 0..n {
+            out.push(f(row, col));
+        }
+    }
+    out
+}
+
+pub fn for_each_mat_entry_block<F>(n: usize, mut f: F) -> Vec<Stmt>
+where
+    F: FnMut(usize, usize) -> Vec<Stmt>,
+{
+    let mut out = Vec::new();
+    for row in 0..n {
+        for col in 0..n {
+            out.extend(f(row, col));
+        }
+    }
+    out
+}
+
+pub fn var_matrix(prefix: &str, n: usize, init: &str) -> Vec<Stmt> {
+    for_each_mat_entry(n, |row, col| var(&format!("{prefix}_{row}{col}"), init))
+}
+
+pub fn var_matrix_expr<F>(prefix: &str, n: usize, mut value: F) -> Vec<Stmt>
+where
+    F: FnMut(usize, usize) -> String,
+{
+    for_each_mat_entry(n, |row, col| {
+        let expr = value(row, col);
+        var(&format!("{prefix}_{row}{col}"), &expr)
+    })
+}
+
+pub fn assign_op_matrix_from_prefix_scaled(
+    op: AssignOp,
+    dest_prefix: &str,
+    src_prefix: &str,
+    n: usize,
+    scale: Option<&str>,
+) -> Vec<Stmt> {
+    for_each_mat_entry(n, |row, col| {
+        let target = format!("{dest_prefix}_{row}{col}");
+        let mut value = format!("{src_prefix}_{row}{col}");
+        if let Some(scale) = scale {
+            value.push_str(" * ");
+            value.push_str(scale);
+        }
+        assign_op(op, &target, &value)
+    })
+}
+
+pub fn assign_op_matrix_diag(op: AssignOp, prefix: &str, n: usize, value: &str) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    for idx in 0..n {
+        out.push(assign_op(op, &format!("{prefix}_{idx}{idx}"), value));
+    }
+    out
+}
+
+pub fn assign_matrix_array_from_prefix_scaled(
+    matrix_array: &str,
+    base_prefix: &str,
+    src_prefix: &str,
+    n: usize,
+    scale: Option<&str>,
+) -> Vec<Stmt> {
+    for_each_mat_entry(n, |row, col| {
+        let base = format!("{base_prefix}_{row}");
+        let target = format!("{matrix_array}[{base} + {col}u]");
+        let mut value = format!("{src_prefix}_{row}{col}");
+        if let Some(scale) = scale {
+            value.push_str(" * ");
+            value.push_str(scale);
+        }
+        assign(&target, &value)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +262,15 @@ mod tests {
     fn dsl_parse_expr_reports_errors() {
         let err = parse_expr("1 +").unwrap_err();
         assert!(matches!(err, ParseError::UnexpectedEof));
+    }
+
+    #[test]
+    fn dsl_builds_matrix_helpers() {
+        let stmts = var_matrix("diag", 2, "0.0");
+        assert_eq!(stmts.len(), 4);
+        assert!(stmts.iter().all(|stmt| matches!(stmt, Stmt::Var { .. })));
+        let stmts = assign_op_matrix_from_prefix_scaled(AssignOp::Add, "diag", "jac", 2, Some("area"));
+        assert_eq!(stmts.len(), 4);
+        assert!(stmts.iter().all(|stmt| matches!(stmt, Stmt::AssignOp { .. })));
     }
 }

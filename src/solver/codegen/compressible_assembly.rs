@@ -335,22 +335,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("scheme_id", "constants.scheme"));
 
     stmts.push(dsl::comment("Jacobian rows/cols: rho, rho_u_x, rho_u_y, rho_e"));
-    stmts.push(dsl::var("diag_00", "0.0"));
-    stmts.push(dsl::var("diag_01", "0.0"));
-    stmts.push(dsl::var("diag_02", "0.0"));
-    stmts.push(dsl::var("diag_03", "0.0"));
-    stmts.push(dsl::var("diag_10", "0.0"));
-    stmts.push(dsl::var("diag_11", "0.0"));
-    stmts.push(dsl::var("diag_12", "0.0"));
-    stmts.push(dsl::var("diag_13", "0.0"));
-    stmts.push(dsl::var("diag_20", "0.0"));
-    stmts.push(dsl::var("diag_21", "0.0"));
-    stmts.push(dsl::var("diag_22", "0.0"));
-    stmts.push(dsl::var("diag_23", "0.0"));
-    stmts.push(dsl::var("diag_30", "0.0"));
-    stmts.push(dsl::var("diag_31", "0.0"));
-    stmts.push(dsl::var("diag_32", "0.0"));
-    stmts.push(dsl::var("diag_33", "0.0"));
+    stmts.extend(dsl::var_matrix("diag", block_size as usize, "0.0"));
 
     stmts.push(dsl::var("sum_rho", "0.0"));
     stmts.push(dsl::var("sum_rho_u_x", "0.0"));
@@ -1213,118 +1198,71 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::let_("base_3", "start_row_3 + 4u * neighbor_rank"),
     ];
 
-    interior_matrix_stmts.extend(vec![
-        dsl::assign("matrix_values[base_0 + 0u]", "jac_r_00 * area"),
-        dsl::assign("matrix_values[base_0 + 1u]", "jac_r_01 * area"),
-        dsl::assign("matrix_values[base_0 + 2u]", "jac_r_02 * area"),
-        dsl::assign("matrix_values[base_0 + 3u]", "jac_r_03 * area"),
-        dsl::assign("matrix_values[base_1 + 0u]", "jac_r_10 * area"),
-        dsl::assign("matrix_values[base_1 + 1u]", "jac_r_11 * area"),
-        dsl::assign("matrix_values[base_1 + 2u]", "jac_r_12 * area"),
-        dsl::assign("matrix_values[base_1 + 3u]", "jac_r_13 * area"),
-        dsl::assign("matrix_values[base_2 + 0u]", "jac_r_20 * area"),
-        dsl::assign("matrix_values[base_2 + 1u]", "jac_r_21 * area"),
-        dsl::assign("matrix_values[base_2 + 2u]", "jac_r_22 * area"),
-        dsl::assign("matrix_values[base_2 + 3u]", "jac_r_23 * area"),
-        dsl::assign("matrix_values[base_3 + 0u]", "jac_r_30 * area"),
-        dsl::assign("matrix_values[base_3 + 1u]", "jac_r_31 * area"),
-        dsl::assign("matrix_values[base_3 + 2u]", "jac_r_32 * area"),
-        dsl::assign("matrix_values[base_3 + 3u]", "jac_r_33 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_00", "jac_l_00 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_01", "jac_l_01 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_02", "jac_l_02 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_03", "jac_l_03 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_10", "jac_l_10 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_11", "jac_l_11 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_12", "jac_l_12 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_13", "jac_l_13 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_20", "jac_l_20 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_21", "jac_l_21 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_22", "jac_l_22 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_23", "jac_l_23 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_30", "jac_l_30 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_31", "jac_l_31 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_32", "jac_l_32 * area"),
-        dsl::assign_op(AssignOp::Add, "diag_33", "jac_l_33 * area"),
-    ]);
+    interior_matrix_stmts.extend(dsl::assign_matrix_array_from_prefix_scaled(
+        "matrix_values",
+        "base",
+        "jac_r",
+        block_size as usize,
+        Some("area"),
+    ));
+    interior_matrix_stmts.extend(dsl::assign_op_matrix_from_prefix_scaled(
+        AssignOp::Add,
+        "diag",
+        "jac_l",
+        block_size as usize,
+        Some("area"),
+    ));
 
     let interior_matrix = dsl::block(interior_matrix_stmts);
 
     let boundary_matrix = {
         let mut body = Vec::new();
-        body.push(dsl::var("eff_00", "jac_l_00 + jac_r_00"));
-        body.push(dsl::var("eff_01", "jac_l_01 + jac_r_01"));
-        body.push(dsl::var("eff_02", "jac_l_02 + jac_r_02"));
-        body.push(dsl::var("eff_03", "jac_l_03 + jac_r_03"));
-        body.push(dsl::var("eff_10", "jac_l_10 + jac_r_10"));
-        body.push(dsl::var("eff_11", "jac_l_11 + jac_r_11"));
-        body.push(dsl::var("eff_12", "jac_l_12 + jac_r_12"));
-        body.push(dsl::var("eff_13", "jac_l_13 + jac_r_13"));
-        body.push(dsl::var("eff_20", "jac_l_20 + jac_r_20"));
-        body.push(dsl::var("eff_21", "jac_l_21 + jac_r_21"));
-        body.push(dsl::var("eff_22", "jac_l_22 + jac_r_22"));
-        body.push(dsl::var("eff_23", "jac_l_23 + jac_r_23"));
-        body.push(dsl::var("eff_30", "jac_l_30 + jac_r_30"));
-        body.push(dsl::var("eff_31", "jac_l_31 + jac_r_31"));
-        body.push(dsl::var("eff_32", "jac_l_32 + jac_r_32"));
-        body.push(dsl::var("eff_33", "jac_l_33 + jac_r_33"));
+        body.extend(dsl::var_matrix_expr("eff", block_size as usize, |row, col| {
+            format!("jac_l_{row}{col} + jac_r_{row}{col}")
+        }));
 
-        let inlet_block = dsl::block(vec![
-            dsl::assign(
-                "eff_00",
-                "jac_l_00 + jac_r_00 + jac_r_01 * constants.inlet_velocity",
-            ),
-            dsl::assign("eff_01", "jac_l_01"),
-            dsl::assign("eff_02", "jac_l_02"),
-            dsl::assign("eff_03", "jac_l_03 + jac_r_03"),
-            dsl::assign(
-                "eff_10",
-                "jac_l_10 + jac_r_10 + jac_r_11 * constants.inlet_velocity",
-            ),
-            dsl::assign("eff_11", "jac_l_11"),
-            dsl::assign("eff_12", "jac_l_12"),
-            dsl::assign("eff_13", "jac_l_13 + jac_r_13"),
-            dsl::assign(
-                "eff_20",
-                "jac_l_20 + jac_r_20 + jac_r_21 * constants.inlet_velocity",
-            ),
-            dsl::assign("eff_21", "jac_l_21"),
-            dsl::assign("eff_22", "jac_l_22"),
-            dsl::assign("eff_23", "jac_l_23 + jac_r_23"),
-            dsl::assign(
-                "eff_30",
-                "jac_l_30 + jac_r_30 + jac_r_31 * constants.inlet_velocity",
-            ),
-            dsl::assign("eff_31", "jac_l_31"),
-            dsl::assign("eff_32", "jac_l_32"),
-            dsl::assign("eff_33", "jac_l_33 + jac_r_33"),
-        ]);
+        let inlet_block = {
+            let mut inlet = Vec::new();
+            inlet.extend(dsl::for_each_mat_entry_block(block_size as usize, |row, col| {
+                let target = format!("eff_{row}{col}");
+                let expr = if col == 0 {
+                    format!(
+                        "jac_l_{row}0 + jac_r_{row}0 + jac_r_{row}1 * constants.inlet_velocity"
+                    )
+                } else if col == 3 {
+                    format!("jac_l_{row}{col} + jac_r_{row}{col}")
+                } else {
+                    format!("jac_l_{row}{col}")
+                };
+                vec![dsl::assign(&target, &expr)]
+            }));
+            dsl::block(inlet)
+        };
 
-        let wall_block = dsl::block(vec![
+        let wall_block = {
+            let mut wall = Vec::new();
             // Wall BC couples the right state to the left state:
             //   m_r = m_l - 2 (m_l · n) n
             // This requires applying the momentum reflection matrix to the right-state Jacobian.
-            dsl::let_("r11", "1.0 - 2.0 * normal.x * normal.x"),
-            dsl::let_("r12", "-2.0 * normal.x * normal.y"),
-            dsl::let_("r21", "-2.0 * normal.y * normal.x"),
-            dsl::let_("r22", "1.0 - 2.0 * normal.y * normal.y"),
-            dsl::assign("eff_00", "jac_l_00 + jac_r_00"),
-            dsl::assign("eff_01", "jac_l_01 + jac_r_01 * r11 + jac_r_02 * r21"),
-            dsl::assign("eff_02", "jac_l_02 + jac_r_01 * r12 + jac_r_02 * r22"),
-            dsl::assign("eff_03", "jac_l_03 + jac_r_03"),
-            dsl::assign("eff_10", "jac_l_10 + jac_r_10"),
-            dsl::assign("eff_11", "jac_l_11 + jac_r_11 * r11 + jac_r_12 * r21"),
-            dsl::assign("eff_12", "jac_l_12 + jac_r_11 * r12 + jac_r_12 * r22"),
-            dsl::assign("eff_13", "jac_l_13 + jac_r_13"),
-            dsl::assign("eff_20", "jac_l_20 + jac_r_20"),
-            dsl::assign("eff_21", "jac_l_21 + jac_r_21 * r11 + jac_r_22 * r21"),
-            dsl::assign("eff_22", "jac_l_22 + jac_r_21 * r12 + jac_r_22 * r22"),
-            dsl::assign("eff_23", "jac_l_23 + jac_r_23"),
-            dsl::assign("eff_30", "jac_l_30 + jac_r_30"),
-            dsl::assign("eff_31", "jac_l_31 + jac_r_31 * r11 + jac_r_32 * r21"),
-            dsl::assign("eff_32", "jac_l_32 + jac_r_31 * r12 + jac_r_32 * r22"),
-            dsl::assign("eff_33", "jac_l_33 + jac_r_33"),
-        ]);
+            wall.extend([
+                dsl::let_("r11", "1.0 - 2.0 * normal.x * normal.x"),
+                dsl::let_("r12", "-2.0 * normal.x * normal.y"),
+                dsl::let_("r21", "-2.0 * normal.y * normal.x"),
+                dsl::let_("r22", "1.0 - 2.0 * normal.y * normal.y"),
+            ]);
+            wall.extend(dsl::for_each_mat_entry_block(block_size as usize, |row, col| {
+                let target = format!("eff_{row}{col}");
+                let expr = if col == 1 {
+                    format!("jac_l_{row}1 + jac_r_{row}1 * r11 + jac_r_{row}2 * r21")
+                } else if col == 2 {
+                    format!("jac_l_{row}2 + jac_r_{row}1 * r12 + jac_r_{row}2 * r22")
+                } else {
+                    format!("jac_l_{row}{col} + jac_r_{row}{col}")
+                };
+                vec![dsl::assign(&target, &expr)]
+            }));
+            dsl::block(wall)
+        };
 
         body.push(dsl::if_block(
             "boundary_type == 1u",
@@ -1336,22 +1274,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             )])),
         ));
 
-        body.push(dsl::assign_op(AssignOp::Add, "diag_00", "eff_00 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_01", "eff_01 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_02", "eff_02 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_03", "eff_03 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_10", "eff_10 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_11", "eff_11 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_12", "eff_12 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_13", "eff_13 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_20", "eff_20 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_21", "eff_21 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_22", "eff_22 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_23", "eff_23 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_30", "eff_30 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_31", "eff_31 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_32", "eff_32 * area"));
-        body.push(dsl::assign_op(AssignOp::Add, "diag_33", "eff_33 * area"));
+        body.extend(dsl::assign_op_matrix_from_prefix_scaled(
+            AssignOp::Add,
+            "diag",
+            "eff",
+            block_size as usize,
+            Some("area"),
+        ));
         dsl::block(body)
     };
 
@@ -1385,14 +1314,18 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "rhs_time_rho_e + rhs_pseudo_rho_e - (coeff_time + coeff_pseudo) * rho_e - sum_rho_e",
     ));
 
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_00", "coeff_time"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_11", "coeff_time"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_22", "coeff_time"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_33", "coeff_time"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_00", "coeff_pseudo"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_11", "coeff_pseudo"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_22", "coeff_pseudo"));
-    stmts.push(dsl::assign_op(AssignOp::Add, "diag_33", "coeff_pseudo"));
+    stmts.extend(dsl::assign_op_matrix_diag(
+        AssignOp::Add,
+        "diag",
+        block_size as usize,
+        "coeff_time",
+    ));
+    stmts.extend(dsl::assign_op_matrix_diag(
+        AssignOp::Add,
+        "diag",
+        block_size as usize,
+        "coeff_pseudo",
+    ));
 
     stmts.push(dsl::let_("scalar_diag_idx", "diagonal_indices[idx]"));
     stmts.push(dsl::let_("diag_rank", "scalar_diag_idx - scalar_offset"));
@@ -1401,22 +1334,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("diag_base_2", "start_row_2 + 4u * diag_rank"));
     stmts.push(dsl::let_("diag_base_3", "start_row_3 + 4u * diag_rank"));
 
-    stmts.push(dsl::assign("matrix_values[diag_base_0 + 0u]", "diag_00"));
-    stmts.push(dsl::assign("matrix_values[diag_base_0 + 1u]", "diag_01"));
-    stmts.push(dsl::assign("matrix_values[diag_base_0 + 2u]", "diag_02"));
-    stmts.push(dsl::assign("matrix_values[diag_base_0 + 3u]", "diag_03"));
-    stmts.push(dsl::assign("matrix_values[diag_base_1 + 0u]", "diag_10"));
-    stmts.push(dsl::assign("matrix_values[diag_base_1 + 1u]", "diag_11"));
-    stmts.push(dsl::assign("matrix_values[diag_base_1 + 2u]", "diag_12"));
-    stmts.push(dsl::assign("matrix_values[diag_base_1 + 3u]", "diag_13"));
-    stmts.push(dsl::assign("matrix_values[diag_base_2 + 0u]", "diag_20"));
-    stmts.push(dsl::assign("matrix_values[diag_base_2 + 1u]", "diag_21"));
-    stmts.push(dsl::assign("matrix_values[diag_base_2 + 2u]", "diag_22"));
-    stmts.push(dsl::assign("matrix_values[diag_base_2 + 3u]", "diag_23"));
-    stmts.push(dsl::assign("matrix_values[diag_base_3 + 0u]", "diag_30"));
-    stmts.push(dsl::assign("matrix_values[diag_base_3 + 1u]", "diag_31"));
-    stmts.push(dsl::assign("matrix_values[diag_base_3 + 2u]", "diag_32"));
-    stmts.push(dsl::assign("matrix_values[diag_base_3 + 3u]", "diag_33"));
+    stmts.extend(dsl::assign_matrix_array_from_prefix_scaled(
+        "matrix_values",
+        "diag_base",
+        "diag",
+        block_size as usize,
+        None,
+    ));
 
     stmts.push(dsl::assign("rhs[4u * idx + 0u]", "rhs_rho"));
     stmts.push(dsl::assign("rhs[4u * idx + 1u]", "rhs_rho_u_x"));

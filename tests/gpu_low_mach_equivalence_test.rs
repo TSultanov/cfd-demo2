@@ -38,8 +38,14 @@ fn env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-fn env_bool(name: &str) -> bool {
-    env::var(name).map(|v| v == "1").unwrap_or(false)
+fn env_bool(name: &str, default: bool) -> bool {
+    env::var(name)
+        .ok()
+        .map(|val| {
+            let val = val.to_ascii_lowercase();
+            matches!(val.as_str(), "1" | "true" | "yes" | "y" | "on")
+        })
+        .unwrap_or(default)
 }
 
 fn find_probe_index(mesh: &Mesh, x: f64, y: f64) -> usize {
@@ -296,13 +302,15 @@ fn std_dev(values: &[f64]) -> f64 {
 #[test]
 #[ignore]
 fn low_mach_equivalence_vortex_street() {
-    let save_plots = env_bool("CFD2_SAVE_PLOTS");
+    let save_plots = env_bool("CFD2_SAVE_PLOTS", false);
     let steps = env_usize("CFD2_LOW_MACH_STEPS", 1200);
     let dt = env_f64("CFD2_LOW_MACH_DT", 0.001);
     let dtau = env_f64("CFD2_LOW_MACH_DTAU", 0.0);
     let alpha_u = env_f64("CFD2_LOW_MACH_ALPHA_U", 1.0);
     let precond_model = env_usize("CFD2_LOW_MACH_PRECOND_MODEL", 1) as u32;
     let precond_theta_floor = env_f64("CFD2_LOW_MACH_PRECOND_THETA_FLOOR", 1e-6);
+    let pc_alpha = env_f64("CFD2_LOW_MACH_PC_ALPHA", 0.0);
+    let nonconv_relax = env_f64("CFD2_LOW_MACH_NONCONV_RELAX", 0.5);
     let checker_max = env_f64("CFD2_LOW_MACH_CB_MAX", 2.0);
     let cell = env_f64("CFD2_LOW_MACH_CELL", 0.05);
     let smooth_alpha = env_f64("CFD2_LOW_MACH_SMOOTH_ALPHA", 0.3);
@@ -312,6 +320,9 @@ fn low_mach_equivalence_vortex_street() {
     let incomp_iters = env_usize("CFD2_LOW_MACH_INCOMP_ITERS", 20);
     let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 40);
     let probe_stride = env_usize("CFD2_LOW_MACH_PROBE_STRIDE", 10);
+    let progress = env_bool("CFD2_LOW_MACH_PROGRESS", true);
+    let progress_stride = env_usize("CFD2_LOW_MACH_PROGRESS_STRIDE", 25);
+    let skip_comp = env_bool("CFD2_LOW_MACH_SKIP_COMP", false);
     let plot_width = env_usize("CFD2_PLOT_WIDTH", 480);
     let plot_height = env_usize("CFD2_PLOT_HEIGHT", 160);
 
@@ -340,6 +351,35 @@ fn low_mach_equivalence_vortex_street() {
     incomp.set_p(&vec![0.0f64; mesh.num_cells()]);
     incomp.initialize_history();
 
+    let start = std::time::Instant::now();
+
+    if skip_comp {
+        for step in 0..steps {
+            incomp.step();
+            if progress && (step % progress_stride == 0 || step + 1 == steps) {
+                let elapsed = start.elapsed().as_secs_f64();
+                let done = (step + 1) as f64;
+                let avg = elapsed / done.max(1.0);
+                let remaining = avg * ((steps - step - 1) as f64);
+                println!(
+                    "low_mach_equivalence(incomp-only) step {}/{} ({:.1}%) elapsed {:.1}s est_remain {:.1}s",
+                    step + 1,
+                    steps,
+                    100.0 * done / steps.max(1) as f64,
+                    elapsed,
+                    remaining
+                );
+            }
+        }
+        let elapsed = start.elapsed().as_secs_f64();
+        println!(
+            "low_mach_equivalence(incomp-only) finished in {:.1}s ({:.3}s/step)",
+            elapsed,
+            elapsed / steps.max(1) as f64
+        );
+        return;
+    }
+
     let mut comp = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32);
@@ -351,6 +391,8 @@ fn low_mach_equivalence_vortex_street() {
     comp.set_alpha_u(alpha_u as f32);
     comp.set_precond_model(precond_model);
     comp.set_precond_theta_floor(precond_theta_floor as f32);
+    comp.set_pressure_coupling_alpha(pc_alpha as f32);
+    comp.set_nonconverged_relax(nonconv_relax as f32);
     comp.set_outer_iters(comp_iters);
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure as f32; mesh.num_cells()];
@@ -367,10 +409,23 @@ fn low_mach_equivalence_vortex_street() {
     let mut best_probe = 0.0f64;
     let mut best_u_incomp: Option<Vec<(f64, f64)>> = None;
     let mut best_u_comp: Option<Vec<(f64, f64)>> = None;
-
     for step in 0..steps {
         incomp.step();
         comp.step();
+        if progress && (step % progress_stride == 0 || step + 1 == steps) {
+            let elapsed = start.elapsed().as_secs_f64();
+            let done = (step + 1) as f64;
+            let avg = elapsed / done.max(1.0);
+            let remaining = avg * ((steps - step - 1) as f64);
+            println!(
+                "low_mach_equivalence step {}/{} ({:.1}%) elapsed {:.1}s est_remain {:.1}s",
+                step + 1,
+                steps,
+                100.0 * done / steps.max(1) as f64,
+                elapsed,
+                remaining
+            );
+        }
         if step % probe_stride == 0 {
             let u_incomp = pollster::block_on(incomp.get_u());
             let u_comp = pollster::block_on(comp.get_u());

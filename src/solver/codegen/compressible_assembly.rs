@@ -67,6 +67,7 @@ fn constants_struct() -> StructDef {
             StructField::new("precond_type", Type::U32),
             StructField::new("precond_model", Type::U32),
             StructField::new("precond_theta_floor", Type::F32),
+            StructField::new("pressure_coupling_alpha", Type::F32),
         ],
     )
 }
@@ -854,7 +855,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     loop_body.push(dsl::let_("flux_rho_l", "rho_l * u_n_l"));
     loop_body.push(dsl::let_("flux_rho_r", "rho_r * u_n_r"));
-    loop_body.push(dsl::let_(
+    loop_body.push(dsl::var(
         "flux_rho",
         "a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l)",
     ));
@@ -911,6 +912,126 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "flux_rho_e",
         "a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l)",
     ));
+    loop_body.push(dsl::let_("inv_rho_l_cell", "1.0 / max(rho_l_cell, 1e-8)"));
+    loop_body.push(dsl::let_("inv_rho_r_cell", "1.0 / max(rho_r_cell, 1e-8)"));
+    loop_body.push(dsl::let_("u_l_x_cell", "rho_u_l_cell.x * inv_rho_l_cell"));
+    loop_body.push(dsl::let_("u_l_y_cell", "rho_u_l_cell.y * inv_rho_l_cell"));
+    loop_body.push(dsl::let_("u_r_x_cell", "rho_u_r_cell.x * inv_rho_r_cell"));
+    loop_body.push(dsl::let_("u_r_y_cell", "rho_u_r_cell.y * inv_rho_r_cell"));
+    loop_body.push(dsl::let_("u2_l_cell", "u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell"));
+    loop_body.push(dsl::let_("u2_r_cell", "u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell"));
+
+    loop_body.push(dsl::let_("grad_rho_l", "grad_rho[idx]"));
+    loop_body.push(dsl::let_("grad_rho_u_x_l", "grad_rho_u_x[idx]"));
+    loop_body.push(dsl::let_("grad_rho_u_y_l", "grad_rho_u_y[idx]"));
+    loop_body.push(dsl::let_("grad_rho_e_l", "grad_rho_e[idx]"));
+    loop_body.push(dsl::let_("grad_rho_r", "grad_rho[other_idx]"));
+    loop_body.push(dsl::let_("grad_rho_u_x_r", "grad_rho_u_x[other_idx]"));
+    loop_body.push(dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"));
+    loop_body.push(dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"));
+
+    loop_body.push(dsl::let_(
+        "grad_u_x_l_x",
+        "(grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u_x_l_y",
+        "(grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u_y_l_x",
+        "(grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u_y_l_y",
+        "(grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell",
+    ));
+
+    loop_body.push(dsl::let_(
+        "grad_u_x_r_x",
+        "(grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u_x_r_y",
+        "(grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u_y_r_x",
+        "(grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u_y_r_y",
+        "(grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell",
+    ));
+
+    loop_body.push(dsl::let_(
+        "grad_u2_l_x",
+        "2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u2_l_y",
+        "2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u2_r_x",
+        "2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_u2_r_y",
+        "2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y",
+    ));
+
+    loop_body.push(dsl::let_(
+        "grad_rho_u2_l_x",
+        "u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_rho_u2_l_y",
+        "u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_rho_u2_r_x",
+        "u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x",
+    ));
+    loop_body.push(dsl::let_(
+        "grad_rho_u2_r_y",
+        "u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y",
+    ));
+
+    loop_body.push(dsl::let_(
+        "grad_p_l_x",
+        &format!("({gamma} - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x)"),
+    ));
+    loop_body.push(dsl::let_(
+        "grad_p_l_y",
+        &format!("({gamma} - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y)"),
+    ));
+    loop_body.push(dsl::let_(
+        "grad_p_r_x",
+        &format!("({gamma} - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x)"),
+    ));
+    loop_body.push(dsl::let_(
+        "grad_p_r_y",
+        &format!("({gamma} - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y)"),
+    ));
+
+    loop_body.push(dsl::let_("grad_p_l_n", "grad_p_l_x * normal.x + grad_p_l_y * normal.y"));
+    loop_body.push(dsl::let_("grad_p_r_n", "grad_p_r_x * normal.x + grad_p_r_y * normal.y"));
+    loop_body.push(dsl::let_("grad_p_face_n", "0.5 * (grad_p_l_n + grad_p_r_n)"));
+    loop_body.push(dsl::let_("grad_p_jump_n", "(p_r - p_l) / dist"));
+    loop_body.push(dsl::let_("rho_face", "0.5 * (rho_l + rho_r)"));
+    loop_body.push(dsl::let_("pc_alpha", "constants.pressure_coupling_alpha"));
+    loop_body.push(dsl::let_(
+        "m_corr",
+        "pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n)",
+    ));
+    loop_body.push(dsl::let_("h_l", "(rho_e_l + p_l) * inv_rho_l"));
+    loop_body.push(dsl::let_("h_r", "(rho_e_r + p_r) * inv_rho_r"));
+    loop_body.push(dsl::let_("h_face", "0.5 * (h_l + h_r)"));
+    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho", "m_corr"));
+    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho_u_x", "m_corr * u_face_x"));
+    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho_u_y", "m_corr * u_face_y"));
+    loop_body.push(dsl::assign_op(AssignOp::Add, "flux_rho_e", "m_corr * h_face"));
     loop_body.push(dsl::assign(
         "flux_rho_e",
         "flux_rho_e + diff_u_x * u_face_x + diff_u_y * u_face_y",

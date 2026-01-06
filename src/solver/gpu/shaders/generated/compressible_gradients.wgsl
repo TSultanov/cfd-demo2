@@ -25,6 +25,7 @@ struct Constants {
     precond_type: u32,
     precond_model: u32,
     precond_theta_floor: f32,
+    pressure_coupling_alpha: f32,
 }
 
 // Group 0: Mesh

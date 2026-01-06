@@ -257,6 +257,16 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Added `step_with_stats` for compressible solver so tests can inspect per-iteration FGMRES convergence (`src/solver/gpu/compressible_solver.rs`).
 - **2025-02-10:** Added a lightweight low‑Mach convergence smoke test with checkerboard gating for faster iteration (`tests/gpu_low_mach_convergence_smoke_test.rs`).
 - **2025-02-10:** Raised default compressible outer-iteration counts in the low‑Mach tests to tighten nonlinear convergence per step (`tests/gpu_low_mach_equivalence_test.rs`, `tests/gpu_low_mach_convergence_smoke_test.rs`).
+- **2025-02-10:** Added optional pressure‑coupling correction (mass/momentum/energy flux) with new `pressure_coupling_alpha` constant + solver/test knobs to suppress low‑Mach checkerboarding without clamping (`src/solver/gpu/structs.rs`, `src/solver/gpu/init/*`, `src/solver/gpu/compressible_solver.rs`, `src/solver/codegen/compressible_{assembly,flux_kt}.rs`, `tests/gpu_low_mach_{equivalence,convergence_smoke}_test.rs`).
+- **2025-02-10:** Switched KT mass flux to a mutable binding so pressure‑coupling corrections compile cleanly in WGSL (`src/solver/codegen/compressible_{assembly,flux_kt}.rs`).
+- **2025-02-10:** Added residual drop diagnostics/thresholds to the convergence smoke test (per‑step residual reduction fraction + optional logging) to evaluate outer‑iteration convergence quickly (`tests/gpu_low_mach_convergence_smoke_test.rs`).
+- **2025-02-10:** Fixed stats iteration in the convergence smoke test to avoid moving the vector before residual checks (`tests/gpu_low_mach_convergence_smoke_test.rs`).
+- **2025-02-10:** Added a retry path for non‑converged compressible FGMRES solves and a convergence‑fraction gate in the smoke test (`src/solver/gpu/compressible_solver.rs`, `tests/gpu_low_mach_convergence_smoke_test.rs`).
+- **2025-02-10:** Replaced the simple pressure‑jump coupling with a Rhie‑Chow‑style gradient correction for mass flux (using cell gradients and pressure jump) to better target checkerboarding (`src/solver/codegen/compressible_{assembly,flux_kt}.rs`).
+- **2025-02-10:** Added an absolute residual tolerance floor to compressible FGMRES convergence to avoid over‑strict relative tolerances when RHS is tiny (`src/solver/gpu/compressible_fgmres.rs`).
+- **2025-02-10:** Disabled residual drop gating by default in the convergence smoke test (now opt‑in via env) to focus on convergence fraction and checkerboarding (`tests/gpu_low_mach_convergence_smoke_test.rs`).
+- **2025-02-10:** Increased compressible FGMRES restart limits in the outer loop (and retry) to improve convergence frequency (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added a non‑converged relaxation fallback (scale `alpha_u` when FGMRES fails) with test knobs to reduce nonlinear overshoot (`src/solver/gpu/compressible_solver.rs`, `tests/gpu_low_mach_{equivalence,convergence_smoke}_test.rs`).
 - **2025-02-10:** Initialized acoustic pulse tests with isentropic density perturbations to avoid a stationary entropy mode and better validate wave propagation (`tests/gpu_compressible_validation_test.rs`).
 - **2025-02-10:** Added a right-going acoustic pulse initialization and a weighted-mean travel check to validate compressible wave propagation (`tests/gpu_compressible_validation_test.rs`).
 - **2025-02-10:** Added debug instrumentation for acoustic pulse peak location to help diagnose slow wave propagation (`tests/gpu_compressible_validation_test.rs`).
@@ -530,3 +540,25 @@ discretization automatically, with modular swapping of schemes and boundary cond
   `src/solver/codegen/compressible_flux_kt.rs`).
 - **2025-02-10:** Tightened compressible implicit solve tolerance/iters to
   better realize low-diffusion fluxes in dual-time (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added progress logging controls for the low-Mach equivalence
+  test to estimate runtime (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Unified `env_bool` helper signature in the low-Mach test so
+  progress logging and save-plot flags compile cleanly
+  (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added an incompressible-only mode for the low-Mach test to
+  isolate runtime on the same mesh (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added compressible step profiling to attribute runtime to
+  FGMRES vs assembly/apply/gradients (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Implemented a 4x4 block-Jacobi preconditioner for the
+  compressible FGMRES path, with GPU block inverse build + apply
+  (`src/solver/gpu/compressible_fgmres.rs`,
+  `src/solver/gpu/shaders/compressible_precond.wgsl`).
+- **2025-02-10:** Added adaptive FGMRES tolerance/restart controls to reduce
+  time per nonlinear iteration (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added block-diagonal AMG preconditioning support for the
+  compressible solver, including AMG pack/unpack kernels and resource build
+  (`src/solver/gpu/compressible_fgmres.rs`,
+  `src/solver/gpu/compressible_solver.rs`,
+  `src/solver/gpu/shaders/compressible_amg_pack.wgsl`).
+- **2025-02-10:** Added AMG smoke test for compressible solver
+  (`tests/gpu_compressible_amg_smoke_test.rs`).

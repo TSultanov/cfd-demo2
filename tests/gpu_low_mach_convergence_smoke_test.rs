@@ -82,8 +82,14 @@ fn compressible_low_mach_convergence_smoke() {
     let alpha_u = env_f64("CFD2_COMP_CONV_ALPHA_U", 0.3);
     let precond_model = env_usize("CFD2_COMP_CONV_PRECOND_MODEL", 1) as u32;
     let precond_theta_floor = env_f64("CFD2_COMP_CONV_THETA_FLOOR", 1e-6);
+    let pc_alpha = env_f64("CFD2_COMP_CONV_PC_ALPHA", 0.0);
     let comp_iters = env_usize("CFD2_COMP_CONV_ITERS", 8);
+    let nonconv_relax = env_f64("CFD2_COMP_CONV_NONCONV_RELAX", 0.5);
     let checker_max = env_f64("CFD2_COMP_CONV_CB_MAX", 5.0);
+    let resid_drop = env_f64("CFD2_COMP_CONV_RESID_DROP", 0.9);
+    let resid_drop_frac = env_f64("CFD2_COMP_CONV_RESID_DROP_FRAC", 0.0);
+    let converged_frac = env_f64("CFD2_COMP_CONV_CONVERGED_FRAC", 0.7);
+    let log_stats = env::var("CFD2_COMP_CONV_LOG").ok().as_deref() == Some("1");
     let cell = env_f64("CFD2_COMP_CONV_CELL", 0.1);
     let u_in = env_f64("CFD2_COMP_CONV_UIN", 1.0) as f32;
     let density = 1.0f32;
@@ -103,6 +109,8 @@ fn compressible_low_mach_convergence_smoke() {
     comp.set_alpha_u(alpha_u as f32);
     comp.set_precond_model(precond_model);
     comp.set_precond_theta_floor(precond_theta_floor as f32);
+    comp.set_pressure_coupling_alpha(pc_alpha as f32);
+    comp.set_nonconverged_relax(nonconv_relax as f32);
     comp.set_outer_iters(comp_iters);
 
     let rho_init = vec![density; mesh.num_cells()];
@@ -112,12 +120,40 @@ fn compressible_low_mach_convergence_smoke() {
     comp.initialize_history();
 
     let mut saw_diverged = false;
+    let mut drop_hits = 0usize;
+    let mut drop_total = 0usize;
+    let mut converged_hits = 0usize;
+    let mut converged_total = 0usize;
+    let mut min_residual = f32::INFINITY;
+    let mut max_residual = 0.0f32;
     for _ in 0..steps {
         let stats = comp.step_with_stats();
-        for stat in stats {
+        for stat in &stats {
+            min_residual = min_residual.min(stat.residual);
+            max_residual = max_residual.max(stat.residual);
             if stat.diverged || !stat.residual.is_finite() {
                 saw_diverged = true;
                 break;
+            }
+            converged_total += 1;
+            if stat.converged {
+                converged_hits += 1;
+            }
+        }
+        if let (Some(first), Some(last)) = (stats.first(), stats.last()) {
+            if first.residual.is_finite() && last.residual.is_finite() && first.residual > 0.0 {
+                drop_total += 1;
+                if last.residual <= first.residual * resid_drop as f32 {
+                    drop_hits += 1;
+                }
+                if log_stats {
+                    eprintln!(
+                        "step residual: start={:.3e} end={:.3e} iters={}",
+                        first.residual,
+                        last.residual,
+                        stats.len()
+                    );
+                }
             }
         }
         if saw_diverged {
@@ -130,6 +166,26 @@ fn compressible_low_mach_convergence_smoke() {
     let checker_comp = checkerboard_metric(&mesh, &p_comp, dyn_pressure);
 
     assert!(!saw_diverged, "FGMRES diverged during the run");
+    if drop_total > 0 && resid_drop_frac > 0.0 {
+        let drop_frac = drop_hits as f64 / drop_total as f64;
+        assert!(
+            drop_frac >= resid_drop_frac,
+            "residual drop fraction {:.3} below {:.3} (min={:.3e}, max={:.3e})",
+            drop_frac,
+            resid_drop_frac,
+            min_residual,
+            max_residual
+        );
+    }
+    if converged_total > 0 {
+        let conv_frac = converged_hits as f64 / converged_total as f64;
+        assert!(
+            conv_frac >= converged_frac,
+            "converged fraction {:.3} below {:.3}",
+            conv_frac,
+            converged_frac
+        );
+    }
     assert!(
         checker_comp < checker_max,
         "checkerboarding metric {:.3} exceeds {:.3}",

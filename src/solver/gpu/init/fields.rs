@@ -116,6 +116,7 @@ pub fn init_field_buffers(device: &wgpu::Device, num_cells: u32, num_faces: u32)
         precond_type: 0,
         precond_model: 0,
         precond_theta_floor: 1e-6,
+        pressure_coupling_alpha: 0.0,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Constants Buffer"),

@@ -25,6 +25,7 @@ struct Constants {
     precond_type: u32,
     precond_model: u32,
     precond_theta_floor: f32,
+    pressure_coupling_alpha: f32,
 }
 
 // Group 0: Mesh
@@ -291,7 +292,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let a_prod_scaled = a_prod / denom;
     let flux_rho_l = rho_l * u_n_l;
     let flux_rho_r = rho_r * u_n_r;
-    let flux_rho = a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l);
+    var flux_rho = a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l);
     let flux_rho_u_x_l = rho_u_l.x * u_n_l + p_l * normal.x;
     let flux_rho_u_x_r = rho_u_r.x * u_n_r + p_r * normal.x;
     var flux_rho_u_x = a_pos * flux_rho_u_x_l + a_neg * flux_rho_u_x_r + a_prod_scaled * (rho_u_r.x - rho_u_l.x);
@@ -305,6 +306,56 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let flux_rho_e_l = (rho_e_l + p_l) * u_n_l;
     let flux_rho_e_r = (rho_e_r + p_r) * u_n_r;
     var flux_rho_e = a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l);
+    let inv_rho_l_cell = 1.0 / max(rho_l_cell, 1e-8);
+    let inv_rho_r_cell = 1.0 / max(rho_r_cell, 1e-8);
+    let u_l_x_cell = rho_u_l_cell.x * inv_rho_l_cell;
+    let u_l_y_cell = rho_u_l_cell.y * inv_rho_l_cell;
+    let u_r_x_cell = rho_u_r_cell.x * inv_rho_r_cell;
+    let u_r_y_cell = rho_u_r_cell.y * inv_rho_r_cell;
+    let u2_l_cell = u_l_x_cell * u_l_x_cell + u_l_y_cell * u_l_y_cell;
+    let u2_r_cell = u_r_x_cell * u_r_x_cell + u_r_y_cell * u_r_y_cell;
+    let grad_rho_l = grad_rho[owner];
+    let grad_rho_u_x_l = grad_rho_u_x[owner];
+    let grad_rho_u_y_l = grad_rho_u_y[owner];
+    let grad_rho_e_l = grad_rho_e[owner];
+    let grad_rho_r = grad_rho[other_idx];
+    let grad_rho_u_x_r = grad_rho_u_x[other_idx];
+    let grad_rho_u_y_r = grad_rho_u_y[other_idx];
+    let grad_rho_e_r = grad_rho_e[other_idx];
+    let grad_u_x_l_x = (grad_rho_u_x_l.x - u_l_x_cell * grad_rho_l.x) * inv_rho_l_cell;
+    let grad_u_x_l_y = (grad_rho_u_x_l.y - u_l_x_cell * grad_rho_l.y) * inv_rho_l_cell;
+    let grad_u_y_l_x = (grad_rho_u_y_l.x - u_l_y_cell * grad_rho_l.x) * inv_rho_l_cell;
+    let grad_u_y_l_y = (grad_rho_u_y_l.y - u_l_y_cell * grad_rho_l.y) * inv_rho_l_cell;
+    let grad_u_x_r_x = (grad_rho_u_x_r.x - u_r_x_cell * grad_rho_r.x) * inv_rho_r_cell;
+    let grad_u_x_r_y = (grad_rho_u_x_r.y - u_r_x_cell * grad_rho_r.y) * inv_rho_r_cell;
+    let grad_u_y_r_x = (grad_rho_u_y_r.x - u_r_y_cell * grad_rho_r.x) * inv_rho_r_cell;
+    let grad_u_y_r_y = (grad_rho_u_y_r.y - u_r_y_cell * grad_rho_r.y) * inv_rho_r_cell;
+    let grad_u2_l_x = 2.0 * u_l_x_cell * grad_u_x_l_x + 2.0 * u_l_y_cell * grad_u_y_l_x;
+    let grad_u2_l_y = 2.0 * u_l_x_cell * grad_u_x_l_y + 2.0 * u_l_y_cell * grad_u_y_l_y;
+    let grad_u2_r_x = 2.0 * u_r_x_cell * grad_u_x_r_x + 2.0 * u_r_y_cell * grad_u_y_r_x;
+    let grad_u2_r_y = 2.0 * u_r_x_cell * grad_u_x_r_y + 2.0 * u_r_y_cell * grad_u_y_r_y;
+    let grad_rho_u2_l_x = u2_l_cell * grad_rho_l.x + rho_l_cell * grad_u2_l_x;
+    let grad_rho_u2_l_y = u2_l_cell * grad_rho_l.y + rho_l_cell * grad_u2_l_y;
+    let grad_rho_u2_r_x = u2_r_cell * grad_rho_r.x + rho_r_cell * grad_u2_r_x;
+    let grad_rho_u2_r_y = u2_r_cell * grad_rho_r.y + rho_r_cell * grad_u2_r_y;
+    let grad_p_l_x = (1.4 - 1.0) * (grad_rho_e_l.x - 0.5 * grad_rho_u2_l_x);
+    let grad_p_l_y = (1.4 - 1.0) * (grad_rho_e_l.y - 0.5 * grad_rho_u2_l_y);
+    let grad_p_r_x = (1.4 - 1.0) * (grad_rho_e_r.x - 0.5 * grad_rho_u2_r_x);
+    let grad_p_r_y = (1.4 - 1.0) * (grad_rho_e_r.y - 0.5 * grad_rho_u2_r_y);
+    let grad_p_l_n = grad_p_l_x * normal.x + grad_p_l_y * normal.y;
+    let grad_p_r_n = grad_p_r_x * normal.x + grad_p_r_y * normal.y;
+    let grad_p_face_n = 0.5 * (grad_p_l_n + grad_p_r_n);
+    let grad_p_jump_n = (p_r - p_l) / dist;
+    let rho_face = 0.5 * (rho_l + rho_r);
+    let pc_alpha = constants.pressure_coupling_alpha;
+    let m_corr = pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n);
+    let h_l = (rho_e_l + p_l) * inv_rho_l;
+    let h_r = (rho_e_r + p_r) * inv_rho_r;
+    let h_face = 0.5 * (h_l + h_r);
+    flux_rho = flux_rho + m_corr;
+    flux_rho_u_x = flux_rho_u_x + m_corr * u_face_x;
+    flux_rho_u_y = flux_rho_u_y + m_corr * u_face_y;
+    flux_rho_e = flux_rho_e + m_corr * h_face;
     flux_rho_e = flux_rho_e + diff_u_x * u_face_x + diff_u_y * u_face_y;
     let base = idx * 4u;
     fluxes[base + 0u] = flux_rho * area;

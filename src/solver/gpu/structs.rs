@@ -102,6 +102,7 @@ pub struct GpuConstants {
     pub precond_type: u32, // 0: Jacobi, 1: AMG
     pub precond_model: u32, // 0: legacy, 1: Weiss-Smith
     pub precond_theta_floor: f32,
+    pub pressure_coupling_alpha: f32,
 }
 
 #[repr(C)]

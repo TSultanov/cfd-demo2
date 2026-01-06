@@ -14,6 +14,7 @@ use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::compressible_model;
 use bytemuck::cast_slice;
+use std::env;
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Copy, Debug)]
@@ -24,6 +25,94 @@ struct CompressibleOffsets {
     rho_e: u32,
     p: u32,
     u: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct CompressibleProfile {
+    enabled: bool,
+    stride: usize,
+    step: usize,
+    accum_steps: usize,
+    accum_total: f64,
+    accum_fgmres: f64,
+    accum_grad: f64,
+    accum_assembly: f64,
+    accum_apply: f64,
+    accum_update: f64,
+    accum_iters: u64,
+}
+
+impl CompressibleProfile {
+    fn new() -> Self {
+        let enabled = env_flag("CFD2_COMP_PROFILE", false);
+        let stride = env_usize("CFD2_COMP_PROFILE_STRIDE", 25).max(1);
+        CompressibleProfile {
+            enabled,
+            stride,
+            ..Default::default()
+        }
+    }
+
+    fn record(
+        &mut self,
+        total: f64,
+        grad: f64,
+        assembly: f64,
+        fgmres: f64,
+        apply: f64,
+        update: f64,
+        iters: u64,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.step += 1;
+        self.accum_steps += 1;
+        self.accum_total += total;
+        self.accum_grad += grad;
+        self.accum_assembly += assembly;
+        self.accum_fgmres += fgmres;
+        self.accum_apply += apply;
+        self.accum_update += update;
+        self.accum_iters += iters;
+
+        if self.accum_steps >= self.stride {
+            let steps = self.accum_steps as f64;
+            let avg_total = self.accum_total / steps;
+            let avg_fgmres = self.accum_fgmres / steps;
+            let avg_grad = self.accum_grad / steps;
+            let avg_assembly = self.accum_assembly / steps;
+            let avg_apply = self.accum_apply / steps;
+            let avg_update = self.accum_update / steps;
+            let avg_iters = self.accum_iters as f64 / steps;
+            let fgmres_pct = if avg_total > 0.0 {
+                100.0 * avg_fgmres / avg_total
+            } else {
+                0.0
+            };
+            println!(
+                "compressible_profile step {}..{} avg_total={:.3}s fgmres={:.3}s ({:.1}%) iters={:.1} grad={:.3}s assembly={:.3}s apply={:.3}s update={:.3}s",
+                self.step + 1 - self.accum_steps,
+                self.step,
+                avg_total,
+                avg_fgmres,
+                fgmres_pct,
+                avg_iters,
+                avg_grad,
+                avg_assembly,
+                avg_apply,
+                avg_update
+            );
+            self.accum_steps = 0;
+            self.accum_total = 0.0;
+            self.accum_fgmres = 0.0;
+            self.accum_grad = 0.0;
+            self.accum_assembly = 0.0;
+            self.accum_apply = 0.0;
+            self.accum_update = 0.0;
+            self.accum_iters = 0;
+        }
+    }
 }
 
 pub struct GpuCompressibleSolver {
@@ -64,6 +153,12 @@ pub struct GpuCompressibleSolver {
     pub pipeline_update: wgpu::ComputePipeline,
     pub fgmres_resources: Option<CompressibleFgmresResources>,
     pub outer_iters: usize,
+    pub nonconverged_relax: f32,
+    pub(crate) scalar_row_offsets: Vec<u32>,
+    pub(crate) scalar_col_indices: Vec<u32>,
+    pub(crate) block_row_offsets: Vec<u32>,
+    pub(crate) block_col_indices: Vec<u32>,
+    profile: CompressibleProfile,
     offsets: CompressibleOffsets,
 }
 
@@ -77,6 +172,7 @@ impl GpuCompressibleSolver {
         let num_cells = mesh.cell_cx.len() as u32;
         let num_faces = mesh.face_owner.len() as u32;
         let num_unknowns = num_cells * 4;
+        let profile = CompressibleProfile::new();
 
         let model = compressible_model();
         let layout = &model.state_layout;
@@ -154,8 +250,12 @@ impl GpuCompressibleSolver {
                     usage: wgpu::BufferUsages::STORAGE,
                 });
 
+        let scalar_row_offsets = mesh_res.row_offsets.clone();
+        let scalar_col_indices = mesh_res.col_indices.clone();
         let (row_offsets, col_indices) =
             build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, 4);
+        let block_row_offsets = row_offsets.clone();
+        let block_col_indices = col_indices.clone();
         let matrix_res = matrix::init_matrix(&context.device, &row_offsets, &col_indices);
         let b_rhs = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Compressible RHS"),
@@ -276,6 +376,12 @@ impl GpuCompressibleSolver {
             pipeline_update,
             fgmres_resources: None,
             outer_iters: 1,
+            nonconverged_relax: 0.5,
+            scalar_row_offsets,
+            scalar_col_indices,
+            block_row_offsets,
+            block_col_indices,
+            profile,
             offsets,
         }
     }
@@ -338,6 +444,11 @@ impl GpuCompressibleSolver {
         self.update_constants();
     }
 
+    pub fn set_precond_type(&mut self, precond_type: u32) {
+        self.constants.precond_type = precond_type;
+        self.update_constants();
+    }
+
     pub fn set_precond_model(&mut self, model: u32) {
         self.constants.precond_model = model;
         self.update_constants();
@@ -348,8 +459,17 @@ impl GpuCompressibleSolver {
         self.update_constants();
     }
 
+    pub fn set_pressure_coupling_alpha(&mut self, alpha: f32) {
+        self.constants.pressure_coupling_alpha = alpha;
+        self.update_constants();
+    }
+
     pub fn set_outer_iters(&mut self, iters: usize) {
         self.outer_iters = iters.max(1);
+    }
+
+    pub fn set_nonconverged_relax(&mut self, relax: f32) {
+        self.nonconverged_relax = relax.max(0.0);
     }
 
     pub fn set_uniform_state(&self, rho: f32, u: [f32; 2], p: f32) {
@@ -405,6 +525,7 @@ impl GpuCompressibleSolver {
     }
 
     pub fn step_with_stats(&mut self) -> Vec<LinearSolverStats> {
+        let step_start = std::time::Instant::now();
         let workgroup_size = 64;
         let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
@@ -434,8 +555,23 @@ impl GpuCompressibleSolver {
 
         self.context.queue.submit(Some(encoder.finish()));
 
+        let base_alpha_u = self.constants.alpha_u;
         let mut stats = Vec::with_capacity(self.outer_iters);
-        for _ in 0..self.outer_iters {
+        let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
+        let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
+        let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
+        let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5)
+            .clamp(0.0, 1.0);
+        let max_restart = env_usize("CFD2_COMP_FGMRES_MAX_RESTART", 80).max(1);
+        let retry_restart = env_usize("CFD2_COMP_FGMRES_RETRY_RESTART", 160).max(1);
+        let mut grad_secs = 0.0f64;
+        let mut assembly_secs = 0.0f64;
+        let mut fgmres_secs = 0.0f64;
+        let mut apply_secs = 0.0f64;
+        let mut update_secs = 0.0f64;
+        let mut fgmres_iters = 0u64;
+        for outer_idx in 0..self.outer_iters {
+            let stage_start = std::time::Instant::now();
             let mut encoder =
                 self.context
                     .device
@@ -455,7 +591,9 @@ impl GpuCompressibleSolver {
             }
 
             self.context.queue.submit(Some(encoder.finish()));
+            grad_secs += stage_start.elapsed().as_secs_f64();
 
+            let stage_start = std::time::Instant::now();
             let mut encoder =
                 self.context
                     .device
@@ -476,10 +614,28 @@ impl GpuCompressibleSolver {
             }
 
             self.context.queue.submit(Some(encoder.finish()));
+            assembly_secs += stage_start.elapsed().as_secs_f64();
 
-            let iter_stats = self.solve_compressible_fgmres(60, 1e-8);
+            let tol = if outer_idx < warm_iters {
+                tol_base * warm_scale
+            } else {
+                tol_base
+            };
+            let retry_tol = (tol * retry_scale).min(tol_base);
+            let mut iter_stats = self.solve_compressible_fgmres(max_restart, tol);
+            fgmres_secs += iter_stats.time.as_secs_f64();
+            fgmres_iters += iter_stats.iterations as u64;
+            if !iter_stats.converged {
+                let retry_stats = self.solve_compressible_fgmres(retry_restart, retry_tol);
+                fgmres_secs += retry_stats.time.as_secs_f64();
+                fgmres_iters += retry_stats.iterations as u64;
+                if retry_stats.converged || retry_stats.residual < iter_stats.residual {
+                    iter_stats = retry_stats;
+                }
+            }
             stats.push(iter_stats);
 
+            let stage_start = std::time::Instant::now();
             let mut encoder =
                 self.context
                     .device
@@ -488,6 +644,16 @@ impl GpuCompressibleSolver {
                     });
             encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, state_size);
             self.context.queue.submit(Some(encoder.finish()));
+
+            let apply_alpha = if iter_stats.converged {
+                base_alpha_u
+            } else {
+                base_alpha_u * self.nonconverged_relax
+            };
+            if (self.constants.alpha_u - apply_alpha).abs() > 1e-6 {
+                self.constants.alpha_u = apply_alpha;
+                self.update_constants();
+            }
 
             let mut encoder =
                 self.context
@@ -508,8 +674,15 @@ impl GpuCompressibleSolver {
             }
 
             self.context.queue.submit(Some(encoder.finish()));
+            apply_secs += stage_start.elapsed().as_secs_f64();
+
+            if (self.constants.alpha_u - base_alpha_u).abs() > 1e-6 {
+                self.constants.alpha_u = base_alpha_u;
+                self.update_constants();
+            }
         }
 
+        let stage_start = std::time::Instant::now();
         let mut encoder =
             self.context
                 .device
@@ -528,6 +701,17 @@ impl GpuCompressibleSolver {
         }
 
         self.context.queue.submit(Some(encoder.finish()));
+        update_secs += stage_start.elapsed().as_secs_f64();
+        let total_secs = step_start.elapsed().as_secs_f64();
+        self.profile.record(
+            total_secs,
+            grad_secs,
+            assembly_secs,
+            fgmres_secs,
+            apply_secs,
+            update_secs,
+            fgmres_iters,
+        );
         stats
     }
 
@@ -573,7 +757,7 @@ impl GpuCompressibleSolver {
         cast_slice(&raw).to_vec()
     }
 
-    async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
+    pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
         let staging = self.context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Compressible Staging Buffer"),
             size,
@@ -605,12 +789,41 @@ impl GpuCompressibleSolver {
         data
     }
 
+    pub(crate) async fn read_buffer_f32(&self, buffer: &wgpu::Buffer, count: usize) -> Vec<f32> {
+        let raw = self.read_buffer(buffer, count as u64 * 4).await;
+        cast_slice(&raw).to_vec()
+    }
+
     fn write_state_all(&self, state: &[f32]) {
         let bytes = cast_slice(state);
         for buffer in &self.state_buffers {
             self.context.queue.write_buffer(buffer, 0, bytes);
         }
     }
+}
+
+fn env_flag(name: &str, default: bool) -> bool {
+    env::var(name)
+        .ok()
+        .map(|val| {
+            let val = val.to_ascii_lowercase();
+            matches!(val.as_str(), "1" | "true" | "yes" | "y" | "on")
+        })
+        .unwrap_or(default)
+}
+
+fn env_usize(name: &str, default: usize) -> usize {
+    env::var(name)
+        .ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_f32(name: &str, default: f32) -> f32 {
+    env::var(name)
+        .ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(default)
 }
 
 fn ping_pong_indices(step_index: usize) -> (usize, usize, usize) {

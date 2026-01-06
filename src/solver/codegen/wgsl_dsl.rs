@@ -4,6 +4,31 @@ pub fn expr(input: &str) -> Expr {
     Expr::parse(input).expect("invalid WGSL expression")
 }
 
+pub fn vec2_f32(x: Expr, y: Expr) -> Expr {
+    Expr::call_named("vec2<f32>", vec![x, y])
+}
+
+pub fn vec2_f32_xy_fields(name: &str) -> Expr {
+    let v = Expr::ident(name);
+    vec2_f32(v.clone().field("x"), v.field("y"))
+}
+
+pub fn vec2_f32_from_xy_fields(value: Expr) -> Expr {
+    vec2_f32(value.clone().field("x"), value.field("y"))
+}
+
+pub fn dot_expr(lhs: Expr, rhs: Expr) -> Expr {
+    Expr::call_named("dot", vec![lhs, rhs])
+}
+
+pub fn min_expr(lhs: Expr, rhs: Expr) -> Expr {
+    Expr::call_named("min", vec![lhs, rhs])
+}
+
+pub fn max_expr(lhs: Expr, rhs: Expr) -> Expr {
+    Expr::call_named("max", vec![lhs, rhs])
+}
+
 pub fn array_access(array: &str, index: Expr) -> Expr {
     Expr::ident(array).index(index)
 }

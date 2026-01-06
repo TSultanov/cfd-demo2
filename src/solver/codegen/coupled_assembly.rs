@@ -3,7 +3,7 @@ use super::dsl as typed;
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::reconstruction::scalar_reconstruction;
-use super::state_access::{state_scalar_expr, state_vec2_expr};
+use super::state_access::{state_scalar_expr, state_vec2, state_vec2_expr};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl::generate_wgsl_library_items;
@@ -448,7 +448,6 @@ fn main_body(
     }
 
     let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", d_p_field);
-    let u_idx_expr = state_vec2_expr(layout, "state", "idx", u_field);
     let pressure_coeff_face_expr = coeff_face_expr(
         layout,
         plan.pressure_diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
@@ -561,7 +560,6 @@ fn main_body(
         ));
         let neighbor_entry = block_matrix.row_entry(&Expr::ident("neighbor_rank"));
 
-        let u_neigh_expr = state_vec2_expr(layout, "state", "other_idx", u_field);
         let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", d_p_field);
 
         let mut inlet_stmts = vec![
@@ -664,54 +662,77 @@ fn main_body(
 
         if let Some(conv_op) = &plan.convection {
             let scheme_id = conv_op.scheme as u32;
-            interior_stmts.push(dsl::let_typed(
+            interior_stmts.push(dsl::let_typed_expr(
                 "scheme_id",
                 Type::U32,
-                &format!("{}u", scheme_id),
+                Expr::lit_u32(scheme_id),
             ));
-            interior_stmts.push(dsl::if_block(
-                "scheme_id != 0u",
+            interior_stmts.push(dsl::if_block_expr(
+                Expr::binary(
+                    Expr::ident("scheme_id"),
+                    BinaryOp::NotEqual,
+                    Expr::lit_u32(0),
+                ),
                 {
                     let mut ho_block = vec![
-                        dsl::let_("u_own", &u_idx_expr),
-                        dsl::let_("u_neigh", &u_neigh_expr),
+                        dsl::let_expr("u_own", state_vec2(layout, "state", "idx", u_field)),
+                        dsl::let_expr(
+                            "u_neigh",
+                            state_vec2(layout, "state", "other_idx", u_field),
+                        ),
                     ];
                     let (u_stmts, u_vars) = scalar_reconstruction(
                         "u",
-                        "scheme_id",
-                        "flux",
-                        "u_own.x",
-                        "u_neigh.x",
-                        "grad_u[idx]",
-                        "grad_u[other_idx]",
-                        "center",
-                        "other_center",
-                        "f_center",
+                        Expr::ident("scheme_id"),
+                        Expr::ident("flux"),
+                        Expr::ident("u_own").field("x"),
+                        Expr::ident("u_neigh").field("x"),
+                        Expr::ident("grad_u").index(Expr::ident("idx")),
+                        Expr::ident("grad_u").index(Expr::ident("other_idx")),
+                        Expr::ident("center"),
+                        Expr::ident("other_center"),
+                        Expr::ident("f_center"),
                     );
                     ho_block.extend(u_stmts);
                     let (v_stmts, v_vars) = scalar_reconstruction(
                         "v",
-                        "scheme_id",
-                        "flux",
-                        "u_own.y",
-                        "u_neigh.y",
-                        "grad_v[idx]",
-                        "grad_v[other_idx]",
-                        "center",
-                        "other_center",
-                        "f_center",
+                        Expr::ident("scheme_id"),
+                        Expr::ident("flux"),
+                        Expr::ident("u_own").field("y"),
+                        Expr::ident("u_neigh").field("y"),
+                        Expr::ident("grad_v").index(Expr::ident("idx")),
+                        Expr::ident("grad_v").index(Expr::ident("other_idx")),
+                        Expr::ident("center"),
+                        Expr::ident("other_center"),
+                        Expr::ident("f_center"),
                     );
                     ho_block.extend(v_stmts);
-                    ho_block.push(dsl::let_(
+                    ho_block.push(dsl::let_expr(
                         "correction_u",
-                        &format!("flux * ({} - {})", u_vars.phi_ho, u_vars.phi_upwind),
+                        Expr::binary(
+                            Expr::ident("flux"),
+                            BinaryOp::Mul,
+                            Expr::binary(u_vars.phi_ho, BinaryOp::Sub, u_vars.phi_upwind),
+                        ),
                     ));
-                    ho_block.push(dsl::let_(
+                    ho_block.push(dsl::let_expr(
                         "correction_v",
-                        &format!("flux * ({} - {})", v_vars.phi_ho, v_vars.phi_upwind),
+                        Expr::binary(
+                            Expr::ident("flux"),
+                            BinaryOp::Mul,
+                            Expr::binary(v_vars.phi_ho, BinaryOp::Sub, v_vars.phi_upwind),
+                        ),
                     ));
-                    ho_block.push(dsl::assign_op(AssignOp::Sub, "rhs_u", "correction_u"));
-                    ho_block.push(dsl::assign_op(AssignOp::Sub, "rhs_v", "correction_v"));
+                    ho_block.push(dsl::assign_op_expr(
+                        AssignOp::Sub,
+                        Expr::ident("rhs_u"),
+                        Expr::ident("correction_u"),
+                    ));
+                    ho_block.push(dsl::assign_op_expr(
+                        AssignOp::Sub,
+                        Expr::ident("rhs_v"),
+                        Expr::ident("correction_v"),
+                    ));
                     dsl::block(ho_block)
                 },
                 None,

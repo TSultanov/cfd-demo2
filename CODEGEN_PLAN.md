@@ -15,6 +15,8 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Migration is in progress:
   - Some matrix indexing/scatters in hot kernels are AST-first (no parser for `matrix_values[...]` writes).
   - `wgsl_dsl` now has helpers for linear array indexing (`idx * stride + offset`) to avoid `format!(...)`-built indices.
+  - `wgsl_dsl` has basic vector helpers (`vec2<f32>` construction, `dot/min/max`) used by reconstruction and flux kernels.
+  - `reconstruction.rs` is AST-first (no string parsing) and is shared by incompressible + compressible kernels.
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the primary safety net for refactors.
 
 ## Goals
@@ -56,10 +58,12 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Expand dense tensor support:
   - Current: `MatExpr<const R, const C>` is an Expr-level helper for unrolled ops/scatters.
   - Missing: a typed variant (`TypedMat`) that tracks per-entry `DslType`/`UnitDim` and supports more ops (e.g. block transforms and structured assembly).
-  - Missing: vector helpers (`VecExpr` / typed component access) to avoid `.x/.y` string usage in kernels.
+  - Partial: basic vector helpers exist in `wgsl_dsl` (`vec2<f32>` construction + `dot/min/max`).
+  - Missing: a richer vector DSL (`VecExpr` / typed vectors) to avoid component-level math and enable vector-valued reconstruction in one call (instead of per-component scalar reconstruction).
 
 ### 5) Discovery Notes (Gotchas)
 - `build.rs` manually `include!()`s the codegen DSL modules; new DSL files must be added there as well (e.g. `dsl/tensor.rs`).
+- WGSL `dot(...)` only accepts `vecN<...>` types, not the project’s `Vector2` struct; convert via `vec2<f32>(v.x, v.y)` (helper: `wgsl_dsl::vec2_f32_from_xy_fields`).
 
 ### 6) Kernel Migration Tracker + Parity Tests
 **Deliverable:** migrated kernels remain behaviorally stable while removing strings.

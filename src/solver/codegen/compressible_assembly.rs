@@ -532,109 +532,167 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     let reconstruct_block = {
         let mut block = Vec::new();
-        block.push(dsl::let_("r_l_x", "f_center.x - center.x"));
-        block.push(dsl::let_("r_l_y", "f_center.y - center.y"));
-        block.push(dsl::let_("r_r_x", "f_center.x - center_r.x"));
-        block.push(dsl::let_("r_r_y", "f_center.y - center_r.y"));
+        block.push(dsl::let_expr(
+            "r_l_x",
+            Expr::binary(
+                Expr::ident("f_center").field("x"),
+                BinaryOp::Sub,
+                Expr::ident("center").field("x"),
+            ),
+        ));
+        block.push(dsl::let_expr(
+            "r_l_y",
+            Expr::binary(
+                Expr::ident("f_center").field("y"),
+                BinaryOp::Sub,
+                Expr::ident("center").field("y"),
+            ),
+        ));
+        block.push(dsl::let_expr(
+            "r_r_x",
+            Expr::binary(
+                Expr::ident("f_center").field("x"),
+                BinaryOp::Sub,
+                Expr::ident("center_r").field("x"),
+            ),
+        ));
+        block.push(dsl::let_expr(
+            "r_r_y",
+            Expr::binary(
+                Expr::ident("f_center").field("y"),
+                BinaryOp::Sub,
+                Expr::ident("center_r").field("y"),
+            ),
+        ));
 
         // Reconstruct conservative variables directly for robustness.
-        block.push(dsl::let_("grad_rho_l", "grad_rho[idx]"));
-        block.push(dsl::let_("grad_rho_u_x_l", "grad_rho_u_x[idx]"));
-        block.push(dsl::let_("grad_rho_u_y_l", "grad_rho_u_y[idx]"));
-        block.push(dsl::let_("grad_rho_e_l", "grad_rho_e[idx]"));
-        block.push(dsl::let_("grad_rho_r", "grad_rho[other_idx]"));
-        block.push(dsl::let_("grad_rho_u_x_r", "grad_rho_u_x[other_idx]"));
-        block.push(dsl::let_("grad_rho_u_y_r", "grad_rho_u_y[other_idx]"));
-        block.push(dsl::let_("grad_rho_e_r", "grad_rho_e[other_idx]"));
+        block.push(dsl::let_expr(
+            "grad_rho_l",
+            Expr::ident("grad_rho").index(Expr::ident("idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_u_x_l",
+            Expr::ident("grad_rho_u_x").index(Expr::ident("idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_u_y_l",
+            Expr::ident("grad_rho_u_y").index(Expr::ident("idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_e_l",
+            Expr::ident("grad_rho_e").index(Expr::ident("idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_r",
+            Expr::ident("grad_rho").index(Expr::ident("other_idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_u_x_r",
+            Expr::ident("grad_rho_u_x").index(Expr::ident("other_idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_u_y_r",
+            Expr::ident("grad_rho_u_y").index(Expr::ident("other_idx")),
+        ));
+        block.push(dsl::let_expr(
+            "grad_rho_e_r",
+            Expr::ident("grad_rho_e").index(Expr::ident("other_idx")),
+        ));
 
         let (rho_l_stmts, rho_l_face) = limited_linear_reconstruct_face(
             "rho",
             "l",
-            "rho_l_cell",
-            "rho_r_cell",
-            "grad_rho_l",
-            "r_l_x",
-            "r_l_y",
+            Expr::ident("rho_l_cell"),
+            Expr::ident("rho_r_cell"),
+            Expr::ident("grad_rho_l"),
+            Expr::ident("r_l_x"),
+            Expr::ident("r_l_y"),
         );
         block.extend(rho_l_stmts);
         let (rho_u_x_l_stmts, rho_u_x_l_face) = limited_linear_reconstruct_face(
             "rho_u_x",
             "l",
-            "rho_u_l_cell.x",
-            "rho_u_r_cell.x",
-            "grad_rho_u_x_l",
-            "r_l_x",
-            "r_l_y",
+            Expr::ident("rho_u_l_cell").field("x"),
+            Expr::ident("rho_u_r_cell").field("x"),
+            Expr::ident("grad_rho_u_x_l"),
+            Expr::ident("r_l_x"),
+            Expr::ident("r_l_y"),
         );
         block.extend(rho_u_x_l_stmts);
         let (rho_u_y_l_stmts, rho_u_y_l_face) = limited_linear_reconstruct_face(
             "rho_u_y",
             "l",
-            "rho_u_l_cell.y",
-            "rho_u_r_cell.y",
-            "grad_rho_u_y_l",
-            "r_l_x",
-            "r_l_y",
+            Expr::ident("rho_u_l_cell").field("y"),
+            Expr::ident("rho_u_r_cell").field("y"),
+            Expr::ident("grad_rho_u_y_l"),
+            Expr::ident("r_l_x"),
+            Expr::ident("r_l_y"),
         );
         block.extend(rho_u_y_l_stmts);
         let (rho_e_l_stmts, rho_e_l_face) = limited_linear_reconstruct_face(
             "rho_e",
             "l",
-            "rho_e_l_cell",
-            "rho_e_r_cell",
-            "grad_rho_e_l",
-            "r_l_x",
-            "r_l_y",
+            Expr::ident("rho_e_l_cell"),
+            Expr::ident("rho_e_r_cell"),
+            Expr::ident("grad_rho_e_l"),
+            Expr::ident("r_l_x"),
+            Expr::ident("r_l_y"),
         );
         block.extend(rho_e_l_stmts);
 
         let (rho_r_stmts, rho_r_face) = limited_linear_reconstruct_face(
             "rho",
             "r",
-            "rho_r_cell",
-            "rho_l_cell",
-            "grad_rho_r",
-            "r_r_x",
-            "r_r_y",
+            Expr::ident("rho_r_cell"),
+            Expr::ident("rho_l_cell"),
+            Expr::ident("grad_rho_r"),
+            Expr::ident("r_r_x"),
+            Expr::ident("r_r_y"),
         );
         block.extend(rho_r_stmts);
         let (rho_u_x_r_stmts, rho_u_x_r_face) = limited_linear_reconstruct_face(
             "rho_u_x",
             "r",
-            "rho_u_r_cell.x",
-            "rho_u_l_cell.x",
-            "grad_rho_u_x_r",
-            "r_r_x",
-            "r_r_y",
+            Expr::ident("rho_u_r_cell").field("x"),
+            Expr::ident("rho_u_l_cell").field("x"),
+            Expr::ident("grad_rho_u_x_r"),
+            Expr::ident("r_r_x"),
+            Expr::ident("r_r_y"),
         );
         block.extend(rho_u_x_r_stmts);
         let (rho_u_y_r_stmts, rho_u_y_r_face) = limited_linear_reconstruct_face(
             "rho_u_y",
             "r",
-            "rho_u_r_cell.y",
-            "rho_u_l_cell.y",
-            "grad_rho_u_y_r",
-            "r_r_x",
-            "r_r_y",
+            Expr::ident("rho_u_r_cell").field("y"),
+            Expr::ident("rho_u_l_cell").field("y"),
+            Expr::ident("grad_rho_u_y_r"),
+            Expr::ident("r_r_x"),
+            Expr::ident("r_r_y"),
         );
         block.extend(rho_u_y_r_stmts);
         let (rho_e_r_stmts, rho_e_r_face) = limited_linear_reconstruct_face(
             "rho_e",
             "r",
-            "rho_e_r_cell",
-            "rho_e_l_cell",
-            "grad_rho_e_r",
-            "r_r_x",
-            "r_r_y",
+            Expr::ident("rho_e_r_cell"),
+            Expr::ident("rho_e_l_cell"),
+            Expr::ident("grad_rho_e_r"),
+            Expr::ident("r_r_x"),
+            Expr::ident("r_r_y"),
         );
         block.extend(rho_e_r_stmts);
 
-        block.push(dsl::assign("rho_l", &rho_l_face));
-        block.extend(dsl::assign_xy("rho_u_l", &rho_u_x_l_face, &rho_u_y_l_face));
-        block.push(dsl::assign("rho_e_l", &rho_e_l_face));
-        block.push(dsl::assign("rho_r", &rho_r_face));
-        block.extend(dsl::assign_xy("rho_u_r", &rho_u_x_r_face, &rho_u_y_r_face));
-        block.push(dsl::assign("rho_e_r", &rho_e_r_face));
+        block.push(dsl::assign_expr(Expr::ident("rho_l"), rho_l_face));
+        block.push(dsl::assign_expr(
+            Expr::ident("rho_u_l"),
+            dsl::vec2_f32(rho_u_x_l_face, rho_u_y_l_face),
+        ));
+        block.push(dsl::assign_expr(Expr::ident("rho_e_l"), rho_e_l_face));
+        block.push(dsl::assign_expr(Expr::ident("rho_r"), rho_r_face));
+        block.push(dsl::assign_expr(
+            Expr::ident("rho_u_r"),
+            dsl::vec2_f32(rho_u_x_r_face, rho_u_y_r_face),
+        ));
+        block.push(dsl::assign_expr(Expr::ident("rho_e_r"), rho_e_r_face));
 
         dsl::block(block)
     };

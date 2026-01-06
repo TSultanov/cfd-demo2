@@ -10,7 +10,7 @@ use crate::solver::gpu::init::compressible_fields::{
 };
 use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
-use crate::solver::gpu::structs::GpuConstants;
+use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::compressible_model;
 use bytemuck::cast_slice;
@@ -401,6 +401,10 @@ impl GpuCompressibleSolver {
     }
 
     pub fn step(&mut self) {
+        let _ = self.step_with_stats();
+    }
+
+    pub fn step_with_stats(&mut self) -> Vec<LinearSolverStats> {
         let workgroup_size = 64;
         let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
@@ -430,6 +434,7 @@ impl GpuCompressibleSolver {
 
         self.context.queue.submit(Some(encoder.finish()));
 
+        let mut stats = Vec::with_capacity(self.outer_iters);
         for _ in 0..self.outer_iters {
             let mut encoder =
                 self.context
@@ -472,7 +477,8 @@ impl GpuCompressibleSolver {
 
             self.context.queue.submit(Some(encoder.finish()));
 
-            let _ = self.solve_compressible_fgmres(60, 1e-8);
+            let iter_stats = self.solve_compressible_fgmres(60, 1e-8);
+            stats.push(iter_stats);
 
             let mut encoder =
                 self.context
@@ -522,6 +528,7 @@ impl GpuCompressibleSolver {
         }
 
         self.context.queue.submit(Some(encoder.finish()));
+        stats
     }
 
     pub async fn get_rho(&self) -> Vec<f64> {

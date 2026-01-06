@@ -310,7 +310,7 @@ fn low_mach_equivalence_vortex_street() {
     let base_pressure = env_f64("CFD2_LOW_MACH_BASE_P", 25.0);
     let perturb_amp = env_f64("CFD2_LOW_MACH_PERTURB", 5e-3);
     let incomp_iters = env_usize("CFD2_LOW_MACH_INCOMP_ITERS", 20);
-    let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 30);
+    let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 40);
     let probe_stride = env_usize("CFD2_LOW_MACH_PROBE_STRIDE", 10);
     let plot_width = env_usize("CFD2_PLOT_WIDTH", 480);
     let plot_height = env_usize("CFD2_PLOT_HEIGHT", 160);

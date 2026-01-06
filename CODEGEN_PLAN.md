@@ -254,6 +254,9 @@ discretization automatically, with modular swapping of schemes and boundary cond
 - **2025-02-10:** Added checkerboarding metric computation + threshold in the low‑Mach equivalence test, with env knobs for preconditioning and checkerboard max (`tests/gpu_low_mach_equivalence_test.rs`).
 - **2025-02-10:** Fixed checkerboard metric iteration to avoid moving the neighbor list so the low‑Mach test compiles (`tests/gpu_low_mach_equivalence_test.rs`).
 - **2025-02-10:** Increased default compressible outer-iteration count in the low‑Mach test to tighten convergence (`tests/gpu_low_mach_equivalence_test.rs`).
+- **2025-02-10:** Added `step_with_stats` for compressible solver so tests can inspect per-iteration FGMRES convergence (`src/solver/gpu/compressible_solver.rs`).
+- **2025-02-10:** Added a lightweight low‑Mach convergence smoke test with checkerboard gating for faster iteration (`tests/gpu_low_mach_convergence_smoke_test.rs`).
+- **2025-02-10:** Raised default compressible outer-iteration counts in the low‑Mach tests to tighten nonlinear convergence per step (`tests/gpu_low_mach_equivalence_test.rs`, `tests/gpu_low_mach_convergence_smoke_test.rs`).
 - **2025-02-10:** Initialized acoustic pulse tests with isentropic density perturbations to avoid a stationary entropy mode and better validate wave propagation (`tests/gpu_compressible_validation_test.rs`).
 - **2025-02-10:** Added a right-going acoustic pulse initialization and a weighted-mean travel check to validate compressible wave propagation (`tests/gpu_compressible_validation_test.rs`).
 - **2025-02-10:** Added debug instrumentation for acoustic pulse peak location to help diagnose slow wave propagation (`tests/gpu_compressible_validation_test.rs`).

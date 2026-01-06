@@ -131,7 +131,7 @@ pub fn init_compressible_field_buffers(
         precond_type: 0,
         precond_model: 1,
         precond_theta_floor: 1e-6,
-        pressure_coupling_alpha: 0.0,
+        pressure_coupling_alpha: 1.0,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Compressible Constants Buffer"),

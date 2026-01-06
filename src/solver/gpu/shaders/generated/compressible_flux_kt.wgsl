@@ -347,7 +347,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let grad_p_face_n = 0.5 * (grad_p_l_n + grad_p_r_n);
     let grad_p_jump_n = (p_r - p_l) / dist;
     let rho_face = 0.5 * (rho_l + rho_r);
-    let pc_alpha = constants.pressure_coupling_alpha;
+    let p_bar = 0.5 * (p_l + p_r);
+    let dp_rel = abs(p_r - p_l) / max(p_bar, 1e-6);
+    let pc_theta = min(1.0, max(mach2, constants.precond_theta_floor));
+    let pc_low_mach = 1.0 - pc_theta;
+    let pc_smooth = 1.0 / (1.0 + dp_rel / 0.2 * dp_rel / 0.2);
+    let pc_alpha = constants.pressure_coupling_alpha * pc_low_mach * pc_smooth;
     let m_corr = pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n);
     let h_l = (rho_e_l + p_l) * inv_rho_l;
     let h_r = (rho_e_r + p_r) * inv_rho_r;

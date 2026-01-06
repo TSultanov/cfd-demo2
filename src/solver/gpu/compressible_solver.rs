@@ -1,7 +1,6 @@
 use crate::solver::gpu::bindings::generated::{
     compressible_apply as generated_apply, compressible_assembly as generated_assembly,
-    compressible_flux_kt as generated_flux, compressible_gradients as generated_gradients,
-    compressible_update as generated_update,
+    compressible_gradients as generated_gradients, compressible_update as generated_update,
 };
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::compressible_fgmres::CompressibleFgmresResources;
@@ -146,7 +145,6 @@ pub struct GpuCompressibleSolver {
     pub bg_mesh: wgpu::BindGroup,
     pub bg_solver: wgpu::BindGroup,
     pub bg_apply_solver: wgpu::BindGroup,
-    pub pipeline_flux_kt: wgpu::ComputePipeline,
     pub pipeline_assembly: wgpu::ComputePipeline,
     pub pipeline_apply: wgpu::ComputePipeline,
     pub pipeline_gradients: wgpu::ComputePipeline,
@@ -197,8 +195,6 @@ impl GpuCompressibleSolver {
             },
         );
 
-        let pipeline_flux_kt =
-            generated_flux::compute::create_main_pipeline_embed_source(&context.device);
         let pipeline_assembly =
             generated_assembly::compute::create_main_pipeline_embed_source(&context.device);
         let pipeline_apply =
@@ -209,13 +205,13 @@ impl GpuCompressibleSolver {
             generated_update::compute::create_main_pipeline_embed_source(&context.device);
 
         let mesh_layout = context.device.create_bind_group_layout(
-            &generated_flux::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
+            &generated_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
         );
         let bg_mesh = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Compressible Mesh Bind Group"),
             layout: &mesh_layout,
-            entries: &generated_flux::WgpuBindGroup0Entries::new(
-                generated_flux::WgpuBindGroup0EntriesParams {
+            entries: &generated_assembly::WgpuBindGroup0Entries::new(
+                generated_assembly::WgpuBindGroup0EntriesParams {
                     face_owner: mesh_res.b_face_owner.as_entire_buffer_binding(),
                     face_neighbor: mesh_res.b_face_neighbor.as_entire_buffer_binding(),
                     face_areas: mesh_res.b_face_areas.as_entire_buffer_binding(),
@@ -369,7 +365,6 @@ impl GpuCompressibleSolver {
             bg_mesh,
             bg_solver,
             bg_apply_solver,
-            pipeline_flux_kt,
             pipeline_assembly,
             pipeline_apply,
             pipeline_gradients,
@@ -419,11 +414,6 @@ impl GpuCompressibleSolver {
         self.update_constants();
     }
 
-    pub fn set_density(&mut self, rho: f32) {
-        self.constants.density = rho;
-        self.update_constants();
-    }
-
     pub fn set_time_scheme(&mut self, scheme: u32) {
         self.constants.time_scheme = scheme;
         self.update_constants();
@@ -456,11 +446,6 @@ impl GpuCompressibleSolver {
 
     pub fn set_precond_theta_floor(&mut self, floor: f32) {
         self.constants.precond_theta_floor = floor;
-        self.update_constants();
-    }
-
-    pub fn set_pressure_coupling_alpha(&mut self, alpha: f32) {
-        self.constants.pressure_coupling_alpha = alpha;
         self.update_constants();
     }
 
@@ -527,7 +512,6 @@ impl GpuCompressibleSolver {
     pub fn step_with_stats(&mut self) -> Vec<LinearSolverStats> {
         let step_start = std::time::Instant::now();
         let workgroup_size = 64;
-        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
 
         self.state_step_index = (self.state_step_index + 1) % 3;
@@ -540,7 +524,6 @@ impl GpuCompressibleSolver {
         self.b_state_old_old = self.state_buffers[idx_old_old].clone();
 
         self.constants.time += self.constants.dt;
-        self.constants.stride_x = workgroup_size * num_groups_faces;
         self.update_constants();
 
         let mut encoder =

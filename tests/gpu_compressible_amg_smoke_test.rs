@@ -20,7 +20,6 @@ fn gpu_compressible_amg_smoke() {
     solver.set_dt(0.01);
     solver.set_dtau(0.0);
     solver.set_time_scheme(1);
-    solver.set_density(1.0);
     solver.set_viscosity(0.01);
     solver.set_inlet_velocity(0.5);
     solver.set_scheme(2);

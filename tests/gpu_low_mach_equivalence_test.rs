@@ -309,7 +309,6 @@ fn low_mach_equivalence_vortex_street() {
     let alpha_u = env_f64("CFD2_LOW_MACH_ALPHA_U", 1.0);
     let precond_model = env_usize("CFD2_LOW_MACH_PRECOND_MODEL", 1) as u32;
     let precond_theta_floor = env_f64("CFD2_LOW_MACH_PRECOND_THETA_FLOOR", 1e-6);
-    let pc_alpha = env_f64("CFD2_LOW_MACH_PC_ALPHA", 0.0);
     let nonconv_relax = env_f64("CFD2_LOW_MACH_NONCONV_RELAX", 0.5);
     let checker_max = env_f64("CFD2_LOW_MACH_CB_MAX", 2.0);
     let cell = env_f64("CFD2_LOW_MACH_CELL", 0.05);
@@ -384,14 +383,12 @@ fn low_mach_equivalence_vortex_street() {
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32);
     comp.set_time_scheme(1);
-    comp.set_density(density);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
     comp.set_scheme(2);
     comp.set_alpha_u(alpha_u as f32);
     comp.set_precond_model(precond_model);
     comp.set_precond_theta_floor(precond_theta_floor as f32);
-    comp.set_pressure_coupling_alpha(pc_alpha as f32);
     comp.set_nonconverged_relax(nonconv_relax as f32);
     comp.set_outer_iters(comp_iters);
     let rho_init = vec![density; mesh.num_cells()];

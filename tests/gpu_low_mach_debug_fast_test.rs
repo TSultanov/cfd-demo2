@@ -85,7 +85,6 @@ fn low_mach_debug_fast() {
     let nonconv_relax = env_f64("CFD2_FAST_NONCONV_RELAX", 0.5);
     let precond_model = env_usize("CFD2_FAST_PRECOND_MODEL", 1) as u32;
     let precond_theta_floor = env_f64("CFD2_FAST_PRECOND_THETA_FLOOR", 1e-6);
-    let pc_alpha = env_f64("CFD2_FAST_PC_ALPHA", 0.0);
     let comp_iters = env_usize("CFD2_FAST_COMP_ITERS", 8);
     let cell = env_f64("CFD2_FAST_CELL", 0.1);
     let u_in = env_f64("CFD2_FAST_UIN", 1.0) as f32;
@@ -102,14 +101,12 @@ fn low_mach_debug_fast() {
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32);
     comp.set_time_scheme(1);
-    comp.set_density(density);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
     comp.set_scheme(2);
     comp.set_alpha_u(alpha_u as f32);
     comp.set_precond_model(precond_model);
     comp.set_precond_theta_floor(precond_theta_floor as f32);
-    comp.set_pressure_coupling_alpha(pc_alpha as f32);
     comp.set_nonconverged_relax(nonconv_relax as f32);
     comp.set_outer_iters(comp_iters);
 

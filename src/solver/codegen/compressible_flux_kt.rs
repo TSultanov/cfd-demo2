@@ -844,7 +844,18 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("grad_p_face_n", "0.5 * (grad_p_l_n + grad_p_r_n)"));
     stmts.push(dsl::let_("grad_p_jump_n", "(p_r - p_l) / dist"));
     stmts.push(dsl::let_("rho_face", "0.5 * (rho_l + rho_r)"));
-    stmts.push(dsl::let_("pc_alpha", "constants.pressure_coupling_alpha"));
+    stmts.push(dsl::let_("p_bar", "0.5 * (p_l + p_r)"));
+    stmts.push(dsl::let_("dp_rel", "abs(p_r - p_l) / max(p_bar, 1e-6)"));
+    stmts.push(dsl::let_("pc_theta", "min(1.0, max(mach2, constants.precond_theta_floor))"));
+    stmts.push(dsl::let_("pc_low_mach", "1.0 - pc_theta"));
+    stmts.push(dsl::let_(
+        "pc_smooth",
+        "1.0 / (1.0 + (dp_rel / 0.2) * (dp_rel / 0.2))",
+    ));
+    stmts.push(dsl::let_(
+        "pc_alpha",
+        "constants.pressure_coupling_alpha * pc_low_mach * pc_smooth",
+    ));
     stmts.push(dsl::let_(
         "m_corr",
         "pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n)",

@@ -430,7 +430,6 @@ impl CFDApp {
                 gpu_solver.set_dt(self.timestep as f32);
                 gpu_solver.set_time_scheme(self.time_scheme.gpu_id());
                 gpu_solver.set_inlet_velocity(self.inlet_velocity);
-                gpu_solver.set_density(self.current_fluid.density as f32);
                 gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
                 let p_ref = self
                     .current_fluid
@@ -686,7 +685,6 @@ impl CFDApp {
             }
             SolverKind::Compressible => {
                 self.with_compressible_solver(|solver| {
-                    solver.set_density(self.current_fluid.density as f32);
                     solver.set_viscosity(self.current_fluid.viscosity as f32);
                 });
             }

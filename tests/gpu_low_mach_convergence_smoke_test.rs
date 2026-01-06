@@ -82,7 +82,6 @@ fn compressible_low_mach_convergence_smoke() {
     let alpha_u = env_f64("CFD2_COMP_CONV_ALPHA_U", 0.3);
     let precond_model = env_usize("CFD2_COMP_CONV_PRECOND_MODEL", 1) as u32;
     let precond_theta_floor = env_f64("CFD2_COMP_CONV_THETA_FLOOR", 1e-6);
-    let pc_alpha = env_f64("CFD2_COMP_CONV_PC_ALPHA", 0.0);
     let comp_iters = env_usize("CFD2_COMP_CONV_ITERS", 8);
     let nonconv_relax = env_f64("CFD2_COMP_CONV_NONCONV_RELAX", 0.5);
     let checker_max = env_f64("CFD2_COMP_CONV_CB_MAX", 5.0);
@@ -102,14 +101,12 @@ fn compressible_low_mach_convergence_smoke() {
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32);
     comp.set_time_scheme(1);
-    comp.set_density(density);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
     comp.set_scheme(2);
     comp.set_alpha_u(alpha_u as f32);
     comp.set_precond_model(precond_model);
     comp.set_precond_theta_floor(precond_theta_floor as f32);
-    comp.set_pressure_coupling_alpha(pc_alpha as f32);
     comp.set_nonconverged_relax(nonconv_relax as f32);
     comp.set_outer_iters(comp_iters);
 

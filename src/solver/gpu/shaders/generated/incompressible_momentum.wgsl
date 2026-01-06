@@ -41,7 +41,7 @@ fn term_div_phi_U_upwind(flux: f32, phi_own: vec2<f32>, phi_neigh: vec2<f32>, gr
     return vec4<f32>(diag_coeff, off_coeff, rhs_corr_x, rhs_corr_y);
 }
 
-// term: laplacian target=U field=U discretization=implicit scheme=upwind coeff=field(nu)
+// term: laplacian target=U field=U discretization=implicit scheme=upwind coeff=field(mu)
 
 fn term_laplacian_U_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
     // diffusion coefficient from mu * area / dist

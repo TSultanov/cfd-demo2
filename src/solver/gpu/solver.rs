@@ -43,8 +43,8 @@ impl GpuSolver {
         self.update_constants();
     }
 
-    pub fn set_viscosity(&mut self, nu: f32) {
-        self.constants.viscosity = nu;
+    pub fn set_viscosity(&mut self, mu: f32) {
+        self.constants.viscosity = mu;
         self.update_constants();
     }
 

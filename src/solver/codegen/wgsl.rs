@@ -807,11 +807,11 @@ mod tests {
     fn generate_wgsl_library_emits_codegen_assemble() {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
-        let nu = vol_scalar("nu");
+        let mu = vol_scalar("mu");
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
-                Coefficient::field(nu).unwrap(),
+                Coefficient::field(mu).unwrap(),
                 u.clone(),
             ));
 
@@ -848,10 +848,10 @@ mod tests {
     #[test]
     fn generate_wgsl_library_emits_diff_coeff_for_laplacian() {
         let u = vol_vector("U");
-        let nu = vol_scalar("nu");
+        let mu = vol_scalar("mu");
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::laplacian(
-                Coefficient::field(nu).unwrap(),
+                Coefficient::field(mu).unwrap(),
                 u.clone(),
             ));
 

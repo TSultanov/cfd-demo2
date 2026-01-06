@@ -120,6 +120,13 @@ fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
     a.abs().max(1)
 }
 
+/// Physical dimension exponents in **SI base units** with rational powers.
+///
+/// - `M` = mass (kilogram)
+/// - `L` = length (meter)
+/// - `T` = time (second)
+///
+/// This encodes **dimensions only** (no scale factors); values are erased when lowering to WGSL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UnitDim {
     m: UnitExp,

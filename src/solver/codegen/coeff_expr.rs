@@ -3,7 +3,9 @@ use crate::solver::model::backend::{Coefficient, FieldKind, StateLayout};
 
 #[derive(Clone, Copy)]
 enum CoeffSample<'a> {
-    Cell { idx: &'a str },
+    Cell {
+        idx: &'a str,
+    },
     Face {
         owner_idx: &'a str,
         neighbor_idx: &'a str,
@@ -18,7 +20,9 @@ fn f32_literal(value: f64) -> String {
 fn coeff_named_expr(name: &str) -> Option<String> {
     match name {
         "rho" => Some("constants.density".to_string()),
-        "nu" => Some("constants.viscosity".to_string()),
+        // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
+        // but `nu` is conventionally kinematic viscosity; accept both for now.
+        "mu" | "nu" => Some("constants.viscosity".to_string()),
         _ => None,
     }
 }
@@ -32,7 +36,9 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                     panic!("coefficient '{}' must be scalar", field.name());
                 }
                 match sample {
-                    CoeffSample::Cell { idx } => state_scalar_expr(layout, "state", idx, field.name()),
+                    CoeffSample::Cell { idx } => {
+                        state_scalar_expr(layout, "state", idx, field.name())
+                    }
                     CoeffSample::Face {
                         owner_idx,
                         neighbor_idx,
@@ -45,7 +51,10 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                 }
             } else {
                 coeff_named_expr(field.name()).unwrap_or_else(|| {
-                    panic!("missing coefficient field '{}' in state layout", field.name())
+                    panic!(
+                        "missing coefficient field '{}' in state layout",
+                        field.name()
+                    )
                 })
             }
         }

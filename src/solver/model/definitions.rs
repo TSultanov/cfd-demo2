@@ -40,7 +40,7 @@ pub struct IncompressibleMomentumFields {
     pub u: FieldRef,
     pub p: FieldRef,
     pub phi: FluxRef,
-    pub nu: FieldRef,
+    pub mu: FieldRef,
     pub rho: FieldRef,
     pub d_p: FieldRef,
     pub grad_p: FieldRef,
@@ -53,7 +53,7 @@ impl IncompressibleMomentumFields {
             u: vol_vector("U"),
             p: vol_scalar("p"),
             phi: surface_scalar("phi"),
-            nu: vol_scalar("nu"),
+            mu: vol_scalar("mu"),
             rho: vol_scalar("rho"),
             d_p: vol_scalar("d_p"),
             grad_p: vol_vector("grad_p"),
@@ -98,7 +98,7 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
     )
         + fvm::div(fields.phi, fields.u)
         + fvm::laplacian(
-            Coefficient::field(fields.nu).expect("nu must be scalar"),
+            Coefficient::field(fields.mu).expect("mu must be scalar"),
             fields.u,
         )
         + fvc::grad(fields.p))

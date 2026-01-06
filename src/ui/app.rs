@@ -56,7 +56,10 @@ enum SolverKind {
 
 #[derive(Clone, PartialEq)]
 enum CompressibilityModel {
-    IdealGas { gas_constant: f64, temperature: f64 },
+    IdealGas {
+        gas_constant: f64,
+        temperature: f64,
+    },
     LinearCompressibility {
         bulk_modulus: f64,
         rho_ref: f64,
@@ -901,13 +904,45 @@ impl eframe::App for CFDApp {
                     ui.group(|ui| {
                         ui.label("Solver Parameters");
 
-                        let recommended_dt = 0.5 * self.min_cell_size;
-                        let cfl = self.timestep / self.min_cell_size;
+                        // SI units:
+                        // - Mesh coordinates/volumes are in meters.
+                        // - `timestep` is seconds.
+                        // - CFL is dimensionless: (wave_speed * dt / dx).
+                        let max_vel = self
+                            .cached_u
+                            .iter()
+                            .map(|(vx, vy)| (vx * vx + vy * vy).sqrt())
+                            .fold(0.0_f64, f64::max);
+                        let adv_speed = max_vel.max(self.inlet_velocity.abs() as f64);
+                        let sound_speed = match (&self.solver_kind, &self.current_fluid.compressibility) {
+                            (
+                                SolverKind::Compressible,
+                                CompressibilityModel::IdealGas {
+                                    gas_constant,
+                                    temperature,
+                                },
+                            ) => (1.4 * gas_constant * temperature).sqrt(),
+                            (
+                                SolverKind::Compressible,
+                                CompressibilityModel::LinearCompressibility { bulk_modulus, .. },
+                            ) => (bulk_modulus / self.current_fluid.density.max(1e-12)).sqrt(),
+                            _ => 0.0,
+                        };
+                        let wave_speed = adv_speed + sound_speed;
+                        let (recommended_dt, cfl) = if self.min_cell_size > 0.0 && wave_speed > 1e-12
+                        {
+                            (
+                                0.5 * self.min_cell_size / wave_speed,
+                                wave_speed * self.timestep / self.min_cell_size,
+                            )
+                        } else {
+                            (0.0, 0.0)
+                        };
 
                         if ui
                             .add(
                                 egui::Slider::new(&mut self.timestep, 0.0001..=0.1)
-                                    .text("Timestep"),
+                                    .text("Timestep (s)"),
                             )
                             .changed()
                         {

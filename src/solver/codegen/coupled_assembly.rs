@@ -891,13 +891,13 @@ mod tests {
     fn generate_coupled_assembly_wgsl_includes_codegen_helpers() {
         let u = vol_vector("U");
         let phi = surface_scalar("phi");
-        let nu = vol_scalar("nu");
+        let mu = vol_scalar("mu");
         let p = vol_scalar("p");
         let d_p = vol_scalar("d_p");
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
-                Coefficient::field(nu).unwrap(),
+                Coefficient::field(mu).unwrap(),
                 u.clone(),
             ));
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
@@ -976,7 +976,7 @@ mod tests {
     #[test]
     fn coupled_assembly_codegen_maps_named_coefficients() {
         let u = vol_vector("U");
-        let nu = vol_scalar("nu");
+        let mu = vol_scalar("mu");
         let rho = vol_scalar("rho");
         let p = vol_scalar("p");
         let d_p = vol_scalar("d_p");
@@ -986,7 +986,7 @@ mod tests {
                 u.clone(),
             ))
             .with_term(fvm::laplacian(
-                Coefficient::field(nu).unwrap(),
+                Coefficient::field(mu).unwrap(),
                 u.clone(),
             ));
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();

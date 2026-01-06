@@ -324,7 +324,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rho_face = 0.5 * (rho_l + rho_r);
     let p_bar = 0.5 * (p_l + p_r);
     let dp_rel = abs(p_r - p_l) / max(p_bar, 1e-6);
-    if (constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
+    if (!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
         let pc_theta = min(1.0, max(mach2, constants.precond_theta_floor));
         let pc_low_mach = 1.0 - pc_theta;
         let pc_smooth = 1.0 / (1.0 + dp_rel / 0.2 * dp_rel / 0.2);

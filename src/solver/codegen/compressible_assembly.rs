@@ -976,7 +976,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::assign_op(AssignOp::Add, "flux_rho_e", "m_corr * h_face"),
     ]);
     loop_body.push(dsl::if_block(
-        "constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0",
+        "!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0",
         pressure_coupling_block,
         None,
     ));
@@ -1338,21 +1338,28 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ]);
 
         let wall_block = dsl::block(vec![
+            // Wall BC couples the right state to the left state:
+            //   m_r = m_l - 2 (m_l · n) n
+            // This requires applying the momentum reflection matrix to the right-state Jacobian.
+            dsl::let_("r11", "1.0 - 2.0 * normal.x * normal.x"),
+            dsl::let_("r12", "-2.0 * normal.x * normal.y"),
+            dsl::let_("r21", "-2.0 * normal.y * normal.x"),
+            dsl::let_("r22", "1.0 - 2.0 * normal.y * normal.y"),
             dsl::assign("eff_00", "jac_l_00 + jac_r_00"),
-            dsl::assign("eff_01", "jac_l_01 - jac_r_01"),
-            dsl::assign("eff_02", "jac_l_02 - jac_r_02"),
+            dsl::assign("eff_01", "jac_l_01 + jac_r_01 * r11 + jac_r_02 * r21"),
+            dsl::assign("eff_02", "jac_l_02 + jac_r_01 * r12 + jac_r_02 * r22"),
             dsl::assign("eff_03", "jac_l_03 + jac_r_03"),
             dsl::assign("eff_10", "jac_l_10 + jac_r_10"),
-            dsl::assign("eff_11", "jac_l_11 - jac_r_11"),
-            dsl::assign("eff_12", "jac_l_12 - jac_r_12"),
+            dsl::assign("eff_11", "jac_l_11 + jac_r_11 * r11 + jac_r_12 * r21"),
+            dsl::assign("eff_12", "jac_l_12 + jac_r_11 * r12 + jac_r_12 * r22"),
             dsl::assign("eff_13", "jac_l_13 + jac_r_13"),
             dsl::assign("eff_20", "jac_l_20 + jac_r_20"),
-            dsl::assign("eff_21", "jac_l_21 - jac_r_21"),
-            dsl::assign("eff_22", "jac_l_22 - jac_r_22"),
+            dsl::assign("eff_21", "jac_l_21 + jac_r_21 * r11 + jac_r_22 * r21"),
+            dsl::assign("eff_22", "jac_l_22 + jac_r_21 * r12 + jac_r_22 * r22"),
             dsl::assign("eff_23", "jac_l_23 + jac_r_23"),
             dsl::assign("eff_30", "jac_l_30 + jac_r_30"),
-            dsl::assign("eff_31", "jac_l_31 - jac_r_31"),
-            dsl::assign("eff_32", "jac_l_32 - jac_r_32"),
+            dsl::assign("eff_31", "jac_l_31 + jac_r_31 * r11 + jac_r_32 * r21"),
+            dsl::assign("eff_32", "jac_l_32 + jac_r_31 * r12 + jac_r_32 * r22"),
             dsl::assign("eff_33", "jac_l_33 + jac_r_33"),
         ]);
 

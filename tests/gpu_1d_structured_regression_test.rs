@@ -6,6 +6,13 @@ use nalgebra::{Point2, Vector2};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug)]
+struct Primitive1D {
+    rho: f64,
+    u: f64,
+    p: f64,
+}
+
 fn draw_line(img: &mut RgbImage, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgb<u8>) {
     let mut x0 = x0;
     let mut y0 = y0;
@@ -212,6 +219,173 @@ fn l2_error(a: &[f64], b: &[f64]) -> f64 {
         .sum::<f64>()
         / a.len() as f64;
     mse.sqrt()
+}
+
+fn sod_pressure_functions(state: Primitive1D, p_star: f64, gamma: f64) -> (f64, f64) {
+    let rho = state.rho.max(1e-12);
+    let p = state.p.max(1e-12);
+    let c = (gamma * p / rho).sqrt();
+
+    if p_star > p {
+        // Shock.
+        let a = 2.0 / ((gamma + 1.0) * rho);
+        let b = (gamma - 1.0) / (gamma + 1.0) * p;
+        let sqrt_term = (a / (p_star + b)).sqrt();
+        let f = (p_star - p) * sqrt_term;
+        let df = sqrt_term * (1.0 - 0.5 * (p_star - p) / (p_star + b));
+        (f, df)
+    } else {
+        // Rarefaction.
+        let pr = (p_star / p).max(1e-12);
+        let exp = (gamma - 1.0) / (2.0 * gamma);
+        let f = (2.0 * c / (gamma - 1.0)) * (pr.powf(exp) - 1.0);
+        let df = (c / (gamma * p)) * pr.powf(-(gamma + 1.0) / (2.0 * gamma));
+        (f, df)
+    }
+}
+
+fn sod_solve_star(left: Primitive1D, right: Primitive1D, gamma: f64) -> (f64, f64) {
+    let rho_l = left.rho.max(1e-12);
+    let rho_r = right.rho.max(1e-12);
+    let p_l = left.p.max(1e-12);
+    let p_r = right.p.max(1e-12);
+    let c_l = (gamma * p_l / rho_l).sqrt();
+    let c_r = (gamma * p_r / rho_r).sqrt();
+
+    // PVRS initial guess (Toro).
+    let p_pv = 0.5 * (p_l + p_r) - 0.125 * (right.u - left.u) * (rho_l + rho_r) * (c_l + c_r);
+    let mut p = p_pv.max(1e-6);
+
+    for _ in 0..50 {
+        let (f_l, df_l) = sod_pressure_functions(left, p, gamma);
+        let (f_r, df_r) = sod_pressure_functions(right, p, gamma);
+        let f = f_l + f_r + (right.u - left.u);
+        let df = (df_l + df_r).max(1e-12);
+        let p_new = (p - f / df).max(1e-8);
+        if ((p_new - p) / p.max(1e-12)).abs() < 1e-8 {
+            p = p_new;
+            break;
+        }
+        p = p_new;
+    }
+
+    let (f_l, _) = sod_pressure_functions(left, p, gamma);
+    let (f_r, _) = sod_pressure_functions(right, p, gamma);
+    let u = 0.5 * (left.u + right.u + f_r - f_l);
+    (p, u)
+}
+
+fn sod_sample(x: f64, t: f64, x0: f64, left: Primitive1D, right: Primitive1D, gamma: f64) -> Primitive1D {
+    if t <= 0.0 {
+        return if x < x0 { left } else { right };
+    }
+
+    let (p_star, u_star) = sod_solve_star(left, right, gamma);
+    let xi = (x - x0) / t;
+
+    let rho_l = left.rho.max(1e-12);
+    let rho_r = right.rho.max(1e-12);
+    let p_l = left.p.max(1e-12);
+    let p_r = right.p.max(1e-12);
+    let c_l = (gamma * p_l / rho_l).sqrt();
+    let c_r = (gamma * p_r / rho_r).sqrt();
+
+    // Left star state.
+    let (rho_star_l, s_l, head_l, tail_l) = if p_star > p_l {
+        let pr = p_star / p_l;
+        let rho_star = rho_l * (pr + (gamma - 1.0) / (gamma + 1.0))
+            / ((gamma - 1.0) / (gamma + 1.0) * pr + 1.0);
+        let s = left.u - c_l * (0.5 * (gamma + 1.0) / gamma * pr + 0.5 * (gamma - 1.0) / gamma).sqrt();
+        (rho_star, Some(s), None, None)
+    } else {
+        let pr = p_star / p_l;
+        let rho_star = rho_l * pr.powf(1.0 / gamma);
+        let c_star = c_l * pr.powf((gamma - 1.0) / (2.0 * gamma));
+        let head = left.u - c_l;
+        let tail = u_star - c_star;
+        (rho_star, None, Some(head), Some(tail))
+    };
+
+    // Right star state.
+    let (rho_star_r, s_r, head_r, tail_r) = if p_star > p_r {
+        let pr = p_star / p_r;
+        let rho_star = rho_r * (pr + (gamma - 1.0) / (gamma + 1.0))
+            / ((gamma - 1.0) / (gamma + 1.0) * pr + 1.0);
+        let s = right.u + c_r * (0.5 * (gamma + 1.0) / gamma * pr + 0.5 * (gamma - 1.0) / gamma).sqrt();
+        (rho_star, Some(s), None, None)
+    } else {
+        let pr = p_star / p_r;
+        let rho_star = rho_r * pr.powf(1.0 / gamma);
+        let c_star = c_r * pr.powf((gamma - 1.0) / (2.0 * gamma));
+        let head = right.u + c_r;
+        let tail = u_star + c_star;
+        (rho_star, None, Some(head), Some(tail))
+    };
+
+    if xi <= u_star {
+        // Left of contact.
+        if let Some(s_l) = s_l {
+            if xi < s_l {
+                return left;
+            }
+            return Primitive1D {
+                rho: rho_star_l,
+                u: u_star,
+                p: p_star,
+            };
+        }
+
+        let head = head_l.unwrap();
+        let tail = tail_l.unwrap();
+        if xi < head {
+            return left;
+        }
+        if xi < tail {
+            // Inside left fan.
+            let u = (2.0 / (gamma + 1.0)) * (c_l + 0.5 * (gamma - 1.0) * left.u + xi);
+            let c = (2.0 / (gamma + 1.0)) * (c_l + 0.5 * (gamma - 1.0) * (left.u - xi));
+            let rho = rho_l * (c / c_l).powf(2.0 / (gamma - 1.0));
+            let p = p_l * (c / c_l).powf(2.0 * gamma / (gamma - 1.0));
+            return Primitive1D { rho, u, p };
+        }
+        return Primitive1D {
+            rho: rho_star_l,
+            u: u_star,
+            p: p_star,
+        };
+    }
+
+    // Right of contact.
+    if let Some(s_r) = s_r {
+        if xi > s_r {
+            return right;
+        }
+        return Primitive1D {
+            rho: rho_star_r,
+            u: u_star,
+            p: p_star,
+        };
+    }
+
+    let head = head_r.unwrap();
+    let tail = tail_r.unwrap();
+    if xi > head {
+        return right;
+    }
+    if xi > tail {
+        // Inside right fan.
+        let u = (2.0 / (gamma + 1.0)) * (-c_r + 0.5 * (gamma - 1.0) * right.u + xi);
+        let c = (2.0 / (gamma + 1.0)) * (c_r - 0.5 * (gamma - 1.0) * (right.u - xi));
+        let rho = rho_r * (c / c_r).powf(2.0 / (gamma - 1.0));
+        let p = p_r * (c / c_r).powf(2.0 * gamma / (gamma - 1.0));
+        return Primitive1D { rho, u, p };
+    }
+
+    Primitive1D {
+        rho: rho_star_r,
+        u: u_star,
+        p: p_star,
+    }
 }
 
 fn total_variation(values: &[f64]) -> f64 {
@@ -462,6 +636,7 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
 #[ignore]
 fn low_mach_channel_incompressible_matches_compressible_profiles() {
     std::env::set_var("CFD2_QUIET", "1");
+    let debug = std::env::var("CFD2_DEBUG_LOW_MACH").ok().as_deref() == Some("1");
 
     let length = 1.0;
     let height = 1.0;
@@ -523,6 +698,26 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     let p_incomp = pollster::block_on(incomp.get_p());
     let u_comp = pollster::block_on(comp.get_u());
     let p_comp = pollster::block_on(comp.get_p());
+
+    if debug {
+        let (min_u_inc, max_u_inc) = u_incomp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, (ux, uy)| {
+            let mag = (ux * ux + uy * uy).sqrt();
+            (acc.0.min(mag), acc.1.max(mag))
+        });
+        let (min_u_cmp, max_u_cmp) = u_comp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, (ux, uy)| {
+            let mag = (ux * ux + uy * uy).sqrt();
+            (acc.0.min(mag), acc.1.max(mag))
+        });
+        let (min_p_inc, max_p_inc) = p_incomp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
+            (acc.0.min(v), acc.1.max(v))
+        });
+        let (min_p_cmp, max_p_cmp) = p_comp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
+            (acc.0.min(v), acc.1.max(v))
+        });
+        println!(
+            "low_mach_debug: |u|_inc=[{min_u_inc:.3},{max_u_inc:.3}] |u|_cmp=[{min_u_cmp:.3},{max_u_cmp:.3}] p_inc=[{min_p_inc:.3},{max_p_inc:.3}] p_cmp=[{min_p_cmp:.3},{max_p_cmp:.3}]"
+        );
+    }
 
     // Sample along the midline (|y - 0.5H| small) for 1D plots.
     let y_mid = 0.5 * height;
@@ -605,4 +800,137 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     }
     l2 = (l2 / u_incomp_sorted.len().max(1) as f64).sqrt();
     assert!(l2 < 0.5, "u_x mismatch too large (L2 {:.3})", l2);
+}
+
+#[test]
+fn compressible_sod_shock_tube_structured_1d_plot() {
+    let nx = 400usize;
+    let ny = 1usize;
+    let length = 1.0;
+    let height = 0.05;
+    let mesh = generate_structured_rect_mesh(
+        nx,
+        ny,
+        length,
+        height,
+        BoundaryType::Outlet,
+        BoundaryType::Outlet,
+        BoundaryType::Wall,
+        BoundaryType::Wall,
+    );
+
+    let gamma: f64 = 1.4;
+    let x0 = 0.5 * length;
+    let left = Primitive1D {
+        rho: 1.0,
+        u: 0.0,
+        p: 1.0,
+    };
+    let right = Primitive1D {
+        rho: 0.125,
+        u: 0.0,
+        p: 0.1,
+    };
+
+    let n = mesh.num_cells();
+    let mut rho = vec![0.0f32; n];
+    let mut p = vec![0.0f32; n];
+    let mut u = vec![[0.0f32, 0.0f32]; n];
+    let mut x = vec![0.0f64; n];
+    let mut rho0 = vec![0.0f64; n];
+    let mut p0 = vec![0.0f64; n];
+
+    for i in 0..n {
+        let xi = mesh.cell_cx[i];
+        x[i] = xi;
+        let init = if xi < x0 { left } else { right };
+        rho[i] = init.rho as f32;
+        p[i] = init.p as f32;
+        u[i][0] = init.u as f32;
+        rho0[i] = init.rho;
+        p0[i] = init.p;
+    }
+
+    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let dt = 0.0005f32;
+    let steps = 200usize;
+    solver.set_dt(dt);
+    solver.set_time_scheme(0);
+    solver.set_viscosity(0.0);
+    solver.set_inlet_velocity(0.0);
+    solver.set_scheme(1);
+    solver.set_outer_iters(1);
+    solver.set_state_fields(&rho, &u, &p);
+    solver.initialize_history();
+
+    for _ in 0..steps {
+        solver.step();
+    }
+
+    let rho_out = pollster::block_on(solver.get_rho());
+    let p_out = pollster::block_on(solver.get_p());
+    let t = dt as f64 * steps as f64;
+
+    let mut rho_expected = vec![0.0f64; n];
+    let mut p_expected = vec![0.0f64; n];
+    for i in 0..n {
+        let s = sod_sample(x[i], t, x0, left, right, gamma);
+        rho_expected[i] = s.rho;
+        p_expected[i] = s.p;
+    }
+
+    let out = out_dir("shock_tube");
+    save_line_plot(
+        &out.join("rho_vs_x.png"),
+        &x,
+        &[
+            (&rho0, Rgb([0, 120, 255])),
+            (&rho_expected, Rgb([0, 170, 0])),
+            (&rho_out, Rgb([220, 60, 60])),
+        ],
+        "Sod shock tube (structured 1D): density",
+        "x",
+        "rho",
+    );
+    save_line_plot(
+        &out.join("p_vs_x.png"),
+        &x,
+        &[
+            (&p0, Rgb([0, 120, 255])),
+            (&p_expected, Rgb([0, 170, 0])),
+            (&p_out, Rgb([220, 60, 60])),
+        ],
+        "Sod shock tube (structured 1D): pressure",
+        "x",
+        "p",
+    );
+
+    assert!(rho_out.iter().all(|v| v.is_finite() && *v > 0.0));
+    assert!(p_out.iter().all(|v| v.is_finite() && *v > 0.0));
+
+    let rho_scale = (left.rho - right.rho).abs().max(1e-12);
+    let p_scale = (left.p - right.p).abs().max(1e-12);
+    let rel_l2_rho = l2_error(&rho_out, &rho_expected) / rho_scale;
+    let rel_l2_p = l2_error(&p_out, &p_expected) / p_scale;
+    let extrema_rho = count_local_extrema(&rho_out, 1e-6 * rho_scale);
+    let extrema_p = count_local_extrema(&p_out, 1e-6 * p_scale);
+    let tv_rho = total_variation(&rho_out) / rho_scale;
+    let tv_p = total_variation(&p_out) / p_scale;
+
+    let summary = format!(
+        "dt={:.6}\nsteps={}\nt={:.6}\nrel_l2_rho={:.6}\nrel_l2_p={:.6}\ntv_rho={:.6}\ntv_p={:.6}\nextrema_rho={}\nextrema_p={}\n",
+        dt, steps, t, rel_l2_rho, rel_l2_p, tv_rho, tv_p, extrema_rho, extrema_p
+    );
+    let _ = fs::write(out.join("summary.txt"), summary);
+    println!(
+        "shock_tube_metrics: rel_l2_rho={:.3} rel_l2_p={:.3} tv_rho={:.3} tv_p={:.3} extrema_rho={} extrema_p={}",
+        rel_l2_rho, rel_l2_p, tv_rho, tv_p, extrema_rho, extrema_p
+    );
+
+    assert!(rel_l2_rho < 0.12, "rho error too large ({rel_l2_rho:.3})");
+    assert!(rel_l2_p < 0.18, "p error too large ({rel_l2_p:.3})");
+    assert!(extrema_rho <= 70, "rho has too many extrema ({extrema_rho})");
+    assert!(extrema_p <= 80, "p has too many extrema ({extrema_p})");
+    assert!(tv_rho < 6.0, "rho TV too high ({tv_rho:.3})");
+    assert!(tv_p < 8.0, "p TV too high ({tv_p:.3})");
 }

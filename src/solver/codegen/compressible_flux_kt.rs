@@ -802,7 +802,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::assign("flux_rho_e", "flux_rho_e + m_corr * h_face"),
     ]);
     stmts.push(dsl::if_block(
-        "constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0",
+        "!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0",
         pressure_coupling_block,
         None,
     ));

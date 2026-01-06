@@ -378,7 +378,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let flux_rho_e_l = (rho_e_l + p_l) * u_n_l;
         let flux_rho_e_r = (rho_e_r + p_r) * u_n_r;
         var flux_rho_e = a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l);
-        if (constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
+        if (!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
             let inv_rho_l_cell = 1.0 / max(rho_l_cell, 1e-8);
             let inv_rho_r_cell = 1.0 / max(rho_r_cell, 1e-8);
             let u_l_x_cell = rho_u_l_cell.x * inv_rho_l_cell;
@@ -667,21 +667,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 eff_33 = jac_l_33 + jac_r_33;
             } else {
                 if (boundary_type == 3u) {
+                    let r11 = 1.0 - 2.0 * normal.x * normal.x;
+                    let r12 = -2.0 * normal.x * normal.y;
+                    let r21 = -2.0 * normal.y * normal.x;
+                    let r22 = 1.0 - 2.0 * normal.y * normal.y;
                     eff_00 = jac_l_00 + jac_r_00;
-                    eff_01 = jac_l_01 - jac_r_01;
-                    eff_02 = jac_l_02 - jac_r_02;
+                    eff_01 = jac_l_01 + jac_r_01 * r11 + jac_r_02 * r21;
+                    eff_02 = jac_l_02 + jac_r_01 * r12 + jac_r_02 * r22;
                     eff_03 = jac_l_03 + jac_r_03;
                     eff_10 = jac_l_10 + jac_r_10;
-                    eff_11 = jac_l_11 - jac_r_11;
-                    eff_12 = jac_l_12 - jac_r_12;
+                    eff_11 = jac_l_11 + jac_r_11 * r11 + jac_r_12 * r21;
+                    eff_12 = jac_l_12 + jac_r_11 * r12 + jac_r_12 * r22;
                     eff_13 = jac_l_13 + jac_r_13;
                     eff_20 = jac_l_20 + jac_r_20;
-                    eff_21 = jac_l_21 - jac_r_21;
-                    eff_22 = jac_l_22 - jac_r_22;
+                    eff_21 = jac_l_21 + jac_r_21 * r11 + jac_r_22 * r21;
+                    eff_22 = jac_l_22 + jac_r_21 * r12 + jac_r_22 * r22;
                     eff_23 = jac_l_23 + jac_r_23;
                     eff_30 = jac_l_30 + jac_r_30;
-                    eff_31 = jac_l_31 - jac_r_31;
-                    eff_32 = jac_l_32 - jac_r_32;
+                    eff_31 = jac_l_31 + jac_r_31 * r11 + jac_r_32 * r21;
+                    eff_32 = jac_l_32 + jac_r_31 * r12 + jac_r_32 * r22;
                     eff_33 = jac_l_33 + jac_r_33;
                 }
             }

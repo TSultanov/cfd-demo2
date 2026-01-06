@@ -3,6 +3,75 @@ use crate::solver::codegen::wgsl_ast::{AssignOp, BinaryOp, Expr, Stmt};
 use super::matrix::BlockCsrSoaEntry;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct VecExpr<const N: usize> {
+    expr: Expr,
+}
+
+impl<const N: usize> VecExpr<N> {
+    fn constructor_name() -> &'static str {
+        match N {
+            2 => "vec2<f32>",
+            3 => "vec3<f32>",
+            4 => "vec4<f32>",
+            _ => panic!("unsupported vector size {N}; expected 2/3/4"),
+        }
+    }
+
+    pub fn from_expr(expr: Expr) -> Self {
+        Self { expr }
+    }
+
+    pub fn expr(&self) -> Expr {
+        self.expr.clone()
+    }
+
+    pub fn from_components(components: [Expr; N]) -> Self {
+        Self::from_expr(Expr::call_named(Self::constructor_name(), components.into()))
+    }
+
+    pub fn zeros() -> Self {
+        Self::from_components(std::array::from_fn(|_| Expr::lit_f32(0.0)))
+    }
+
+    pub fn add(&self, rhs: &Self) -> Self {
+        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Add, rhs.expr()))
+    }
+
+    pub fn sub(&self, rhs: &Self) -> Self {
+        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Sub, rhs.expr()))
+    }
+
+    pub fn neg(&self) -> Self {
+        Self::from_expr(Expr::unary(crate::solver::codegen::wgsl_ast::UnaryOp::Negate, self.expr()))
+    }
+
+    pub fn mul_scalar(&self, scalar: Expr) -> Self {
+        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Mul, scalar))
+    }
+
+    pub fn div_scalar(&self, scalar: Expr) -> Self {
+        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Div, scalar))
+    }
+
+    pub fn dot(&self, rhs: &Self) -> Expr {
+        Expr::call_named("dot", vec![self.expr(), rhs.expr()])
+    }
+}
+
+impl VecExpr<2> {
+    pub fn from_xy_fields(value: Expr) -> Self {
+        Self::from_components([value.clone().field("x"), value.field("y")])
+    }
+
+    pub fn to_vector2_struct(&self) -> Expr {
+        Expr::call_named(
+            "Vector2",
+            vec![self.expr().field("x"), self.expr().field("y")],
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatExpr<const R: usize, const C: usize> {
     entries: [[Expr; C]; R],
 }
@@ -132,4 +201,3 @@ mod tests {
         }
     }
 }
-

@@ -97,7 +97,7 @@ mod solver {
                 BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix,
                 CsrPattern,
             };
-            pub use tensor::MatExpr;
+            pub use tensor::{MatExpr, VecExpr};
             pub use types::{DslType, ScalarType, Shape};
             pub use units::UnitDim;
         }

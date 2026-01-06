@@ -10,6 +10,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   - `UnitDim` uses **SI base dimensions** (M/L/T) and supports **rational exponents** (e.g. `sqrt`).
 - Dense tensor helpers exist in the DSL (`src/solver/codegen/dsl/tensor.rs`):
   - `MatExpr<const R, const C>` for building small dense matrix expressions and emitting unrolled assigns/scatters.
+  - `VecExpr<const N>` for `vecN<f32>` expressions and basic vector algebra (used to remove per-component loops).
 - Sparse matrix types exist in the DSL (`src/solver/codegen/dsl/matrix.rs`):
   - `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, `BlockCsrSoaEntry`, `BlockShape`
 - Migration is in progress:
@@ -17,6 +18,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   - `wgsl_dsl` now has helpers for linear array indexing (`idx * stride + offset`) to avoid `format!(...)`-built indices.
   - `wgsl_dsl` has basic vector helpers (`vec2<f32>` construction, `dot/min/max`) used by reconstruction and flux kernels.
   - `reconstruction.rs` is AST-first (no string parsing) and is shared by incompressible + compressible kernels.
+  - `compressible_gradients` removed x/y component loops in favor of vector ops (accumulate `grad += scalar * area * normal`).
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the primary safety net for refactors.
 
 ## Goals
@@ -56,10 +58,10 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 
 - Unify sparse storage layouts behind a small API (contiguous vs row-split SoA) and provide safe scatter/accumulate helpers.
 - Expand dense tensor support:
-  - Current: `MatExpr<const R, const C>` is an Expr-level helper for unrolled ops/scatters.
+  - Current: `MatExpr<const R, const C>` and `VecExpr<const N>` are Expr-level helpers for unrolled ops/scatters and vector algebra.
   - Missing: a typed variant (`TypedMat`) that tracks per-entry `DslType`/`UnitDim` and supports more ops (e.g. block transforms and structured assembly).
   - Partial: basic vector helpers exist in `wgsl_dsl` (`vec2<f32>` construction + `dot/min/max`).
-  - Missing: a richer vector DSL (`VecExpr` / typed vectors) to avoid component-level math and enable vector-valued reconstruction in one call (instead of per-component scalar reconstruction).
+  - Missing: typed vectors/matrices (units + shapes) and higher-level ops (e.g. mat-vec, vector-valued reconstruction, structured tensor access).
 
 ### 5) Discovery Notes (Gotchas)
 - `build.rs` manually `include!()`s the codegen DSL modules; new DSL files must be added there as well (e.g. `dsl/tensor.rs`).

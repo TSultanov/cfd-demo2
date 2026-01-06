@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: a5454f400af66f6aa18fe74791fbfcec0b48da007fe6fbbd96d82890bdbee918
+// SourceHash: 0cf6a49596014beef9dc611ca4da26d274e4ddb4e063a3e282a6f1f0d7799107
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -8509,19 +8509,18 @@ var<storage> state_iter: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var grad_rho_accum: Vector2_ = Vector2_(0f, 0f);
-    var grad_rho_u_x_accum: Vector2_ = Vector2_(0f, 0f);
-    var grad_rho_u_y_accum: Vector2_ = Vector2_(0f, 0f);
-    var grad_rho_e_accum: Vector2_ = Vector2_(0f, 0f);
+    var grad_rho_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_rho_u_x_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_rho_u_y_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_rho_e_accum: vec2<f32> = vec2<f32>(0f, 0f);
     var k: u32;
-    var normal: Vector2_;
+    var normal: vec2<f32>;
     var rho_r: f32;
     var rho_u_r: vec2<f32>;
     var rho_e_r: f32;
     var other_idx: u32;
     var rho_face: f32;
-    var rho_u_face_x: f32;
-    var rho_u_face_y: f32;
+    var rho_u_face: vec2<f32>;
     var rho_e_face: f32;
 
     let idx = global_id.x;
@@ -8550,13 +8549,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let owner = face_owner[face_idx];
             let neighbor = face_neighbor[face_idx];
             let area = face_areas[face_idx];
-            let _e68 = face_normals[face_idx];
-            normal = _e68;
+            let _e69 = face_normals[face_idx].x;
+            let _e73 = face_normals[face_idx].y;
+            normal = vec2<f32>(_e69, _e73);
             if (owner != idx) {
-                let _e73 = normal.x;
-                normal.x = -(_e73);
-                let _e77 = normal.y;
-                normal.y = -(_e77);
+                let _e77 = normal;
+                normal = -(_e77);
             }
             rho_r = rho_l;
             rho_u_r = rho_u_l;
@@ -8576,86 +8574,62 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e112 = other_idx;
                 let rho_e_neigh = state[((_e112 * 7u) + 3u)];
                 rho_r = rho_neigh;
-                rho_u_r.x = rho_u_neigh.x;
-                rho_u_r.y = rho_u_neigh.y;
+                rho_u_r = rho_u_neigh;
                 rho_e_r = rho_e_neigh;
             }
             rho_face = rho_l;
-            rho_u_face_x = rho_u_l.x;
-            rho_u_face_y = rho_u_l.y;
+            rho_u_face = rho_u_l;
             rho_e_face = rho_e_l;
             if (neighbor != -1i) {
-                let _e132 = rho_r;
-                rho_face = (0.5f * (rho_l + _e132));
-                let _e138 = rho_u_r.x;
-                rho_u_face_x = (0.5f * (rho_u_l.x + _e138));
-                let _e144 = rho_u_r.y;
-                rho_u_face_y = (0.5f * (rho_u_l.y + _e144));
-                let _e148 = rho_e_r;
-                rho_e_face = (0.5f * (rho_e_l + _e148));
+                let _e125 = rho_r;
+                rho_face = (0.5f * (rho_l + _e125));
+                let _e129 = rho_u_r;
+                rho_u_face = (0.5f * (rho_u_l + _e129));
+                let _e133 = rho_e_r;
+                rho_e_face = (0.5f * (rho_e_l + _e133));
             }
-            let _e154 = rho_face;
-            let _e156 = normal.x;
-            let _e159 = grad_rho_accum.x;
-            grad_rho_accum.x = (_e159 + ((_e154 * _e156) * area));
-            let _e162 = rho_face;
-            let _e164 = normal.y;
-            let _e167 = grad_rho_accum.y;
-            grad_rho_accum.y = (_e167 + ((_e162 * _e164) * area));
-            let _e171 = rho_u_face_x;
-            let _e173 = normal.x;
-            let _e176 = grad_rho_u_x_accum.x;
-            grad_rho_u_x_accum.x = (_e176 + ((_e171 * _e173) * area));
-            let _e179 = rho_u_face_x;
-            let _e181 = normal.y;
-            let _e184 = grad_rho_u_x_accum.y;
-            grad_rho_u_x_accum.y = (_e184 + ((_e179 * _e181) * area));
-            let _e188 = rho_u_face_y;
-            let _e190 = normal.x;
-            let _e193 = grad_rho_u_y_accum.x;
-            grad_rho_u_y_accum.x = (_e193 + ((_e188 * _e190) * area));
-            let _e196 = rho_u_face_y;
-            let _e198 = normal.y;
-            let _e201 = grad_rho_u_y_accum.y;
-            grad_rho_u_y_accum.y = (_e201 + ((_e196 * _e198) * area));
-            let _e205 = rho_e_face;
-            let _e207 = normal.x;
-            let _e210 = grad_rho_e_accum.x;
-            grad_rho_e_accum.x = (_e210 + ((_e205 * _e207) * area));
-            let _e213 = rho_e_face;
-            let _e215 = normal.y;
-            let _e218 = grad_rho_e_accum.y;
-            grad_rho_e_accum.y = (_e218 + ((_e213 * _e215) * area));
+            let _e138 = normal;
+            let _e139 = rho_face;
+            let _e142 = grad_rho_accum;
+            grad_rho_accum = (_e142 + ((_e138 * _e139) * area));
+            let _e145 = normal;
+            let _e147 = rho_u_face.x;
+            let _e150 = grad_rho_u_x_accum;
+            grad_rho_u_x_accum = (_e150 + ((_e145 * _e147) * area));
+            let _e153 = normal;
+            let _e155 = rho_u_face.y;
+            let _e158 = grad_rho_u_y_accum;
+            grad_rho_u_y_accum = (_e158 + ((_e153 * _e155) * area));
+            let _e161 = normal;
+            let _e162 = rho_e_face;
+            let _e165 = grad_rho_e_accum;
+            grad_rho_e_accum = (_e165 + ((_e161 * _e162) * area));
         }
         continuing {
-            let _e221 = k;
-            k = (_e221 + 1u);
+            let _e168 = k;
+            k = (_e168 + 1u);
         }
     }
-    let _e225 = grad_rho_accum.x;
-    grad_rho_accum.x = (_e225 / vol);
-    let _e229 = grad_rho_accum.y;
-    grad_rho_accum.y = (_e229 / vol);
-    let _e233 = grad_rho_u_x_accum.x;
-    grad_rho_u_x_accum.x = (_e233 / vol);
-    let _e237 = grad_rho_u_x_accum.y;
-    grad_rho_u_x_accum.y = (_e237 / vol);
-    let _e241 = grad_rho_u_y_accum.x;
-    grad_rho_u_y_accum.x = (_e241 / vol);
-    let _e245 = grad_rho_u_y_accum.y;
-    grad_rho_u_y_accum.y = (_e245 / vol);
-    let _e249 = grad_rho_e_accum.x;
-    grad_rho_e_accum.x = (_e249 / vol);
-    let _e253 = grad_rho_e_accum.y;
-    grad_rho_e_accum.y = (_e253 / vol);
-    let _e257 = grad_rho_accum;
-    grad_rho[idx] = _e257;
-    let _e260 = grad_rho_u_x_accum;
-    grad_rho_u_x[idx] = _e260;
-    let _e263 = grad_rho_u_y_accum;
-    grad_rho_u_y[idx] = _e263;
-    let _e266 = grad_rho_e_accum;
-    grad_rho_e[idx] = _e266;
+    let _e170 = grad_rho_accum;
+    grad_rho_accum = (_e170 / vec2(vol));
+    let _e173 = grad_rho_u_x_accum;
+    grad_rho_u_x_accum = (_e173 / vec2(vol));
+    let _e176 = grad_rho_u_y_accum;
+    grad_rho_u_y_accum = (_e176 / vec2(vol));
+    let _e179 = grad_rho_e_accum;
+    grad_rho_e_accum = (_e179 / vec2(vol));
+    let _e185 = grad_rho_accum.x;
+    let _e187 = grad_rho_accum.y;
+    grad_rho[idx] = Vector2_(_e185, _e187);
+    let _e192 = grad_rho_u_x_accum.x;
+    let _e194 = grad_rho_u_x_accum.y;
+    grad_rho_u_x[idx] = Vector2_(_e192, _e194);
+    let _e199 = grad_rho_u_y_accum.x;
+    let _e201 = grad_rho_u_y_accum.y;
+    grad_rho_u_y[idx] = Vector2_(_e199, _e201);
+    let _e206 = grad_rho_e_accum.x;
+    let _e208 = grad_rho_e_accum.y;
+    grad_rho_e[idx] = Vector2_(_e206, _e208);
     return;
 }
 "#;

@@ -1,9 +1,10 @@
-use super::state_access::{state_scalar_expr, state_vec2_expr};
+use super::dsl as typed;
+use super::state_access::{state_scalar, state_vec2};
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt,
-    StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
+    Param, Stmt, StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -273,106 +274,213 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let rho_u_field = fields.rho_u.name();
     let rho_e_field = fields.rho_e.name();
 
-    let rho_expr = state_scalar_expr(layout, "state", "idx", rho_field);
-    let rho_u_expr = state_vec2_expr(layout, "state", "idx", rho_u_field);
-    let rho_e_expr = state_scalar_expr(layout, "state", "idx", rho_e_field);
+    let rho_expr = state_scalar(layout, "state", "idx", rho_field);
+    let rho_u_expr = state_vec2(layout, "state", "idx", rho_u_field);
+    let rho_e_expr = state_scalar(layout, "state", "idx", rho_e_field);
 
-    stmts.push(dsl::let_("idx", "global_id.x"));
-    stmts.push(dsl::if_block(
-        "idx >= arrayLength(&cell_vols)",
+    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::if_block_expr(
+        Expr::binary(
+            Expr::ident("idx"),
+            BinaryOp::GreaterEq,
+            Expr::call_named(
+                "arrayLength",
+                vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("cell_vols"))],
+            ),
+        ),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
-    stmts.push(dsl::let_("center", "cell_centers[idx]"));
-    stmts.push(dsl::let_("vol", "cell_vols[idx]"));
-    stmts.push(dsl::let_("start", "cell_face_offsets[idx]"));
-    stmts.push(dsl::let_("end", "cell_face_offsets[idx + 1u]"));
+    stmts.push(dsl::let_expr(
+        "center",
+        Expr::ident("cell_centers").index(Expr::ident("idx")),
+    ));
+    stmts.push(dsl::let_expr(
+        "vol",
+        Expr::ident("cell_vols").index(Expr::ident("idx")),
+    ));
+    stmts.push(dsl::let_expr(
+        "start",
+        Expr::ident("cell_face_offsets").index(Expr::ident("idx")),
+    ));
+    stmts.push(dsl::let_expr(
+        "end",
+        Expr::ident("cell_face_offsets").index(Expr::binary(
+            Expr::ident("idx"),
+            BinaryOp::Add,
+            Expr::lit_u32(1),
+        )),
+    ));
 
-    stmts.push(dsl::let_("rho_l", &rho_expr));
-    stmts.push(dsl::let_("rho_u_l", &rho_u_expr));
-    stmts.push(dsl::let_("rho_e_l", &rho_e_expr));
+    stmts.push(dsl::let_expr("rho_l", rho_expr));
+    stmts.push(dsl::let_expr("rho_u_l", rho_u_expr));
+    stmts.push(dsl::let_expr("rho_e_l", rho_e_expr));
 
-    stmts.push(dsl::var("grad_rho_accum", "Vector2(0.0, 0.0)"));
-    stmts.push(dsl::var("grad_rho_u_x_accum", "Vector2(0.0, 0.0)"));
-    stmts.push(dsl::var("grad_rho_u_y_accum", "Vector2(0.0, 0.0)"));
-    stmts.push(dsl::var("grad_rho_e_accum", "Vector2(0.0, 0.0)"));
+    let zeros = typed::VecExpr::<2>::zeros().expr();
+    stmts.push(dsl::var_typed_expr(
+        "grad_rho_accum",
+        Type::vec2_f32(),
+        Some(zeros.clone()),
+    ));
+    stmts.push(dsl::var_typed_expr(
+        "grad_rho_u_x_accum",
+        Type::vec2_f32(),
+        Some(zeros.clone()),
+    ));
+    stmts.push(dsl::var_typed_expr(
+        "grad_rho_u_y_accum",
+        Type::vec2_f32(),
+        Some(zeros.clone()),
+    ));
+    stmts.push(dsl::var_typed_expr(
+        "grad_rho_e_accum",
+        Type::vec2_f32(),
+        Some(zeros),
+    ));
 
     let mut loop_body = Vec::new();
-    loop_body.push(dsl::let_("face_idx", "cell_faces[k]"));
-    loop_body.push(dsl::let_("owner", "face_owner[face_idx]"));
-    loop_body.push(dsl::let_("neighbor", "face_neighbor[face_idx]"));
-    loop_body.push(dsl::let_("area", "face_areas[face_idx]"));
-    loop_body.push(dsl::var("normal", "face_normals[face_idx]"));
-
-    loop_body.push(dsl::if_block(
-        "owner != idx",
-        dsl::block(dsl::for_each_xy(|axis| {
-            dsl::assign(&format!("normal.{axis}"), &format!("-normal.{axis}"))
-        })),
+    loop_body.push(dsl::let_expr(
+        "face_idx",
+        Expr::ident("cell_faces").index(Expr::ident("k")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "owner",
+        Expr::ident("face_owner").index(Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "neighbor",
+        Expr::ident("face_neighbor").index(Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "area",
+        Expr::ident("face_areas").index(Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::var_typed_expr(
+        "normal",
+        Type::vec2_f32(),
+        Some(
+            typed::VecExpr::<2>::from_xy_fields(
+                Expr::ident("face_normals").index(Expr::ident("face_idx")),
+            )
+            .expr(),
+        ),
+    ));
+    loop_body.push(dsl::if_block_expr(
+        Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+        dsl::block(vec![dsl::assign_expr(
+            Expr::ident("normal"),
+            Expr::unary(UnaryOp::Negate, Expr::ident("normal")),
+        )]),
         None,
     ));
 
-    loop_body.push(dsl::var("rho_r", "rho_l"));
-    loop_body.push(dsl::var("rho_u_r", "rho_u_l"));
-    loop_body.push(dsl::var("rho_e_r", "rho_e_l"));
+    loop_body.push(dsl::var_typed_expr("rho_r", Type::F32, Some(Expr::ident("rho_l"))));
+    loop_body.push(dsl::var_typed_expr(
+        "rho_u_r",
+        Type::vec2_f32(),
+        Some(Expr::ident("rho_u_l")),
+    ));
+    loop_body.push(dsl::var_typed_expr("rho_e_r", Type::F32, Some(Expr::ident("rho_e_l"))));
 
-    let rho_neigh_expr = state_scalar_expr(layout, "state", "other_idx", rho_field);
-    let rho_u_neigh_expr = state_vec2_expr(layout, "state", "other_idx", rho_u_field);
-    let rho_e_neigh_expr = state_scalar_expr(layout, "state", "other_idx", rho_e_field);
-    loop_body.push(dsl::if_block(
-        "neighbor != -1",
+    let rho_neigh_expr = state_scalar(layout, "state", "other_idx", rho_field);
+    let rho_u_neigh_expr = state_vec2(layout, "state", "other_idx", rho_u_field);
+    let rho_e_neigh_expr = state_scalar(layout, "state", "other_idx", rho_e_field);
+    loop_body.push(dsl::if_block_expr(
+        Expr::binary(
+            Expr::ident("neighbor"),
+            BinaryOp::NotEqual,
+            Expr::lit_i32(-1),
+        ),
         dsl::block(vec![
-            dsl::var("other_idx", "u32(neighbor)"),
-            dsl::if_block(
-                "owner != idx",
-                dsl::block(vec![dsl::assign("other_idx", "owner")]),
+            dsl::var_typed_expr(
+                "other_idx",
+                Type::U32,
+                Some(Expr::call_named("u32", vec![Expr::ident("neighbor")])),
+            ),
+            dsl::if_block_expr(
+                Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("other_idx"),
+                    Expr::ident("owner"),
+                )]),
                 None,
             ),
-            dsl::let_("rho_neigh", &rho_neigh_expr),
-            dsl::let_("rho_u_neigh", &rho_u_neigh_expr),
-            dsl::let_("rho_e_neigh", &rho_e_neigh_expr),
-            dsl::assign("rho_r", "rho_neigh"),
-            dsl::assign("rho_u_r.x", "rho_u_neigh.x"),
-            dsl::assign("rho_u_r.y", "rho_u_neigh.y"),
-            dsl::assign("rho_e_r", "rho_e_neigh"),
+            dsl::let_expr("rho_neigh", rho_neigh_expr),
+            dsl::let_expr("rho_u_neigh", rho_u_neigh_expr),
+            dsl::let_expr("rho_e_neigh", rho_e_neigh_expr),
+            dsl::assign_expr(Expr::ident("rho_r"), Expr::ident("rho_neigh")),
+            dsl::assign_expr(Expr::ident("rho_u_r"), Expr::ident("rho_u_neigh")),
+            dsl::assign_expr(Expr::ident("rho_e_r"), Expr::ident("rho_e_neigh")),
         ]),
         None,
     ));
 
-    loop_body.push(dsl::var("rho_face", "rho_l"));
-    loop_body.push(dsl::var("rho_u_face_x", "rho_u_l.x"));
-    loop_body.push(dsl::var("rho_u_face_y", "rho_u_l.y"));
-    loop_body.push(dsl::var("rho_e_face", "rho_e_l"));
-    loop_body.push(dsl::if_block(
-        "neighbor != -1",
+    loop_body.push(dsl::var_typed_expr("rho_face", Type::F32, Some(Expr::ident("rho_l"))));
+    loop_body.push(dsl::var_typed_expr(
+        "rho_u_face",
+        Type::vec2_f32(),
+        Some(Expr::ident("rho_u_l")),
+    ));
+    loop_body.push(dsl::var_typed_expr("rho_e_face", Type::F32, Some(Expr::ident("rho_e_l"))));
+    loop_body.push(dsl::if_block_expr(
+        Expr::binary(
+            Expr::ident("neighbor"),
+            BinaryOp::NotEqual,
+            Expr::lit_i32(-1),
+        ),
         dsl::block(vec![
-            dsl::assign("rho_face", "0.5 * (rho_l + rho_r)"),
-            dsl::assign("rho_u_face_x", "0.5 * (rho_u_l.x + rho_u_r.x)"),
-            dsl::assign("rho_u_face_y", "0.5 * (rho_u_l.y + rho_u_r.y)"),
-            dsl::assign("rho_e_face", "0.5 * (rho_e_l + rho_e_r)"),
+            dsl::assign_expr(
+                Expr::ident("rho_face"),
+                Expr::binary(
+                    Expr::lit_f32(0.5),
+                    BinaryOp::Mul,
+                    Expr::binary(Expr::ident("rho_l"), BinaryOp::Add, Expr::ident("rho_r")),
+                ),
+            ),
+            dsl::assign_expr(
+                Expr::ident("rho_u_face"),
+                Expr::binary(
+                    Expr::lit_f32(0.5),
+                    BinaryOp::Mul,
+                    Expr::binary(Expr::ident("rho_u_l"), BinaryOp::Add, Expr::ident("rho_u_r")),
+                ),
+            ),
+            dsl::assign_expr(
+                Expr::ident("rho_e_face"),
+                Expr::binary(
+                    Expr::lit_f32(0.5),
+                    BinaryOp::Mul,
+                    Expr::binary(Expr::ident("rho_e_l"), BinaryOp::Add, Expr::ident("rho_e_r")),
+                ),
+            ),
         ]),
         None,
     ));
 
-    for (accum, face_value) in [
-        ("grad_rho_accum", "rho_face"),
-        ("grad_rho_u_x_accum", "rho_u_face_x"),
-        ("grad_rho_u_y_accum", "rho_u_face_y"),
-        ("grad_rho_e_accum", "rho_e_face"),
-    ] {
-        loop_body.extend(dsl::for_each_xy(|axis| {
-            dsl::assign_op(
-                AssignOp::Add,
-                &format!("{accum}.{axis}"),
-                &format!("{face_value} * normal.{axis} * area"),
-            )
-        }));
-    }
+    let add_flux = |target: &str, face_value: Expr| {
+        let flux = typed::VecExpr::<2>::from_expr(Expr::ident("normal")).mul_scalar(Expr::binary(
+            face_value,
+            BinaryOp::Mul,
+            Expr::ident("area"),
+        ));
+        dsl::assign_op_expr(AssignOp::Add, Expr::ident(target), flux.expr())
+    };
 
-    stmts.push(dsl::for_loop(
-        dsl::for_init_var("k", "start"),
-        "k < end",
-        dsl::for_step_increment("k"),
+    loop_body.push(add_flux("grad_rho_accum", Expr::ident("rho_face")));
+    loop_body.push(add_flux(
+        "grad_rho_u_x_accum",
+        Expr::ident("rho_u_face").field("x"),
+    ));
+    loop_body.push(add_flux(
+        "grad_rho_u_y_accum",
+        Expr::ident("rho_u_face").field("y"),
+    ));
+    loop_body.push(add_flux("grad_rho_e_accum", Expr::ident("rho_e_face")));
+
+    stmts.push(dsl::for_loop_expr(
+        dsl::for_init_var_expr("k", Expr::ident("start")),
+        Expr::binary(Expr::ident("k"), BinaryOp::Less, Expr::ident("end")),
+        dsl::for_step_increment_expr(Expr::ident("k")),
         dsl::block(loop_body),
     ));
 
@@ -382,18 +490,26 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "grad_rho_u_y_accum",
         "grad_rho_e_accum",
     ] {
-        stmts.extend(dsl::for_each_xy(|axis| {
-            dsl::assign(
-                &format!("{accum}.{axis}"),
-                &format!("{accum}.{axis} / vol"),
-            )
-        }));
+        stmts.push(dsl::assign_expr(
+            Expr::ident(accum),
+            typed::VecExpr::<2>::from_expr(Expr::ident(accum))
+                .div_scalar(Expr::ident("vol"))
+                .expr(),
+        ));
     }
 
-    stmts.push(dsl::assign("grad_rho[idx]", "grad_rho_accum"));
-    stmts.push(dsl::assign("grad_rho_u_x[idx]", "grad_rho_u_x_accum"));
-    stmts.push(dsl::assign("grad_rho_u_y[idx]", "grad_rho_u_y_accum"));
-    stmts.push(dsl::assign("grad_rho_e[idx]", "grad_rho_e_accum"));
+    let store_grad = |buf: &str, accum: &str| {
+        dsl::assign_expr(
+            Expr::ident(buf)
+                .index(Expr::ident("idx")),
+            typed::VecExpr::<2>::from_expr(Expr::ident(accum)).to_vector2_struct(),
+        )
+    };
+
+    stmts.push(store_grad("grad_rho", "grad_rho_accum"));
+    stmts.push(store_grad("grad_rho_u_x", "grad_rho_u_x_accum"));
+    stmts.push(store_grad("grad_rho_u_y", "grad_rho_u_y_accum"));
+    stmts.push(store_grad("grad_rho_e", "grad_rho_e_accum"));
 
     Block::new(stmts)
 }

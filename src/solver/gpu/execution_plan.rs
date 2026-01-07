@@ -95,6 +95,14 @@ impl PlanTimings {
             _ => None,
         })
     }
+
+    pub fn seconds_for(&self, label: &'static str) -> f64 {
+        self.nodes
+            .iter()
+            .find(|node| node.label() == label)
+            .map(|node| node.seconds())
+            .unwrap_or(0.0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,4 +139,3 @@ pub struct HostTiming {
     pub label: &'static str,
     pub seconds: f64,
 }
-

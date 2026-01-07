@@ -1,19 +1,19 @@
+use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
 use crate::solver::gpu::bindings::generated::{
     compressible_apply as generated_apply, compressible_assembly as generated_assembly,
-    compressible_flux_kt as generated_flux_kt,
-    compressible_gradients as generated_gradients, compressible_update as generated_update,
+    compressible_flux_kt as generated_flux_kt, compressible_gradients as generated_gradients,
+    compressible_update as generated_update,
 };
-use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
-use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::compressible_fgmres::CompressibleFgmresResources;
+use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
 use crate::solver::gpu::init::compressible_fields::{
     create_compressible_field_bind_groups, init_compressible_field_buffers, PackedStateConfig,
 };
-use crate::solver::gpu::kernel_graph::{ComputeNode, CopyBufferNode, KernelGraph, KernelNode};
 use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
-use crate::solver::gpu::csr::build_block_csr;
+use crate::solver::gpu::kernel_graph::{ComputeNode, CopyBufferNode, KernelGraph, KernelNode};
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::compressible_model;
@@ -163,6 +163,12 @@ pub struct GpuCompressibleSolver {
     pub(crate) scalar_col_indices: Vec<u32>,
     pub(crate) block_row_offsets: Vec<u32>,
     pub(crate) block_col_indices: Vec<u32>,
+    implicit_tol: f32,
+    implicit_max_restart: usize,
+    implicit_retry_tol: f32,
+    implicit_retry_restart: usize,
+    implicit_base_alpha_u: f32,
+    implicit_last_stats: LinearSolverStats,
     profile: CompressibleProfile,
     offsets: CompressibleOffsets,
     pre_step_graph: KernelGraph<GpuCompressibleSolver>,
@@ -182,11 +188,15 @@ impl GpuCompressibleSolver {
         self.num_cells as u64 * self.offsets.stride as u64 * 4
     }
 
-    fn explicit_plan_pre_step_graph(solver: &GpuCompressibleSolver) -> &KernelGraph<GpuCompressibleSolver> {
+    fn explicit_plan_pre_step_graph(
+        solver: &GpuCompressibleSolver,
+    ) -> &KernelGraph<GpuCompressibleSolver> {
         &solver.pre_step_graph
     }
 
-    fn explicit_plan_explicit_graph(solver: &GpuCompressibleSolver) -> &KernelGraph<GpuCompressibleSolver> {
+    fn explicit_plan_explicit_graph(
+        solver: &GpuCompressibleSolver,
+    ) -> &KernelGraph<GpuCompressibleSolver> {
         &solver.explicit_graph
     }
 
@@ -212,6 +222,99 @@ impl GpuCompressibleSolver {
         static PLAN: std::sync::OnceLock<ExecutionPlan<GpuCompressibleSolver>> =
             std::sync::OnceLock::new();
         PLAN.get_or_init(GpuCompressibleSolver::build_explicit_plan)
+    }
+
+    fn implicit_iter_plan_grad_assembly_graph(
+        solver: &GpuCompressibleSolver,
+    ) -> &KernelGraph<GpuCompressibleSolver> {
+        &solver.implicit_grad_assembly_graph
+    }
+
+    fn implicit_iter_plan_snapshot_graph(
+        solver: &GpuCompressibleSolver,
+    ) -> &KernelGraph<GpuCompressibleSolver> {
+        &solver.implicit_snapshot_graph
+    }
+
+    fn implicit_iter_plan_apply_graph(
+        solver: &GpuCompressibleSolver,
+    ) -> &KernelGraph<GpuCompressibleSolver> {
+        &solver.implicit_apply_graph
+    }
+
+    fn implicit_host_solve_fgmres(solver: &mut GpuCompressibleSolver) {
+        let mut iter_stats =
+            solver.solve_compressible_fgmres(solver.implicit_max_restart, solver.implicit_tol);
+        if !iter_stats.converged {
+            let retry_stats = solver.solve_compressible_fgmres(
+                solver.implicit_retry_restart,
+                solver.implicit_retry_tol,
+            );
+            if retry_stats.converged || retry_stats.residual < iter_stats.residual {
+                iter_stats = retry_stats;
+            }
+        }
+        solver.implicit_last_stats = iter_stats;
+    }
+
+    fn implicit_host_set_alpha_for_apply(solver: &mut GpuCompressibleSolver) {
+        let apply_alpha = if solver.implicit_last_stats.converged {
+            solver.implicit_base_alpha_u
+        } else {
+            solver.implicit_base_alpha_u * solver.nonconverged_relax
+        };
+        if (solver.constants.alpha_u - apply_alpha).abs() > 1e-6 {
+            solver.constants.alpha_u = apply_alpha;
+            solver.update_constants();
+        }
+    }
+
+    fn implicit_host_restore_alpha(solver: &mut GpuCompressibleSolver) {
+        if (solver.constants.alpha_u - solver.implicit_base_alpha_u).abs() > 1e-6 {
+            solver.constants.alpha_u = solver.implicit_base_alpha_u;
+            solver.update_constants();
+        }
+    }
+
+    fn build_implicit_iter_plan() -> ExecutionPlan<GpuCompressibleSolver> {
+        ExecutionPlan::new(
+            GpuCompressibleSolver::context_ref,
+            vec![
+                PlanNode::Graph(GraphNode {
+                    label: "compressible:implicit_grad_assembly",
+                    graph: GpuCompressibleSolver::implicit_iter_plan_grad_assembly_graph,
+                    mode: GraphExecMode::SplitTimed,
+                }),
+                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
+                    label: "compressible:implicit_fgmres",
+                    run: GpuCompressibleSolver::implicit_host_solve_fgmres,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "compressible:implicit_snapshot",
+                    graph: GpuCompressibleSolver::implicit_iter_plan_snapshot_graph,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
+                    label: "compressible:implicit_set_alpha",
+                    run: GpuCompressibleSolver::implicit_host_set_alpha_for_apply,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "compressible:implicit_apply",
+                    graph: GpuCompressibleSolver::implicit_iter_plan_apply_graph,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
+                    label: "compressible:implicit_restore_alpha",
+                    run: GpuCompressibleSolver::implicit_host_restore_alpha,
+                }),
+            ],
+        )
+    }
+
+    fn implicit_iter_plan() -> &'static ExecutionPlan<GpuCompressibleSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuCompressibleSolver>> =
+            std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuCompressibleSolver::build_implicit_iter_plan)
     }
 
     fn build_pre_step_graph() -> KernelGraph<GpuCompressibleSolver> {
@@ -352,36 +455,38 @@ impl GpuCompressibleSolver {
         let pipeline_update =
             generated_update::compute::create_main_pipeline_embed_source(&context.device);
 
-        let mesh_layout = context.device.create_bind_group_layout(
-            &generated_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-        );
-        let bg_mesh = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compressible Mesh Bind Group"),
-            layout: &mesh_layout,
-            entries: &generated_assembly::WgpuBindGroup0Entries::new(
-                generated_assembly::WgpuBindGroup0EntriesParams {
-                    face_owner: mesh_res.b_face_owner.as_entire_buffer_binding(),
-                    face_neighbor: mesh_res.b_face_neighbor.as_entire_buffer_binding(),
-                    face_areas: mesh_res.b_face_areas.as_entire_buffer_binding(),
-                    face_normals: mesh_res.b_face_normals.as_entire_buffer_binding(),
-                    cell_centers: mesh_res.b_cell_centers.as_entire_buffer_binding(),
-                    cell_vols: mesh_res.b_cell_vols.as_entire_buffer_binding(),
-                    cell_face_offsets: mesh_res.b_cell_face_offsets.as_entire_buffer_binding(),
-                    cell_faces: mesh_res.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: mesh_res
-                        .b_cell_face_matrix_indices
-                        .as_entire_buffer_binding(),
-                    diagonal_indices: mesh_res.b_diagonal_indices.as_entire_buffer_binding(),
-                    face_boundary: mesh_res.b_face_boundary.as_entire_buffer_binding(),
-                    face_centers: mesh_res.b_face_centers.as_entire_buffer_binding(),
-                },
-            )
-            .into_array(),
-        });
+        let mesh_layout = context
+            .device
+            .create_bind_group_layout(&generated_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+        let bg_mesh = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compressible Mesh Bind Group"),
+                layout: &mesh_layout,
+                entries: &generated_assembly::WgpuBindGroup0Entries::new(
+                    generated_assembly::WgpuBindGroup0EntriesParams {
+                        face_owner: mesh_res.b_face_owner.as_entire_buffer_binding(),
+                        face_neighbor: mesh_res.b_face_neighbor.as_entire_buffer_binding(),
+                        face_areas: mesh_res.b_face_areas.as_entire_buffer_binding(),
+                        face_normals: mesh_res.b_face_normals.as_entire_buffer_binding(),
+                        cell_centers: mesh_res.b_cell_centers.as_entire_buffer_binding(),
+                        cell_vols: mesh_res.b_cell_vols.as_entire_buffer_binding(),
+                        cell_face_offsets: mesh_res.b_cell_face_offsets.as_entire_buffer_binding(),
+                        cell_faces: mesh_res.b_cell_faces.as_entire_buffer_binding(),
+                        cell_face_matrix_indices: mesh_res
+                            .b_cell_face_matrix_indices
+                            .as_entire_buffer_binding(),
+                        diagonal_indices: mesh_res.b_diagonal_indices.as_entire_buffer_binding(),
+                        face_boundary: mesh_res.b_face_boundary.as_entire_buffer_binding(),
+                        face_centers: mesh_res.b_face_centers.as_entire_buffer_binding(),
+                    },
+                )
+                .into_array(),
+            });
 
-        let fields_layout = context.device.create_bind_group_layout(
-            &generated_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
-        );
+        let fields_layout = context
+            .device
+            .create_bind_group_layout(&generated_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
         let fields_res =
             create_compressible_field_bind_groups(&context.device, field_buffers, &fields_layout);
 
@@ -396,8 +501,11 @@ impl GpuCompressibleSolver {
 
         let scalar_row_offsets = mesh_res.row_offsets.clone();
         let scalar_col_indices = mesh_res.col_indices.clone();
-        let (row_offsets, col_indices) =
-            build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, unknowns_per_cell);
+        let (row_offsets, col_indices) = build_block_csr(
+            &mesh_res.row_offsets,
+            &mesh_res.col_indices,
+            unknowns_per_cell,
+        );
         let block_row_offsets = row_offsets.clone();
         let block_col_indices = col_indices.clone();
         let matrix_res = matrix::init_matrix(&context.device, &row_offsets, &col_indices);
@@ -418,25 +526,27 @@ impl GpuCompressibleSolver {
             mapped_at_creation: false,
         });
 
-        let solver_layout = context.device.create_bind_group_layout(
-            &generated_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR,
-        );
-        let bg_solver = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compressible Solver Bind Group"),
-            layout: &solver_layout,
-            entries: &generated_assembly::WgpuBindGroup2Entries::new(
-                generated_assembly::WgpuBindGroup2EntriesParams {
-                    matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
-                    rhs: b_rhs.as_entire_buffer_binding(),
-                    scalar_row_offsets: b_scalar_row_offsets.as_entire_buffer_binding(),
-                },
-            )
-            .into_array(),
-        });
+        let solver_layout = context
+            .device
+            .create_bind_group_layout(&generated_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
+        let bg_solver = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compressible Solver Bind Group"),
+                layout: &solver_layout,
+                entries: &generated_assembly::WgpuBindGroup2Entries::new(
+                    generated_assembly::WgpuBindGroup2EntriesParams {
+                        matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
+                        rhs: b_rhs.as_entire_buffer_binding(),
+                        scalar_row_offsets: b_scalar_row_offsets.as_entire_buffer_binding(),
+                    },
+                )
+                .into_array(),
+            });
 
-        let apply_fields_layout = context.device.create_bind_group_layout(
-            &generated_apply::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-        );
+        let apply_fields_layout = context
+            .device
+            .create_bind_group_layout(&generated_apply::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
         let mut bg_apply_fields_ping_pong = Vec::new();
         for i in 0..3 {
             let (idx_state, idx_old, idx_old_old) = match i {
@@ -445,42 +555,46 @@ impl GpuCompressibleSolver {
                 2 => (1, 2, 0),
                 _ => (0, 1, 2),
             };
-            let bg = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("Compressible Apply Fields Bind Group {}", i)),
-                layout: &apply_fields_layout,
-                entries: &generated_apply::WgpuBindGroup0Entries::new(
-                    generated_apply::WgpuBindGroup0EntriesParams {
-                        state: fields_res.state_buffers[idx_state].as_entire_buffer_binding(),
-                        state_old: fields_res.state_buffers[idx_old].as_entire_buffer_binding(),
-                        state_old_old: fields_res.state_buffers[idx_old_old]
-                            .as_entire_buffer_binding(),
-                        state_iter: fields_res.b_state_iter.as_entire_buffer_binding(),
-                        fluxes: fields_res.b_fluxes.as_entire_buffer_binding(),
-                        constants: fields_res.b_constants.as_entire_buffer_binding(),
-                        grad_rho: fields_res.b_grad_rho.as_entire_buffer_binding(),
-                        grad_rho_u_x: fields_res.b_grad_rho_u_x.as_entire_buffer_binding(),
-                        grad_rho_u_y: fields_res.b_grad_rho_u_y.as_entire_buffer_binding(),
-                        grad_rho_e: fields_res.b_grad_rho_e.as_entire_buffer_binding(),
+            let bg = context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("Compressible Apply Fields Bind Group {}", i)),
+                    layout: &apply_fields_layout,
+                    entries: &generated_apply::WgpuBindGroup0Entries::new(
+                        generated_apply::WgpuBindGroup0EntriesParams {
+                            state: fields_res.state_buffers[idx_state].as_entire_buffer_binding(),
+                            state_old: fields_res.state_buffers[idx_old].as_entire_buffer_binding(),
+                            state_old_old: fields_res.state_buffers[idx_old_old]
+                                .as_entire_buffer_binding(),
+                            state_iter: fields_res.b_state_iter.as_entire_buffer_binding(),
+                            fluxes: fields_res.b_fluxes.as_entire_buffer_binding(),
+                            constants: fields_res.b_constants.as_entire_buffer_binding(),
+                            grad_rho: fields_res.b_grad_rho.as_entire_buffer_binding(),
+                            grad_rho_u_x: fields_res.b_grad_rho_u_x.as_entire_buffer_binding(),
+                            grad_rho_u_y: fields_res.b_grad_rho_u_y.as_entire_buffer_binding(),
+                            grad_rho_e: fields_res.b_grad_rho_e.as_entire_buffer_binding(),
+                        },
+                    )
+                    .into_array(),
+                });
+            bg_apply_fields_ping_pong.push(bg);
+        }
+        let bg_apply_fields = bg_apply_fields_ping_pong[0].clone();
+        let apply_solver_layout = context
+            .device
+            .create_bind_group_layout(&generated_apply::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+        let bg_apply_solver = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compressible Apply Solver Bind Group"),
+                layout: &apply_solver_layout,
+                entries: &generated_apply::WgpuBindGroup1Entries::new(
+                    generated_apply::WgpuBindGroup1EntriesParams {
+                        solution: b_x.as_entire_buffer_binding(),
                     },
                 )
                 .into_array(),
             });
-            bg_apply_fields_ping_pong.push(bg);
-        }
-        let bg_apply_fields = bg_apply_fields_ping_pong[0].clone();
-        let apply_solver_layout = context.device.create_bind_group_layout(
-            &generated_apply::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
-        );
-        let bg_apply_solver = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compressible Apply Solver Bind Group"),
-            layout: &apply_solver_layout,
-            entries: &generated_apply::WgpuBindGroup1Entries::new(
-                generated_apply::WgpuBindGroup1EntriesParams {
-                    solution: b_x.as_entire_buffer_binding(),
-                },
-            )
-            .into_array(),
-        });
 
         Self {
             context,
@@ -526,11 +640,18 @@ impl GpuCompressibleSolver {
             scalar_col_indices,
             block_row_offsets,
             block_col_indices,
+            implicit_tol: 0.0,
+            implicit_max_restart: 1,
+            implicit_retry_tol: 0.0,
+            implicit_retry_restart: 1,
+            implicit_base_alpha_u: 0.0,
+            implicit_last_stats: LinearSolverStats::default(),
             profile,
             offsets,
             pre_step_graph: GpuCompressibleSolver::build_pre_step_graph(),
             explicit_graph: GpuCompressibleSolver::build_explicit_graph(),
-            implicit_grad_assembly_graph: GpuCompressibleSolver::build_implicit_grad_assembly_graph(),
+            implicit_grad_assembly_graph: GpuCompressibleSolver::build_implicit_grad_assembly_graph(
+            ),
             implicit_snapshot_graph: GpuCompressibleSolver::build_implicit_snapshot_graph(),
             implicit_apply_graph: GpuCompressibleSolver::build_implicit_apply_graph(),
             primitive_update_graph: GpuCompressibleSolver::build_primitive_update_graph(),
@@ -714,8 +835,7 @@ impl GpuCompressibleSolver {
         let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
         let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
         let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
-        let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5)
-            .clamp(0.0, 1.0);
+        let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5).clamp(0.0, 1.0);
         let max_restart = env_usize("CFD2_COMP_FGMRES_MAX_RESTART", 80).max(1);
         let retry_restart = env_usize("CFD2_COMP_FGMRES_RETRY_RESTART", 160).max(1);
         let mut grad_secs = 0.0f64;
@@ -724,52 +844,34 @@ impl GpuCompressibleSolver {
         let mut apply_secs = 0.0f64;
         let mut update_secs = 0.0f64;
         let mut fgmres_iters = 0u64;
+        self.implicit_base_alpha_u = base_alpha_u;
         for outer_idx in 0..self.outer_iters {
-            let timings = self
-                .implicit_grad_assembly_graph
-                .execute_split_timed(&self.context, &*self);
-            grad_secs += timings.seconds_for("compressible:gradients");
-            assembly_secs += timings.seconds_for("compressible:assembly");
-
             let tol = if outer_idx < warm_iters {
                 tol_base * warm_scale
             } else {
                 tol_base
             };
             let retry_tol = (tol * retry_scale).min(tol_base);
-            let mut iter_stats = self.solve_compressible_fgmres(max_restart, tol);
-            fgmres_secs += iter_stats.time.as_secs_f64();
-            fgmres_iters += iter_stats.iterations as u64;
-            if !iter_stats.converged {
-                let retry_stats = self.solve_compressible_fgmres(retry_restart, retry_tol);
-                fgmres_secs += retry_stats.time.as_secs_f64();
-                fgmres_iters += retry_stats.iterations as u64;
-                if retry_stats.converged || retry_stats.residual < iter_stats.residual {
-                    iter_stats = retry_stats;
-                }
-            }
-            stats.push(iter_stats);
+            self.implicit_tol = tol;
+            self.implicit_retry_tol = retry_tol;
+            self.implicit_max_restart = max_restart;
+            self.implicit_retry_restart = retry_restart;
 
-            let stage_start = std::time::Instant::now();
-            self.implicit_snapshot_graph.execute(&self.context, &*self);
+            let iter_timings = GpuCompressibleSolver::implicit_iter_plan().execute(self);
+            let detail = iter_timings
+                .graph_detail("compressible:implicit_grad_assembly")
+                .expect("implicit_grad_assembly timings missing");
+            grad_secs += detail.seconds_for("compressible:gradients");
+            assembly_secs += detail.seconds_for("compressible:assembly");
 
-            let apply_alpha = if iter_stats.converged {
-                base_alpha_u
-            } else {
-                base_alpha_u * self.nonconverged_relax
-            };
-            if (self.constants.alpha_u - apply_alpha).abs() > 1e-6 {
-                self.constants.alpha_u = apply_alpha;
-                self.update_constants();
-            }
+            fgmres_secs += self.implicit_last_stats.time.as_secs_f64();
+            fgmres_iters += self.implicit_last_stats.iterations as u64;
+            stats.push(self.implicit_last_stats);
 
-            self.implicit_apply_graph.execute(&self.context, &*self);
-            apply_secs += stage_start.elapsed().as_secs_f64();
-
-            if (self.constants.alpha_u - base_alpha_u).abs() > 1e-6 {
-                self.constants.alpha_u = base_alpha_u;
-                self.update_constants();
-            }
+            apply_secs += iter_timings.seconds_for("compressible:implicit_snapshot")
+                + iter_timings.seconds_for("compressible:implicit_set_alpha")
+                + iter_timings.seconds_for("compressible:implicit_apply")
+                + iter_timings.seconds_for("compressible:implicit_restore_alpha");
         }
 
         let stage_start = std::time::Instant::now();

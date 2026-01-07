@@ -91,13 +91,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let area = face_areas[idx];
     let boundary_type = face_boundary[idx];
     let face_center = face_centers[idx];
-    var normal = face_normals[idx];
     let c_owner = cell_centers[owner];
-    let dx_vec = face_center.x - c_owner.x;
-    let dy_vec = face_center.y - c_owner.y;
-    if (dx_vec * normal.x + dy_vec * normal.y < 0.0) {
-        normal.x = -normal.x;
-        normal.y = -normal.y;
+    let c_owner_vec: vec2<f32> = vec2<f32>(c_owner.x, c_owner.y);
+    let face_center_vec: vec2<f32> = vec2<f32>(face_center.x, face_center.y);
+    var normal_vec: vec2<f32> = vec2<f32>(face_normals[idx].x, face_normals[idx].y);
+    if (dot(face_center_vec - c_owner_vec, normal_vec) < 0.0) {
+        normal_vec = -normal_vec;
     }
     var u_face = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
     var d_p_face = state[owner * 8u + 3u];
@@ -109,45 +108,43 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let d_p_neigh = state[neigh_idx * 8u + 3u];
         let grad_p_neigh = vec2<f32>(state[neigh_idx * 8u + 4u], state[neigh_idx * 8u + 5u]);
         let c_neigh = cell_centers[neigh_idx];
-        let d_own = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(face_center.x, face_center.y));
-        let d_neigh = distance(vec2<f32>(c_neigh.x, c_neigh.y), vec2<f32>(face_center.x, face_center.y));
+        let c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
+        let d_own = distance(c_owner_vec, face_center_vec);
+        let d_neigh = distance(c_neigh_vec, face_center_vec);
         let total_dist = d_own + d_neigh;
         var lambda: f32 = 0.5;
         if (total_dist > 1e-6) {
             lambda = d_neigh / total_dist;
         }
+        let lambda_other = 1.0 - lambda;
         rho_face = constants.density;
-        var u_central = u_face;
-        u_central.x = lambda * u_face.x + (1.0 - lambda) * u_neigh.x;
-        u_central.y = lambda * u_face.y + (1.0 - lambda) * u_neigh.y;
+        let u_central: vec2<f32> = u_face * lambda + u_neigh * lambda_other;
         u_face = u_central;
-        d_p_face = lambda * d_p_face + (1.0 - lambda) * d_p_neigh;
-        grad_p_avg.x = lambda * grad_p_avg.x + (1.0 - lambda) * grad_p_neigh.x;
-        grad_p_avg.y = lambda * grad_p_avg.y + (1.0 - lambda) * grad_p_neigh.y;
-        let dx = c_neigh.x - c_owner.x;
-        let dy = c_neigh.y - c_owner.y;
-        let dist_proj = abs(dx * normal.x + dy * normal.y);
+        d_p_face = lambda * d_p_face + lambda_other * d_p_neigh;
+        grad_p_avg = grad_p_avg * lambda + grad_p_neigh * lambda_other;
+        let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
+        let dist_proj = abs(dot(d_vec, normal_vec));
         let dist = max(dist_proj, 1e-6);
         let p_own = state[owner * 8u + 2u];
         let p_neigh = state[neigh_idx * 8u + 2u];
-        let grad_p_n = grad_p_avg.x * normal.x + grad_p_avg.y * normal.y;
+        let grad_p_n = dot(grad_p_avg, normal_vec);
         let p_grad_f = (p_neigh - p_own) / dist;
         let rc_term = d_p_face * area * (grad_p_n - p_grad_f);
-        let u_n = u_face.x * normal.x + u_face.y * normal.y;
+        let u_n = dot(u_face, normal_vec);
         fluxes[idx] = rho_face * (u_n * area + rc_term);
     } else {
         if (boundary_type == 1u) {
             let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
-            let u_bc = Vector2(constants.inlet_velocity * ramp, 0.0);
-            fluxes[idx] = rho_face * (u_bc.x * normal.x + u_bc.y * normal.y) * area;
+            let u_bc: vec2<f32> = vec2<f32>(constants.inlet_velocity * ramp, 0.0);
+            fluxes[idx] = rho_face * dot(u_bc, normal_vec) * area;
         } else {
             if (boundary_type == 3u) {
                 fluxes[idx] = 0.0;
             } else {
                 if (boundary_type == 2u) {
-                    let u_n = u_face.x * normal.x + u_face.y * normal.y;
+                    let u_n = dot(u_face, normal_vec);
                     var rc_term: f32 = 0.0;
-                    let dist_face = distance(vec2<f32>(c_owner.x, c_owner.y), vec2<f32>(face_center.x, face_center.y));
+                    let dist_face = distance(c_owner_vec, face_center_vec);
                     if (dist_face > 1e-6) {
                         rc_term = 0.0;
                     }

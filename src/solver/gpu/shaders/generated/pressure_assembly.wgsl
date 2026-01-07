@@ -97,6 +97,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start = cell_face_offsets[idx];
     let end = cell_face_offsets[idx + 1];
     let center = cell_centers[idx];
+    let center_vec: vec2<f32> = vec2<f32>(center.x, center.y);
     let vol = cell_vols[idx];
     var diag_coeff: f32 = 0.0;
     var rhs_val: f32 = 0.0;
@@ -105,22 +106,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let owner = face_owner[face_idx];
         let neigh_idx = face_neighbor[face_idx];
         let boundary_type = face_boundary[face_idx];
-        var normal = face_normals[face_idx];
         let area = face_areas[face_idx];
         let f_center = face_centers[face_idx];
         let c_owner = cell_centers[owner];
-        let dx_vec = f_center.x - c_owner.x;
-        let dy_vec = f_center.y - c_owner.y;
-        if (dx_vec * normal.x + dy_vec * normal.y < 0.0) {
-            normal.x = -normal.x;
-            normal.y = -normal.y;
+        let c_owner_vec: vec2<f32> = vec2<f32>(c_owner.x, c_owner.y);
+        let f_center_vec: vec2<f32> = vec2<f32>(f_center.x, f_center.y);
+        var normal_vec: vec2<f32> = vec2<f32>(face_normals[face_idx].x, face_normals[face_idx].y);
+        if (dot(f_center_vec - c_owner_vec, normal_vec) < 0.0) {
+            normal_vec = -normal_vec;
         }
         var normal_sign: f32 = 1.0;
         if (owner != idx) {
-            normal.x = -normal.x;
-            normal.y = -normal.y;
+            normal_vec = -normal_vec;
             normal_sign = -1.0;
         }
+        let face_vec: vec2<f32> = normal_vec * area;
         let flux = fluxes[face_idx] * normal_sign;
         rhs_val -= flux;
         var other_center: Vector2;
@@ -140,11 +140,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             d_p_neigh = state[idx * 8u + 3u];
         }
         if (!is_boundary) {
-            let d_vec_x = other_center.x - center.x;
-            let d_vec_y = other_center.y - center.y;
-            let dist = sqrt(d_vec_x * d_vec_x + d_vec_y * d_vec_y);
-            let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
-            let d_neigh = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
+            let other_center_vec: vec2<f32> = vec2<f32>(other_center.x, other_center.y);
+            let d_vec: vec2<f32> = other_center_vec - center_vec;
+            let dist = length(d_vec);
+            let d_own = distance(center_vec, f_center_vec);
+            let d_neigh = distance(other_center_vec, f_center_vec);
             let total_dist = d_own + d_neigh;
             var lambda = 0.5;
             if (total_dist > 1e-6) {
@@ -159,18 +159,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 matrix_values[mat_idx] = -coeff;
             }
             diag_coeff += coeff;
-            let s_x = normal.x * area;
-            let s_y = normal.y * area;
-            let k_x_raw = s_x - d_vec_x * area / dist;
-            let k_y_raw = s_y - d_vec_y * area / dist;
-            let k_mag = sqrt(k_x_raw * k_x_raw + k_y_raw * k_y_raw);
+            let area_over_dist = area / dist;
+            let k_raw: vec2<f32> = face_vec - d_vec * area_over_dist;
+            let k_mag = length(k_raw);
             let k_limit = 0.5 * area;
             var k_scale = 1.0;
             if (k_mag > k_limit) {
                 k_scale = k_limit / k_mag;
             }
-            let k_x = k_x_raw * k_scale;
-            let k_y = k_y_raw * k_scale;
+            let k_vec: vec2<f32> = k_raw * k_scale;
             var other_idx_p = u32(neigh_idx);
             if (owner != idx) {
                 other_idx_p = owner;
@@ -181,9 +178,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if (total_dist > 1e-6) {
                 interp_f = d_own / total_dist;
             }
-            let grad_p_f_x = grad_p_own.x + interp_f * (grad_p_neigh.x - grad_p_own.x);
-            let grad_p_f_y = grad_p_own.y + interp_f * (grad_p_neigh.y - grad_p_own.y);
-            let correction_flux = 0.5 * pressure_coeff_face * (grad_p_f_x * k_x + grad_p_f_y * k_y);
+            let grad_p_f: vec2<f32> = grad_p_own + (grad_p_neigh - grad_p_own) * interp_f;
+            let correction_flux = 0.5 * pressure_coeff_face * dot(grad_p_f, k_vec);
             rhs_val -= correction_flux;
         } else {
             if (boundary_type == 2u) {

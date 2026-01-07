@@ -1,4 +1,4 @@
-use crate::solver::codegen::wgsl_ast::{AssignOp, BinaryOp, Expr, Stmt};
+use crate::solver::codegen::wgsl_ast::{AssignOp, BinaryOp, Expr, Literal, Stmt};
 
 use super::matrix::BlockCsrSoaEntry;
 
@@ -77,6 +77,10 @@ pub struct MatExpr<const R: usize, const C: usize> {
 }
 
 impl<const R: usize, const C: usize> MatExpr<R, C> {
+    pub fn from_entries(entries: [[Expr; C]; R]) -> Self {
+        Self { entries }
+    }
+
     pub fn from_fn<F>(mut f: F) -> Self
     where
         F: FnMut(usize, usize) -> Expr,
@@ -87,6 +91,20 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
 
     pub fn from_prefix(prefix: &str) -> Self {
         Self::from_fn(|row, col| Expr::ident(format!("{prefix}_{row}{col}")))
+    }
+
+    pub fn var_prefix(prefix: &str, init: Expr) -> Vec<Stmt> {
+        let mut out = Vec::new();
+        for row in 0..R {
+            for col in 0..C {
+                out.push(Stmt::Var {
+                    name: format!("{prefix}_{row}{col}"),
+                    ty: None,
+                    expr: Some(init.clone()),
+                });
+            }
+        }
+        out
     }
 
     pub fn entry(&self, row: usize, col: usize) -> Expr {
@@ -107,6 +125,44 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
 
     pub fn mul_scalar(&self, scalar: Expr) -> Self {
         Self::from_fn(|row, col| Expr::binary(self.entry(row, col), BinaryOp::Mul, scalar.clone()))
+    }
+
+    pub fn mul_mat<const D: usize>(&self, rhs: &MatExpr<C, D>) -> MatExpr<R, D> {
+        MatExpr::<R, D>::from_fn(|row, col| {
+            let mut acc: Option<Expr> = None;
+            for k in 0..C {
+                let lhs = self.entry(row, k);
+                let rhs_entry = rhs.entry(k, col);
+                if expr_is_zero(&lhs) || expr_is_zero(&rhs_entry) {
+                    continue;
+                }
+                let term = if expr_is_one(&lhs) {
+                    rhs_entry
+                } else if expr_is_one(&rhs_entry) {
+                    lhs
+                } else {
+                    Expr::binary(lhs, BinaryOp::Mul, rhs_entry)
+                };
+                acc = Some(match acc {
+                    None => term,
+                    Some(prev) => Expr::binary(prev, BinaryOp::Add, term),
+                });
+            }
+            acc.unwrap_or_else(|| Expr::lit_f32(0.0))
+        })
+    }
+
+    pub fn assign_op_diag(&self, op: AssignOp, value: Expr) -> Vec<Stmt> {
+        let diag_len = std::cmp::min(R, C);
+        let mut out = Vec::with_capacity(diag_len);
+        for idx in 0..diag_len {
+            out.push(Stmt::AssignOp {
+                target: self.entry(idx, idx),
+                op,
+                value: value.clone(),
+            });
+        }
+        out
     }
 
     pub fn assign_to_prefix_scaled(&self, prefix: &str, scale: Option<Expr>) -> Vec<Stmt> {
@@ -166,6 +222,38 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
     }
 }
 
+impl<const N: usize> MatExpr<N, N> {
+    pub fn identity() -> Self {
+        Self::from_fn(|row, col| {
+            if row == col {
+                Expr::lit_f32(1.0)
+            } else {
+                Expr::lit_f32(0.0)
+            }
+        })
+    }
+}
+
+fn expr_is_zero(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(Literal::Float(value)) => match value.parse::<f32>() {
+            Ok(v) => v == 0.0,
+            Err(_) => false,
+        },
+        _ => false,
+    }
+}
+
+fn expr_is_one(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(Literal::Float(value)) => match value.parse::<f32>() {
+            Ok(v) => v == 1.0,
+            Err(_) => false,
+        },
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +287,16 @@ mod tests {
             }
             _ => panic!("expected assign stmt"),
         }
+    }
+
+    #[test]
+    fn mat_expr_mul_simplifies_identity() {
+        let mat = MatExpr::<2, 2>::from_prefix("a");
+        let ident = MatExpr::<2, 2>::identity();
+        let prod = mat.mul_mat(&ident);
+        assert_eq!(prod.entry(0, 0).to_string(), "a_00");
+        assert_eq!(prod.entry(0, 1).to_string(), "a_01");
+        assert_eq!(prod.entry(1, 0).to_string(), "a_10");
+        assert_eq!(prod.entry(1, 1).to_string(), "a_11");
     }
 }

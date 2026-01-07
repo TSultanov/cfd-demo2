@@ -344,7 +344,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_("scheme_id", "constants.scheme"));
 
     stmts.push(dsl::comment("Jacobian rows/cols: rho, rho_u_x, rho_u_y, rho_e"));
-    stmts.extend(dsl::var_matrix("diag", block_size as usize, "0.0"));
+    stmts.extend(typed::MatExpr::<4, 4>::var_prefix("diag", Expr::lit_f32(0.0)));
+    let diag_mat = typed::MatExpr::<4, 4>::from_prefix("diag");
 
     stmts.push(dsl::var("sum_rho", "0.0"));
     stmts.push(dsl::var("sum_rho_u_x", "0.0"));
@@ -1386,15 +1387,33 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ));
 
         let inlet_velocity = Expr::ident("constants").field("inlet_velocity");
-        let eff_inlet = typed::MatExpr::<4, 4>::from_fn(|row, col| match col {
-            0 => {
-                let base = Expr::binary(jac_l.entry(row, 0), BinaryOp::Add, jac_r.entry(row, 0));
-                let extra = Expr::binary(jac_r.entry(row, 1), BinaryOp::Mul, inlet_velocity.clone());
-                Expr::binary(base, BinaryOp::Add, extra)
-            }
-            3 => Expr::binary(jac_l.entry(row, col), BinaryOp::Add, jac_r.entry(row, col)),
-            _ => jac_l.entry(row, col),
-        });
+        let t_inlet = typed::MatExpr::<4, 4>::from_entries([
+            [
+                Expr::lit_f32(1.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+            ],
+            [
+                inlet_velocity.clone(),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+            ],
+            [
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+            ],
+            [
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(0.0),
+                Expr::lit_f32(1.0),
+            ],
+        ]);
+        let eff_inlet = jac_l.add(&jac_r.mul_mat(&t_inlet));
         let inlet_block = dsl::block(eff_inlet.assign_op_to_prefix_scaled(
             AssignOp::Add,
             "diag",
@@ -1446,27 +1465,33 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
                 ),
             ]);
 
-            let eff_wall = typed::MatExpr::<4, 4>::from_fn(|row, col| match col {
-                1 => {
-                    let term1 = Expr::binary(jac_r.entry(row, 1), BinaryOp::Mul, Expr::ident("r11"));
-                    let term2 = Expr::binary(jac_r.entry(row, 2), BinaryOp::Mul, Expr::ident("r21"));
-                    Expr::binary(
-                        jac_l.entry(row, 1),
-                        BinaryOp::Add,
-                        Expr::binary(term1, BinaryOp::Add, term2),
-                    )
-                }
-                2 => {
-                    let term1 = Expr::binary(jac_r.entry(row, 1), BinaryOp::Mul, Expr::ident("r12"));
-                    let term2 = Expr::binary(jac_r.entry(row, 2), BinaryOp::Mul, Expr::ident("r22"));
-                    Expr::binary(
-                        jac_l.entry(row, 2),
-                        BinaryOp::Add,
-                        Expr::binary(term1, BinaryOp::Add, term2),
-                    )
-                }
-                _ => Expr::binary(jac_l.entry(row, col), BinaryOp::Add, jac_r.entry(row, col)),
-            });
+            let t_wall = typed::MatExpr::<4, 4>::from_entries([
+                [
+                    Expr::lit_f32(1.0),
+                    Expr::lit_f32(0.0),
+                    Expr::lit_f32(0.0),
+                    Expr::lit_f32(0.0),
+                ],
+                [
+                    Expr::lit_f32(0.0),
+                    Expr::ident("r11"),
+                    Expr::ident("r12"),
+                    Expr::lit_f32(0.0),
+                ],
+                [
+                    Expr::lit_f32(0.0),
+                    Expr::ident("r21"),
+                    Expr::ident("r22"),
+                    Expr::lit_f32(0.0),
+                ],
+                [
+                    Expr::lit_f32(0.0),
+                    Expr::lit_f32(0.0),
+                    Expr::lit_f32(0.0),
+                    Expr::lit_f32(1.0),
+                ],
+            ]);
+            let eff_wall = jac_l.add(&jac_r.mul_mat(&t_wall));
             wall.extend(eff_wall.assign_op_to_prefix_scaled(
                 AssignOp::Add,
                 "diag",
@@ -1526,18 +1551,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "rhs_time_rho_e + rhs_pseudo_rho_e - (coeff_time + coeff_pseudo) * rho_e - sum_rho_e",
     ));
 
-    stmts.extend(dsl::assign_op_matrix_diag(
-        AssignOp::Add,
-        "diag",
-        block_size as usize,
-        "coeff_time",
-    ));
-    stmts.extend(dsl::assign_op_matrix_diag(
-        AssignOp::Add,
-        "diag",
-        block_size as usize,
-        "coeff_pseudo",
-    ));
+    stmts.extend(diag_mat.assign_op_diag(AssignOp::Add, Expr::ident("coeff_time")));
+    stmts.extend(diag_mat.assign_op_diag(AssignOp::Add, Expr::ident("coeff_pseudo")));
 
     stmts.push(dsl::let_expr(
         "scalar_diag_idx",
@@ -1552,7 +1567,6 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ));
     let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
-    let diag_mat = typed::MatExpr::<4, 4>::from_prefix("diag");
     stmts.extend(diag_mat.scatter_assign_to_block_entry_scaled(&diag_entry, None));
 
     stmts.push(dsl::assign_array_access_linear(

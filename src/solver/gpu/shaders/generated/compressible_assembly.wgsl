@@ -572,20 +572,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             if (boundary_type == 1u) {
                 diag_00 += (0.0 - a_prod_scaled + a_prod_scaled + a_r * normal.x * constants.inlet_velocity) * area;
-                diag_01 += a_l * normal.x * area;
-                diag_02 += a_l * normal.y * area;
+                diag_01 += (a_l * normal.x + 0.0) * area;
+                diag_02 += (a_l * normal.y + 0.0) * area;
                 diag_03 += (0.0 + 0.0) * area;
                 diag_10 += (a_l * A_l_10 + d_diff_x_l_rho + a_r * A_r_10 + d_diff_x_r_rho + (a_r * A_r_11 + a_prod_scaled + d_diff_x_r_ru) * constants.inlet_velocity) * area;
-                diag_11 += (a_l * A_l_11 - a_prod_scaled + d_diff_x_l_ru) * area;
-                diag_12 += (a_l * A_l_12 + d_diff_x_l_rv) * area;
+                diag_11 += (a_l * A_l_11 - a_prod_scaled + d_diff_x_l_ru + 0.0) * area;
+                diag_12 += (a_l * A_l_12 + d_diff_x_l_rv + 0.0) * area;
                 diag_13 += (a_l * A_l_13 + d_diff_x_l_re + a_r * A_r_13 + d_diff_x_r_re) * area;
                 diag_20 += (a_l * A_l_20 + d_diff_y_l_rho + a_r * A_r_20 + d_diff_y_r_rho + (a_r * A_r_21 + d_diff_y_r_ru) * constants.inlet_velocity) * area;
-                diag_21 += (a_l * A_l_21 + d_diff_y_l_ru) * area;
-                diag_22 += (a_l * A_l_22 - a_prod_scaled + d_diff_y_l_rv) * area;
+                diag_21 += (a_l * A_l_21 + d_diff_y_l_ru + 0.0) * area;
+                diag_22 += (a_l * A_l_22 - a_prod_scaled + d_diff_y_l_rv + 0.0) * area;
                 diag_23 += (a_l * A_l_23 + d_diff_y_l_re + a_r * A_r_23 + d_diff_y_r_re) * area;
                 diag_30 += (a_l * A_l_30 + d_e_visc_l_rho + a_r * A_r_30 + d_e_visc_r_rho + (a_r * A_r_31 + d_e_visc_r_ru) * constants.inlet_velocity) * area;
-                diag_31 += (a_l * A_l_31 + d_e_visc_l_ru) * area;
-                diag_32 += (a_l * A_l_32 + d_e_visc_l_rv) * area;
+                diag_31 += (a_l * A_l_31 + d_e_visc_l_ru + 0.0) * area;
+                diag_32 += (a_l * A_l_32 + d_e_visc_l_rv + 0.0) * area;
                 diag_33 += (a_l * A_l_33 - a_prod_scaled + d_e_visc_l_re + a_r * A_r_33 + a_prod_scaled + d_e_visc_r_re) * area;
             } else {
                 if (boundary_type == 3u) {

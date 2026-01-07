@@ -1,6 +1,7 @@
+use super::dsl as typed;
+use super::dsl::EnumExpr;
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
-use super::dsl::EnumExpr;
 use crate::solver::scheme::Scheme;
 
 #[derive(Debug, Clone)]
@@ -10,7 +11,6 @@ pub struct ScalarReconstruction {
 }
 
 pub fn scalar_reconstruction(
-    prefix: &str,
     scheme: EnumExpr<Scheme>,
     flux: Expr,
     phi_own: Expr,
@@ -20,83 +20,91 @@ pub fn scalar_reconstruction(
     center: Expr,
     other_center: Expr,
     face_center: Expr,
-) -> (Vec<Stmt>, ScalarReconstruction) {
-    let phi_upwind = format!("phi_upwind_{prefix}");
-    let phi_ho = format!("phi_ho_{prefix}");
-
-    let mut stmts = Vec::new();
-    stmts.push(dsl::var_expr(&phi_upwind, phi_own));
-    stmts.push(dsl::if_block_expr(
-        flux.lt(0.0),
-        dsl::block(vec![dsl::assign_expr(
-            Expr::ident(&phi_upwind),
-            phi_neigh,
-        )]),
-        None,
-    ));
-    stmts.push(dsl::var_expr(&phi_ho, Expr::ident(&phi_upwind)));
-
+) -> ScalarReconstruction {
     let xy = |point: &Expr| dsl::vec2_f32(point.field("x"), point.field("y"));
 
-    let sou_block = dsl::block(vec![dsl::if_block_expr(
-        flux.gt(0.0),
-        dsl::block(vec![dsl::assign_expr(
-            Expr::ident(&phi_ho),
-            phi_own
-                + dsl::dot(
-                    dsl::vec2_f32_from_xy_fields(grad_own),
-                    xy(&face_center) - xy(&center),
-                ),
-        )]),
-        Some(dsl::block(vec![dsl::assign_expr(
-            Expr::ident(&phi_ho),
-            phi_neigh
-                + dsl::dot(
-                    dsl::vec2_f32_from_xy_fields(grad_neigh),
-                    xy(&face_center) - xy(&other_center),
-                ),
-        )])),
-    )]);
+    let phi_upwind = dsl::select(phi_own, phi_neigh, flux.lt(0.0));
 
-    let quick_block = dsl::block(vec![dsl::if_block_expr(
-        flux.gt(0.0),
-        dsl::block(vec![dsl::assign_expr(
-            Expr::ident(&phi_ho),
-            phi_own * 0.625
-                + phi_neigh * 0.375
-                + dsl::dot(
-                    dsl::vec2_f32_from_xy_fields(grad_own),
-                    xy(&other_center) - xy(&center),
-                ) * 0.125,
-        )]),
-        Some(dsl::block(vec![dsl::assign_expr(
-            Expr::ident(&phi_ho),
-            phi_neigh * 0.625
-                + phi_own * 0.375
-                + dsl::dot(
-                    dsl::vec2_f32_from_xy_fields(grad_neigh),
-                    xy(&center) - xy(&other_center),
-                ) * 0.125,
-        )])),
-    )]);
+    let sou_pos = phi_own
+        + dsl::dot(
+            dsl::vec2_f32_from_xy_fields(grad_own),
+            xy(&face_center) - xy(&center),
+        );
+    let sou_neg = phi_neigh
+        + dsl::dot(
+            dsl::vec2_f32_from_xy_fields(grad_neigh),
+            xy(&face_center) - xy(&other_center),
+        );
+    let phi_sou = dsl::select(sou_neg, sou_pos, flux.gt(0.0));
 
-    stmts.push(dsl::if_block_expr(
+    let quick_pos = phi_own * 0.625
+        + phi_neigh * 0.375
+        + dsl::dot(
+            dsl::vec2_f32_from_xy_fields(grad_own),
+            xy(&other_center) - xy(&center),
+        ) * 0.125;
+    let quick_neg = phi_neigh * 0.625
+        + phi_own * 0.375
+        + dsl::dot(
+            dsl::vec2_f32_from_xy_fields(grad_neigh),
+            xy(&center) - xy(&other_center),
+        ) * 0.125;
+    let phi_quick = dsl::select(quick_neg, quick_pos, flux.gt(0.0));
+
+    let phi_ho = dsl::select(
+        phi_upwind,
+        phi_sou,
         scheme.eq(Scheme::SecondOrderUpwind),
-        sou_block,
-        Some(dsl::block(vec![dsl::if_block_expr(
-            scheme.eq(Scheme::QUICK),
-            quick_block,
-            None,
-        )])),
-    ));
+    );
+    let phi_ho = dsl::select(phi_ho, phi_quick, scheme.eq(Scheme::QUICK));
 
-    (
-        stmts,
-        ScalarReconstruction {
-            phi_upwind: Expr::ident(&phi_upwind),
-            phi_ho: Expr::ident(&phi_ho),
-        },
-    )
+    ScalarReconstruction { phi_upwind, phi_ho }
+}
+
+#[derive(Debug, Clone)]
+pub struct Vec2Reconstruction {
+    pub phi_upwind: typed::VecExpr<2>,
+    pub phi_ho: typed::VecExpr<2>,
+}
+
+pub fn vec2_reconstruction_xy(
+    scheme: EnumExpr<Scheme>,
+    flux: Expr,
+    phi_own: typed::VecExpr<2>,
+    phi_neigh: typed::VecExpr<2>,
+    grad_own: [Expr; 2],
+    grad_neigh: [Expr; 2],
+    center: Expr,
+    other_center: Expr,
+    face_center: Expr,
+) -> Vec2Reconstruction {
+    let rec_x = scalar_reconstruction(
+        scheme,
+        flux,
+        phi_own.component(0),
+        phi_neigh.component(0),
+        grad_own[0],
+        grad_neigh[0],
+        center,
+        other_center,
+        face_center,
+    );
+    let rec_y = scalar_reconstruction(
+        scheme,
+        flux,
+        phi_own.component(1),
+        phi_neigh.component(1),
+        grad_own[1],
+        grad_neigh[1],
+        center,
+        other_center,
+        face_center,
+    );
+
+    Vec2Reconstruction {
+        phi_upwind: typed::VecExpr::<2>::from_components([rec_x.phi_upwind, rec_y.phi_upwind]),
+        phi_ho: typed::VecExpr::<2>::from_components([rec_x.phi_ho, rec_y.phi_ho]),
+    }
 }
 
 pub fn limited_linear_reconstruct_face(

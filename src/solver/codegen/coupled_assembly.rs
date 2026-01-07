@@ -2,7 +2,7 @@ use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::dsl as typed;
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
-use super::reconstruction::scalar_reconstruction;
+use super::reconstruction::vec2_reconstruction_xy;
 use super::state_access::{state_scalar, state_vec2};
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::model::IncompressibleMomentumFields;
@@ -852,36 +852,27 @@ fn main_body(
                             state_vec2(layout, "state", "other_idx", u_field),
                         ),
                     ];
-                    let (u_stmts, u_vars) = scalar_reconstruction(
-                        "u",
+                    let recon = vec2_reconstruction_xy(
                         scheme,
                         Expr::ident("flux"),
-                        Expr::ident("u_own").field("x"),
-                        Expr::ident("u_neigh").field("x"),
-                        Expr::ident("grad_u").index(Expr::ident("idx")),
-                        Expr::ident("grad_u").index(Expr::ident("other_idx")),
+                        typed::VecExpr::<2>::from_expr(Expr::ident("u_own")),
+                        typed::VecExpr::<2>::from_expr(Expr::ident("u_neigh")),
+                        [
+                            Expr::ident("grad_u").index(Expr::ident("idx")),
+                            Expr::ident("grad_v").index(Expr::ident("idx")),
+                        ],
+                        [
+                            Expr::ident("grad_u").index(Expr::ident("other_idx")),
+                            Expr::ident("grad_v").index(Expr::ident("other_idx")),
+                        ],
                         Expr::ident("center"),
                         Expr::ident("other_center"),
                         Expr::ident("f_center"),
                     );
-                    ho_block.extend(u_stmts);
-                    let (v_stmts, v_vars) = scalar_reconstruction(
-                        "v",
-                        scheme,
-                        Expr::ident("flux"),
-                        Expr::ident("u_own").field("y"),
-                        Expr::ident("u_neigh").field("y"),
-                        Expr::ident("grad_v").index(Expr::ident("idx")),
-                        Expr::ident("grad_v").index(Expr::ident("other_idx")),
-                        Expr::ident("center"),
-                        Expr::ident("other_center"),
-                        Expr::ident("f_center"),
-                    );
-                    ho_block.extend(v_stmts);
-                    let phi_ho = typed::VecExpr::<2>::from_components([u_vars.phi_ho, v_vars.phi_ho]);
-                    let phi_upwind =
-                        typed::VecExpr::<2>::from_components([u_vars.phi_upwind, v_vars.phi_upwind]);
-                    let correction = phi_ho.sub(&phi_upwind).mul_scalar(Expr::ident("flux"));
+                    let correction = recon
+                        .phi_ho
+                        .sub(&recon.phi_upwind)
+                        .mul_scalar(Expr::ident("flux"));
                     ho_block.push(dsl::assign_op_expr(
                         AssignOp::Sub,
                         Expr::ident("rhs_uv"),

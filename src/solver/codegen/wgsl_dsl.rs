@@ -20,6 +20,13 @@ pub fn smoothstep(edge0: impl Into<Expr>, edge1: impl Into<Expr>, x: impl Into<E
     Expr::call_named("smoothstep", vec![edge0.into(), edge1.into(), x.into()])
 }
 
+pub fn select(false_value: impl Into<Expr>, true_value: impl Into<Expr>, condition: impl Into<Expr>) -> Expr {
+    Expr::call_named(
+        "select",
+        vec![false_value.into(), true_value.into(), condition.into()],
+    )
+}
+
 pub fn sqrt(x: impl Into<Expr>) -> Expr {
     Expr::call_named("sqrt", vec![x.into()])
 }

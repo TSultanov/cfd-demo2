@@ -20,6 +20,7 @@ use super::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, P
 use super::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
 use super::profiling::ProfileCategory;
 use super::structs::{GpuSolver, LinearSolverStats};
+use crate::solver::model::incompressible_momentum_model;
 use std::time::Instant;
 
 /// Enable debug reads for diagnosing matrix assembly issues.
@@ -390,6 +391,7 @@ impl GpuSolver {
                     0,
                 );
                 let res = self.coupled_resources.as_ref().unwrap();
+                let unknowns_per_cell = incompressible_momentum_model().system.unknowns_per_cell();
 
                 // Read diagonal entries (sample first few) - DEBUG READS
                 let read_start = Instant::now();
@@ -405,12 +407,12 @@ impl GpuSolver {
 
                 let read_start = Instant::now();
                 let rhs_vals =
-                    pollster::block_on(self.read_buffer_f32(&res.b_rhs, self.num_cells * 3));
+                    pollster::block_on(self.read_buffer_f32(&res.b_rhs, self.num_cells * unknowns_per_cell));
                 self.profiling_stats.record_location(
                     "coupled:debug_read_rhs",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
-                    (self.num_cells as u64) * 3 * 4,
+                    (self.num_cells as u64) * unknowns_per_cell as u64 * 4,
                 );
 
                 let read_start = Instant::now();
@@ -427,13 +429,13 @@ impl GpuSolver {
                 let num_cells = self.num_cells as usize;
                 let read_start = Instant::now();
                 let row_offsets = pollster::block_on(
-                    self.read_buffer_u32(&res.b_row_offsets, self.num_cells * 3 + 1),
+                    self.read_buffer_u32(&res.b_row_offsets, self.num_cells * unknowns_per_cell + 1),
                 );
                 self.profiling_stats.record_location(
                     "coupled:debug_read_row_offsets",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
-                    ((self.num_cells * 3 + 1) as u64) * 4,
+                    ((self.num_cells * unknowns_per_cell + 1) as u64) * 4,
                 );
 
                 // Sample diagonal for each equation type - look for actual diagonal

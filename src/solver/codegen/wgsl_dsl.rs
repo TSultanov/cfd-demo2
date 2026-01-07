@@ -1,5 +1,41 @@
 use super::wgsl_ast::{AssignOp, Block, Expr, ForInit, ForStep, Stmt, Type};
 
+pub fn abs(x: Expr) -> Expr {
+    Expr::call_named("abs", vec![x])
+}
+
+pub fn min(lhs: Expr, rhs: Expr) -> Expr {
+    Expr::call_named("min", vec![lhs, rhs])
+}
+
+pub fn max(lhs: Expr, rhs: Expr) -> Expr {
+    Expr::call_named("max", vec![lhs, rhs])
+}
+
+pub fn clamp(x: Expr, min_val: Expr, max_val: Expr) -> Expr {
+    Expr::call_named("clamp", vec![x, min_val, max_val])
+}
+
+pub fn smoothstep(edge0: Expr, edge1: Expr, x: Expr) -> Expr {
+    Expr::call_named("smoothstep", vec![edge0, edge1, x])
+}
+
+pub fn sqrt(x: Expr) -> Expr {
+    Expr::call_named("sqrt", vec![x])
+}
+
+pub fn length(x: Expr) -> Expr {
+    Expr::call_named("length", vec![x])
+}
+
+pub fn distance(a: Expr, b: Expr) -> Expr {
+    Expr::call_named("distance", vec![a, b])
+}
+
+pub fn dot(lhs: Expr, rhs: Expr) -> Expr {
+    Expr::call_named("dot", vec![lhs, rhs])
+}
+
 pub fn vec2_f32(x: Expr, y: Expr) -> Expr {
     Expr::call_named("vec2<f32>", vec![x, y])
 }
@@ -14,15 +50,15 @@ pub fn vec2_f32_from_xy_fields(value: Expr) -> Expr {
 }
 
 pub fn dot_expr(lhs: Expr, rhs: Expr) -> Expr {
-    Expr::call_named("dot", vec![lhs, rhs])
+    dot(lhs, rhs)
 }
 
 pub fn min_expr(lhs: Expr, rhs: Expr) -> Expr {
-    Expr::call_named("min", vec![lhs, rhs])
+    min(lhs, rhs)
 }
 
 pub fn max_expr(lhs: Expr, rhs: Expr) -> Expr {
-    Expr::call_named("max", vec![lhs, rhs])
+    max(lhs, rhs)
 }
 
 pub fn array_access(array: &str, index: Expr) -> Expr {
@@ -290,5 +326,17 @@ mod tests {
             }
             _ => panic!("expected assign stmt"),
         }
+    }
+
+    #[test]
+    fn dsl_builds_common_builtin_calls() {
+        assert_eq!(
+            max(Expr::ident("a"), Expr::ident("b")).to_string(),
+            "max(a, b)"
+        );
+        assert_eq!(
+            smoothstep(Expr::lit_f32(0.0), Expr::lit_f32(1.0), Expr::ident("x")).to_string(),
+            "smoothstep(0.0, 1.0, x)"
+        );
     }
 }

@@ -637,8 +637,11 @@ impl Expr {
         })
     }
 
-    pub fn index(self, index: Expr) -> Self {
-        Expr::alloc(ExprNode::Index { base: self, index })
+    pub fn index(self, index: impl Into<Expr>) -> Self {
+        Expr::alloc(ExprNode::Index {
+            base: self,
+            index: index.into(),
+        })
     }
 
     pub fn call(callee: Expr, args: Vec<Expr>) -> Self {
@@ -653,28 +656,28 @@ impl Expr {
         Expr::unary(UnaryOp::AddressOf, self)
     }
 
-    pub fn lt(self, rhs: Expr) -> Self {
-        Expr::binary(self, BinaryOp::Less, rhs)
+    pub fn lt(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::Less, rhs.into())
     }
 
-    pub fn le(self, rhs: Expr) -> Self {
-        Expr::binary(self, BinaryOp::LessEq, rhs)
+    pub fn le(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::LessEq, rhs.into())
     }
 
-    pub fn gt(self, rhs: Expr) -> Self {
-        Expr::binary(self, BinaryOp::Greater, rhs)
+    pub fn gt(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::Greater, rhs.into())
     }
 
-    pub fn ge(self, rhs: Expr) -> Self {
-        Expr::binary(self, BinaryOp::GreaterEq, rhs)
+    pub fn ge(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::GreaterEq, rhs.into())
     }
 
-    pub fn eq(self, rhs: Expr) -> Self {
-        Expr::binary(self, BinaryOp::Equal, rhs)
+    pub fn eq(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::Equal, rhs.into())
     }
 
-    pub fn ne(self, rhs: Expr) -> Self {
-        Expr::binary(self, BinaryOp::NotEqual, rhs)
+    pub fn ne(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::NotEqual, rhs.into())
     }
 
     pub fn try_call_named(self, name: &str) -> Option<Vec<Expr>> {
@@ -887,11 +890,92 @@ fn expr_precedence(expr: Expr) -> Precedence {
     })
 }
 
+impl From<&str> for Expr {
+    fn from(value: &str) -> Self {
+        Expr::ident(value)
+    }
+}
+
+impl From<String> for Expr {
+    fn from(value: String) -> Self {
+        Expr::ident(value)
+    }
+}
+
+impl From<bool> for Expr {
+    fn from(value: bool) -> Self {
+        Expr::lit_bool(value)
+    }
+}
+
+impl From<i32> for Expr {
+    fn from(value: i32) -> Self {
+        Expr::lit_i32(value)
+    }
+}
+
+impl From<u32> for Expr {
+    fn from(value: u32) -> Self {
+        Expr::lit_u32(value)
+    }
+}
+
+impl From<usize> for Expr {
+    fn from(value: usize) -> Self {
+        let value = u32::try_from(value).expect("usize literal does not fit in u32");
+        Expr::lit_u32(value)
+    }
+}
+
+impl From<f32> for Expr {
+    fn from(value: f32) -> Self {
+        Expr::lit_f32(value)
+    }
+}
+
+impl From<f64> for Expr {
+    fn from(value: f64) -> Self {
+        Expr::lit_f32(value as f32)
+    }
+}
+
 impl std::ops::Add for Expr {
     type Output = Expr;
 
     fn add(self, rhs: Expr) -> Self::Output {
         Expr::binary(self, BinaryOp::Add, rhs)
+    }
+}
+
+impl std::ops::Add<u32> for Expr {
+    type Output = Expr;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        self + Expr::from(rhs)
+    }
+}
+
+impl std::ops::Add<f32> for Expr {
+    type Output = Expr;
+
+    fn add(self, rhs: f32) -> Self::Output {
+        self + Expr::from(rhs)
+    }
+}
+
+impl std::ops::Add<&str> for Expr {
+    type Output = Expr;
+
+    fn add(self, rhs: &str) -> Self::Output {
+        self + Expr::from(rhs)
+    }
+}
+
+impl std::ops::Add<String> for Expr {
+    type Output = Expr;
+
+    fn add(self, rhs: String) -> Self::Output {
+        self + Expr::from(rhs)
     }
 }
 
@@ -903,6 +987,38 @@ impl std::ops::Sub for Expr {
     }
 }
 
+impl std::ops::Sub<u32> for Expr {
+    type Output = Expr;
+
+    fn sub(self, rhs: u32) -> Self::Output {
+        self - Expr::from(rhs)
+    }
+}
+
+impl std::ops::Sub<f32> for Expr {
+    type Output = Expr;
+
+    fn sub(self, rhs: f32) -> Self::Output {
+        self - Expr::from(rhs)
+    }
+}
+
+impl std::ops::Sub<&str> for Expr {
+    type Output = Expr;
+
+    fn sub(self, rhs: &str) -> Self::Output {
+        self - Expr::from(rhs)
+    }
+}
+
+impl std::ops::Sub<String> for Expr {
+    type Output = Expr;
+
+    fn sub(self, rhs: String) -> Self::Output {
+        self - Expr::from(rhs)
+    }
+}
+
 impl std::ops::Mul for Expr {
     type Output = Expr;
 
@@ -911,11 +1027,75 @@ impl std::ops::Mul for Expr {
     }
 }
 
+impl std::ops::Mul<u32> for Expr {
+    type Output = Expr;
+
+    fn mul(self, rhs: u32) -> Self::Output {
+        self * Expr::from(rhs)
+    }
+}
+
+impl std::ops::Mul<f32> for Expr {
+    type Output = Expr;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        self * Expr::from(rhs)
+    }
+}
+
+impl std::ops::Mul<&str> for Expr {
+    type Output = Expr;
+
+    fn mul(self, rhs: &str) -> Self::Output {
+        self * Expr::from(rhs)
+    }
+}
+
+impl std::ops::Mul<String> for Expr {
+    type Output = Expr;
+
+    fn mul(self, rhs: String) -> Self::Output {
+        self * Expr::from(rhs)
+    }
+}
+
 impl std::ops::Div for Expr {
     type Output = Expr;
 
     fn div(self, rhs: Expr) -> Self::Output {
         Expr::binary(self, BinaryOp::Div, rhs)
+    }
+}
+
+impl std::ops::Div<u32> for Expr {
+    type Output = Expr;
+
+    fn div(self, rhs: u32) -> Self::Output {
+        self / Expr::from(rhs)
+    }
+}
+
+impl std::ops::Div<f32> for Expr {
+    type Output = Expr;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        self / Expr::from(rhs)
+    }
+}
+
+impl std::ops::Div<&str> for Expr {
+    type Output = Expr;
+
+    fn div(self, rhs: &str) -> Self::Output {
+        self / Expr::from(rhs)
+    }
+}
+
+impl std::ops::Div<String> for Expr {
+    type Output = Expr;
+
+    fn div(self, rhs: String) -> Self::Output {
+        self / Expr::from(rhs)
     }
 }
 
@@ -943,11 +1123,27 @@ impl std::ops::BitAnd for Expr {
     }
 }
 
+impl std::ops::BitAnd<bool> for Expr {
+    type Output = Expr;
+
+    fn bitand(self, rhs: bool) -> Self::Output {
+        self & Expr::from(rhs)
+    }
+}
+
 impl std::ops::BitOr for Expr {
     type Output = Expr;
 
     fn bitor(self, rhs: Expr) -> Self::Output {
         Expr::binary(self, BinaryOp::Or, rhs)
+    }
+}
+
+impl std::ops::BitOr<bool> for Expr {
+    type Output = Expr;
+
+    fn bitor(self, rhs: bool) -> Self::Output {
+        self | Expr::from(rhs)
     }
 }
 
@@ -1047,6 +1243,27 @@ mod tests {
             .field("u")
             .field("x");
         assert_eq!(expr.to_string(), "state[idx].u.x");
+    }
+
+    #[test]
+    fn expr_converts_strings_and_numbers() {
+        let expr: Expr = "x".into();
+        assert_eq!(expr.to_string(), "x");
+
+        let expr = Expr::ident("x") + 1u32;
+        assert_eq!(expr.to_string(), "x + 1u");
+
+        let expr = Expr::ident("x") + 1.0;
+        assert_eq!(expr.to_string(), "x + 1.0");
+
+        let expr = Expr::ident("arr").index(0);
+        assert_eq!(expr.to_string(), "arr[0]");
+
+        let expr = Expr::ident("neighbor").ne(-1);
+        assert_eq!(expr.to_string(), "neighbor != -1");
+
+        let expr = Expr::ident("cond") & true;
+        assert_eq!(expr.to_string(), "cond && true");
     }
 
     #[test]

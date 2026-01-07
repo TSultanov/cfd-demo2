@@ -540,13 +540,10 @@ fn main_body(
     let inlet_block = dsl::block(vec![
         dsl::let_expr(
             "ramp",
-            Expr::call_named(
-                "smoothstep",
-                vec![
-                    Expr::lit_f32(0.0),
-                    Expr::ident("constants").field("ramp_time"),
-                    Expr::ident("constants").field("time"),
-                ],
+            dsl::smoothstep(
+                Expr::lit_f32(0.0),
+                Expr::ident("constants").field("ramp_time"),
+                Expr::ident("constants").field("time"),
             ),
         ),
         dsl::let_typed_expr(
@@ -995,13 +992,10 @@ fn main_body(
     let inlet_vel = dsl::block(vec![
         dsl::let_expr(
             "ramp",
-            Expr::call_named(
-                "smoothstep",
-                vec![
-                    Expr::lit_f32(0.0),
-                    Expr::ident("constants").field("ramp_time"),
-                    Expr::ident("constants").field("time"),
-                ],
+            dsl::smoothstep(
+                Expr::lit_f32(0.0),
+                Expr::ident("constants").field("ramp_time"),
+                Expr::ident("constants").field("time"),
             ),
         ),
         dsl::assign_expr(

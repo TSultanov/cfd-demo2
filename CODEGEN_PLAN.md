@@ -36,6 +36,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Plumbed the same scheme expansion result into the incompressible coupled solver loop via `GpuSolver.scheme_needs_gradients` (replacing direct `scheme != 0` checks) (`src/solver/gpu/solver.rs`, `src/solver/gpu/coupled_solver.rs`).
 - Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
 - Added a first **generic boundary-condition** representation (`BoundarySpec` on `ModelSpec`) plus a helper to build GPU BC tables and a generic BC path in the generic coupled assembly kernel (Dirichlet + Neumann/zeroGradient for diffusion) (`src/solver/model/definitions.rs`, `src/solver/codegen/generic_coupled_kernels.rs`).
+- Added `ModelSpec.id` and emit generic coupled kernels under id-suffixed WGSL names (so multiple generated-per-model variants can coexist) and a first runtime backend for `ModelFields::GenericCoupled` in `GpuUnifiedSolver` (`src/solver/codegen/emit.rs`, `src/solver/gpu/generic_coupled_solver.rs`, `src/solver/gpu/unified_solver.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:

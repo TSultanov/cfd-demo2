@@ -9,6 +9,7 @@ pub mod coupled_solver_fgmres;
 pub mod csr;
 pub mod enums;
 pub mod execution_plan;
+pub mod generic_coupled_solver;
 pub mod init;
 pub mod kernel_graph;
 pub mod linear_solver;
@@ -20,6 +21,7 @@ pub mod unified_solver;
 
 pub use async_buffer::{AsyncScalarReader, AsyncStagingBuffer};
 pub use compressible_solver::GpuCompressibleSolver;
+pub use generic_coupled_solver::GpuGenericCoupledSolver;
 pub use profiling::{ProfileCategory, ProfilingStats};
 pub use structs::GpuSolver;
 pub use unified_solver::{GpuUnifiedSolver, SolverConfig, UnifiedSolverBackend};

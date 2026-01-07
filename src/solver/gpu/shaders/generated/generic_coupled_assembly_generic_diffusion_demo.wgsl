@@ -118,15 +118,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     var diag_0: f32 = 0.0;
     var rhs_0: f32 = 0.0;
-    diag_0 += vol * constants.density / constants.dt;
-    rhs_0 += vol * constants.density / constants.dt * state_old[idx * 1u + 0u];
+    diag_0 += vol * 1.0 / constants.dt;
+    rhs_0 += vol * 1.0 / constants.dt * state_old[idx * 1u + 0u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
-        let diag_bdf2 = vol * constants.density / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
+        let diag_bdf2 = vol * 1.0 / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        diag_0 = diag_0 - vol * constants.density / constants.dt + diag_bdf2;
-        rhs_0 = rhs_0 - vol * constants.density / constants.dt * state_old[idx * 1u + 0u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 1u + 0u] - factor_nm1 * state_old_old[idx * 1u + 0u]);
+        diag_0 = diag_0 - vol * 1.0 / constants.dt + diag_bdf2;
+        rhs_0 = rhs_0 - vol * 1.0 / constants.dt * state_old[idx * 1u + 0u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 1u + 0u] - factor_nm1 * state_old_old[idx * 1u + 0u]);
     }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
@@ -158,7 +158,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dx = other_center.x - center.x;
         let dy = other_center.y - center.y;
         let dist_proj = abs(dx * normal.x + dy * normal.y);
-        let dist = max(dist_proj, 0.000001);
+        let dist_euc = sqrt(dx * dx + dy * dy);
+        var dist: f32 = max(dist_euc, 0.000001);
+        if (dist_proj > 0.000001) {
+            dist = dist_proj;
+        }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
         let diff_coeff_phi = 1.0 * area / dist;

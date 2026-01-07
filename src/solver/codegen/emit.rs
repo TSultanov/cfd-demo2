@@ -64,22 +64,26 @@ pub fn write_wgsl_in_dir(
     write_wgsl_file(system, output_path)
 }
 
-fn kernel_output_name(kind: KernelKind) -> &'static str {
+fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
     match kind {
-        KernelKind::PrepareCoupled => "prepare_coupled.wgsl",
-        KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl",
-        KernelKind::PressureAssembly => "pressure_assembly.wgsl",
-        KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl",
-        KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl",
-        KernelKind::IncompressibleMomentum => "incompressible_momentum.wgsl",
-        KernelKind::CompressibleAssembly => "compressible_assembly.wgsl",
-        KernelKind::CompressibleApply => "compressible_apply.wgsl",
-        KernelKind::CompressibleGradients => "compressible_gradients.wgsl",
-        KernelKind::CompressibleUpdate => "compressible_update.wgsl",
-        KernelKind::CompressibleFluxKt => "compressible_flux_kt.wgsl",
-        KernelKind::GenericCoupledAssembly => "generic_coupled_assembly.wgsl",
-        KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl",
-        KernelKind::GenericCoupledUpdate => "generic_coupled_update.wgsl",
+        KernelKind::PrepareCoupled => "prepare_coupled.wgsl".to_string(),
+        KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl".to_string(),
+        KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
+        KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl".to_string(),
+        KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
+        KernelKind::IncompressibleMomentum => "incompressible_momentum.wgsl".to_string(),
+        KernelKind::CompressibleAssembly => "compressible_assembly.wgsl".to_string(),
+        KernelKind::CompressibleApply => "compressible_apply.wgsl".to_string(),
+        KernelKind::CompressibleGradients => "compressible_gradients.wgsl".to_string(),
+        KernelKind::CompressibleUpdate => "compressible_update.wgsl".to_string(),
+        KernelKind::CompressibleFluxKt => "compressible_flux_kt.wgsl".to_string(),
+        KernelKind::GenericCoupledAssembly => {
+            format!("generic_coupled_assembly_{}.wgsl", model.id)
+        }
+        KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
+        KernelKind::GenericCoupledUpdate => {
+            format!("generic_coupled_update_{}.wgsl", model.id)
+        }
     }
 }
 
@@ -191,7 +195,7 @@ pub fn emit_model_kernel_wgsl_with_schemes(
     let wgsl = generate_kernel_wgsl(model, schemes, kind).map_err(|err| {
         std::io::Error::new(std::io::ErrorKind::Other, err)
     })?;
-    let output_path = generated_dir_for(base_dir).join(kernel_output_name(kind));
+    let output_path = generated_dir_for(base_dir).join(kernel_output_name(model, kind));
     if let Ok(existing) = fs::read_to_string(&output_path) {
         if existing == wgsl {
             return Ok(output_path);
@@ -317,7 +321,7 @@ mod tests {
         let plan = model.kernel_plan();
         assert_eq!(outputs.len(), plan.kernels().len());
         for kind in plan.kernels() {
-            let expected = generated_dir_for(&base_dir).join(kernel_output_name(*kind));
+            let expected = generated_dir_for(&base_dir).join(kernel_output_name(&model, *kind));
             assert!(expected.exists());
             assert!(outputs.contains(&expected));
         }
@@ -333,7 +337,7 @@ mod tests {
         let plan = model.kernel_plan();
         assert_eq!(outputs.len(), plan.kernels().len());
         for kind in plan.kernels() {
-            let expected = generated_dir_for(&base_dir).join(kernel_output_name(*kind));
+            let expected = generated_dir_for(&base_dir).join(kernel_output_name(&model, *kind));
             assert!(expected.exists());
             assert!(outputs.contains(&expected));
         }

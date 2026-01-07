@@ -411,7 +411,7 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
             layout,
             ddt_op.coeff.as_ref(),
             "idx",
-            Expr::ident("constants").field("density"),
+            1.0.into(),
         );
         let base_coeff =
             Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
@@ -563,7 +563,16 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
                     + Expr::ident("dy") * Expr::ident("normal").field("y"),
             ),
         ));
-        body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
+        body.push(dsl::let_expr(
+            "dist_euc",
+            dsl::sqrt(Expr::ident("dx") * Expr::ident("dx") + Expr::ident("dy") * Expr::ident("dy")),
+        ));
+        body.push(dsl::var_typed_expr("dist", Type::F32, Some(dsl::max("dist_euc", 1e-6))));
+        body.push(dsl::if_block_expr(
+            Expr::ident("dist_proj").gt(1e-6),
+            dsl::block(vec![dsl::assign_expr(Expr::ident("dist"), Expr::ident("dist_proj"))]),
+            None,
+        ));
 
         body.push(dsl::let_expr(
             "scalar_mat_idx",
@@ -590,7 +599,7 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
                 layout,
                 diff_op.coeff.as_ref(),
                 "idx",
-                Expr::ident("constants").field("viscosity"),
+                1.0.into(),
             );
 
             let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());

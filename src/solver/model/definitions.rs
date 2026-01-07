@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
+    pub id: &'static str,
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub fields: ModelFields,
@@ -357,6 +358,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_component,
     ]);
     ModelSpec {
+        id: "incompressible_momentum",
         system,
         state_layout: layout,
         fields: ModelFields::Incompressible(fields),
@@ -369,6 +371,7 @@ pub fn compressible_model() -> ModelSpec {
     let system = build_compressible_system(&fields);
     let layout = StateLayout::new(vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.u]);
     ModelSpec {
+        id: "compressible",
         system,
         state_layout: layout,
         fields: ModelFields::Compressible(fields),
@@ -406,6 +409,7 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
             ),
     );
     ModelSpec {
+        id: "generic_diffusion_demo",
         system,
         state_layout: layout,
         fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),

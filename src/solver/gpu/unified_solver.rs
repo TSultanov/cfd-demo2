@@ -1,4 +1,5 @@
 use crate::solver::gpu::compressible_solver::GpuCompressibleSolver;
+use crate::solver::gpu::generic_coupled_solver::GpuGenericCoupledSolver;
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
@@ -25,6 +26,7 @@ impl Default for SolverConfig {
 pub enum UnifiedSolverBackend {
     Incompressible(GpuSolver),
     Compressible(GpuCompressibleSolver),
+    GenericCoupled(GpuGenericCoupledSolver),
 }
 
 impl std::fmt::Debug for UnifiedSolverBackend {
@@ -33,6 +35,9 @@ impl std::fmt::Debug for UnifiedSolverBackend {
             UnifiedSolverBackend::Incompressible(_) => f.write_str("Incompressible(GpuSolver)"),
             UnifiedSolverBackend::Compressible(_) => {
                 f.write_str("Compressible(GpuCompressibleSolver)")
+            }
+            UnifiedSolverBackend::GenericCoupled(_) => {
+                f.write_str("GenericCoupled(GpuGenericCoupledSolver)")
             }
         }
     }
@@ -64,7 +69,9 @@ impl GpuUnifiedSolver {
                 UnifiedSolverBackend::Compressible(solver)
             }
             ModelFields::GenericCoupled(_) => {
-                return Err("GpuUnifiedSolver does not support GenericCoupled models yet".to_string());
+                let mut solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
+                apply_config_incompressible(&mut solver.linear, config);
+                UnifiedSolverBackend::GenericCoupled(solver)
             }
         };
 
@@ -87,6 +94,7 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.num_cells,
             UnifiedSolverBackend::Compressible(solver) => solver.num_cells,
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.num_cells,
         }
     }
 
@@ -94,6 +102,7 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.constants.time,
             UnifiedSolverBackend::Compressible(solver) => solver.constants.time,
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.constants.time,
         }
     }
 
@@ -101,6 +110,7 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.constants.dt,
             UnifiedSolverBackend::Compressible(solver) => solver.constants.dt,
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.constants.dt,
         }
     }
 
@@ -108,6 +118,7 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => &solver.b_state,
             UnifiedSolverBackend::Compressible(solver) => &solver.b_state,
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.state_buffer(),
         }
     }
 
@@ -115,6 +126,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_dt(dt),
             UnifiedSolverBackend::Compressible(solver) => solver.set_dt(dt),
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_dt(dt),
         }
     }
 
@@ -122,6 +134,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(_) => {}
             UnifiedSolverBackend::Compressible(solver) => solver.set_dtau(dtau),
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -129,6 +142,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_viscosity(mu),
             UnifiedSolverBackend::Compressible(solver) => solver.set_viscosity(mu),
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_viscosity(mu),
         }
     }
 
@@ -136,6 +150,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_density(rho),
             UnifiedSolverBackend::Compressible(_) => {}
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_density(rho),
         }
     }
 
@@ -143,6 +158,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_alpha_u(alpha_u),
             UnifiedSolverBackend::Compressible(solver) => solver.set_alpha_u(alpha_u),
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_alpha_u(alpha_u),
         }
     }
 
@@ -150,6 +166,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_alpha_p(alpha_p),
             UnifiedSolverBackend::Compressible(_) => {}
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_alpha_p(alpha_p),
         }
     }
 
@@ -157,6 +174,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_inlet_velocity(velocity),
             UnifiedSolverBackend::Compressible(solver) => solver.set_inlet_velocity(velocity),
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_inlet_velocity(velocity),
         }
     }
 
@@ -164,6 +182,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_ramp_time(time),
             UnifiedSolverBackend::Compressible(_) => {}
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_ramp_time(time),
         }
     }
 
@@ -172,6 +191,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_scheme(scheme.gpu_id()),
             UnifiedSolverBackend::Compressible(solver) => solver.set_scheme(scheme.gpu_id()),
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_scheme(scheme.gpu_id()),
         }
     }
 
@@ -180,6 +200,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_time_scheme(scheme as u32),
             UnifiedSolverBackend::Compressible(solver) => solver.set_time_scheme(scheme as u32),
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_time_scheme(scheme as u32),
         }
     }
 
@@ -190,6 +211,7 @@ impl GpuUnifiedSolver {
             UnifiedSolverBackend::Compressible(solver) => {
                 solver.set_precond_type(preconditioner as u32)
             }
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_precond_type(preconditioner),
         }
     }
 
@@ -197,6 +219,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(_) => {}
             UnifiedSolverBackend::Compressible(solver) => solver.set_outer_iters(iters),
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -210,6 +233,7 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.should_stop,
             UnifiedSolverBackend::Compressible(_) => false,
+            UnifiedSolverBackend::GenericCoupled(_) => false,
         }
     }
 
@@ -239,6 +263,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_u(u),
             UnifiedSolverBackend::Compressible(_) => {}
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -246,6 +271,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_p(p),
             UnifiedSolverBackend::Compressible(_) => {}
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -253,6 +279,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(_) => {}
             UnifiedSolverBackend::Compressible(solver) => solver.set_uniform_state(rho, u, p),
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -260,6 +287,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(_) => {}
             UnifiedSolverBackend::Compressible(solver) => solver.set_state_fields(rho, u, p),
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -267,6 +295,9 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.step(),
             UnifiedSolverBackend::Compressible(solver) => solver.step(),
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                let _ = solver.step();
+            }
         }
     }
 
@@ -274,6 +305,7 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.initialize_history(),
             UnifiedSolverBackend::Compressible(solver) => solver.initialize_history(),
+            UnifiedSolverBackend::GenericCoupled(_) => {}
         }
     }
 
@@ -289,6 +321,24 @@ impl GpuUnifiedSolver {
                 let raw = solver.read_buffer(&solver.b_state, bytes).await;
                 bytemuck::cast_slice(&raw).to_vec()
             }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                let raw = solver.linear.read_buffer(solver.state_buffer(), bytes).await;
+                bytemuck::cast_slice(&raw).to_vec()
+            }
+        }
+    }
+
+    pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
+        match &mut self.backend {
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.set_field_scalar(field, values),
+            _ => Err("set_field_scalar is supported for GenericCoupled models only".to_string()),
+        }
+    }
+
+    pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
+        match &self.backend {
+            UnifiedSolverBackend::GenericCoupled(solver) => solver.get_field_scalar(field).await,
+            _ => Err("get_field_scalar is supported for GenericCoupled models only".to_string()),
         }
     }
 

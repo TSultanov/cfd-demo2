@@ -12,8 +12,10 @@ pub mod linear_solver;
 pub mod profiling;
 pub mod solver;
 pub mod structs;
+pub mod unified_solver;
 
 pub use async_buffer::{AsyncScalarReader, AsyncStagingBuffer};
 pub use compressible_solver::GpuCompressibleSolver;
 pub use profiling::{ProfileCategory, ProfilingStats};
 pub use structs::GpuSolver;
+pub use unified_solver::{GpuUnifiedSolver, SolverConfig, UnifiedSolverBackend};

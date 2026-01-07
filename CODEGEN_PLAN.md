@@ -4,7 +4,14 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 
 ## Current Status
 - WGSL is generated from a real AST (`src/solver/codegen/wgsl_ast.rs`) with a precedence-aware renderer.
-- `wgsl_dsl` is AST-only (no string parsing helpers remain); `src/solver/codegen/*` kernels do not build expressions via strings.
+- `Expr` is a `Copy` handle backed by an internal arena; expression nodes and low-level ops are private so expressions must be built via:
+  - overloaded operators (`+ - * /`, unary `-`, `&`/`|` for `&&`/`||`)
+  - helper methods (`.lt/.le/.gt/.ge/.eq/.ne`, `.addr_of()`, `.field()`, `.index()`, `.call_named()`)
+- Ergonomics:
+  - `Expr: From<&str/String>` produces identifiers.
+  - `Expr: From<{bool,i32,u32,usize,f32,f64}>` produces literals.
+  - `.index(...)` and comparisons accept `impl Into<Expr>` so numeric indices/thresholds don’t need `Expr::lit_*`.
+- `wgsl_dsl` is AST-only (no string parsing helpers remain); it provides statement builders plus common builtin wrappers (e.g. `smoothstep`, `max`, `abs`, `dot`).
 - Tensor helpers exist in `src/solver/codegen/dsl/tensor.rs`:
   - `VecExpr<const N>` and `MatExpr<const R, const C>` for unrolled small-vector/matrix algebra and scatters.
   - Named-axis wrappers (`NamedVecExpr`, `NamedMatExpr`) with `AxisXY` (`XY`) and `AxisCons` (`Cons`) plus basic broadcasting (`mul_row_broadcast`, `mul_col_broadcast`) and reductions (`contract_rows`).
@@ -15,11 +22,13 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Sparse matrix types exist in `src/solver/codegen/dsl/matrix.rs`:
   - `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, etc.
 - Kernel codegen status:
-  - All kernels under `src/solver/codegen/` are AST-based (no `wgsl_dsl::expr`, no stringly-typed `let_/assign/if_block/for_loop`).
+  - All kernels under `src/solver/codegen/` are AST-based; expressions are built via `Expr` operators/helpers (no string parsing, no public `BinaryOp/UnaryOp` usage).
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the primary safety net for refactors.
 
 ## Recently Completed
-- Removed the string-based WGSL DSL API from `src/solver/codegen/wgsl_dsl.rs` and updated downstream kernels/tests to build `wgsl_ast::Expr` directly.
+- Removed the string-based WGSL expression API and updated kernels/tests to build `wgsl_ast::Expr` directly.
+- Enforced operator-only AST construction and made `Expr` `Copy` (all remaining `BinaryOp/UnaryOp` call sites removed).
+- Added `wgsl_dsl` builtin wrappers (e.g. `smoothstep`, `max`) and `Expr` literal/identifier conversions for less boilerplate.
 - Migrated matrix-heavy compressible assembly sections to `MatExpr`/`VecExpr` and replaced large hand-expanded derivative boilerplate with vectorized tensor ops.
 - Updated generated WGSL shaders under `src/solver/gpu/shaders/generated/*` to match the new AST emit path.
 

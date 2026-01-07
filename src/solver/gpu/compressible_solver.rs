@@ -11,6 +11,7 @@ use crate::solver::gpu::init::compressible_fields::{
 };
 use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
+use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::compressible_model;
@@ -256,8 +257,7 @@ impl GpuCompressibleSolver {
 
         let scalar_row_offsets = mesh_res.row_offsets.clone();
         let scalar_col_indices = mesh_res.col_indices.clone();
-        let (row_offsets, col_indices) =
-            build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, 4);
+        let (row_offsets, col_indices) = build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, 4);
         let block_row_offsets = row_offsets.clone();
         let block_col_indices = col_indices.clone();
         let matrix_res = matrix::init_matrix(&context.device, &row_offsets, &col_indices);
@@ -929,28 +929,3 @@ fn ping_pong_indices(step_index: usize) -> (usize, usize, usize) {
     }
 }
 
-fn build_block_csr(row_offsets: &[u32], col_indices: &[u32], block_size: u32) -> (Vec<u32>, Vec<u32>) {
-    let num_cells = row_offsets.len().saturating_sub(1);
-    let block_rows = num_cells * block_size as usize;
-    let mut block_row_offsets = vec![0u32; block_rows + 1];
-    let mut block_col_indices = Vec::new();
-    let mut current_offset = 0u32;
-
-    for cell in 0..num_cells {
-        let start = row_offsets[cell] as usize;
-        let end = row_offsets[cell + 1] as usize;
-        let neighbors = &col_indices[start..end];
-        for row in 0..block_size {
-            block_row_offsets[cell * block_size as usize + row as usize] = current_offset;
-            for &neighbor in neighbors {
-                for col in 0..block_size {
-                    block_col_indices.push(neighbor * block_size + col);
-                }
-            }
-            current_offset += neighbors.len() as u32 * block_size;
-        }
-    }
-    block_row_offsets[block_rows] = current_offset;
-
-    (block_row_offsets, block_col_indices)
-}

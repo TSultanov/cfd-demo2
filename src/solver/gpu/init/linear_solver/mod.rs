@@ -5,6 +5,7 @@ pub mod state;
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
+use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
@@ -107,11 +108,12 @@ pub fn init_linear_solver(
 
     let coupled_resources = init_coupled_resources(
         device,
-        mesh,
         num_cells,
         &pipeline_res,
         &matrix_res.b_row_offsets,
         &matrix_res.b_matrix_values,
+        &row_offsets,
+        &col_indices,
     );
 
     LinearSolverResources {
@@ -171,49 +173,17 @@ pub fn init_linear_solver(
 
 fn init_coupled_resources(
     device: &wgpu::Device,
-    mesh: &Mesh,
     num_cells: u32,
     pipeline_res: &pipelines::PipelineResources,
     scalar_row_offsets_buffer: &wgpu::Buffer,
     b_scalar_matrix_values: &wgpu::Buffer,
+    scalar_row_offsets: &[u32],
+    scalar_col_indices: &[u32],
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
     let num_coupled_cells = num_cells * 3;
-    let mut row_offsets = vec![0u32; num_coupled_cells as usize + 1];
-    let mut col_indices = Vec::new();
-
-    // Build adjacency list first (same as scalar)
-    let mut adj = vec![Vec::new(); num_cells as usize];
-    for (i, &owner) in mesh.face_owner.iter().enumerate() {
-        if let Some(neighbor) = mesh.face_neighbor[i] {
-            adj[owner].push(neighbor);
-            adj[neighbor].push(owner);
-        }
-    }
-    for (i, list) in adj.iter_mut().enumerate() {
-        list.push(i); // Add diagonal
-        list.sort();
-        list.dedup();
-    }
-
-    // Now expand to coupled system
-    let mut current_offset = 0;
-    for i in 0..num_cells as usize {
-        let neighbors = &adj[i];
-        // For each of the 3 rows for cell i
-        for _row_sub in 0..3 {
-            row_offsets[3 * i + _row_sub] = current_offset;
-            // For each neighbor cell j (including i itself)
-            for &j in neighbors {
-                // Add 3 columns: 3*j, 3*j+1, 3*j+2
-                col_indices.push((3 * j) as u32);
-                col_indices.push((3 * j + 1) as u32);
-                col_indices.push((3 * j + 2) as u32);
-            }
-            current_offset += (neighbors.len() * 3) as u32;
-        }
-    }
-    row_offsets[num_coupled_cells as usize] = current_offset;
+    let (row_offsets, col_indices) = build_block_csr(scalar_row_offsets, scalar_col_indices, 3);
+    debug_assert_eq!(row_offsets.len(), num_coupled_cells as usize + 1);
 
     // 2. Init Matrix Buffers
     let matrix_res = matrix::init_matrix(device, &row_offsets, &col_indices);

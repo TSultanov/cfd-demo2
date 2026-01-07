@@ -1056,15 +1056,6 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("a_l", "a_plus / denom"));
     loop_body.push(dsl::let_("a_r", "-a_minus / denom"));
 
-    loop_body.push(dsl::var("jac_l_00", "-a_prod_scaled"));
-    loop_body.push(dsl::var("jac_l_01", "a_l * normal.x"));
-    loop_body.push(dsl::var("jac_l_02", "a_l * normal.y"));
-    loop_body.push(dsl::var("jac_l_03", "0.0"));
-    loop_body.push(dsl::var("jac_r_00", "a_prod_scaled"));
-    loop_body.push(dsl::var("jac_r_01", "a_r * normal.x"));
-    loop_body.push(dsl::var("jac_r_02", "a_r * normal.y"));
-    loop_body.push(dsl::var("jac_r_03", "0.0"));
-
     loop_body.push(dsl::let_("A_l_10", "-u_l_x * u_n_l + dp_drho_l * normal.x"));
     loop_body.push(dsl::let_(
         "A_l_11",
@@ -1109,33 +1100,6 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("A_r_32", "H_r * normal.y + dp_drv_r * u_n_r"));
     loop_body.push(dsl::let_("A_r_33", &format!("{gamma} * u_n_r")));
 
-    loop_body.push(dsl::var("jac_l_10", "a_l * A_l_10"));
-    loop_body.push(dsl::var("jac_l_11", "a_l * A_l_11 - a_prod_scaled"));
-    loop_body.push(dsl::var("jac_l_12", "a_l * A_l_12"));
-    loop_body.push(dsl::var("jac_l_13", "a_l * A_l_13"));
-    loop_body.push(dsl::var("jac_r_10", "a_r * A_r_10"));
-    loop_body.push(dsl::var("jac_r_11", "a_r * A_r_11 + a_prod_scaled"));
-    loop_body.push(dsl::var("jac_r_12", "a_r * A_r_12"));
-    loop_body.push(dsl::var("jac_r_13", "a_r * A_r_13"));
-
-    loop_body.push(dsl::var("jac_l_20", "a_l * A_l_20"));
-    loop_body.push(dsl::var("jac_l_21", "a_l * A_l_21"));
-    loop_body.push(dsl::var("jac_l_22", "a_l * A_l_22 - a_prod_scaled"));
-    loop_body.push(dsl::var("jac_l_23", "a_l * A_l_23"));
-    loop_body.push(dsl::var("jac_r_20", "a_r * A_r_20"));
-    loop_body.push(dsl::var("jac_r_21", "a_r * A_r_21"));
-    loop_body.push(dsl::var("jac_r_22", "a_r * A_r_22 + a_prod_scaled"));
-    loop_body.push(dsl::var("jac_r_23", "a_r * A_r_23"));
-
-    loop_body.push(dsl::var("jac_l_30", "a_l * A_l_30"));
-    loop_body.push(dsl::var("jac_l_31", "a_l * A_l_31"));
-    loop_body.push(dsl::var("jac_l_32", "a_l * A_l_32"));
-    loop_body.push(dsl::var("jac_l_33", "a_l * A_l_33 - a_prod_scaled"));
-    loop_body.push(dsl::var("jac_r_30", "a_r * A_r_30"));
-    loop_body.push(dsl::var("jac_r_31", "a_r * A_r_31"));
-    loop_body.push(dsl::var("jac_r_32", "a_r * A_r_32"));
-    loop_body.push(dsl::var("jac_r_33", "a_r * A_r_33 + a_prod_scaled"));
-
     loop_body.push(dsl::let_("mu_over_dist", "mu / dist"));
     loop_body.push(dsl::let_("du_lx_drho", "-u_l_x * inv_rho_l"));
     loop_body.push(dsl::let_("du_lx_dru", "inv_rho_l"));
@@ -1168,24 +1132,6 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("d_diff_y_r_ru", "0.0"));
     loop_body.push(dsl::let_("d_diff_y_r_rv", "-mu_over_dist * du_ry_drv"));
     loop_body.push(dsl::let_("d_diff_y_r_re", "0.0"));
-
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_10", "d_diff_x_l_rho"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_11", "d_diff_x_l_ru"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_12", "d_diff_x_l_rv"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_13", "d_diff_x_l_re"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_20", "d_diff_y_l_rho"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_21", "d_diff_y_l_ru"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_22", "d_diff_y_l_rv"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_23", "d_diff_y_l_re"));
-
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_10", "d_diff_x_r_rho"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_11", "d_diff_x_r_ru"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_12", "d_diff_x_r_rv"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_13", "d_diff_x_r_re"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_20", "d_diff_y_r_rho"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_21", "d_diff_y_r_ru"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_22", "d_diff_y_r_rv"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_23", "d_diff_y_r_re"));
 
     loop_body.push(dsl::let_("du_face_x_l_rho", "0.5 * du_lx_drho"));
     loop_body.push(dsl::let_("du_face_x_l_ru", "0.5 * du_lx_dru"));
@@ -1239,14 +1185,170 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "d_diff_x_r_re * u_face_x + diff_u_x * du_face_x_r_re + d_diff_y_r_re * u_face_y + diff_u_y * du_face_y_r_re",
     ));
 
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_30", "d_e_visc_l_rho"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_31", "d_e_visc_l_ru"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_32", "d_e_visc_l_rv"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_l_33", "d_e_visc_l_re"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_30", "d_e_visc_r_rho"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_31", "d_e_visc_r_ru"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_32", "d_e_visc_r_rv"));
-    loop_body.push(dsl::assign_op(AssignOp::Add, "jac_r_33", "d_e_visc_r_re"));
+    let a_prod_scaled = Expr::ident("a_prod_scaled");
+    let a_l = Expr::ident("a_l");
+    let a_r = Expr::ident("a_r");
+    let normal = Expr::ident("normal");
+    let nx = normal.clone().field("x");
+    let ny = normal.clone().field("y");
+    let jac_l = typed::MatExpr::<4, 4>::from_fn(|row, col| match (row, col) {
+        (0, 0) => Expr::binary(Expr::lit_f32(0.0), BinaryOp::Sub, a_prod_scaled.clone()),
+        (0, 1) => Expr::binary(a_l.clone(), BinaryOp::Mul, nx.clone()),
+        (0, 2) => Expr::binary(a_l.clone(), BinaryOp::Mul, ny.clone()),
+        (0, 3) => Expr::lit_f32(0.0),
+        (1, 0) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_10")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_l_rho"),
+        ),
+        (1, 1) => Expr::binary(
+            Expr::binary(
+                Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_11")),
+                BinaryOp::Sub,
+                a_prod_scaled.clone(),
+            ),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_l_ru"),
+        ),
+        (1, 2) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_12")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_l_rv"),
+        ),
+        (1, 3) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_13")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_l_re"),
+        ),
+        (2, 0) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_20")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_l_rho"),
+        ),
+        (2, 1) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_21")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_l_ru"),
+        ),
+        (2, 2) => Expr::binary(
+            Expr::binary(
+                Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_22")),
+                BinaryOp::Sub,
+                a_prod_scaled.clone(),
+            ),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_l_rv"),
+        ),
+        (2, 3) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_23")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_l_re"),
+        ),
+        (3, 0) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_30")),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_l_rho"),
+        ),
+        (3, 1) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_31")),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_l_ru"),
+        ),
+        (3, 2) => Expr::binary(
+            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_32")),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_l_rv"),
+        ),
+        (3, 3) => Expr::binary(
+            Expr::binary(
+                Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_33")),
+                BinaryOp::Sub,
+                a_prod_scaled.clone(),
+            ),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_l_re"),
+        ),
+        _ => unreachable!("invalid jac_l entry ({row},{col})"),
+    });
+    let jac_r = typed::MatExpr::<4, 4>::from_fn(|row, col| match (row, col) {
+        (0, 0) => a_prod_scaled.clone(),
+        (0, 1) => Expr::binary(a_r.clone(), BinaryOp::Mul, nx.clone()),
+        (0, 2) => Expr::binary(a_r.clone(), BinaryOp::Mul, ny.clone()),
+        (0, 3) => Expr::lit_f32(0.0),
+        (1, 0) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_10")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_r_rho"),
+        ),
+        (1, 1) => Expr::binary(
+            Expr::binary(
+                Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_11")),
+                BinaryOp::Add,
+                a_prod_scaled.clone(),
+            ),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_r_ru"),
+        ),
+        (1, 2) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_12")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_r_rv"),
+        ),
+        (1, 3) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_13")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_x_r_re"),
+        ),
+        (2, 0) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_20")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_r_rho"),
+        ),
+        (2, 1) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_21")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_r_ru"),
+        ),
+        (2, 2) => Expr::binary(
+            Expr::binary(
+                Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_22")),
+                BinaryOp::Add,
+                a_prod_scaled.clone(),
+            ),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_r_rv"),
+        ),
+        (2, 3) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_23")),
+            BinaryOp::Add,
+            Expr::ident("d_diff_y_r_re"),
+        ),
+        (3, 0) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_30")),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_r_rho"),
+        ),
+        (3, 1) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_31")),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_r_ru"),
+        ),
+        (3, 2) => Expr::binary(
+            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_32")),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_r_rv"),
+        ),
+        (3, 3) => Expr::binary(
+            Expr::binary(
+                Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_33")),
+                BinaryOp::Add,
+                a_prod_scaled.clone(),
+            ),
+            BinaryOp::Add,
+            Expr::ident("d_e_visc_r_re"),
+        ),
+        _ => unreachable!("invalid jac_r entry ({row},{col})"),
+    });
 
     let mut interior_matrix_stmts = vec![
         dsl::let_("scalar_mat_idx", "cell_face_matrix_indices[face_offset]"),
@@ -1262,8 +1364,6 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ];
 
     let neighbor_entry = block_matrix.row_entry(&Expr::ident("neighbor_rank"));
-    let jac_l = typed::MatExpr::<4, 4>::from_prefix("jac_l");
-    let jac_r = typed::MatExpr::<4, 4>::from_prefix("jac_r");
     interior_matrix_stmts.extend(jac_r.scatter_assign_to_block_entry_scaled(
         &neighbor_entry,
         Some(Expr::ident("area")),
@@ -1503,6 +1603,6 @@ mod tests {
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("sum_rho"));
         assert!(wgsl.contains("rhs_time_rho"));
-        assert!(wgsl.contains("jac_l_00"));
+        assert!(wgsl.contains("A_l_10"));
     }
 }

@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: af78ee1292270df332d7d975d26b1e2c3b3aac3a0baf15991d12dedd41bc6ade
+// SourceHash: 44b9411de5535b9e0502c519f43c7401dedbfa5eb87de2f4308b42f3e7d31f1a
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -11380,12 +11380,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
             pub cell_faces: wgpu::BufferBinding<'a>,
-            pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
+            pub diagonal_indices: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -11393,12 +11395,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
             pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
+            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -11419,6 +11423,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
                         resource: wgpu::BindingResource::Buffer(params.cell_centers),
@@ -11435,28 +11443,34 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 7,
                         resource: wgpu::BindingResource::Buffer(params.cell_faces),
                     },
-                    diagonal_indices: wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
-                    },
                     cell_face_matrix_indices: wgpu::BindGroupEntry {
                         binding: 10,
                         resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
                     },
+                    diagonal_indices: wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
                 [
                     self.face_owner,
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
+                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
                     self.cell_faces,
-                    self.diagonal_indices,
                     self.cell_face_matrix_indices,
+                    self.diagonal_indices,
+                    self.face_boundary,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -11514,6 +11528,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             },
                             count: None,
                         },
+                        #[doc = " @binding(13): \"face_centers\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 13,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
                         #[doc = " @binding(4): \"cell_centers\""]
                         wgpu::BindGroupLayoutEntry {
                             binding: 4,
@@ -11558,9 +11583,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             },
                             count: None,
                         },
-                        #[doc = " @binding(9): \"diagonal_indices\""]
+                        #[doc = " @binding(10): \"cell_face_matrix_indices\""]
                         wgpu::BindGroupLayoutEntry {
-                            binding: 9,
+                            binding: 10,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -11569,9 +11594,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             },
                             count: None,
                         },
-                        #[doc = " @binding(10): \"cell_face_matrix_indices\""]
+                        #[doc = " @binding(11): \"diagonal_indices\""]
                         wgpu::BindGroupLayoutEntry {
-                            binding: 10,
+                            binding: 11,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(12): \"face_boundary\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 12,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -11815,6 +11851,84 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 pass.set_bind_group(2, &self.0, &[]);
             }
         }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup3Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup3Entries<'a> {
+            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3(wgpu::BindGroup);
+        impl WgpuBindGroup3 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GeneratedGenericCoupledAssembly::BindGroup3::LayoutDescriptor"),
+                    entries: &[
+                        #[doc = " @binding(0): \"bc_kind\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"bc_value\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedGenericCoupledAssembly::BindGroup3"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(3, &self.0, &[]);
+            }
+        }
         #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
         #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
         #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
@@ -11826,20 +11940,22 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub bind_group0: &'a WgpuBindGroup0,
             pub bind_group1: &'a WgpuBindGroup1,
             pub bind_group2: &'a WgpuBindGroup2,
+            pub bind_group3: &'a WgpuBindGroup3,
         }
         impl<'a> WgpuBindGroups<'a> {
             pub fn set(&self, pass: &mut impl SetBindGroup) {
                 self.bind_group0.set(pass);
                 self.bind_group1.set(pass);
                 self.bind_group2.set(pass);
+                self.bind_group3.set(pass);
             }
         }
         #[derive(Debug)]
         pub struct WgpuPipelineLayout;
         impl WgpuPipelineLayout {
             pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 3],
-            ) -> [wgpu::BindGroupLayout; 3] {
+                entries: [wgpu::BindGroupLayout; 4],
+            ) -> [wgpu::BindGroupLayout; 4] {
                 entries
             }
         }
@@ -11850,6 +11966,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
                     &WgpuBindGroup2::get_bind_group_layout(device),
+                    &WgpuBindGroup3::get_bind_group_layout(device),
                 ],
                 push_constant_ranges: &[],
             })
@@ -11896,6 +12013,8 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -11904,10 +12023,12 @@ var<storage> cell_vols: array<f32>;
 var<storage> cell_face_offsets: array<u32>;
 @group(0) @binding(7) 
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(9) 
-var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(10) 
 var<storage> cell_face_matrix_indices: array<u32>;
+@group(0) @binding(11) 
+var<storage> diagonal_indices: array<u32>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -11922,6 +12043,10 @@ var<storage, read_write> matrix_values: array<f32>;
 var<storage, read_write> rhs: array<f32>;
 @group(2) @binding(2) 
 var<storage> scalar_row_offsets: array<u32>;
+@group(3) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(3) @binding(1) 
+var<storage> bc_value: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -11929,6 +12054,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var diag_0_: f32 = 0f;
     var rhs_0_: f32 = 0f;
     var k: u32;
+    var normal: Vector2_;
+    var is_boundary: bool;
+    var other_idx: u32;
+    var other_center: Vector2_;
 
     let idx = global_id.x;
     if (idx >= arrayLength((&cell_vols))) {
@@ -11999,39 +12128,84 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         {
             let _e171 = k;
-            let face = cell_faces[_e171];
-            let other_raw = face_neighbor[face];
-            if (other_raw < 0i) {
+            let face_idx = cell_faces[_e171];
+            let owner = face_owner[face_idx];
+            let neighbor_raw = face_neighbor[face_idx];
+            let boundary_type = face_boundary[face_idx];
+            let area = face_areas[face_idx];
+            let f_center = face_centers[face_idx];
+            let _e191 = face_normals[face_idx];
+            normal = _e191;
+            is_boundary = false;
+            other_idx = idx;
+            if (owner != idx) {
+                let _e199 = normal.x;
+                normal.x = -(_e199);
+                let _e203 = normal.y;
+                normal.y = -(_e203);
+            }
+            if (neighbor_raw != -1i) {
+                let neighbor = u32(neighbor_raw);
+                other_idx = neighbor;
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e210 = other_idx;
+                let _e212 = cell_centers[_e210];
+                other_center = _e212;
             } else {
-                let other_idx = u32(other_raw);
-                let other_center = cell_centers[other_idx];
-                let normal = face_normals[face];
-                let dx = (other_center.x - center.x);
-                let dy = (other_center.y - center.y);
-                let dist = abs(((dx * normal.x) + (dy * normal.y)));
-                let area = face_areas[face];
-                let _e202 = k;
-                let scalar_mat_idx = cell_face_matrix_indices[_e202];
-                let neighbor_rank = (scalar_mat_idx - scalar_offset);
-                let diff_coeff_phi = ((1f * area) / dist);
-                let _e209 = diag_0_;
-                diag_0_ = (_e209 + diff_coeff_phi);
-                let _e218 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e218 - diff_coeff_phi);
+                is_boundary = true;
+                other_idx = idx;
+                other_center = f_center;
+            }
+            let _e216 = other_center.x;
+            let dx = (_e216 - center.x);
+            let _e220 = other_center.y;
+            let dy = (_e220 - center.y);
+            let _e224 = normal.x;
+            let _e227 = normal.y;
+            let dist_proj = abs(((dx * _e224) + (dy * _e227)));
+            let dist = max(dist_proj, 0.000001f);
+            let _e234 = k;
+            let scalar_mat_idx = cell_face_matrix_indices[_e234];
+            let neighbor_rank = (scalar_mat_idx - scalar_offset);
+            let diff_coeff_phi = ((1f * area) / dist);
+            let _e241 = is_boundary;
+            if !(_e241) {
+                let _e243 = diag_0_;
+                diag_0_ = (_e243 + diff_coeff_phi);
+                let _e252 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e252 - diff_coeff_phi);
+            } else {
+                let _e260 = bc_kind[((boundary_type * 1u) + 0u)];
+                if (_e260 == 1u) {
+                    let _e263 = diag_0_;
+                    diag_0_ = (_e263 + diff_coeff_phi);
+                    let _e271 = bc_value[((boundary_type * 1u) + 0u)];
+                    let _e273 = rhs_0_;
+                    rhs_0_ = (_e273 + (diff_coeff_phi * _e271));
+                } else {
+                    let _e281 = bc_kind[((boundary_type * 1u) + 0u)];
+                    if (_e281 == 2u) {
+                        let _e292 = bc_value[((boundary_type * 1u) + 0u)];
+                        let _e295 = rhs_0_;
+                        rhs_0_ = (_e295 + -(((1f * area) * _e292)));
+                    }
+                }
             }
         }
         continuing {
-            let _e221 = k;
-            k = (_e221 + 1u);
+            let _e298 = k;
+            k = (_e298 + 1u);
         }
     }
-    let _e225 = diagonal_indices[idx];
-    let diag_rank = (_e225 - scalar_offset);
-    let _e234 = diag_0_;
-    let _e235 = matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)] = (_e235 + _e234);
-    let _e243 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e243;
+    let _e302 = diagonal_indices[idx];
+    let diag_rank = (_e302 - scalar_offset);
+    let _e311 = diag_0_;
+    let _e312 = matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)];
+    matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)] = (_e312 + _e311);
+    let _e320 = rhs_0_;
+    rhs[((idx * 1u) + 0u)] = _e320;
     return;
 }
 "#;

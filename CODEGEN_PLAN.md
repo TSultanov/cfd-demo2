@@ -35,6 +35,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Used the scheme expansion to skip compressible gradient dispatches for first-order runs by selecting first-order vs reconstruction kernel graphs at runtime (`src/solver/gpu/compressible_solver.rs`).
 - Plumbed the same scheme expansion result into the incompressible coupled solver loop via `GpuSolver.scheme_needs_gradients` (replacing direct `scheme != 0` checks) (`src/solver/gpu/solver.rs`, `src/solver/gpu/coupled_solver.rs`).
 - Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
+- Added a first **generic boundary-condition** representation (`BoundarySpec` on `ModelSpec`) plus a helper to build GPU BC tables and a generic BC path in the generic coupled assembly kernel (Dirichlet + Neumann/zeroGradient for diffusion) (`src/solver/model/definitions.rs`, `src/solver/codegen/generic_coupled_kernels.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
@@ -82,6 +83,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 7. **Boundary conditions become first-class and per-field**
    - Add `BoundarySpec` to `ModelSpec` (or a parallel structure) that maps (patch, field) → BC type + parameters with units.
    - Use typed enums in WGSL for BC kinds; codegen derives required BC handling for each operator.
+   - Status: `BoundarySpec` exists and can be lowered to `(bc_kind, bc_value)` tables; generic coupled diffusion assembly uses it via a `bc_kind/bc_value` buffer (other kernels still use legacy hardcoded inlet/outlet/wall behavior).
 8. **Test/validation automation**
    - Run all 1D cases across all combinations of temporal (Euler/BDF2) × spatial (Upwind/SOU/QUICK) schemes.
    - Store plots under `target/test_plots/*` with a consistent naming scheme; add a small summary index (text/HTML) to spot regressions quickly.

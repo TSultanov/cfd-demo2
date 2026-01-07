@@ -7,6 +7,7 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::model::backend::ast::{Coefficient, Discretization};
 use crate::solver::model::backend::StateLayout;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
@@ -116,6 +117,13 @@ fn base_mesh_items() -> Vec<Item> {
             AccessMode::Read,
         ),
         storage_var(
+            "face_centers",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            13,
+            AccessMode::Read,
+        ),
+        storage_var(
             "cell_centers",
             Type::array(Type::Custom("Vector2".to_string())),
             0,
@@ -132,17 +140,24 @@ fn base_mesh_items() -> Vec<Item> {
         ),
         storage_var("cell_faces", Type::array(Type::U32), 0, 7, AccessMode::Read),
         storage_var(
-            "diagonal_indices",
-            Type::array(Type::U32),
-            0,
-            9,
-            AccessMode::Read,
-        ),
-        storage_var(
             "cell_face_matrix_indices",
             Type::array(Type::U32),
             0,
             10,
+            AccessMode::Read,
+        ),
+        storage_var(
+            "diagonal_indices",
+            Type::array(Type::U32),
+            0,
+            11,
+            AccessMode::Read,
+        ),
+        storage_var(
+            "face_boundary",
+            Type::array(Type::U32),
+            0,
+            12,
             AccessMode::Read,
         ),
     ]
@@ -181,6 +196,21 @@ fn base_assembly_items() -> Vec<Item> {
         Type::array(Type::U32),
         2,
         2,
+        AccessMode::Read,
+    ));
+    items.push(Item::Comment("Group 3: Boundary conditions (per boundary type × unknown)".to_string()));
+    items.push(storage_var(
+        "bc_kind",
+        Type::array(Type::U32),
+        3,
+        0,
+        AccessMode::Read,
+    ));
+    items.push(storage_var(
+        "bc_value",
+        Type::array(Type::F32),
+        3,
+        1,
         AccessMode::Read,
     ));
     items
@@ -439,104 +469,202 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
         }
     }
 
-    let diffusion_face_stmts = {
-        let mut out = Vec::new();
+    // Face loop for diffusion contributions (implicit only).
+    let face_loop_body = {
+        let mut body = Vec::new();
+        body.push(dsl::let_expr(
+            "face_idx",
+            dsl::array_access("cell_faces", Expr::ident("k")),
+        ));
+        body.push(dsl::let_expr(
+            "owner",
+            dsl::array_access("face_owner", Expr::ident("face_idx")),
+        ));
+        body.push(dsl::let_expr(
+            "neighbor_raw",
+            dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+        ));
+        body.push(dsl::let_expr(
+            "boundary_type",
+            dsl::array_access("face_boundary", Expr::ident("face_idx")),
+        ));
+        body.push(dsl::let_expr(
+            "area",
+            dsl::array_access("face_areas", Expr::ident("face_idx")),
+        ));
+        body.push(dsl::let_expr(
+            "f_center",
+            dsl::array_access("face_centers", Expr::ident("face_idx")),
+        ));
+        body.push(dsl::var_typed_expr(
+            "normal",
+            Type::Custom("Vector2".to_string()),
+            Some(dsl::array_access("face_normals", Expr::ident("face_idx"))),
+        ));
+        body.push(dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())));
+        body.push(dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))));
+        body.push(dsl::var_typed_expr(
+            "other_center",
+            Type::Custom("Vector2".to_string()),
+            None,
+        ));
+
+        // Make normal outward from `idx`.
+        body.push(dsl::if_block_expr(
+            Expr::ident("owner").ne(Expr::ident("idx")),
+            dsl::block(vec![
+                dsl::assign_expr(Expr::ident("normal").field("x"), -Expr::ident("normal").field("x")),
+                dsl::assign_expr(Expr::ident("normal").field("y"), -Expr::ident("normal").field("y")),
+            ]),
+            None,
+        ));
+
+        let interior_block = dsl::block(vec![
+            dsl::let_expr(
+                "neighbor",
+                Expr::call_named("u32", vec![Expr::ident("neighbor_raw")]),
+            ),
+            dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("neighbor")),
+            dsl::if_block_expr(
+                Expr::ident("owner").ne(Expr::ident("idx")),
+                dsl::block(vec![dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("owner"))]),
+                None,
+            ),
+            dsl::assign_expr(
+                Expr::ident("other_center"),
+                dsl::array_access("cell_centers", Expr::ident("other_idx")),
+            ),
+        ]);
+
+        let boundary_block = dsl::block(vec![
+            dsl::assign_expr(Expr::ident("is_boundary"), true),
+            dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("idx")),
+            dsl::assign_expr(Expr::ident("other_center"), Expr::ident("f_center")),
+        ]);
+
+        body.push(dsl::if_block_expr(
+            Expr::ident("neighbor_raw").ne(-1),
+            interior_block,
+            Some(boundary_block),
+        ));
+
+        body.push(dsl::let_expr(
+            "dx",
+            Expr::ident("other_center").field("x") - Expr::ident("center").field("x"),
+        ));
+        body.push(dsl::let_expr(
+            "dy",
+            Expr::ident("other_center").field("y") - Expr::ident("center").field("y"),
+        ));
+        body.push(dsl::let_expr(
+            "dist_proj",
+            dsl::abs(
+                Expr::ident("dx") * Expr::ident("normal").field("x")
+                    + Expr::ident("dy") * Expr::ident("normal").field("y"),
+            ),
+        ));
+        body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
+
+        body.push(dsl::let_expr(
+            "scalar_mat_idx",
+            dsl::array_access("cell_face_matrix_indices", Expr::ident("k")),
+        ));
+        body.push(dsl::let_expr(
+            "neighbor_rank",
+            Expr::ident("scalar_mat_idx") - Expr::ident("scalar_offset"),
+        ));
+
+        // Diffusion contributions per equation.
         for equation in &system.equations {
             let Some(diff_op) = equation.ops.iter().find(|op| {
                 op.kind == DiscreteOpKind::Diffusion && op.discretization == Discretization::Implicit
             }) else {
                 continue;
             };
+
             let base_offset = *offsets
                 .get(equation.target.name())
                 .expect("missing target offset");
+
             let kappa = coefficient_value_expr(
                 layout,
                 diff_op.coeff.as_ref(),
                 "idx",
                 Expr::ident("constants").field("viscosity"),
             );
-            let coeff_name = format!("diff_coeff_{}", equation.target.name());
-            out.push(dsl::let_expr(
-                &coeff_name,
-                kappa * Expr::ident("area") / Expr::ident("dist"),
+
+            let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
+            body.push(dsl::let_expr(
+                &diff_coeff_name,
+                kappa.clone() * Expr::ident("area") / Expr::ident("dist"),
             ));
+
             for component in 0..equation.target.kind().component_count() as u32 {
                 let u_idx = base_offset + component;
-                out.push(dsl::assign_op_expr(
-                    AssignOp::Add,
-                    Expr::ident(format!("diag_{u_idx}")),
-                    Expr::ident(&coeff_name),
+                let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
+                let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
+                    "bc_kind",
+                    bc_table_idx,
                 ));
-                out.push(dsl::assign_op_expr(
-                    AssignOp::Sub,
-                    block_matrix
-                        .entry(&Expr::ident("neighbor_rank"), u_idx as u8, u_idx as u8)
-                        .expr,
-                    Expr::ident(&coeff_name),
+                let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+
+                let interior_contrib = dsl::block(vec![
+                    dsl::assign_op_expr(
+                        AssignOp::Add,
+                        Expr::ident(format!("diag_{u_idx}")),
+                        Expr::ident(&diff_coeff_name),
+                    ),
+                    dsl::assign_op_expr(
+                        AssignOp::Sub,
+                        block_matrix
+                            .entry(&Expr::ident("neighbor_rank"), u_idx as u8, u_idx as u8)
+                            .expr,
+                        Expr::ident(&diff_coeff_name),
+                    ),
+                ]);
+
+                let neumann_rhs = -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
+                let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
+                    bc_kind_expr.eq(GpuBcKind::Dirichlet),
+                    dsl::block(vec![
+                        dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident(format!("diag_{u_idx}")),
+                            Expr::ident(&diff_coeff_name),
+                        ),
+                        dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident(format!("rhs_{u_idx}")),
+                            Expr::ident(&diff_coeff_name) * bc_value_expr.clone(),
+                        ),
+                    ]),
+                    Some(dsl::block(vec![dsl::if_block_expr(
+                        bc_kind_expr.eq(GpuBcKind::Neumann),
+                        dsl::block(vec![dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident(format!("rhs_{u_idx}")),
+                            neumann_rhs,
+                        )]),
+                        None,
+                    )])),
+                )]);
+
+                body.push(dsl::if_block_expr(
+                    !Expr::ident("is_boundary"),
+                    interior_contrib,
+                    Some(boundary_contrib),
                 ));
             }
         }
-        out
-    };
 
-    // Face loop for diffusion contributions (implicit only, Neumann boundaries).
-    let mut face_neighbor_stmts = vec![
-        dsl::let_expr(
-            "other_idx",
-            Expr::call_named("u32", vec![Expr::ident("other_raw")]),
-        ),
-        dsl::let_expr(
-            "other_center",
-            dsl::array_access("cell_centers", Expr::ident("other_idx")),
-        ),
-        dsl::let_expr(
-            "normal",
-            dsl::array_access("face_normals", Expr::ident("face")),
-        ),
-        dsl::let_expr(
-            "dx",
-            Expr::ident("other_center").field("x") - Expr::ident("center").field("x"),
-        ),
-        dsl::let_expr(
-            "dy",
-            Expr::ident("other_center").field("y") - Expr::ident("center").field("y"),
-        ),
-        dsl::let_expr(
-            "dist",
-            dsl::abs(
-                Expr::ident("dx") * Expr::ident("normal").field("x")
-                    + Expr::ident("dy") * Expr::ident("normal").field("y"),
-            ),
-        ),
-        dsl::let_expr("area", dsl::array_access("face_areas", Expr::ident("face"))),
-        dsl::let_expr(
-            "scalar_mat_idx",
-            dsl::array_access("cell_face_matrix_indices", Expr::ident("k")),
-        ),
-        dsl::let_expr(
-            "neighbor_rank",
-            Expr::ident("scalar_mat_idx") - Expr::ident("scalar_offset"),
-        ),
-    ];
-    face_neighbor_stmts.extend(diffusion_face_stmts);
+        body
+    };
 
     stmts.push(dsl::for_loop_expr(
         dsl::for_init_var_expr("k", Expr::ident("start")),
         Expr::ident("k").lt(Expr::ident("end")),
         dsl::for_step_increment_expr(Expr::ident("k")),
-        dsl::block(vec![
-            dsl::let_expr("face", dsl::array_access("cell_faces", Expr::ident("k"))),
-            dsl::let_expr(
-                "other_raw",
-                dsl::array_access("face_neighbor", Expr::ident("face")),
-            ),
-            dsl::if_block_expr(
-                Expr::ident("other_raw").lt(0),
-                dsl::block(vec![]),
-                Some(dsl::block(face_neighbor_stmts)),
-            ),
-        ]),
+        dsl::block(face_loop_body),
     ));
 
     // Write diagonal block and RHS.

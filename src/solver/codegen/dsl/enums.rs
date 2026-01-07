@@ -68,3 +68,8 @@ impl WgslEnum for crate::solver::gpu::enums::TimeScheme {
     }
 }
 
+impl WgslEnum for crate::solver::gpu::enums::GpuBcKind {
+    fn wgsl_id(self) -> u32 {
+        self as u32
+    }
+}

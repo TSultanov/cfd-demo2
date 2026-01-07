@@ -42,6 +42,9 @@ var<storage, read> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage, read> face_normals: array<Vector2>;
 
+@group(0) @binding(13) 
+var<storage, read> face_centers: array<Vector2>;
+
 @group(0) @binding(4) 
 var<storage, read> cell_centers: array<Vector2>;
 
@@ -54,11 +57,14 @@ var<storage, read> cell_face_offsets: array<u32>;
 @group(0) @binding(7) 
 var<storage, read> cell_faces: array<u32>;
 
-@group(0) @binding(9) 
-var<storage, read> diagonal_indices: array<u32>;
-
 @group(0) @binding(10) 
 var<storage, read> cell_face_matrix_indices: array<u32>;
+
+@group(0) @binding(11) 
+var<storage, read> diagonal_indices: array<u32>;
+
+@group(0) @binding(12) 
+var<storage, read> face_boundary: array<u32>;
 
 // Group 1: Fields
 
@@ -84,6 +90,14 @@ var<storage, read_write> rhs: array<f32>;
 
 @group(2) @binding(2) 
 var<storage, read> scalar_row_offsets: array<u32>;
+
+// Group 3: Boundary conditions (per boundary type × unknown)
+
+@group(3) @binding(0) 
+var<storage, read> bc_kind: array<u32>;
+
+@group(3) @binding(1) 
+var<storage, read> bc_value: array<f32>;
 
 @compute
 @workgroup_size(64)
@@ -115,22 +129,51 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_0 = rhs_0 - vol * constants.density / constants.dt * state_old[idx * 1u + 0u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 1u + 0u] - factor_nm1 * state_old_old[idx * 1u + 0u]);
     }
     for (var k = start; k < end; k++) {
-        let face = cell_faces[k];
-        let other_raw = face_neighbor[face];
-        if (other_raw < 0) {
+        let face_idx = cell_faces[k];
+        let owner = face_owner[face_idx];
+        let neighbor_raw = face_neighbor[face_idx];
+        let boundary_type = face_boundary[face_idx];
+        let area = face_areas[face_idx];
+        let f_center = face_centers[face_idx];
+        var normal: Vector2 = face_normals[face_idx];
+        var is_boundary: bool = false;
+        var other_idx: u32 = idx;
+        var other_center: Vector2;
+        if (owner != idx) {
+            normal.x = -normal.x;
+            normal.y = -normal.y;
+        }
+        if (neighbor_raw != -1) {
+            let neighbor = u32(neighbor_raw);
+            other_idx = neighbor;
+            if (owner != idx) {
+                other_idx = owner;
+            }
+            other_center = cell_centers[other_idx];
         } else {
-            let other_idx = u32(other_raw);
-            let other_center = cell_centers[other_idx];
-            let normal = face_normals[face];
-            let dx = other_center.x - center.x;
-            let dy = other_center.y - center.y;
-            let dist = abs(dx * normal.x + dy * normal.y);
-            let area = face_areas[face];
-            let scalar_mat_idx = cell_face_matrix_indices[k];
-            let neighbor_rank = scalar_mat_idx - scalar_offset;
-            let diff_coeff_phi = 1.0 * area / dist;
+            is_boundary = true;
+            other_idx = idx;
+            other_center = f_center;
+        }
+        let dx = other_center.x - center.x;
+        let dy = other_center.y - center.y;
+        let dist_proj = abs(dx * normal.x + dy * normal.y);
+        let dist = max(dist_proj, 0.000001);
+        let scalar_mat_idx = cell_face_matrix_indices[k];
+        let neighbor_rank = scalar_mat_idx - scalar_offset;
+        let diff_coeff_phi = 1.0 * area / dist;
+        if (!is_boundary) {
             diag_0 += diff_coeff_phi;
             matrix_values[start_row_0 + neighbor_rank * 1u + 0u] -= diff_coeff_phi;
+        } else {
+            if (bc_kind[boundary_type * 1u + 0u] == 1u) {
+                diag_0 += diff_coeff_phi;
+                rhs_0 += diff_coeff_phi * bc_value[boundary_type * 1u + 0u];
+            } else {
+                if (bc_kind[boundary_type * 1u + 0u] == 2u) {
+                    rhs_0 += -(1.0 * area * bc_value[boundary_type * 1u + 0u]);
+                }
+            }
         }
     }
     let diag_rank = diagonal_indices[idx] - scalar_offset;

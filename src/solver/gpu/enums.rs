@@ -14,3 +14,11 @@ pub enum TimeScheme {
     BDF2 = 1,
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GpuBcKind {
+    ZeroGradient = 0,
+    Dirichlet = 1,
+    /// Value represents `dphi/dn` (outward normal gradient).
+    Neumann = 2,
+}

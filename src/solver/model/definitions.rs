@@ -4,13 +4,16 @@ use super::backend::ast::{
 };
 use super::backend::state_layout::StateLayout;
 use super::kernel::{KernelKind, KernelPlan};
-use crate::solver::units::si;
+use crate::solver::units::{si, UnitDim};
+use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub fields: ModelFields,
+    pub boundaries: BoundarySpec,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +68,155 @@ impl ModelFields {
         match self {
             ModelFields::GenericCoupled(fields) => Some(fields),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BoundarySpec {
+    pub fields: HashMap<String, FieldBoundarySpec>,
+}
+
+impl BoundarySpec {
+    pub fn set_field(&mut self, name: impl Into<String>, spec: FieldBoundarySpec) {
+        self.fields.insert(name.into(), spec);
+    }
+
+    pub fn field(&self, name: &str) -> Option<&FieldBoundarySpec> {
+        self.fields.get(name)
+    }
+
+    pub fn to_gpu_tables(
+        &self,
+        system: &EquationSystem,
+    ) -> Result<(Vec<u32>, Vec<f32>), String> {
+        let mut unknowns: Vec<(FieldRef, usize)> = Vec::new();
+        for eqn in system.equations() {
+            let field = eqn.target();
+            for component in 0..field.kind().component_count() {
+                unknowns.push((*field, component));
+            }
+        }
+
+        let coupled_stride = unknowns.len();
+        let mut kind = vec![GpuBcKind::ZeroGradient as u32; 4 * coupled_stride];
+        let mut value = vec![0.0_f32; 4 * coupled_stride];
+
+        let boundary_types = [
+            GpuBoundaryType::None,
+            GpuBoundaryType::Inlet,
+            GpuBoundaryType::Outlet,
+            GpuBoundaryType::Wall,
+        ];
+
+        for (b_i, &b) in boundary_types.iter().enumerate() {
+            for (u_idx, (field, component)) in unknowns.iter().enumerate() {
+                let entry = if let Some(spec) = self.field(field.name()) {
+                    if let Some(conditions) = spec.by_boundary.get(&b) {
+                        let expected_components = field.kind().component_count();
+                        if conditions.len() != expected_components {
+                            return Err(format!(
+                                "boundary spec for field '{}' on {:?} has {} components, expected {}",
+                                field.name(),
+                                b,
+                                conditions.len(),
+                                expected_components
+                            ));
+                        }
+                        conditions.get(*component).cloned()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let expected_unit = match entry.as_ref().map(|c| c.kind) {
+                    Some(GpuBcKind::Dirichlet) => field.unit(),
+                    Some(GpuBcKind::Neumann) | Some(GpuBcKind::ZeroGradient) | None => {
+                        field.unit() / si::LENGTH
+                    }
+                };
+
+                if let Some(cond) = entry {
+                    if cond.unit != expected_unit {
+                        return Err(format!(
+                            "boundary units mismatch for field '{}': got {}, expected {} for {:?}",
+                            field.name(),
+                            cond.unit,
+                            expected_unit,
+                            cond.kind
+                        ));
+                    }
+                    kind[b_i * coupled_stride + u_idx] = cond.kind as u32;
+                    value[b_i * coupled_stride + u_idx] = cond.value as f32;
+                } else {
+                    // Default: ZeroGradient (Neumann=0), with expected unit field.unit()/L.
+                    kind[b_i * coupled_stride + u_idx] = GpuBcKind::ZeroGradient as u32;
+                    value[b_i * coupled_stride + u_idx] = 0.0;
+                }
+            }
+        }
+
+        Ok((kind, value))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldBoundarySpec {
+    /// Per boundary type (Inlet/Outlet/Wall), per component (scalar=1, vec2=2).
+    pub by_boundary: HashMap<GpuBoundaryType, Vec<BoundaryCondition>>,
+}
+
+impl FieldBoundarySpec {
+    pub fn new() -> Self {
+        Self {
+            by_boundary: HashMap::new(),
+        }
+    }
+
+    pub fn set_uniform(
+        mut self,
+        boundary: GpuBoundaryType,
+        components: usize,
+        condition: BoundaryCondition,
+    ) -> Self {
+        self.by_boundary
+            .insert(boundary, vec![condition; components]);
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundaryCondition {
+    pub kind: GpuBcKind,
+    pub value: f64,
+    pub unit: UnitDim,
+}
+
+impl BoundaryCondition {
+    pub fn zero_gradient(unit: UnitDim) -> Self {
+        Self {
+            kind: GpuBcKind::ZeroGradient,
+            value: 0.0,
+            unit,
+        }
+    }
+
+    pub fn dirichlet(value: f64, unit: UnitDim) -> Self {
+        Self {
+            kind: GpuBcKind::Dirichlet,
+            value,
+            unit,
+        }
+    }
+
+    /// Value is `dphi/dn` (outward normal gradient).
+    pub fn neumann(dphi_dn: f64, unit: UnitDim) -> Self {
+        Self {
+            kind: GpuBcKind::Neumann,
+            value: dphi_dn,
+            unit,
         }
     }
 }
@@ -208,6 +360,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         system,
         state_layout: layout,
         fields: ModelFields::Incompressible(fields),
+        boundaries: BoundarySpec::default(),
     }
 }
 
@@ -219,6 +372,7 @@ pub fn compressible_model() -> ModelSpec {
         system,
         state_layout: layout,
         fields: ModelFields::Compressible(fields),
+        boundaries: BoundarySpec::default(),
     }
 }
 
@@ -231,10 +385,31 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
     system.add_equation(eqn);
 
     let layout = StateLayout::new(vec![phi]);
+    let mut boundaries = BoundarySpec::default();
+    boundaries.set_field(
+        "phi",
+        FieldBoundarySpec::new()
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                1,
+                BoundaryCondition::dirichlet(0.0, si::DIMENSIONLESS),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                1,
+                BoundaryCondition::dirichlet(0.0, si::DIMENSIONLESS),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+            ),
+    );
     ModelSpec {
         system,
         state_layout: layout,
         fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
+        boundaries,
     }
 }
 
@@ -291,5 +466,22 @@ mod tests {
         assert_eq!(model.system.equations()[2].terms().len(), 2);
         assert!(model.kernel_plan().contains(KernelKind::CompressibleFluxKt));
         assert!(matches!(model.fields, ModelFields::Compressible(_)));
+    }
+
+    #[test]
+    fn boundary_spec_can_build_gpu_tables() {
+        let model = generic_diffusion_demo_model();
+        let (kind, value) = model
+            .boundaries
+            .to_gpu_tables(&model.system)
+            .expect("gpu tables");
+        assert_eq!(kind.len(), 4);
+        assert_eq!(value.len(), 4);
+        assert_eq!(kind[GpuBoundaryType::Inlet as usize], GpuBcKind::Dirichlet as u32);
+        assert_eq!(kind[GpuBoundaryType::Outlet as usize], GpuBcKind::Dirichlet as u32);
+        assert_eq!(
+            kind[GpuBoundaryType::Wall as usize],
+            GpuBcKind::ZeroGradient as u32
+        );
     }
 }

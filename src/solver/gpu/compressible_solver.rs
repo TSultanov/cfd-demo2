@@ -9,6 +9,7 @@ use crate::solver::gpu::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::init::compressible_fields::{
     create_compressible_field_bind_groups, init_compressible_field_buffers, PackedStateConfig,
 };
+use crate::solver::gpu::kernel_graph::{ComputeNode, CopyBufferNode, KernelGraph, KernelNode};
 use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
 use crate::solver::gpu::csr::build_block_csr;
@@ -163,9 +164,80 @@ pub struct GpuCompressibleSolver {
     pub(crate) block_col_indices: Vec<u32>,
     profile: CompressibleProfile,
     offsets: CompressibleOffsets,
+    pre_step_graph: KernelGraph<GpuCompressibleSolver>,
+    explicit_graph: KernelGraph<GpuCompressibleSolver>,
 }
 
 impl GpuCompressibleSolver {
+    fn state_size_bytes(&self) -> u64 {
+        self.num_cells as u64 * self.offsets.stride as u64 * 4
+    }
+
+    fn build_pre_step_graph() -> KernelGraph<GpuCompressibleSolver> {
+        KernelGraph::new(vec![
+            KernelNode::CopyBuffer(CopyBufferNode {
+                label: "compressible:copy_old_to_state",
+                src: |s| &s.b_state_old,
+                dst: |s| &s.b_state,
+                size_bytes: GpuCompressibleSolver::state_size_bytes,
+            }),
+            KernelNode::CopyBuffer(CopyBufferNode {
+                label: "compressible:copy_state_to_iter",
+                src: |s| &s.b_state,
+                dst: |s| &s.b_state_iter,
+                size_bytes: GpuCompressibleSolver::state_size_bytes,
+            }),
+        ])
+    }
+
+    fn build_explicit_graph() -> KernelGraph<GpuCompressibleSolver> {
+        fn bind_mesh_fields(s: &GpuCompressibleSolver, cpass: &mut wgpu::ComputePass) {
+            cpass.set_bind_group(0, &s.bg_mesh, &[]);
+            cpass.set_bind_group(1, &s.bg_fields, &[]);
+        }
+
+        fn bind_fields_only(s: &GpuCompressibleSolver, cpass: &mut wgpu::ComputePass) {
+            cpass.set_bind_group(0, &s.bg_fields, &[]);
+        }
+
+        fn groups_cells(s: &GpuCompressibleSolver) -> (u32, u32, u32) {
+            let workgroup_size = 64;
+            (s.num_cells.div_ceil(workgroup_size), 1, 1)
+        }
+
+        fn groups_faces(s: &GpuCompressibleSolver) -> (u32, u32, u32) {
+            let workgroup_size = 64;
+            (s.num_faces.div_ceil(workgroup_size), 1, 1)
+        }
+
+        KernelGraph::new(vec![
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:gradients",
+                pipeline: |s| &s.pipeline_gradients,
+                bind_groups: bind_mesh_fields,
+                workgroups: groups_cells,
+            }),
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:flux_kt",
+                pipeline: |s| &s.pipeline_flux,
+                bind_groups: bind_mesh_fields,
+                workgroups: groups_faces,
+            }),
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:explicit_update",
+                pipeline: |s| &s.pipeline_explicit_update,
+                bind_groups: bind_mesh_fields,
+                workgroups: groups_cells,
+            }),
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:primitive_update",
+                pipeline: |s| &s.pipeline_update,
+                bind_groups: bind_fields_only,
+                workgroups: groups_cells,
+            }),
+        ])
+    }
+
     pub async fn new(
         mesh: &Mesh,
         device: Option<wgpu::Device>,
@@ -390,6 +462,8 @@ impl GpuCompressibleSolver {
             block_col_indices,
             profile,
             offsets,
+            pre_step_graph: GpuCompressibleSolver::build_pre_step_graph(),
+            explicit_graph: GpuCompressibleSolver::build_explicit_graph(),
         }
     }
 
@@ -525,7 +599,6 @@ impl GpuCompressibleSolver {
         let step_start = std::time::Instant::now();
         let workgroup_size = 64;
         let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
-        let num_groups_faces = self.num_faces.div_ceil(workgroup_size);
 
         self.state_step_index = (self.state_step_index + 1) % 3;
         self.bg_fields = self.bg_fields_ping_pong[self.state_step_index].clone();
@@ -539,100 +612,18 @@ impl GpuCompressibleSolver {
         self.constants.time += self.constants.dt;
         self.update_constants();
 
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Compressible Step Encoder"),
-                });
-        let state_size = self.num_cells as u64 * self.offsets.stride as u64 * 4;
-        encoder.copy_buffer_to_buffer(&self.b_state_old, 0, &self.b_state, 0, state_size);
-        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, state_size);
-
-        self.context.queue.submit(Some(encoder.finish()));
+        self.pre_step_graph.execute(&self.context, &*self);
+        let state_size = self.state_size_bytes();
 
         // Explicit KT update (rhoCentralFoam-like) for transient Euler timestepping.
         // The implicit FGMRES path is retained for BDF2/pseudo-time (dtau) workflows.
         let use_explicit = self.constants.time_scheme == 0 && self.constants.dtau <= 0.0;
         if use_explicit {
-            let grad_start = std::time::Instant::now();
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Compressible Explicit Gradients Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Compressible Explicit Gradients Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_gradients);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-            let grad_secs = grad_start.elapsed().as_secs_f64();
-
-            let flux_start = std::time::Instant::now();
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Compressible Explicit Flux Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Compressible Explicit Flux Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_flux);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.dispatch_workgroups(num_groups_faces, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-            let flux_secs = flux_start.elapsed().as_secs_f64();
-
-            let explicit_update_start = std::time::Instant::now();
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Compressible Explicit Update Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Compressible Explicit Update Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_explicit_update);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-            let explicit_update_secs = explicit_update_start.elapsed().as_secs_f64();
-
-            let primitive_update_start = std::time::Instant::now();
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Compressible Explicit Primitive Update Encoder"),
-                    });
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Compressible Explicit Primitive Update Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_update);
-                cpass.set_bind_group(0, &self.bg_fields, &[]);
-                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-            }
-            self.context.queue.submit(Some(encoder.finish()));
-            let primitive_update_secs = primitive_update_start.elapsed().as_secs_f64();
+            let timings = self.explicit_graph.execute_split_timed(&self.context, &*self);
+            let grad_secs = timings.seconds_for("compressible:gradients");
+            let flux_secs = timings.seconds_for("compressible:flux_kt");
+            let explicit_update_secs = timings.seconds_for("compressible:explicit_update");
+            let primitive_update_secs = timings.seconds_for("compressible:primitive_update");
 
             let total_secs = step_start.elapsed().as_secs_f64();
             self.profile.record(

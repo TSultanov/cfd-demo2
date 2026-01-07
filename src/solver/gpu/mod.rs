@@ -9,6 +9,7 @@ pub mod coupled_solver_fgmres;
 pub mod csr;
 pub mod enums;
 pub mod init;
+pub mod kernel_graph;
 pub mod linear_solver;
 pub mod profiling;
 pub mod solver;

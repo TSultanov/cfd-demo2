@@ -15,6 +15,15 @@ impl Scheme {
         }
     }
 
+    pub fn from_gpu_id(id: u32) -> Option<Self> {
+        match id {
+            0 => Some(Scheme::Upwind),
+            1 => Some(Scheme::SecondOrderUpwind),
+            2 => Some(Scheme::QUICK),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Scheme::Upwind => "upwind",
@@ -67,5 +76,13 @@ mod tests {
     fn scheme_from_str_errors_on_unknown() {
         let err = "nope".parse::<Scheme>().unwrap_err();
         assert!(err.contains("unknown scheme"));
+    }
+
+    #[test]
+    fn scheme_from_gpu_id_roundtrips() {
+        for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind, Scheme::QUICK] {
+            assert_eq!(Scheme::from_gpu_id(scheme.gpu_id()), Some(scheme));
+        }
+        assert_eq!(Scheme::from_gpu_id(999), None);
     }
 }

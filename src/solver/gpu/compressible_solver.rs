@@ -14,9 +14,11 @@ use crate::solver::gpu::init::compressible_fields::{
 use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
 use crate::solver::gpu::kernel_graph::{ComputeNode, CopyBufferNode, KernelGraph, KernelNode};
+use crate::solver::gpu::model_defaults::default_compressible_model;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
-use crate::solver::model::compressible_model;
+use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
+use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use std::env;
 use wgpu::util::DeviceExt;
@@ -172,11 +174,14 @@ pub struct GpuCompressibleSolver {
     profile: CompressibleProfile,
     offsets: CompressibleOffsets,
     pre_step_graph: KernelGraph<GpuCompressibleSolver>,
+    explicit_graph_first_order: KernelGraph<GpuCompressibleSolver>,
     explicit_graph: KernelGraph<GpuCompressibleSolver>,
+    implicit_assembly_graph_first_order: KernelGraph<GpuCompressibleSolver>,
     implicit_grad_assembly_graph: KernelGraph<GpuCompressibleSolver>,
     implicit_snapshot_graph: KernelGraph<GpuCompressibleSolver>,
     implicit_apply_graph: KernelGraph<GpuCompressibleSolver>,
     primitive_update_graph: KernelGraph<GpuCompressibleSolver>,
+    needs_gradients: bool,
 }
 
 impl GpuCompressibleSolver {
@@ -197,7 +202,11 @@ impl GpuCompressibleSolver {
     fn explicit_plan_explicit_graph(
         solver: &GpuCompressibleSolver,
     ) -> &KernelGraph<GpuCompressibleSolver> {
-        &solver.explicit_graph
+        if solver.needs_gradients {
+            &solver.explicit_graph
+        } else {
+            &solver.explicit_graph_first_order
+        }
     }
 
     fn build_explicit_plan() -> ExecutionPlan<GpuCompressibleSolver> {
@@ -227,7 +236,11 @@ impl GpuCompressibleSolver {
     fn implicit_iter_plan_grad_assembly_graph(
         solver: &GpuCompressibleSolver,
     ) -> &KernelGraph<GpuCompressibleSolver> {
-        &solver.implicit_grad_assembly_graph
+        if solver.needs_gradients {
+            &solver.implicit_grad_assembly_graph
+        } else {
+            &solver.implicit_assembly_graph_first_order
+        }
     }
 
     fn implicit_iter_plan_snapshot_graph(
@@ -363,6 +376,29 @@ impl GpuCompressibleSolver {
         ])
     }
 
+    fn build_explicit_graph_first_order() -> KernelGraph<GpuCompressibleSolver> {
+        KernelGraph::new(vec![
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:flux_kt",
+                pipeline: |s| &s.pipeline_flux,
+                bind_groups: compressible_bind_mesh_fields,
+                workgroups: compressible_workgroups_faces,
+            }),
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:explicit_update",
+                pipeline: |s| &s.pipeline_explicit_update,
+                bind_groups: compressible_bind_mesh_fields,
+                workgroups: compressible_workgroups_cells,
+            }),
+            KernelNode::Compute(ComputeNode {
+                label: "compressible:primitive_update",
+                pipeline: |s| &s.pipeline_update,
+                bind_groups: compressible_bind_fields_only,
+                workgroups: compressible_workgroups_cells,
+            }),
+        ])
+    }
+
     fn build_implicit_grad_assembly_graph() -> KernelGraph<GpuCompressibleSolver> {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
@@ -378,6 +414,23 @@ impl GpuCompressibleSolver {
                 workgroups: compressible_workgroups_cells,
             }),
         ])
+    }
+
+    fn build_implicit_assembly_graph_first_order() -> KernelGraph<GpuCompressibleSolver> {
+        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+            label: "compressible:assembly",
+            pipeline: |s| &s.pipeline_assembly,
+            bind_groups: compressible_bind_mesh_fields_solver,
+            workgroups: compressible_workgroups_cells,
+        })])
+    }
+
+    fn update_needs_gradients(&mut self) {
+        let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
+        let registry = SchemeRegistry::new(scheme);
+        self.needs_gradients = expand_schemes(&default_compressible_model().system, &registry)
+            .map(|expansion| expansion.needs_gradients())
+            .unwrap_or(true);
     }
 
     fn build_implicit_snapshot_graph() -> KernelGraph<GpuCompressibleSolver> {
@@ -417,7 +470,7 @@ impl GpuCompressibleSolver {
         let num_faces = mesh.face_owner.len() as u32;
         let profile = CompressibleProfile::new();
 
-        let model = compressible_model();
+        let model = default_compressible_model();
         let unknowns_per_cell = model.system.unknowns_per_cell();
         let num_unknowns = num_cells * unknowns_per_cell;
         let layout = &model.state_layout;
@@ -596,7 +649,7 @@ impl GpuCompressibleSolver {
                 .into_array(),
             });
 
-        Self {
+        let mut solver = Self {
             context,
             num_cells,
             num_faces,
@@ -649,13 +702,20 @@ impl GpuCompressibleSolver {
             profile,
             offsets,
             pre_step_graph: GpuCompressibleSolver::build_pre_step_graph(),
+            explicit_graph_first_order: GpuCompressibleSolver::build_explicit_graph_first_order(),
             explicit_graph: GpuCompressibleSolver::build_explicit_graph(),
+            implicit_assembly_graph_first_order:
+                GpuCompressibleSolver::build_implicit_assembly_graph_first_order(),
             implicit_grad_assembly_graph: GpuCompressibleSolver::build_implicit_grad_assembly_graph(
             ),
             implicit_snapshot_graph: GpuCompressibleSolver::build_implicit_snapshot_graph(),
             implicit_apply_graph: GpuCompressibleSolver::build_implicit_apply_graph(),
             primitive_update_graph: GpuCompressibleSolver::build_primitive_update_graph(),
+            needs_gradients: false,
         }
+        ;
+        solver.update_needs_gradients();
+        solver
     }
 
     pub fn initialize_history(&self) {
@@ -704,6 +764,7 @@ impl GpuCompressibleSolver {
     pub fn set_scheme(&mut self, scheme: u32) {
         self.constants.scheme = scheme;
         self.update_constants();
+        self.update_needs_gradients();
     }
 
     pub fn set_alpha_u(&mut self, alpha_u: f32) {

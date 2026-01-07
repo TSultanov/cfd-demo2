@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod scheme;
+pub mod scheme_expansion;
 pub mod state_layout;
 
 pub use ast::{
@@ -7,4 +8,5 @@ pub use ast::{
     Term, TermOp,
 };
 pub use scheme::{SchemeRegistry, TermKey};
+pub use scheme_expansion::{expand_schemes, SchemeExpansion};
 pub use state_layout::{StateField, StateLayout};

@@ -31,6 +31,8 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Removed `FluidState` struct dependence from the public incompressible GPU read/write helpers by using `StateLayout` offsets instead (`src/solver/gpu/solver.rs`).
 - Switched incompressible state buffer initialization to use `StateLayout` stride (so the host no longer needs a matching `FluidState` struct) (`src/solver/gpu/init/fields.rs`).
 - Added cached default `ModelSpec`s for GPU codepaths that need access to layout/unknown metadata without threading a `ModelSpec` everywhere (`src/solver/gpu/model_defaults.rs`).
+- Added a generic (model-driven) scheme expansion pass that reports required auxiliary computations (currently: gradient needs for higher-order convection) (`src/solver/model/backend/scheme_expansion.rs`).
+- Used the scheme expansion to skip compressible gradient dispatches for first-order runs by selecting first-order vs reconstruction kernel graphs at runtime (`src/solver/gpu/compressible_solver.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
@@ -66,6 +68,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 4. **Generic scheme expansion**
    - Implement “needs gradients?” and “needs reconstruction?” detection per term/scheme.
    - Auto-generate gradient kernels per required field (instead of hardcoded `grad_rho`, `grad_u`, etc.).
+   - Status: gradient *requirements* are derived from the model + `SchemeRegistry`; runtime can now skip gradient passes for first-order compressible stepping.
 5. **Generic assembly/apply/update kernels for arbitrary coupled systems**
    - Generate matrix + RHS assembly for implicit terms and RHS-only contributions for explicit terms (from `DiscreteSystem`).
    - Generate an `apply(A, x)` kernel (SpMV + optional explicit parts) so the same linear solver kernels can be reused.

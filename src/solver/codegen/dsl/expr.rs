@@ -51,7 +51,7 @@ impl TypedExpr {
     }
 
     pub fn f32(value: f32, unit: UnitDim) -> Self {
-        Self::new(Expr::lit_f32(value), DslType::f32(), unit)
+        Self::new(value.into(), DslType::f32(), unit)
     }
 
     pub fn ident(name: &str, ty: DslType, unit: UnitDim) -> Self {

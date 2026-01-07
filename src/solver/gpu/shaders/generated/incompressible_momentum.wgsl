@@ -14,9 +14,9 @@ fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32,
     var rhs_y: f32 = base_coeff * phi_n.y;
     if (time_scheme == 1u) {
         let r = dt / dt_old;
-        diag = base_coeff * (1.0 + 2.0 * r) / (1.0 + r);
-        let factor_n = 1.0 + r;
-        let factor_nm1 = r * r / (1.0 + r);
+        diag = base_coeff * (r * 2.0 + 1.0) / (r + 1.0);
+        let factor_n = r + 1.0;
+        let factor_nm1 = r * r / (r + 1.0);
         rhs_x = base_coeff * (factor_n * phi_n.x - factor_nm1 * phi_nm1.x);
         rhs_y = base_coeff * (factor_n * phi_n.y - factor_nm1 * phi_nm1.y);
     }

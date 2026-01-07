@@ -301,7 +301,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "end",
-        Expr::ident("cell_face_offsets").index(Expr::ident("idx") + Expr::lit_u32(1)),
+        Expr::ident("cell_face_offsets").index(Expr::ident("idx") + 1u32),
     ));
 
     stmts.push(dsl::let_expr("rho_l", rho_expr));
@@ -312,17 +312,17 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::var_typed_expr(
         "grad_rho_accum",
         Type::vec2_f32(),
-        Some(zeros.clone()),
+        Some(zeros),
     ));
     stmts.push(dsl::var_typed_expr(
         "grad_rho_u_x_accum",
         Type::vec2_f32(),
-        Some(zeros.clone()),
+        Some(zeros),
     ));
     stmts.push(dsl::var_typed_expr(
         "grad_rho_u_y_accum",
         Type::vec2_f32(),
-        Some(zeros.clone()),
+        Some(zeros),
     ));
     stmts.push(dsl::var_typed_expr(
         "grad_rho_e_accum",
@@ -378,7 +378,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let rho_u_neigh_expr = state_vec2(layout, "state", "other_idx", rho_u_field);
     let rho_e_neigh_expr = state_scalar(layout, "state", "other_idx", rho_e_field);
     loop_body.push(dsl::if_block_expr(
-        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
+        Expr::ident("neighbor").ne(-1),
         dsl::block(vec![
             dsl::var_typed_expr(
                 "other_idx",
@@ -411,19 +411,19 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::var_typed_expr("rho_e_face", Type::F32, Some(Expr::ident("rho_e_l"))));
     loop_body.push(dsl::if_block_expr(
-        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
+        Expr::ident("neighbor").ne(-1),
         dsl::block(vec![
             dsl::assign_expr(
                 Expr::ident("rho_face"),
-                Expr::lit_f32(0.5) * (Expr::ident("rho_l") + Expr::ident("rho_r")),
+                (Expr::ident("rho_l") + Expr::ident("rho_r")) * 0.5,
             ),
             dsl::assign_expr(
                 Expr::ident("rho_u_face"),
-                Expr::lit_f32(0.5) * (Expr::ident("rho_u_l") + Expr::ident("rho_u_r")),
+                (Expr::ident("rho_u_l") + Expr::ident("rho_u_r")) * 0.5,
             ),
             dsl::assign_expr(
                 Expr::ident("rho_e_face"),
-                Expr::lit_f32(0.5) * (Expr::ident("rho_e_l") + Expr::ident("rho_e_r")),
+                (Expr::ident("rho_e_l") + Expr::ident("rho_e_r")) * 0.5,
             ),
         ]),
         None,

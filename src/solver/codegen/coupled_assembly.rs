@@ -306,11 +306,11 @@ fn safe_inverse_fn() -> Function {
     let params = vec![Param::new("val", Type::F32, Vec::new())];
     let body = Block::new(vec![
         dsl::if_block_expr(
-            Expr::call_named("abs", vec![Expr::ident("val")]).gt(Expr::lit_f32(1e-14)),
-            dsl::block(vec![Stmt::Return(Some(Expr::lit_f32(1.0) / Expr::ident("val")))]),
+            dsl::abs("val").gt(1e-14),
+            dsl::block(vec![Stmt::Return(Some(Expr::from(1.0) / "val"))]),
             None,
         ),
-        Stmt::Return(Some(Expr::lit_f32(0.0))),
+        Stmt::Return(Some(0.0.into())),
     ]);
     Function::new("safe_inverse", params, Some(Type::F32), Vec::new(), body)
 }
@@ -397,7 +397,7 @@ fn main_body(
     ));
     stmts.push(dsl::let_expr(
         "end",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx") + Expr::lit_u32(1)),
+        dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
     ));
     stmts.push(dsl::let_expr(
         "scalar_offset",
@@ -405,44 +405,44 @@ fn main_body(
     ));
     stmts.push(dsl::let_expr(
         "num_neighbors",
-        dsl::array_access("scalar_row_offsets", Expr::ident("idx") + Expr::lit_u32(1))
+        dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
             - Expr::ident("scalar_offset"),
     ));
     stmts.push(dsl::let_expr(
         "start_row_0",
-        Expr::lit_u32(block_stride as u32) * Expr::ident("scalar_offset"),
+        Expr::ident("scalar_offset") * block_stride as u32,
     ));
     stmts.push(dsl::let_expr(
         "start_row_1",
         Expr::ident("start_row_0")
-            + Expr::lit_u32(coupled_stride as u32) * Expr::ident("num_neighbors"),
+            + Expr::ident("num_neighbors") * coupled_stride as u32,
     ));
     stmts.push(dsl::let_expr(
         "start_row_2",
         Expr::ident("start_row_0")
-            + Expr::lit_u32(row_stride_2 as u32) * Expr::ident("num_neighbors"),
+            + Expr::ident("num_neighbors") * row_stride_2 as u32,
     ));
     let zero_vec2 = typed::VecExpr::<2>::zeros().expr();
     stmts.push(dsl::var_typed_expr(
         "diag_uv",
         Type::vec2_f32(),
-        Some(zero_vec2.clone()),
+        Some(zero_vec2),
     ));
-    stmts.push(dsl::var_typed_expr("diag_p", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::var_typed_expr("diag_p", Type::F32, Some(0.0.into())));
     stmts.push(dsl::var_typed_expr(
         "sum_diag_uv_p",
         Type::vec2_f32(),
-        Some(zero_vec2.clone()),
+        Some(zero_vec2),
     ));
     stmts.push(dsl::var_typed_expr(
         "sum_diag_p_uv",
         Type::vec2_f32(),
-        Some(zero_vec2.clone()),
+        Some(zero_vec2),
     ));
-    stmts.push(dsl::var_typed_expr("sum_diag_pp", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::var_typed_expr("sum_diag_pp", Type::F32, Some(0.0.into())));
     stmts.push(dsl::var_typed_expr("rhs_uv", Type::vec2_f32(), Some(zero_vec2)));
-    stmts.push(dsl::var_typed_expr("rhs_p", Type::F32, Some(Expr::lit_f32(0.0))));
-    stmts.push(dsl::var_typed_expr("scalar_diag_p", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::var_typed_expr("rhs_p", Type::F32, Some(0.0.into())));
+    stmts.push(dsl::var_typed_expr("scalar_diag_p", Type::F32, Some(0.0.into())));
     if let Some(ddt_op) = &plan.ddt {
         let rho_expr = coeff_cell_expr(
             layout,
@@ -465,7 +465,7 @@ fn main_body(
         stmts.push(dsl::if_block_expr(
             Expr::ident("constants")
                 .field("time_scheme")
-                .eq(Expr::lit_u32(1)),
+                .eq(1u32),
             dsl::block(vec![
                 dsl::let_expr("dt", Expr::ident("constants").field("dt")),
                 dsl::let_expr("dt_old", Expr::ident("constants").field("dt_old")),
@@ -476,14 +476,14 @@ fn main_body(
                     Expr::ident("vol")
                         * Expr::ident("rho")
                         / Expr::ident("dt")
-                        * (Expr::lit_f32(1.0) + Expr::lit_f32(2.0) * Expr::ident("r"))
-                        / (Expr::lit_f32(1.0) + Expr::ident("r")),
+                        * (Expr::ident("r") * 2.0 + 1.0)
+                        / (Expr::ident("r") + 1.0),
                 ),
-                dsl::let_expr("factor_n", Expr::lit_f32(1.0) + Expr::ident("r")),
+                dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                 dsl::let_expr(
                     "factor_nm1",
                     (Expr::ident("r") * Expr::ident("r"))
-                        / (Expr::lit_f32(1.0) + Expr::ident("r")),
+                        / (Expr::ident("r") + 1.0),
                 ),
                 dsl::assign_expr(
                     Expr::ident("rhs_time"),
@@ -498,7 +498,7 @@ fn main_body(
             None,
         ));
         let coeff_time = Expr::ident("coeff_time");
-        let diag_time = typed::VecExpr::<2>::from_components([coeff_time.clone(), coeff_time]).expr();
+        let diag_time = typed::VecExpr::<2>::from_components([coeff_time, coeff_time]).expr();
         stmts.push(dsl::assign_op_expr(AssignOp::Add, Expr::ident("diag_uv"), diag_time));
         stmts.push(dsl::assign_op_expr(
             AssignOp::Add,
@@ -554,13 +554,13 @@ fn main_body(
             "f_center",
             dsl::array_access("face_centers", Expr::ident("face_idx")),
         ));
-        body.push(dsl::var_typed_expr("normal_sign", Type::F32, Some(Expr::lit_f32(1.0))));
+        body.push(dsl::var_typed_expr("normal_sign", Type::F32, Some(1.0.into())));
         body.push(dsl::if_block_expr(
             Expr::ident("owner").ne(Expr::ident("idx")),
             dsl::block(vec![
                 dsl::assign_expr(Expr::ident("normal").field("x"), -Expr::ident("normal").field("x")),
                 dsl::assign_expr(Expr::ident("normal").field("y"), -Expr::ident("normal").field("y")),
-                dsl::assign_expr(Expr::ident("normal_sign"), Expr::lit_f32(-1.0)),
+                dsl::assign_expr(Expr::ident("normal_sign"), -1.0),
             ]),
             None,
         ));
@@ -584,13 +584,13 @@ fn main_body(
             Type::Custom("Vector2".to_string()),
             None,
         ));
-        body.push(dsl::var_typed_expr("is_boundary", Type::Bool, Some(Expr::lit_bool(false))));
-        body.push(dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::lit_u32(0))));
-        body.push(dsl::var_typed_expr("d_p_neigh", Type::F32, Some(Expr::lit_f32(0.0))));
+        body.push(dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())));
+        body.push(dsl::var_typed_expr("other_idx", Type::U32, Some(0u32.into())));
+        body.push(dsl::var_typed_expr("d_p_neigh", Type::F32, Some(0.0.into())));
 
         let d_p_other_expr = state_scalar(layout, "state", "other_idx", d_p_field);
         body.push(dsl::if_block_expr(
-            Expr::ident("neigh_idx").ne(Expr::lit_i32(-1)),
+            Expr::ident("neigh_idx").ne(-1),
             dsl::block(vec![
                 dsl::assign_expr(
                     Expr::ident("other_idx"),
@@ -611,7 +611,7 @@ fn main_body(
                 dsl::assign_expr(Expr::ident("d_p_neigh"), d_p_other_expr),
             ]),
             Some(dsl::block(vec![
-                dsl::assign_expr(Expr::ident("is_boundary"), Expr::lit_bool(true)),
+                dsl::assign_expr(Expr::ident("is_boundary"), true),
                 dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("idx")),
                 dsl::assign_expr(Expr::ident("other_center"), Expr::ident("f_center")),
                 dsl::assign_expr(Expr::ident("d_p_neigh"), d_p_idx_expr),
@@ -625,15 +625,12 @@ fn main_body(
                     &typed::VecExpr::<2>::from_xy_fields(Expr::ident("center")),
                 );
                 let normal_vec = typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"));
-                Expr::call_named("abs", vec![d_vec.dot(&normal_vec)])
+                dsl::abs(d_vec.dot(&normal_vec))
             },
         ));
         body.push(dsl::let_expr(
             "dist",
-            Expr::call_named(
-                "max",
-                vec![Expr::ident("dist_proj"), Expr::lit_f32(1e-6)],
-            ),
+            dsl::max("dist_proj", 1e-6),
         ));
         if let Some(diff_op) = &plan.diffusion {
             let mu_expr = coeff_face_expr(
@@ -641,8 +638,8 @@ fn main_body(
                 diff_op.coeff.as_ref(),
                 "idx",
                 "other_idx",
-                Expr::lit_f32(0.5),
-                Expr::lit_f32(1.0),
+                0.5.into(),
+                1.0.into(),
             );
             body.push(dsl::let_expr(
                 "diff_coeff",
@@ -652,7 +649,7 @@ fn main_body(
                 ),
             ));
         } else {
-            body.push(dsl::let_expr("diff_coeff", Expr::lit_f32(0.0)));
+            body.push(dsl::let_expr("diff_coeff", 0.0));
         }
 
         if plan.convection.is_some() {
@@ -663,8 +660,8 @@ fn main_body(
             body.push(dsl::let_expr("conv_coeff_diag", Expr::ident("conv_coeff").field("x")));
             body.push(dsl::let_expr("conv_coeff_off", Expr::ident("conv_coeff").field("y")));
         } else {
-            body.push(dsl::let_expr("conv_coeff_diag", Expr::lit_f32(0.0)));
-            body.push(dsl::let_expr("conv_coeff_off", Expr::lit_f32(0.0)));
+            body.push(dsl::let_expr("conv_coeff_diag", 0.0));
+            body.push(dsl::let_expr("conv_coeff_off", 0.0));
         }
         body.push(dsl::let_expr(
             "scalar_mat_idx",
@@ -682,7 +679,7 @@ fn main_body(
             dsl::let_expr(
                 "ramp",
                 dsl::smoothstep(
-                    Expr::lit_f32(0.0),
+                    0.0,
                     Expr::ident("constants").field("ramp_time"),
                     Expr::ident("constants").field("time"),
                 ),
@@ -692,7 +689,7 @@ fn main_body(
                 Type::vec2_f32(),
                 typed::VecExpr::<2>::from_components([
                     Expr::ident("constants").field("inlet_velocity") * Expr::ident("ramp"),
-                    Expr::lit_f32(0.0),
+                    0.0.into(),
                 ])
                 .expr(),
             ),
@@ -713,7 +710,7 @@ fn main_body(
                     .expr(),
             ),
             dsl::if_block_expr(
-                Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+                Expr::ident("flux").gt(0.0),
                 dsl::block(vec![dsl::assign_op_expr(
                     AssignOp::Add,
                     Expr::ident("diag_uv"),
@@ -765,7 +762,7 @@ fn main_body(
 
         let outlet_block = dsl::block(vec![
             dsl::if_block_expr(
-                Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+                Expr::ident("flux").gt(0.0),
                 dsl::block(vec![dsl::assign_op_expr(
                     AssignOp::Add,
                     Expr::ident("diag_uv"),
@@ -802,13 +799,13 @@ fn main_body(
         ]);
 
         let boundary_stmt = dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
+            Expr::ident("boundary_type").eq(1u32),
             inlet_block,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
+                Expr::ident("boundary_type").eq(3u32),
                 wall_block,
                 Some(dsl::block(vec![dsl::if_block_expr(
-                    Expr::ident("boundary_type").eq(Expr::lit_u32(2)),
+                    Expr::ident("boundary_type").eq(2u32),
                     outlet_block,
                     None,
                 )])),
@@ -836,10 +833,10 @@ fn main_body(
             interior_stmts.push(dsl::let_typed_expr(
                 "scheme_id",
                 Type::U32,
-                Expr::lit_u32(scheme_id),
+                scheme_id,
             ));
             interior_stmts.push(dsl::if_block_expr(
-                Expr::ident("scheme_id").ne(Expr::lit_u32(0)),
+                Expr::ident("scheme_id").ne(0u32),
                 {
                     let mut ho_block = vec![
                         dsl::let_expr("u_own", state_vec2(layout, "state", "idx", u_field)),
@@ -913,9 +910,9 @@ fn main_body(
             "total_dist",
             Expr::ident("d_own") + Expr::ident("d_neigh"),
         ));
-        interior_stmts.push(dsl::var_typed_expr("lambda", Type::F32, Some(Expr::lit_f32(0.5))));
+        interior_stmts.push(dsl::var_typed_expr("lambda", Type::F32, Some(0.5.into())));
         interior_stmts.push(dsl::if_block_expr(
-            Expr::ident("total_dist").gt(Expr::lit_f32(1e-6)),
+            Expr::ident("total_dist").gt(1e-6),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("lambda"),
                 Expr::ident("d_neigh") / Expr::ident("total_dist"),
@@ -941,7 +938,7 @@ fn main_body(
             dsl::let_expr(
                 "d_p_face",
                 Expr::ident("lambda") * Expr::ident("d_p_own")
-                    + (Expr::lit_f32(1.0) - Expr::ident("lambda")) * Expr::ident("d_p_neigh"),
+                    + (Expr::from(1.0) - Expr::ident("lambda")) * Expr::ident("d_p_neigh"),
             ),
             dsl::let_expr("pressure_coeff_face", pressure_coeff_face_expr.clone()),
             dsl::let_expr(
@@ -958,7 +955,7 @@ fn main_body(
                 Expr::ident("pressure_coeff_face") * Expr::ident("area") / Expr::ident("dist"),
             ),
             dsl::if_block_expr(
-                Expr::ident("scalar_mat_idx").ne(Expr::lit_u32(u32::MAX)),
+                Expr::ident("scalar_mat_idx").ne(u32::MAX),
                 dsl::block(vec![dsl::assign_array_access(
                     "scalar_matrix_values",
                     Expr::ident("scalar_mat_idx"),
@@ -973,26 +970,26 @@ fn main_body(
             ),
         ]);
 
-        let one_minus_lambda = Expr::lit_f32(1.0) - Expr::ident("lambda");
-        let zero = Expr::lit_f32(0.0);
+        let one_minus_lambda: Expr = Expr::from(1.0) - Expr::ident("lambda");
+        let zero: Expr = 0.0.into();
         let face_x = Expr::ident("face_vec").field("x");
         let face_y = Expr::ident("face_vec").field("y");
         let pg_off_x = if plan.gradient.is_some() {
-            one_minus_lambda.clone() * face_x.clone()
+            one_minus_lambda * face_x
         } else {
-            zero.clone()
+            zero
         };
         let pg_off_y = if plan.gradient.is_some() {
-            one_minus_lambda.clone() * face_y.clone()
+            one_minus_lambda * face_y
         } else {
-            zero.clone()
+            zero
         };
         let offdiag_block = typed::MatExpr::<3, 3>::from_entries([
-            [Expr::ident("coeff"), zero.clone(), pg_off_x],
-            [zero.clone(), Expr::ident("coeff"), pg_off_y],
+            [Expr::ident("coeff"), zero, pg_off_x],
+            [zero, Expr::ident("coeff"), pg_off_y],
             [
-                one_minus_lambda.clone() * face_x,
-                one_minus_lambda.clone() * face_y,
+                one_minus_lambda * face_x,
+                one_minus_lambda * face_y,
                 -Expr::ident("lapl_coeff"),
             ],
         ]);
@@ -1026,11 +1023,11 @@ fn main_body(
     let diag_block = typed::MatExpr::<3, 3>::from_entries([
         [
             Expr::ident("diag_uv").field("x"),
-            Expr::lit_f32(0.0),
+            0.0.into(),
             Expr::ident("sum_diag_uv_p").field("x"),
         ],
         [
-            Expr::lit_f32(0.0),
+            0.0.into(),
             Expr::ident("diag_uv").field("y"),
             Expr::ident("sum_diag_uv_p").field("y"),
         ],

@@ -146,7 +146,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             if (boundary_type == 3u) {
                 let m_dot_n = dot(rho_u_l, normal_vec);
-                rho_u_r = rho_u_l - normal_vec * 2.0 * m_dot_n;
+                rho_u_r = rho_u_l - normal_vec * m_dot_n * 2.0;
             }
         }
     }
@@ -223,19 +223,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let inv_rho_l = 1.0 / max(rho_l, 0.00000001);
     let u_l: vec2<f32> = rho_u_l * inv_rho_l;
-    let ke_l = 0.5 * rho_l * dot(u_l, u_l);
-    let p_l = max(0.0, 0.39999998 * (rho_e_l - ke_l));
+    let ke_l = rho_l * dot(u_l, u_l) * 0.5;
+    let p_l = max(0.0, (rho_e_l - ke_l) * 0.39999998);
     let u_n_l = dot(u_l, normal_vec);
-    let c_l = sqrt(1.4 * p_l * inv_rho_l);
+    let c_l = sqrt(p_l * inv_rho_l * 1.4);
     let inv_rho_r = 1.0 / max(rho_r, 0.00000001);
     let u_r: vec2<f32> = rho_u_r * inv_rho_r;
-    let ke_r = 0.5 * rho_r * dot(u_r, u_r);
-    let p_r = max(0.0, 0.39999998 * (rho_e_r - ke_r));
+    let ke_r = rho_r * dot(u_r, u_r) * 0.5;
+    let p_r = max(0.0, (rho_e_r - ke_r) * 0.39999998);
     let u_n_r = dot(u_r, normal_vec);
-    let c_r = sqrt(1.4 * p_r * inv_rho_r);
+    let c_r = sqrt(p_r * inv_rho_r * 1.4);
     let u_face: vec2<f32> = (u_l + u_r) * 0.5;
     let u_face_n = dot(u_face, normal_vec);
-    let c_bar = 0.5 * (c_l + c_r);
+    let c_bar = (c_l + c_r) * 0.5;
     let mach = abs(u_face_n) / max(c_bar, 0.000001);
     let mach2 = mach * mach;
     var c_l_eff: f32 = c_l;
@@ -293,8 +293,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let grad_u_y_l_vec: vec2<f32> = (grad_rho_u_y_l_vec - grad_rho_l_vec * u_l_cell.y) * inv_rho_l_cell;
     let grad_u_x_r_vec: vec2<f32> = (grad_rho_u_x_r_vec - grad_rho_r_vec * u_r_cell.x) * inv_rho_r_cell;
     let grad_u_y_r_vec: vec2<f32> = (grad_rho_u_y_r_vec - grad_rho_r_vec * u_r_cell.y) * inv_rho_r_cell;
-    let grad_u2_l_vec: vec2<f32> = grad_u_x_l_vec * 2.0 * u_l_cell.x + grad_u_y_l_vec * 2.0 * u_l_cell.y;
-    let grad_u2_r_vec: vec2<f32> = grad_u_x_r_vec * 2.0 * u_r_cell.x + grad_u_y_r_vec * 2.0 * u_r_cell.y;
+    let grad_u2_l_vec: vec2<f32> = grad_u_x_l_vec * u_l_cell.x * 2.0 + grad_u_y_l_vec * u_l_cell.y * 2.0;
+    let grad_u2_r_vec: vec2<f32> = grad_u_x_r_vec * u_r_cell.x * 2.0 + grad_u_y_r_vec * u_r_cell.y * 2.0;
     let grad_rho_u2_l_vec: vec2<f32> = grad_rho_l_vec * u2_l_cell + grad_u2_l_vec * rho_l_cell;
     let grad_rho_u2_r_vec: vec2<f32> = grad_rho_r_vec * u2_r_cell + grad_u2_r_vec * rho_r_cell;
     let gamma_minus_1 = 0.39999998;
@@ -302,27 +302,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let grad_p_r_vec: vec2<f32> = (grad_rho_e_r_vec - grad_rho_u2_r_vec * 0.5) * gamma_minus_1;
     let grad_p_l_n = dot(grad_p_l_vec, normal_vec);
     let grad_p_r_n = dot(grad_p_r_vec, normal_vec);
-    let grad_p_face_n = 0.5 * (grad_p_l_n + grad_p_r_n);
+    let grad_p_face_n = (grad_p_l_n + grad_p_r_n) * 0.5;
     let grad_p_jump_n = (p_r - p_l) / dist;
-    let rho_face = 0.5 * (rho_l + rho_r);
-    let p_bar = 0.5 * (p_l + p_r);
+    let rho_face = (rho_l + rho_r) * 0.5;
+    let p_bar = (p_l + p_r) * 0.5;
     let dp_rel = abs(p_r - p_l) / max(p_bar, 0.000001);
     if (!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
         let pc_theta = min(1.0, max(mach2, constants.precond_theta_floor));
         let pc_low_mach = 1.0 - pc_theta;
-        let pc_smooth = 1.0 / (1.0 + dp_rel / 0.2 * dp_rel / 0.2);
+        let pc_smooth = 1.0 / (dp_rel / 0.2 * dp_rel / 0.2 + 1.0);
         let pc_alpha = constants.pressure_coupling_alpha * pc_low_mach * pc_smooth;
         let m_corr = pc_alpha * constants.dt / max(rho_face, 0.00000001) * (grad_p_face_n - grad_p_jump_n);
         let h_l = (rho_e_l + p_l) * inv_rho_l;
         let h_r = (rho_e_r + p_r) * inv_rho_r;
-        let h_face = 0.5 * (h_l + h_r);
+        let h_face = (h_l + h_r) * 0.5;
         flux_rho = flux_rho + m_corr;
         flux_rho_u = flux_rho_u + u_face * m_corr;
         flux_rho_e = flux_rho_e + m_corr * h_face;
     }
     flux_rho_e = flux_rho_e + dot(diff_u, u_face);
     let base = idx * 4u;
-    fluxes[base + 0u] = flux_rho * area;
+    fluxes[base] = flux_rho * area;
     fluxes[base + 1u] = flux_rho_u.x * area;
     fluxes[base + 2u] = flux_rho_u.y * area;
     fluxes[base + 3u] = flux_rho_e * area;

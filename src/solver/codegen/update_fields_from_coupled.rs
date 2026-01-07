@@ -212,14 +212,14 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
 
     stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::let_expr("lid", Expr::ident("local_id").field("x")));
-    stmts.push(dsl::var_typed_expr("diff_u", Type::F32, Some(Expr::lit_f32(0.0))));
-    stmts.push(dsl::var_typed_expr("diff_p", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::var_typed_expr("diff_u", Type::F32, Some(0.0.into())));
+    stmts.push(dsl::var_typed_expr("diff_p", Type::F32, Some(0.0.into())));
     stmts.push(dsl::let_expr(
         "num_cells",
         Expr::call_named(
             "arrayLength",
             vec![Expr::ident("state").addr_of()],
-        ) / Expr::lit_u32(stride),
+        ) / stride,
     ));
 
     let u_x_target = state_component(layout, "state", "idx", u_field, 0);
@@ -317,9 +317,9 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     stmts.push(dsl::call_stmt_expr(Expr::call_named("workgroupBarrier", Vec::new())));
 
     stmts.push(dsl::for_loop_expr(
-        dsl::for_init_var_expr("stride", Expr::lit_u32(32)),
-        Expr::ident("stride").gt(Expr::lit_u32(0)),
-        dsl::for_step_assign_expr(Expr::ident("stride"), Expr::ident("stride") / Expr::lit_u32(2)),
+        dsl::for_init_var_expr("stride", 32u32),
+        Expr::ident("stride").gt(0u32),
+        dsl::for_step_assign_expr(Expr::ident("stride"), Expr::ident("stride") / 2u32),
         dsl::block(vec![
             dsl::if_block_expr(
                 Expr::ident("lid").lt(Expr::ident("stride")),
@@ -358,25 +358,25 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     ));
 
     stmts.push(dsl::if_block_expr(
-        Expr::ident("lid").eq(Expr::lit_u32(0)),
+        Expr::ident("lid").eq(0u32),
         dsl::block(vec![
             dsl::call_stmt_expr(Expr::call_named(
                 "atomicMax",
                 vec![
-                    dsl::array_access("max_diff_result", Expr::lit_u32(0)).addr_of(),
+                    dsl::array_access("max_diff_result", 0u32).addr_of(),
                     Expr::call_named(
                         "bitcast<u32>",
-                        vec![dsl::array_access("shared_max_u", Expr::lit_u32(0))],
+                        vec![dsl::array_access("shared_max_u", 0u32)],
                     ),
                 ],
             )),
             dsl::call_stmt_expr(Expr::call_named(
                 "atomicMax",
                 vec![
-                    dsl::array_access("max_diff_result", Expr::lit_u32(1)).addr_of(),
+                    dsl::array_access("max_diff_result", 1u32).addr_of(),
                     Expr::call_named(
                         "bitcast<u32>",
-                        vec![dsl::array_access("shared_max_p", Expr::lit_u32(0))],
+                        vec![dsl::array_access("shared_max_p", 0u32)],
                     ),
                 ],
             )),

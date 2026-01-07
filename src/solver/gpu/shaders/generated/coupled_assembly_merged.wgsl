@@ -127,9 +127,9 @@ fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32,
     var rhs_y: f32 = base_coeff * phi_n.y;
     if (time_scheme == 1u) {
         let r = dt / dt_old;
-        diag = base_coeff * (1.0 + 2.0 * r) / (1.0 + r);
-        let factor_n = 1.0 + r;
-        let factor_nm1 = r * r / (1.0 + r);
+        diag = base_coeff * (r * 2.0 + 1.0) / (r + 1.0);
+        let factor_n = r + 1.0;
+        let factor_nm1 = r * r / (r + 1.0);
         rhs_x = base_coeff * (factor_n * phi_n.x - factor_nm1 * phi_nm1.x);
         rhs_y = base_coeff * (factor_n * phi_n.y - factor_nm1 * phi_nm1.y);
     }
@@ -224,9 +224,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let end = cell_face_offsets[idx + 1u];
     let scalar_offset = scalar_row_offsets[idx];
     let num_neighbors = scalar_row_offsets[idx + 1u] - scalar_offset;
-    let start_row_0 = 9u * scalar_offset;
-    let start_row_1 = start_row_0 + 3u * num_neighbors;
-    let start_row_2 = start_row_0 + 6u * num_neighbors;
+    let start_row_0 = scalar_offset * 9u;
+    let start_row_1 = start_row_0 + num_neighbors * 3u;
+    let start_row_2 = start_row_0 + num_neighbors * 6u;
     var diag_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
     var diag_p: f32 = 0.0;
     var sum_diag_uv_p: vec2<f32> = vec2<f32>(0.0, 0.0);
@@ -244,9 +244,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
         let u_nm1: vec2<f32> = vec2<f32>(state_old_old[idx * 8u + 0u], state_old_old[idx * 8u + 1u]);
-        coeff_time = vol * rho / dt * (1.0 + 2.0 * r) / (1.0 + r);
-        let factor_n = 1.0 + r;
-        let factor_nm1 = r * r / (1.0 + r);
+        coeff_time = vol * rho / dt * (r * 2.0 + 1.0) / (r + 1.0);
+        let factor_n = r + 1.0;
+        let factor_nm1 = r * r / (r + 1.0);
         rhs_time = vol * rho / dt * (factor_n * u_n - factor_nm1 * u_nm1);
     }
     diag_uv += vec2<f32>(coeff_time, coeff_time);
@@ -314,9 +314,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 } else {
                     if (scheme_id == 2u) {
                         if (flux > 0.0) {
-                            phi_ho_u = 0.625 * u_own.x + 0.375 * u_neigh.x + 0.125 * dot(vec2<f32>(grad_u[idx].x, grad_u[idx].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y));
+                            phi_ho_u = u_own.x * 0.625 + u_neigh.x * 0.375 + dot(vec2<f32>(grad_u[idx].x, grad_u[idx].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125;
                         } else {
-                            phi_ho_u = 0.625 * u_neigh.x + 0.375 * u_own.x + 0.125 * dot(vec2<f32>(grad_u[other_idx].x, grad_u[other_idx].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y));
+                            phi_ho_u = u_neigh.x * 0.625 + u_own.x * 0.375 + dot(vec2<f32>(grad_u[other_idx].x, grad_u[other_idx].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125;
                         }
                     }
                 }
@@ -334,9 +334,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 } else {
                     if (scheme_id == 2u) {
                         if (flux > 0.0) {
-                            phi_ho_v = 0.625 * u_own.y + 0.375 * u_neigh.y + 0.125 * dot(vec2<f32>(grad_v[idx].x, grad_v[idx].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y));
+                            phi_ho_v = u_own.y * 0.625 + u_neigh.y * 0.375 + dot(vec2<f32>(grad_v[idx].x, grad_v[idx].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125;
                         } else {
-                            phi_ho_v = 0.625 * u_neigh.y + 0.375 * u_own.y + 0.125 * dot(vec2<f32>(grad_v[other_idx].x, grad_v[other_idx].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y));
+                            phi_ho_v = u_neigh.y * 0.625 + u_own.y * 0.375 + dot(vec2<f32>(grad_v[other_idx].x, grad_v[other_idx].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125;
                         }
                     }
                 }
@@ -361,15 +361,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 scalar_matrix_values[scalar_mat_idx] = -scalar_coeff;
             }
             scalar_diag_p += scalar_coeff;
-            matrix_values[start_row_0 + 3u * neighbor_rank + 0u] = coeff;
-            matrix_values[start_row_0 + 3u * neighbor_rank + 1u] = 0.0;
-            matrix_values[start_row_0 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * face_vec.x;
-            matrix_values[start_row_1 + 3u * neighbor_rank + 0u] = 0.0;
-            matrix_values[start_row_1 + 3u * neighbor_rank + 1u] = coeff;
-            matrix_values[start_row_1 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * face_vec.y;
-            matrix_values[start_row_2 + 3u * neighbor_rank + 0u] = (1.0 - lambda) * face_vec.x;
-            matrix_values[start_row_2 + 3u * neighbor_rank + 1u] = (1.0 - lambda) * face_vec.y;
-            matrix_values[start_row_2 + 3u * neighbor_rank + 2u] = -lapl_coeff;
+            matrix_values[start_row_0 + neighbor_rank * 3u + 0u] = coeff;
+            matrix_values[start_row_0 + neighbor_rank * 3u + 1u] = 0.0;
+            matrix_values[start_row_0 + neighbor_rank * 3u + 2u] = (1.0 - lambda) * face_vec.x;
+            matrix_values[start_row_1 + neighbor_rank * 3u + 0u] = 0.0;
+            matrix_values[start_row_1 + neighbor_rank * 3u + 1u] = coeff;
+            matrix_values[start_row_1 + neighbor_rank * 3u + 2u] = (1.0 - lambda) * face_vec.y;
+            matrix_values[start_row_2 + neighbor_rank * 3u + 0u] = (1.0 - lambda) * face_vec.x;
+            matrix_values[start_row_2 + neighbor_rank * 3u + 1u] = (1.0 - lambda) * face_vec.y;
+            matrix_values[start_row_2 + neighbor_rank * 3u + 2u] = -lapl_coeff;
         } else {
             if (boundary_type == 1u) {
                 let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
@@ -407,15 +407,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = scalar_diag_idx - scalar_offset;
-    matrix_values[start_row_0 + 3u * diag_rank + 0u] = diag_uv.x;
-    matrix_values[start_row_0 + 3u * diag_rank + 1u] = 0.0;
-    matrix_values[start_row_0 + 3u * diag_rank + 2u] = sum_diag_uv_p.x;
-    matrix_values[start_row_1 + 3u * diag_rank + 0u] = 0.0;
-    matrix_values[start_row_1 + 3u * diag_rank + 1u] = diag_uv.y;
-    matrix_values[start_row_1 + 3u * diag_rank + 2u] = sum_diag_uv_p.y;
-    matrix_values[start_row_2 + 3u * diag_rank + 0u] = sum_diag_p_uv.x;
-    matrix_values[start_row_2 + 3u * diag_rank + 1u] = sum_diag_p_uv.y;
-    matrix_values[start_row_2 + 3u * diag_rank + 2u] = diag_p + sum_diag_pp;
+    matrix_values[start_row_0 + diag_rank * 3u + 0u] = diag_uv.x;
+    matrix_values[start_row_0 + diag_rank * 3u + 1u] = 0.0;
+    matrix_values[start_row_0 + diag_rank * 3u + 2u] = sum_diag_uv_p.x;
+    matrix_values[start_row_1 + diag_rank * 3u + 0u] = 0.0;
+    matrix_values[start_row_1 + diag_rank * 3u + 1u] = diag_uv.y;
+    matrix_values[start_row_1 + diag_rank * 3u + 2u] = sum_diag_uv_p.y;
+    matrix_values[start_row_2 + diag_rank * 3u + 0u] = sum_diag_p_uv.x;
+    matrix_values[start_row_2 + diag_rank * 3u + 1u] = sum_diag_p_uv.y;
+    matrix_values[start_row_2 + diag_rank * 3u + 2u] = diag_p + sum_diag_pp;
     rhs[idx * 3u + 0u] = rhs_uv.x;
     rhs[idx * 3u + 1u] = rhs_uv.y;
     rhs[idx * 3u + 2u] = rhs_p;

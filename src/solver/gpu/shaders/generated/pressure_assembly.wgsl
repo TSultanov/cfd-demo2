@@ -162,7 +162,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let area_over_dist = area / dist;
             let k_raw: vec2<f32> = face_vec - d_vec * area_over_dist;
             let k_mag = length(k_raw);
-            let k_limit = 0.5 * area;
+            let k_limit = area * 0.5;
             var k_scale: f32 = 1.0;
             if (k_mag > k_limit) {
                 k_scale = k_limit / k_mag;
@@ -179,7 +179,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 interp_f = d_own / total_dist;
             }
             let grad_p_f: vec2<f32> = grad_p_own + (grad_p_neigh - grad_p_own) * interp_f;
-            let correction_flux = 0.5 * pressure_coeff_face * dot(grad_p_f, k_vec);
+            let correction_flux = pressure_coeff_face * dot(grad_p_f, k_vec) * 0.5;
             rhs_val -= correction_flux;
         } else {
             if (boundary_type == 2u) {

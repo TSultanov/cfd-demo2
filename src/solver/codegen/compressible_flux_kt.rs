@@ -343,7 +343,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::if_block_expr(
         owner_face_d_vec
             .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")))
-            .lt(Expr::lit_f32(0.0)),
+            .lt(0.0),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal_vec"),
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
@@ -353,7 +353,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::var_typed_expr(
         "is_boundary",
         Type::Bool,
-        Some(Expr::lit_bool(false)),
+        Some(false.into()),
     ));
     stmts.push(dsl::var_typed_expr(
         "other_idx",
@@ -412,19 +412,19 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     };
 
     let boundary_block = dsl::block(vec![
-        dsl::assign_expr(Expr::ident("is_boundary"), Expr::lit_bool(true)),
+        dsl::assign_expr(Expr::ident("is_boundary"), true),
         dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
+            Expr::ident("boundary_type").eq(1u32),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("rho_u_r"),
                 typed::VecExpr::<2>::from_components([
                     Expr::ident("rho_r") * Expr::ident("constants").field("inlet_velocity"),
-                    Expr::lit_f32(0.0),
+                    0.0.into(),
                 ])
                 .expr(),
             )]),
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
+                Expr::ident("boundary_type").eq(3u32),
                 dsl::block(vec![
                     // Slip wall: reflect only the normal component of momentum.
                     dsl::let_expr(
@@ -438,7 +438,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
                         typed::VecExpr::<2>::from_expr(Expr::ident("rho_u_l"))
                             .sub(
                                 &typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
-                                    .mul_scalar(Expr::lit_f32(2.0) * Expr::ident("m_dot_n")),
+                                    .mul_scalar(Expr::ident("m_dot_n") * 2.0),
                             )
                             .expr(),
                     ),
@@ -449,7 +449,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
 
     stmts.push(dsl::if_block_expr(
-        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
+        Expr::ident("neighbor").ne(-1),
         interior_block,
         Some(boundary_block),
     ));
@@ -620,15 +620,14 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         (!Expr::ident("is_boundary"))
             & Expr::ident("constants")
                 .field("scheme")
-                .eq(Expr::lit_u32(1)),
+                .eq(1u32),
         reconstruct_block,
         None,
     ));
 
     stmts.push(dsl::let_expr(
         "inv_rho_l",
-        Expr::lit_f32(1.0)
-            / Expr::call_named("max", vec![Expr::ident("rho_l"), Expr::lit_f32(1e-8)]),
+        Expr::from(1.0) / dsl::max("rho_l", 1e-8),
     ));
     stmts.push(dsl::let_typed_expr(
         "u_l",
@@ -639,20 +638,14 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "ke_l",
-        Expr::lit_f32(0.5)
-            * Expr::ident("rho_l")
+        Expr::ident("rho_l")
             * typed::VecExpr::<2>::from_expr(Expr::ident("u_l"))
-                .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_l"))),
+                .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_l")))
+            * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "p_l",
-        Expr::call_named(
-            "max",
-            vec![
-                Expr::lit_f32(0.0),
-                Expr::lit_f32(gamma_minus_1) * (Expr::ident("rho_e_l") - Expr::ident("ke_l")),
-            ],
-        ),
+        dsl::max(0.0, (Expr::ident("rho_e_l") - Expr::ident("ke_l")) * gamma_minus_1),
     ));
     stmts.push(dsl::let_expr(
         "u_n_l",
@@ -661,16 +654,12 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "c_l",
-        Expr::call_named(
-            "sqrt",
-            vec![Expr::lit_f32(gamma) * Expr::ident("p_l") * Expr::ident("inv_rho_l")],
-        ),
+        dsl::sqrt(Expr::ident("p_l") * Expr::ident("inv_rho_l") * gamma),
     ));
 
     stmts.push(dsl::let_expr(
         "inv_rho_r",
-        Expr::lit_f32(1.0)
-            / Expr::call_named("max", vec![Expr::ident("rho_r"), Expr::lit_f32(1e-8)]),
+        Expr::from(1.0) / dsl::max("rho_r", 1e-8),
     ));
     stmts.push(dsl::let_typed_expr(
         "u_r",
@@ -681,20 +670,14 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "ke_r",
-        Expr::lit_f32(0.5)
-            * Expr::ident("rho_r")
+        Expr::ident("rho_r")
             * typed::VecExpr::<2>::from_expr(Expr::ident("u_r"))
-                .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_r"))),
+                .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_r")))
+            * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "p_r",
-        Expr::call_named(
-            "max",
-            vec![
-                Expr::lit_f32(0.0),
-                Expr::lit_f32(gamma_minus_1) * (Expr::ident("rho_e_r") - Expr::ident("ke_r")),
-            ],
-        ),
+        dsl::max(0.0, (Expr::ident("rho_e_r") - Expr::ident("ke_r")) * gamma_minus_1),
     ));
     stmts.push(dsl::let_expr(
         "u_n_r",
@@ -703,17 +686,14 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "c_r",
-        Expr::call_named(
-            "sqrt",
-            vec![Expr::lit_f32(gamma) * Expr::ident("p_r") * Expr::ident("inv_rho_r")],
-        ),
+        dsl::sqrt(Expr::ident("p_r") * Expr::ident("inv_rho_r") * gamma),
     ));
     stmts.push(dsl::let_typed_expr(
         "u_face",
         Type::vec2_f32(),
         typed::VecExpr::<2>::from_expr(Expr::ident("u_l"))
             .add(&typed::VecExpr::<2>::from_expr(Expr::ident("u_r")))
-            .mul_scalar(Expr::lit_f32(0.5))
+            .mul_scalar(0.5.into())
             .expr(),
     ));
     stmts.push(dsl::let_expr(
@@ -723,12 +703,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "c_bar",
-        Expr::lit_f32(0.5) * (Expr::ident("c_l") + Expr::ident("c_r")),
+        (Expr::ident("c_l") + Expr::ident("c_r")) * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "mach",
-        Expr::call_named("abs", vec![Expr::ident("u_face_n")])
-            / Expr::call_named("max", vec![Expr::ident("c_bar"), Expr::lit_f32(1e-6)]),
+        dsl::abs("u_face_n") / dsl::max("c_bar", 1e-6),
     ));
     stmts.push(dsl::let_expr("mach2", Expr::ident("mach") * Expr::ident("mach")));
     // Low-Mach preconditioning (optional). Default is `precond_model=2` (off) for
@@ -742,54 +721,41 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let precond_weiss_smith_block = dsl::block(vec![
         dsl::let_expr(
             "theta",
-            Expr::call_named(
-                "min",
-                vec![
-                    Expr::lit_f32(1.0),
-                    Expr::call_named(
-                        "max",
-                        vec![Expr::ident("mach2"), Expr::ident("constants").field("precond_theta_floor")],
-                    ),
-                ],
+            dsl::min(
+                1.0,
+                dsl::max(Expr::ident("mach2"), Expr::ident("constants").field("precond_theta_floor")),
             ),
         ),
-        dsl::let_expr("one_minus_theta", Expr::lit_f32(1.0) - Expr::ident("theta")),
+        dsl::let_expr(
+            "one_minus_theta",
+            Expr::from(1.0) - Expr::ident("theta"),
+        ),
         dsl::assign_expr(
             Expr::ident("c_l_eff"),
-            Expr::call_named(
-                "sqrt",
-                vec![
-                    Expr::ident("theta") * Expr::ident("c_l") * Expr::ident("c_l")
-                        + Expr::ident("one_minus_theta")
-                            * Expr::ident("u_n_l")
-                            * Expr::ident("u_n_l"),
-                ],
+            dsl::sqrt(
+                Expr::ident("theta") * Expr::ident("c_l") * Expr::ident("c_l")
+                    + Expr::ident("one_minus_theta") * Expr::ident("u_n_l") * Expr::ident("u_n_l"),
             ),
         ),
         dsl::assign_expr(
             Expr::ident("c_r_eff"),
-            Expr::call_named(
-                "sqrt",
-                vec![
-                    Expr::ident("theta") * Expr::ident("c_r") * Expr::ident("c_r")
-                        + Expr::ident("one_minus_theta")
-                            * Expr::ident("u_n_r")
-                            * Expr::ident("u_n_r"),
-                ],
+            dsl::sqrt(
+                Expr::ident("theta") * Expr::ident("c_r") * Expr::ident("c_r")
+                    + Expr::ident("one_minus_theta") * Expr::ident("u_n_r") * Expr::ident("u_n_r"),
             ),
         ),
     ]);
     let precond_else_block = dsl::block(vec![dsl::if_block_expr(
         Expr::ident("constants")
             .field("precond_model")
-            .eq(Expr::lit_u32(1)),
+            .eq(1u32),
         precond_weiss_smith_block,
         None,
     )]);
     stmts.push(dsl::if_block_expr(
         Expr::ident("constants")
             .field("precond_model")
-            .eq(Expr::lit_u32(0)),
+            .eq(0u32),
         precond_legacy_block,
         Some(precond_else_block),
     ));
@@ -807,13 +773,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "dist",
-        Expr::call_named(
-            "max",
-            vec![
-                Expr::call_named("length", vec![Expr::ident("d_center")]),
-                Expr::lit_f32(1e-6),
-            ],
-        ),
+        dsl::max(dsl::length("d_center"), 1e-6),
     ));
     stmts.push(dsl::let_expr(
         "mu",
@@ -822,42 +782,27 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr(
         "a_plus",
-        Expr::call_named(
-            "max",
-            vec![
-                Expr::lit_f32(0.0),
-                Expr::call_named(
-                    "max",
-                    vec![
-                        Expr::ident("u_n_l") + Expr::ident("c_l_eff"),
-                        Expr::ident("u_n_r") + Expr::ident("c_r_eff"),
-                    ],
-                ),
-            ],
+        dsl::max(
+            0.0,
+            dsl::max(
+                Expr::ident("u_n_l") + Expr::ident("c_l_eff"),
+                Expr::ident("u_n_r") + Expr::ident("c_r_eff"),
+            ),
         ),
     ));
     stmts.push(dsl::let_expr(
         "a_minus",
-        Expr::call_named(
-            "min",
-            vec![
-                Expr::lit_f32(0.0),
-                Expr::call_named(
-                    "min",
-                    vec![
-                        Expr::ident("u_n_l") - Expr::ident("c_l_eff"),
-                        Expr::ident("u_n_r") - Expr::ident("c_r_eff"),
-                    ],
-                ),
-            ],
+        dsl::min(
+            0.0,
+            dsl::min(
+                Expr::ident("u_n_l") - Expr::ident("c_l_eff"),
+                Expr::ident("u_n_r") - Expr::ident("c_r_eff"),
+            ),
         ),
     ));
     stmts.push(dsl::let_expr(
         "denom",
-        Expr::call_named(
-            "max",
-            vec![Expr::ident("a_plus") - Expr::ident("a_minus"), Expr::lit_f32(1e-6)],
-        ),
+        dsl::max(Expr::ident("a_plus") - Expr::ident("a_minus"), 1e-6),
     ));
     stmts.push(dsl::let_expr(
         "a_prod",
@@ -867,7 +812,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "a_pos",
         Expr::ident("a_plus") / Expr::ident("denom"),
     ));
-    stmts.push(dsl::let_expr("a_neg", Expr::lit_f32(1.0) - Expr::ident("a_pos")));
+    stmts.push(dsl::let_expr(
+        "a_neg",
+        Expr::from(1.0) - Expr::ident("a_pos"),
+    ));
     stmts.push(dsl::let_expr(
         "a_prod_scaled",
         Expr::ident("a_prod") / Expr::ident("denom"),
@@ -968,13 +916,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "inv_rho_l_cell",
-        Expr::lit_f32(1.0)
-            / Expr::call_named("max", vec![Expr::ident("rho_l_cell"), Expr::lit_f32(1e-8)]),
+        Expr::from(1.0) / dsl::max("rho_l_cell", 1e-8),
     ));
     stmts.push(dsl::let_expr(
         "inv_rho_r_cell",
-        Expr::lit_f32(1.0)
-            / Expr::call_named("max", vec![Expr::ident("rho_r_cell"), Expr::lit_f32(1e-8)]),
+        Expr::from(1.0) / dsl::max("rho_r_cell", 1e-8),
     ));
     stmts.push(dsl::let_typed_expr(
         "u_l_cell",
@@ -1111,10 +1057,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "grad_u2_l_vec",
         Type::vec2_f32(),
         typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_x_l_vec"))
-            .mul_scalar(Expr::lit_f32(2.0) * Expr::ident("u_l_cell").field("x"))
+            .mul_scalar(Expr::ident("u_l_cell").field("x") * 2.0)
             .add(
                 &typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_y_l_vec")).mul_scalar(
-                    Expr::lit_f32(2.0) * Expr::ident("u_l_cell").field("y"),
+                    Expr::ident("u_l_cell").field("y") * 2.0,
                 ),
             )
             .expr(),
@@ -1123,10 +1069,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "grad_u2_r_vec",
         Type::vec2_f32(),
         typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_x_r_vec"))
-            .mul_scalar(Expr::lit_f32(2.0) * Expr::ident("u_r_cell").field("x"))
+            .mul_scalar(Expr::ident("u_r_cell").field("x") * 2.0)
             .add(
                 &typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_y_r_vec")).mul_scalar(
-                    Expr::lit_f32(2.0) * Expr::ident("u_r_cell").field("y"),
+                    Expr::ident("u_r_cell").field("y") * 2.0,
                 ),
             )
             .expr(),
@@ -1155,31 +1101,28 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             .expr(),
     ));
 
-    stmts.push(dsl::let_expr(
-        "gamma_minus_1",
-        Expr::lit_f32(gamma_minus_1),
-    ));
+    stmts.push(dsl::let_expr("gamma_minus_1", gamma_minus_1));
     stmts.push(dsl::let_typed_expr(
         "grad_p_l_vec",
         Type::vec2_f32(),
-        typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_e_l_vec"))
-            .sub(
-                &typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_u2_l_vec"))
-                    .mul_scalar(Expr::lit_f32(0.5)),
-            )
-            .mul_scalar(Expr::ident("gamma_minus_1"))
-            .expr(),
+            typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_e_l_vec"))
+                .sub(
+                    &typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_u2_l_vec"))
+                    .mul_scalar(0.5.into()),
+                )
+                .mul_scalar(Expr::ident("gamma_minus_1"))
+                .expr(),
     ));
     stmts.push(dsl::let_typed_expr(
         "grad_p_r_vec",
         Type::vec2_f32(),
-        typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_e_r_vec"))
-            .sub(
-                &typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_u2_r_vec"))
-                    .mul_scalar(Expr::lit_f32(0.5)),
-            )
-            .mul_scalar(Expr::ident("gamma_minus_1"))
-            .expr(),
+            typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_e_r_vec"))
+                .sub(
+                    &typed::VecExpr::<2>::from_expr(Expr::ident("grad_rho_u2_r_vec"))
+                    .mul_scalar(0.5.into()),
+                )
+                .mul_scalar(Expr::ident("gamma_minus_1"))
+                .expr(),
     ));
 
     stmts.push(dsl::let_expr(
@@ -1194,7 +1137,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "grad_p_face_n",
-        Expr::lit_f32(0.5) * (Expr::ident("grad_p_l_n") + Expr::ident("grad_p_r_n")),
+        (Expr::ident("grad_p_l_n") + Expr::ident("grad_p_r_n")) * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "grad_p_jump_n",
@@ -1202,40 +1145,31 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "rho_face",
-        Expr::lit_f32(0.5) * (Expr::ident("rho_l") + Expr::ident("rho_r")),
+        (Expr::ident("rho_l") + Expr::ident("rho_r")) * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "p_bar",
-        Expr::lit_f32(0.5) * (Expr::ident("p_l") + Expr::ident("p_r")),
+        (Expr::ident("p_l") + Expr::ident("p_r")) * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "dp_rel",
-        Expr::call_named("abs", vec![Expr::ident("p_r") - Expr::ident("p_l")])
-            / Expr::call_named("max", vec![Expr::ident("p_bar"), Expr::lit_f32(1e-6)]),
+        dsl::abs(Expr::ident("p_r") - Expr::ident("p_l")) / dsl::max("p_bar", 1e-6),
     ));
     // Rhie–Chow-style pressure flux coupling is only used with low-Mach preconditioning.
     // (In the pure KT mode it can introduce dispersive/odd-even pressure ringing.)
     let pressure_coupling_block = dsl::block(vec![
         dsl::let_expr(
             "pc_theta",
-            Expr::call_named(
-                "min",
-                vec![
-                    Expr::lit_f32(1.0),
-                    Expr::call_named(
-                        "max",
-                        vec![Expr::ident("mach2"), Expr::ident("constants").field("precond_theta_floor")],
-                    ),
-                ],
+            dsl::min(
+                1.0,
+                dsl::max(Expr::ident("mach2"), Expr::ident("constants").field("precond_theta_floor")),
             ),
         ),
-        dsl::let_expr("pc_low_mach", Expr::lit_f32(1.0) - Expr::ident("pc_theta")),
+        dsl::let_expr("pc_low_mach", Expr::from(1.0) - Expr::ident("pc_theta")),
         dsl::let_expr(
             "pc_smooth",
-            Expr::lit_f32(1.0)
-                / (Expr::lit_f32(1.0)
-                    + (Expr::ident("dp_rel") / Expr::lit_f32(0.2))
-                        * (Expr::ident("dp_rel") / Expr::lit_f32(0.2))),
+            Expr::from(1.0)
+                / ((Expr::ident("dp_rel") / 0.2) * (Expr::ident("dp_rel") / 0.2) + 1.0),
         ),
         dsl::let_expr(
             "pc_alpha",
@@ -1247,7 +1181,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "m_corr",
             Expr::ident("pc_alpha")
                 * Expr::ident("constants").field("dt")
-                / Expr::call_named("max", vec![Expr::ident("rho_face"), Expr::lit_f32(1e-8)])
+                / dsl::max("rho_face", 1e-8)
                 * (Expr::ident("grad_p_face_n") - Expr::ident("grad_p_jump_n")),
         ),
         dsl::let_expr(
@@ -1260,7 +1194,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
         dsl::let_expr(
             "h_face",
-            Expr::lit_f32(0.5) * (Expr::ident("h_l") + Expr::ident("h_r")),
+            (Expr::ident("h_l") + Expr::ident("h_r")) * 0.5,
         ),
         dsl::assign_expr(Expr::ident("flux_rho"), Expr::ident("flux_rho") + Expr::ident("m_corr")),
         dsl::assign_expr(
@@ -1278,10 +1212,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         (!Expr::ident("is_boundary"))
             & Expr::ident("constants")
                 .field("precond_model")
-                .ne(Expr::lit_u32(2))
+                .ne(2u32)
             & Expr::ident("constants")
                 .field("pressure_coupling_alpha")
-                .gt(Expr::lit_f32(0.0)),
+                .gt(0.0),
         pressure_coupling_block,
         None,
     ));
@@ -1294,22 +1228,22 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr(
         "base",
-        Expr::ident("idx") * Expr::lit_u32(flux_stride),
+        Expr::ident("idx") * flux_stride,
     ));
     stmts.push(dsl::assign_expr(
-        Expr::ident("fluxes").index(Expr::ident("base") + Expr::lit_u32(0)),
+        Expr::ident("fluxes").index(Expr::ident("base")),
         Expr::ident("flux_rho") * Expr::ident("area"),
     ));
     stmts.push(dsl::assign_expr(
-        Expr::ident("fluxes").index(Expr::ident("base") + Expr::lit_u32(1)),
+        Expr::ident("fluxes").index(Expr::ident("base") + 1u32),
         Expr::ident("flux_rho_u").field("x") * Expr::ident("area"),
     ));
     stmts.push(dsl::assign_expr(
-        Expr::ident("fluxes").index(Expr::ident("base") + Expr::lit_u32(2)),
+        Expr::ident("fluxes").index(Expr::ident("base") + 2u32),
         Expr::ident("flux_rho_u").field("y") * Expr::ident("area"),
     ));
     stmts.push(dsl::assign_expr(
-        Expr::ident("fluxes").index(Expr::ident("base") + Expr::lit_u32(3)),
+        Expr::ident("fluxes").index(Expr::ident("base") + 3u32),
         Expr::ident("flux_rho_e") * Expr::ident("area"),
     ));
 

@@ -144,9 +144,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var rho_u_face: vec2<f32> = rho_u_l;
         var rho_e_face: f32 = rho_e_l;
         if (neighbor != -1) {
-            rho_face = 0.5 * (rho_l + rho_r);
-            rho_u_face = 0.5 * (rho_u_l + rho_u_r);
-            rho_e_face = 0.5 * (rho_e_l + rho_e_r);
+            rho_face = (rho_l + rho_r) * 0.5;
+            rho_u_face = (rho_u_l + rho_u_r) * 0.5;
+            rho_e_face = (rho_e_l + rho_e_r) * 0.5;
         }
         grad_rho_accum += normal * rho_face * area;
         grad_rho_u_x_accum += normal * rho_u_face.x * area;

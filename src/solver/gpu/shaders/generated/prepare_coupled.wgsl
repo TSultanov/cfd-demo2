@@ -128,7 +128,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
-        time_coeff = vol * rho_cell / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        time_coeff = vol * rho_cell / dt * (r * 2.0 + 1.0) / (r + 1.0);
     }
     diag_coeff += time_coeff;
     let val_c_p = state[idx * 8u + 2u];

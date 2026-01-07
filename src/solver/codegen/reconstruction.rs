@@ -25,7 +25,7 @@ pub fn scalar_reconstruction(
     let mut stmts = Vec::new();
     stmts.push(dsl::var_expr(&phi_upwind, phi_own));
     stmts.push(dsl::if_block_expr(
-        flux.lt(Expr::lit_f32(0.0)),
+        flux.lt(0.0),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_upwind),
             phi_neigh,
@@ -37,11 +37,11 @@ pub fn scalar_reconstruction(
     let xy = |point: &Expr| dsl::vec2_f32(point.field("x"), point.field("y"));
 
     let sou_block = dsl::block(vec![dsl::if_block_expr(
-        flux.gt(Expr::lit_f32(0.0)),
+        flux.gt(0.0),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
             phi_own
-                + dsl::dot_expr(
+                + dsl::dot(
                     dsl::vec2_f32_from_xy_fields(grad_own),
                     xy(&face_center) - xy(&center),
                 ),
@@ -49,7 +49,7 @@ pub fn scalar_reconstruction(
         Some(dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
             phi_neigh
-                + dsl::dot_expr(
+                + dsl::dot(
                     dsl::vec2_f32_from_xy_fields(grad_neigh),
                     xy(&face_center) - xy(&other_center),
                 ),
@@ -57,34 +57,32 @@ pub fn scalar_reconstruction(
     )]);
 
     let quick_block = dsl::block(vec![dsl::if_block_expr(
-        flux.gt(Expr::lit_f32(0.0)),
+        flux.gt(0.0),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
-            Expr::lit_f32(0.625) * phi_own
-                + Expr::lit_f32(0.375) * phi_neigh
-                + Expr::lit_f32(0.125)
-                    * dsl::dot_expr(
-                        dsl::vec2_f32_from_xy_fields(grad_own),
-                        xy(&other_center) - xy(&center),
-                    ),
+            phi_own * 0.625
+                + phi_neigh * 0.375
+                + dsl::dot(
+                    dsl::vec2_f32_from_xy_fields(grad_own),
+                    xy(&other_center) - xy(&center),
+                ) * 0.125,
         )]),
         Some(dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
-            Expr::lit_f32(0.625) * phi_neigh
-                + Expr::lit_f32(0.375) * phi_own
-                + Expr::lit_f32(0.125)
-                    * dsl::dot_expr(
-                        dsl::vec2_f32_from_xy_fields(grad_neigh),
-                        xy(&center) - xy(&other_center),
-                    ),
+            phi_neigh * 0.625
+                + phi_own * 0.375
+                + dsl::dot(
+                    dsl::vec2_f32_from_xy_fields(grad_neigh),
+                    xy(&center) - xy(&other_center),
+                ) * 0.125,
         )])),
     )]);
 
     stmts.push(dsl::if_block_expr(
-        scheme_id.eq(Expr::lit_u32(1)),
+        scheme_id.eq(1u32),
         sou_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            scheme_id.eq(Expr::lit_u32(2)),
+            scheme_id.eq(2u32),
             quick_block,
             None,
         )])),
@@ -122,20 +120,20 @@ pub fn limited_linear_reconstruct_face(
     ));
     stmts.push(dsl::let_expr(
         &min_diff,
-        dsl::min_expr(Expr::ident(&diff), Expr::lit_f32(0.0)),
+        dsl::min(Expr::ident(&diff), 0.0),
     ));
     stmts.push(dsl::let_expr(
         &max_diff,
-        dsl::max_expr(Expr::ident(&diff), Expr::lit_f32(0.0)),
+        dsl::max(Expr::ident(&diff), 0.0),
     ));
     stmts.push(dsl::let_expr(
         &delta,
-        dsl::dot_expr(dsl::vec2_f32_from_xy_fields(grad_cell), dsl::vec2_f32(r_x, r_y)),
+        dsl::dot(dsl::vec2_f32_from_xy_fields(grad_cell), dsl::vec2_f32(r_x, r_y)),
     ));
     stmts.push(dsl::let_expr(
         &delta_limited,
-        dsl::min_expr(
-            dsl::max_expr(Expr::ident(&delta), Expr::ident(&min_diff)),
+        dsl::min(
+            dsl::max(Expr::ident(&delta), Expr::ident(&min_diff)),
             Expr::ident(&max_diff),
         ),
     ));

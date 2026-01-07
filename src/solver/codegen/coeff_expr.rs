@@ -15,7 +15,7 @@ enum CoeffSample<'a> {
 }
 
 fn f32_literal(value: f64) -> Expr {
-    Expr::lit_f32(value as f32)
+    value.into()
 }
 
 fn coeff_named_expr(name: &str) -> Option<Expr> {
@@ -47,7 +47,7 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                     } => {
                         let own = state_scalar(layout, "state", owner_idx, field.name());
                         let neigh = state_scalar(layout, "state", neighbor_idx, field.name());
-                        interp * own + (Expr::lit_f32(1.0) - interp) * neigh
+                        interp * own + (Expr::from(1.0) - interp) * neigh
                     }
                 }
             } else {
@@ -123,8 +123,8 @@ mod tests {
             Some(&coeff),
             "i",
             "j",
-            Expr::lit_f32(0.5),
-            Expr::lit_f32(1.0),
+            0.5.into(),
+            1.0.into(),
         );
         assert_eq!(
             expr.to_string(),
@@ -147,7 +147,7 @@ mod tests {
         ));
 
         let coeff = Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap();
-        let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", Expr::lit_f32(1.0));
+        let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", 1.0.into());
         assert_eq!(expr.to_string(), "state[idx * 1u + 0u]");
     }
 }

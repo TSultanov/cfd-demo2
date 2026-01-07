@@ -156,20 +156,20 @@ fn term_ddt_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("base_coeff") * Expr::ident("phi_n").field("y")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::ident("time_scheme").eq(Expr::lit_u32(1)),
+                Expr::ident("time_scheme").eq(1u32),
                 dsl::block(vec![
                     dsl::let_expr("r", Expr::ident("dt") / Expr::ident("dt_old")),
                     dsl::assign_expr(
                         Expr::ident("diag"),
                         Expr::ident("base_coeff")
-                            * (Expr::lit_f32(1.0) + Expr::lit_f32(2.0) * Expr::ident("r"))
-                            / (Expr::lit_f32(1.0) + Expr::ident("r")),
+                            * (Expr::ident("r") * 2.0 + 1.0)
+                            / (Expr::ident("r") + 1.0),
                     ),
-                    dsl::let_expr("factor_n", Expr::lit_f32(1.0) + Expr::ident("r")),
+                    dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                     dsl::let_expr(
                         "factor_nm1",
                         (Expr::ident("r") * Expr::ident("r"))
-                            / (Expr::lit_f32(1.0) + Expr::ident("r")),
+                            / (Expr::ident("r") + 1.0),
                     ),
                     dsl::assign_expr(
                         Expr::ident("rhs_x"),
@@ -199,20 +199,20 @@ fn term_ddt_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("base_coeff") * Expr::ident("phi_n")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::ident("time_scheme").eq(Expr::lit_u32(1)),
+                Expr::ident("time_scheme").eq(1u32),
                 dsl::block(vec![
                     dsl::let_expr("r", Expr::ident("dt") / Expr::ident("dt_old")),
                     dsl::assign_expr(
                         Expr::ident("diag"),
                         Expr::ident("base_coeff")
-                            * (Expr::lit_f32(1.0) + Expr::lit_f32(2.0) * Expr::ident("r"))
-                            / (Expr::lit_f32(1.0) + Expr::ident("r")),
+                            * (Expr::ident("r") * 2.0 + 1.0)
+                            / (Expr::ident("r") + 1.0),
                     ),
-                    dsl::let_expr("factor_n", Expr::lit_f32(1.0) + Expr::ident("r")),
+                    dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                     dsl::let_expr(
                         "factor_nm1",
                         (Expr::ident("r") * Expr::ident("r"))
-                            / (Expr::lit_f32(1.0) + Expr::ident("r")),
+                            / (Expr::ident("r") + 1.0),
                     ),
                     dsl::assign_expr(
                         Expr::ident("rhs"),
@@ -271,7 +271,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("phi_own")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::ident("flux").le(Expr::lit_f32(0.0)),
+                Expr::ident("flux").le(0.0),
                 dsl::block(vec![
                     dsl::assign_expr(Expr::ident("phi_upwind"), Expr::ident("phi_neigh")),
                     dsl::assign_expr(Expr::ident("phi_ho"), Expr::ident("phi_neigh")),
@@ -282,7 +282,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             match op.scheme {
                 Scheme::SecondOrderUpwind => {
                     body.push(dsl::if_block_expr(
-                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(0.0),
                         dsl::block(vec![
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("x"),
@@ -323,49 +323,49 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                 }
                 Scheme::QUICK => {
                     body.push(dsl::if_block_expr(
-                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(0.0),
                         dsl::block(vec![
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("x"),
-                                Expr::lit_f32(0.625) * Expr::ident("phi_own").field("x")
-                                    + Expr::lit_f32(0.375) * Expr::ident("phi_neigh").field("x")
-                                    + Expr::lit_f32(0.125)
-                                        * (Expr::ident("grad_own_u").field("x")
-                                            * Expr::ident("r_cd").field("x")
-                                            + Expr::ident("grad_own_u").field("y")
-                                                * Expr::ident("r_cd").field("y")),
+                                Expr::ident("phi_own").field("x") * 0.625
+                                    + Expr::ident("phi_neigh").field("x") * 0.375
+                                    + (Expr::ident("grad_own_u").field("x")
+                                        * Expr::ident("r_cd").field("x")
+                                        + Expr::ident("grad_own_u").field("y")
+                                            * Expr::ident("r_cd").field("y"))
+                                        * 0.125,
                             ),
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("y"),
-                                Expr::lit_f32(0.625) * Expr::ident("phi_own").field("y")
-                                    + Expr::lit_f32(0.375) * Expr::ident("phi_neigh").field("y")
-                                    + Expr::lit_f32(0.125)
-                                        * (Expr::ident("grad_own_v").field("x")
-                                            * Expr::ident("r_cd").field("x")
-                                            + Expr::ident("grad_own_v").field("y")
-                                                * Expr::ident("r_cd").field("y")),
+                                Expr::ident("phi_own").field("y") * 0.625
+                                    + Expr::ident("phi_neigh").field("y") * 0.375
+                                    + (Expr::ident("grad_own_v").field("x")
+                                        * Expr::ident("r_cd").field("x")
+                                        + Expr::ident("grad_own_v").field("y")
+                                            * Expr::ident("r_cd").field("y"))
+                                        * 0.125,
                             ),
                         ]),
                         Some(dsl::block(vec![
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("x"),
-                                Expr::lit_f32(0.625) * Expr::ident("phi_neigh").field("x")
-                                    + Expr::lit_f32(0.375) * Expr::ident("phi_own").field("x")
-                                    + Expr::lit_f32(0.125)
-                                        * (Expr::ident("grad_neigh_u").field("x")
-                                            * Expr::ident("r_cd").field("x")
-                                            + Expr::ident("grad_neigh_u").field("y")
-                                                * Expr::ident("r_cd").field("y")),
+                                Expr::ident("phi_neigh").field("x") * 0.625
+                                    + Expr::ident("phi_own").field("x") * 0.375
+                                    + (Expr::ident("grad_neigh_u").field("x")
+                                        * Expr::ident("r_cd").field("x")
+                                        + Expr::ident("grad_neigh_u").field("y")
+                                            * Expr::ident("r_cd").field("y"))
+                                        * 0.125,
                             ),
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("y"),
-                                Expr::lit_f32(0.625) * Expr::ident("phi_neigh").field("y")
-                                    + Expr::lit_f32(0.375) * Expr::ident("phi_own").field("y")
-                                    + Expr::lit_f32(0.125)
-                                        * (Expr::ident("grad_neigh_v").field("x")
-                                            * Expr::ident("r_cd").field("x")
-                                            + Expr::ident("grad_neigh_v").field("y")
-                                                * Expr::ident("r_cd").field("y")),
+                                Expr::ident("phi_neigh").field("y") * 0.625
+                                    + Expr::ident("phi_own").field("y") * 0.375
+                                    + (Expr::ident("grad_neigh_v").field("x")
+                                        * Expr::ident("r_cd").field("x")
+                                        + Expr::ident("grad_neigh_v").field("y")
+                                            * Expr::ident("r_cd").field("y"))
+                                        * 0.125,
                             ),
                         ])),
                     ));
@@ -415,7 +415,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             body.push(dsl::var_typed_expr("phi_upwind", Type::F32, Some(Expr::ident("phi_own"))));
             body.push(dsl::var_typed_expr("phi_ho", Type::F32, Some(Expr::ident("phi_own"))));
             body.push(dsl::if_block_expr(
-                Expr::ident("flux").le(Expr::lit_f32(0.0)),
+                Expr::ident("flux").le(0.0),
                 dsl::block(vec![
                     dsl::assign_expr(Expr::ident("phi_upwind"), Expr::ident("phi_neigh")),
                     dsl::assign_expr(Expr::ident("phi_ho"), Expr::ident("phi_neigh")),
@@ -426,7 +426,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             match op.scheme {
                 Scheme::SecondOrderUpwind => {
                     body.push(dsl::if_block_expr(
-                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(0.0),
                         dsl::block(vec![dsl::assign_expr(
                             Expr::ident("phi_ho"),
                             Expr::ident("phi_own")
@@ -447,26 +447,26 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                 }
                 Scheme::QUICK => {
                     body.push(dsl::if_block_expr(
-                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(0.0),
                         dsl::block(vec![dsl::assign_expr(
                             Expr::ident("phi_ho"),
-                            Expr::lit_f32(0.625) * Expr::ident("phi_own")
-                                + Expr::lit_f32(0.375) * Expr::ident("phi_neigh")
-                                + Expr::lit_f32(0.125)
-                                    * (Expr::ident("grad_own").field("x")
-                                        * Expr::ident("r_cd").field("x")
-                                        + Expr::ident("grad_own").field("y")
-                                            * Expr::ident("r_cd").field("y")),
+                            Expr::ident("phi_own") * 0.625
+                                + Expr::ident("phi_neigh") * 0.375
+                                + (Expr::ident("grad_own").field("x")
+                                    * Expr::ident("r_cd").field("x")
+                                    + Expr::ident("grad_own").field("y")
+                                        * Expr::ident("r_cd").field("y"))
+                                    * 0.125,
                         )]),
                         Some(dsl::block(vec![dsl::assign_expr(
                             Expr::ident("phi_ho"),
-                            Expr::lit_f32(0.625) * Expr::ident("phi_neigh")
-                                + Expr::lit_f32(0.375) * Expr::ident("phi_own")
-                                + Expr::lit_f32(0.125)
-                                    * (Expr::ident("grad_neigh").field("x")
-                                        * Expr::ident("r_cd").field("x")
-                                        + Expr::ident("grad_neigh").field("y")
-                                            * Expr::ident("r_cd").field("y")),
+                            Expr::ident("phi_neigh") * 0.625
+                                + Expr::ident("phi_own") * 0.375
+                                + (Expr::ident("grad_neigh").field("x")
+                                    * Expr::ident("r_cd").field("x")
+                                    + Expr::ident("grad_neigh").field("y")
+                                        * Expr::ident("r_cd").field("y"))
+                                    * 0.125,
                         )])),
                     ));
                 }
@@ -537,11 +537,11 @@ fn term_grad_fn(op: &DiscreteOp) -> Function {
             ),
             dsl::let_expr(
                 "off_u",
-                (Expr::lit_f32(1.0) - Expr::ident("lambda")) * Expr::ident("force_x"),
+                (Expr::from(1.0) - Expr::ident("lambda")) * Expr::ident("force_x"),
             ),
             dsl::let_expr(
                 "off_v",
-                (Expr::lit_f32(1.0) - Expr::ident("lambda")) * Expr::ident("force_y"),
+                (Expr::from(1.0) - Expr::ident("lambda")) * Expr::ident("force_y"),
             ),
             dsl::let_expr("diag_u", Expr::ident("lambda") * Expr::ident("force_x")),
             dsl::let_expr("diag_v", Expr::ident("lambda") * Expr::ident("force_y")),
@@ -559,7 +559,7 @@ fn term_grad_fn(op: &DiscreteOp) -> Function {
             Stmt::Comment("gradient term not used for scalar targets".to_string()),
             Stmt::Return(Some(Expr::call_named(
                 "vec2<f32>",
-                vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)],
+                vec![0.0.into(), 0.0.into()],
             ))),
         ]),
     };
@@ -577,12 +577,12 @@ fn term_source_fn(op: &DiscreteOp) -> Function {
             Stmt::Comment("source term placeholder".to_string()),
             Stmt::Return(Some(Expr::call_named(
                 "vec2<f32>",
-                vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)],
+                vec![0.0.into(), 0.0.into()],
             ))),
         ]),
         FieldKind::Scalar => Block::new(vec![
             Stmt::Comment("source term placeholder".to_string()),
-            Stmt::Return(Some(Expr::lit_f32(0.0))),
+            Stmt::Return(Some(0.0.into())),
         ]),
     };
     let return_type = match op.target.kind() {
@@ -615,53 +615,53 @@ fn term_call_expr(op: &DiscreteOp) -> Expr {
     let args: Vec<Expr> = match op.kind {
         DiscreteOpKind::TimeDerivative => match op.target.kind() {
             FieldKind::Vector2 => vec![
-                Expr::lit_f32(1.0),
-                Expr::lit_f32(1.0),
-                Expr::lit_f32(1.0),
-                Expr::lit_f32(1.0),
-                Expr::lit_u32(0),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
+                1.0.into(),
+                1.0.into(),
+                1.0.into(),
+                1.0.into(),
+                0u32.into(),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
             ],
             FieldKind::Scalar => vec![
-                Expr::lit_f32(1.0),
-                Expr::lit_f32(1.0),
-                Expr::lit_f32(1.0),
-                Expr::lit_f32(1.0),
-                Expr::lit_u32(0),
-                Expr::lit_f32(0.0),
-                Expr::lit_f32(0.0),
+                1.0.into(),
+                1.0.into(),
+                1.0.into(),
+                1.0.into(),
+                0u32.into(),
+                0.0.into(),
+                0.0.into(),
             ],
         },
         DiscreteOpKind::Convection => match op.target.kind() {
             FieldKind::Vector2 => vec![
-                Expr::lit_f32(0.0),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
+                0.0.into(),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
             ],
             FieldKind::Scalar => vec![
-                Expr::lit_f32(0.0),
-                Expr::lit_f32(0.0),
-                Expr::lit_f32(0.0),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-                Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
+                0.0.into(),
+                0.0.into(),
+                0.0.into(),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
+                dsl::vec2_f32(0.0, 0.0),
             ],
         },
-        DiscreteOpKind::Diffusion => vec![Expr::lit_f32(1.0), Expr::lit_f32(1.0), Expr::lit_f32(1.0)],
+        DiscreteOpKind::Diffusion => vec![1.0.into(), 1.0.into(), 1.0.into()],
         DiscreteOpKind::Gradient => vec![
-            Expr::lit_f32(1.0),
-            Expr::call_named("vec2<f32>", vec![Expr::lit_f32(0.0), Expr::lit_f32(0.0)]),
-            Expr::lit_f32(0.5),
+            1.0.into(),
+            dsl::vec2_f32(0.0, 0.0),
+            0.5.into(),
         ],
         DiscreteOpKind::Source => Vec::new(),
     };
@@ -680,10 +680,10 @@ fn main_fn(system: &DiscreteSystem) -> Function {
 fn codegen_conv_coeff_fn() -> Function {
     let params = vec![Param::new("flux", Type::F32, Vec::new())];
     let body = Block::new(vec![
-        dsl::var_typed_expr("conv_coeff_diag", Type::F32, Some(Expr::lit_f32(0.0))),
-        dsl::var_typed_expr("conv_coeff_off", Type::F32, Some(Expr::lit_f32(0.0))),
+        dsl::var_typed_expr("conv_coeff_diag", Type::F32, Some(0.0.into())),
+        dsl::var_typed_expr("conv_coeff_off", Type::F32, Some(0.0.into())),
         dsl::if_block_expr(
-            Expr::ident("flux").gt(Expr::lit_f32(0.0)),
+            Expr::ident("flux").gt(0.0),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("conv_coeff_diag"),
                 Expr::ident("flux"),

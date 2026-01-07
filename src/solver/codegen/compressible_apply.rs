@@ -208,7 +208,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ));
     stmts.push(dsl::if_block_expr(
-        (Expr::ident("idx") * Expr::lit_u32(layout.stride())).ge(Expr::ident("num_cells")),
+        (Expr::ident("idx") * layout.stride()).ge("num_cells"),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -229,10 +229,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr(
         "base",
-        Expr::ident("idx") * Expr::lit_u32(4),
+        Expr::ident("idx") * 4u32,
     ));
     let solution_at = |offset: u32| {
-        Expr::ident("solution").index(Expr::ident("base") + Expr::lit_u32(offset))
+        Expr::ident("solution").index(Expr::ident("base") + offset)
     };
     stmts.push(dsl::let_expr("delta_rho", solution_at(0)));
     stmts.push(dsl::let_typed_expr(

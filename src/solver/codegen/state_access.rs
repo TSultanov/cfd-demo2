@@ -46,12 +46,10 @@ pub fn state_component(
                 "missing field '{}' component {} in state layout",
                 field, component
             )
-        });
+    });
     let stride = layout.stride();
     let idx_expr = Expr::ident(idx);
-    let offset_expr = Expr::lit_u32(offset);
-    let stride_expr = Expr::lit_u32(stride);
-    let index_expr = idx_expr * stride_expr + offset_expr;
+    let index_expr = idx_expr * stride + offset;
     Expr::ident(buffer).index(index_expr)
 }
 

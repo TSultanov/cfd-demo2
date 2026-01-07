@@ -47,7 +47,7 @@ impl CsrPattern {
     }
 
     pub fn row_end(&self, row: &Expr) -> Expr {
-        let next = *row + Expr::lit_u32(1);
+        let next = *row + 1u32;
         self.row_offsets.index(next)
     }
 
@@ -116,9 +116,8 @@ impl BlockCsrMatrix {
     pub fn entry(&self, nnz_index: &Expr, row: u8, col: u8) -> TypedExpr {
         assert!(row < self.block.rows, "block row out of bounds");
         assert!(col < self.block.cols, "block col out of bounds");
-        let block_stride = Expr::lit_u32(self.block.entry_count());
-        let base = *nnz_index * block_stride;
-        let offset = Expr::lit_u32(row as u32 * self.block.cols as u32 + col as u32);
+        let base = *nnz_index * self.block.entry_count();
+        let offset = row as u32 * self.block.cols as u32 + col as u32;
         let index = base + offset;
         let ty = DslType::new(self.scalar, Shape::Scalar);
         TypedExpr::new(self.values.index(index), ty, self.entry_unit)
@@ -169,13 +168,13 @@ impl BlockCsrSoaMatrix {
     }
 
     pub fn row_entry(&self, rank: &Expr) -> BlockCsrSoaEntry {
-        let cols = Expr::lit_u32(self.block.cols as u32);
+        let cols = self.block.cols as u32;
         let bases = self
             .start_rows
             .iter()
             .cloned()
             .map(|start| {
-                start + cols * *rank
+                start + *rank * cols
             })
             .collect();
         BlockCsrSoaEntry::new(
@@ -231,7 +230,7 @@ impl BlockCsrSoaEntry {
         assert!(row < self.block.rows, "block row out of bounds");
         assert!(col < self.block.cols, "block col out of bounds");
         let base = self.row_bases[row as usize];
-        base + Expr::lit_u32(col as u32)
+        base + col as u32
     }
 
     pub fn access_expr(&self, row: u8, col: u8) -> Expr {

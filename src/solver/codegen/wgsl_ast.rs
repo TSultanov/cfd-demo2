@@ -1226,16 +1226,16 @@ mod tests {
         let expr = Expr::call_named("arrayLength", vec![Expr::ident("cell_vols").addr_of()]);
         assert_eq!(expr.to_string(), "arrayLength(&cell_vols)");
 
-        let expr = Expr::call_named("vec2<f32>", vec![Expr::lit_f32(1.0), Expr::lit_f32(2.0)]);
+        let expr = Expr::call_named("vec2<f32>", vec![1.0.into(), 2.0.into()]);
         assert_eq!(expr.to_string(), "vec2<f32>(1.0, 2.0)");
 
-        let expr = Expr::lit_u32(3);
+        let expr: Expr = 3u32.into();
         assert_eq!(expr.to_string(), "3u");
 
-        let expr = Expr::lit_f32(1.0);
+        let expr: Expr = 1.0.into();
         assert_eq!(expr.to_string(), "1.0");
 
-        let expr = Expr::call_named("max", vec![Expr::lit_f32(1.0), Expr::ident("x")]);
+        let expr = Expr::call_named("max", vec![1.0.into(), Expr::ident("x")]);
         assert_eq!(expr.to_string(), "max(1.0, x)");
 
         let expr = Expr::ident("state")

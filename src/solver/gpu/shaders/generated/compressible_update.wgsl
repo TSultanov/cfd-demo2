@@ -74,8 +74,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let inv_rho = 1.0 / max(rho, 0.00000001);
     let u: vec2<f32> = rho_u * inv_rho;
     let u2 = dot(u, u);
-    let ke = 0.5 * rho * u2;
-    let p_val = max(0.0, 0.39999998 * (rho_e - ke));
+    let ke = rho * u2 * 0.5;
+    let p_val = max(0.0, (rho_e - ke) * 0.39999998);
     state[idx * 7u + 5u] = u.x;
     state[idx * 7u + 6u] = u.y;
     state[idx * 7u + 4u] = p_val;

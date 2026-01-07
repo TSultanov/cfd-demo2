@@ -196,7 +196,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ));
     stmts.push(dsl::if_block_expr(
-        (Expr::ident("idx") * Expr::lit_u32(layout.stride())).ge(Expr::ident("num_cells")),
+        (Expr::ident("idx") * layout.stride()).ge("num_cells"),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -217,7 +217,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr(
         "inv_rho",
-        Expr::lit_f32(1.0) / Expr::call_named("max", vec![Expr::ident("rho"), Expr::lit_f32(1e-8)]),
+        Expr::from(1.0) / dsl::max("rho", 1e-8),
     ));
     stmts.push(dsl::let_typed_expr(
         "u",
@@ -232,17 +232,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "ke",
-        Expr::lit_f32(0.5) * Expr::ident("rho") * Expr::ident("u2"),
+        Expr::ident("rho") * Expr::ident("u2") * 0.5,
     ));
     stmts.push(dsl::let_expr(
         "p_val",
-        Expr::call_named(
-            "max",
-            vec![
-                Expr::lit_f32(0.0),
-                Expr::lit_f32(gamma_minus_1) * (Expr::ident("rho_e") - Expr::ident("ke")),
-            ],
-        ),
+        dsl::max(0.0, (Expr::ident("rho_e") - Expr::ident("ke")) * gamma_minus_1),
     ));
 
     let u_x_target = state_component(layout, "state", "idx", u_field, 0);

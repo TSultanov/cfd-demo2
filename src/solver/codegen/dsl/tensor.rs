@@ -100,7 +100,7 @@ impl<const N: usize> VecExpr<N> {
     }
 
     pub fn zeros() -> Self {
-        Self::from_components(std::array::from_fn(|_| Expr::lit_f32(0.0)))
+        Self::from_components(std::array::from_fn(|_| 0.0.into()))
     }
 
     pub fn add(&self, rhs: &Self) -> Self {
@@ -272,12 +272,12 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             return self.clone();
         }
         if expr_is_zero(&scalar) {
-            return Self::from_fn(|_, _| Expr::lit_f32(0.0));
+            return Self::from_fn(|_, _| 0.0.into());
         }
         Self::from_fn(|row, col| {
             let entry = self.entry(row, col);
             if expr_is_zero(&entry) {
-                return Expr::lit_f32(0.0);
+                return 0.0.into();
             }
             if expr_is_one(&entry) {
                 return scalar;
@@ -307,7 +307,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                     Some(prev) => prev + term,
                 });
             }
-            acc.unwrap_or_else(|| Expr::lit_f32(0.0))
+            acc.unwrap_or_else(|| 0.0.into())
         })
     }
 
@@ -318,7 +318,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             out.push(Stmt::AssignOp {
                 target: self.entry(idx, idx),
                 op,
-                value: value.clone(),
+                value,
             });
         }
         out
@@ -434,7 +434,7 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
             let entry = self.entry(r, c);
             let scale = row.component(r);
             if expr_is_zero(&entry) || expr_is_zero(&scale) {
-                return Expr::lit_f32(0.0);
+                return 0.0.into();
             }
             if expr_is_one(&scale) {
                 return entry;
@@ -448,7 +448,7 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
             let entry = self.entry(r, c);
             let scale = col.component(c);
             if expr_is_zero(&entry) || expr_is_zero(&scale) {
-                return Expr::lit_f32(0.0);
+                return 0.0.into();
             }
             if expr_is_one(&scale) {
                 return entry;
@@ -478,7 +478,7 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
                     Some(prev) => prev + term,
                 });
             }
-            acc.unwrap_or_else(|| Expr::lit_f32(0.0))
+            acc.unwrap_or_else(|| 0.0.into())
         })))
     }
 
@@ -491,9 +491,9 @@ impl<const N: usize> MatExpr<N, N> {
     pub fn identity() -> Self {
         Self::from_fn(|row, col| {
             if row == col {
-                Expr::lit_f32(1.0)
+                1.0.into()
             } else {
-                Expr::lit_f32(0.0)
+                0.0.into()
             }
         })
     }

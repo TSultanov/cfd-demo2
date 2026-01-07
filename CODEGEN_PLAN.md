@@ -10,6 +10,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   - `UnitDim` uses **SI base dimensions** (M/L/T) and supports **rational exponents** (e.g. `sqrt`).
 - Dense tensor helpers exist in the DSL (`src/solver/codegen/dsl/tensor.rs`):
   - `MatExpr<const R, const C>` for building small dense matrix expressions and emitting unrolled assigns/scatters.
+    - Includes `identity()`, `from_entries(...)`, diagonal updates (`assign_op_diag`), matrix multiplication (`mul_mat`), and prefix var helpers (`var_prefix`).
   - `VecExpr<const N>` for `vecN<f32>` expressions and basic vector algebra (used to remove per-component loops).
 - Sparse matrix types exist in the DSL (`src/solver/codegen/dsl/matrix.rs`):
   - `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, `BlockCsrSoaEntry`, `BlockShape`
@@ -18,7 +19,11 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   - `wgsl_dsl` now has helpers for linear array indexing (`idx * stride + offset`) to avoid `format!(...)`-built indices.
   - `wgsl_dsl` has basic vector helpers (`vec2<f32>` construction, `dot/min/max`) used by reconstruction and flux kernels.
   - `reconstruction.rs` is AST-first (no string parsing) and is shared by incompressible + compressible kernels.
-  - `compressible_gradients` removed x/y component loops in favor of vector ops (accumulate `grad += scalar * area * normal`).
+  - `compressible_gradients` removed x/y component loops in favor of `VecExpr` ops (accumulate `grad += scalar * area * normal`).
+  - `compressible_assembly` migrated the matrix-heavy parts to `MatExpr`:
+    - Jacobians (`jac_l`, `jac_r`) are built from matrix algebra and scattered via `BlockCsrSoaEntry`.
+    - Inlet/wall boundary conditions are expressed as `jac_l + jac_r * T_bc` using `mul_mat`.
+    - Removed per-entry temporary scalars like `jac_l_00` and `A_l_10` in favor of matrix notation (`a_l_mat`, `a_r_mat`).
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the primary safety net for refactors.
 
 ## Goals
@@ -35,7 +40,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Keep adding small AST helpers where repeated patterns show up (array indexing, block scatters, component swizzles).
 - Migrate kernels one-by-one, preferring the most string-fragile sections first:
   - `coupled_assembly`: continue replacing remaining string-based math; diagonal block scatter is now `MatExpr`-based.
-  - `compressible_assembly`: continue replacing remaining string-based math; CSR-SoA scatters and boundary block ops are now `MatExpr`-based.
+  - `compressible_assembly`: matrix/tensor portions are now `MatExpr`-based; remaining work is converting scalar/intermediate math away from `dsl::let_(&str)` and other parse-based helpers.
   - `pressure_assembly`, `update_fields_from_coupled`, `compressible_flux_kt`, `compressible_gradients`.
 - Once migrations are sufficiently complete, gate `wgsl_dsl::expr(&str)` behind tests/debug (or deprecate it).
 
@@ -58,7 +63,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 
 - Unify sparse storage layouts behind a small API (contiguous vs row-split SoA) and provide safe scatter/accumulate helpers.
 - Expand dense tensor support:
-  - Current: `MatExpr<const R, const C>` and `VecExpr<const N>` are Expr-level helpers for unrolled ops/scatters and vector algebra.
+  - Current: `MatExpr<const R, const C>` and `VecExpr<const N>` are Expr-level helpers for unrolled ops/scatters, vector algebra, and small matrix multiplication.
   - Missing: a typed variant (`TypedMat`) that tracks per-entry `DslType`/`UnitDim` and supports more ops (e.g. block transforms and structured assembly).
   - Partial: basic vector helpers exist in `wgsl_dsl` (`vec2<f32>` construction + `dot/min/max`).
   - Missing: typed vectors/matrices (units + shapes) and higher-level ops (e.g. mat-vec, vector-valued reconstruction, structured tensor access).

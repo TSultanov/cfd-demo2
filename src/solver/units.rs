@@ -146,9 +146,9 @@ const fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
 
 /// Physical dimension exponents in **SI base units** with rational powers.
 ///
-/// - `M` = mass (kilogram)
-/// - `L` = length (meter)
-/// - `T` = time (second)
+/// - `kg` = mass (kilogram)
+/// - `m` = length (meter)
+/// - `s` = time (second)
 ///
 /// This encodes **dimensions only** (no scale factors); values are erased when lowering to WGSL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -238,9 +238,9 @@ impl fmt::Display for UnitDim {
         }
 
         let mut parts = Vec::new();
-        push_dim(&mut parts, "M", self.m);
-        push_dim(&mut parts, "L", self.l);
-        push_dim(&mut parts, "T", self.t);
+        push_dim(&mut parts, "kg", self.m);
+        push_dim(&mut parts, "m", self.l);
+        push_dim(&mut parts, "s", self.t);
         write!(f, "{}", parts.join(" "))
     }
 }
@@ -249,7 +249,9 @@ fn push_dim(parts: &mut Vec<String>, name: &str, exp: UnitExp) {
     if exp.is_zero() {
         return;
     }
-    if exp.den == 1 {
+    if exp.den == 1 && exp.num == 1 {
+        parts.push(name.to_string());
+    } else if exp.den == 1 {
         parts.push(format!("{name}^{}", exp.num));
     } else {
         parts.push(format!("{name}^({exp})"));
@@ -321,5 +323,18 @@ mod tests {
         assert_eq!(si::PRESSURE_GRADIENT, UnitDim::new(1, -2, -2));
 
         assert_eq!(si::D_P, UnitDim::new(-1, 3, 1));
+    }
+
+    #[test]
+    fn unit_display_uses_si_base_names() {
+        assert_eq!(UnitDim::dimensionless().to_string(), "1");
+        assert_eq!(UnitDim::new(0, 1, 0).to_string(), "m");
+        assert_eq!(UnitDim::new(1, 0, 0).to_string(), "kg");
+        assert_eq!(UnitDim::new(0, 0, 1).to_string(), "s");
+
+        assert_eq!(UnitDim::new(1, -3, 0).to_string(), "kg m^-3");
+        assert_eq!(UnitDim::new(1, 1, -2).to_string(), "kg m s^-2");
+
+        assert_eq!(UnitDim::new(0, 1, 0).sqrt().to_string(), "m^(1/2)");
     }
 }

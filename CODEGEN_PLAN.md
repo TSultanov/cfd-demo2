@@ -19,6 +19,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Removed `ModelSpec.kernel_plan` storage; kernel plans are derived via `ModelSpec::kernel_plan()` (still model-family specific for now).
 - Shared block-CSR expansion (`src/solver/gpu/csr.rs`) and derived compressible unknown count from `EquationSystem::unknowns_per_cell()`.
 - Introduced a small runtime `KernelGraph` executor (`src/solver/gpu/kernel_graph.rs`) and migrated the compressible explicit KT timestep path to it.
+- Migrated the compressible implicit path’s GPU dispatch blocks (grad/assembly/apply/update) to `KernelGraph` as well (FGMRES remains a host-controlled plugin step for now).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:

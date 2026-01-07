@@ -29,6 +29,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Expanded `GpuUnifiedSolver` to provide a real shared surface (common setters + `get_u/get_p/get_rho`) and migrated the 1D regression test harness to run compressible/incompressible cases through it (`tests/gpu_1d_structured_regression_test.rs`).
 - Migrated the UI app to `GpuUnifiedSolver` and switched plotting to use `StateLayout`-derived offsets instead of hardcoded packing (`src/ui/app.rs`).
 - Removed `FluidState` struct dependence from the public incompressible GPU read/write helpers by using `StateLayout` offsets instead (`src/solver/gpu/solver.rs`).
+- Switched incompressible state buffer initialization to use `StateLayout` stride (so the host no longer needs a matching `FluidState` struct) (`src/solver/gpu/init/fields.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
@@ -60,7 +61,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 3. **Unify state packing + unknown layout**
    - Make all models use `StateLayout`-driven packed state (like compressible) so init/update/plotting don’t need per-model structs.
    - Compute unknown count from equation targets (sum of field component counts); build CSR expansion generically for any block size.
-   - Status: plotting/UI now uses `StateLayout`; runtime packing still needs consolidation.
+   - Status: UI + read/write helpers + buffer init now use `StateLayout`; coupled solver still has a few `*3` assumptions outside init/debug paths.
 4. **Generic scheme expansion**
    - Implement “needs gradients?” and “needs reconstruction?” detection per term/scheme.
    - Auto-generate gradient kernels per required field (instead of hardcoded `grad_rho`, `grad_u`, etc.).

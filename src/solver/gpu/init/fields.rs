@@ -1,29 +1,6 @@
 use crate::solver::gpu::structs::GpuConstants;
-use bytemuck::{Pod, Zeroable};
+use crate::solver::model::incompressible_momentum_model;
 use wgpu::util::DeviceExt;
-
-/// FluidState struct matching the WGSL definition (32 bytes per cell, aligned)
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub struct FluidState {
-    pub u: [f32; 2],              // velocity (8 bytes)
-    pub p: f32,                   // pressure (4 bytes)
-    pub d_p: f32,                 // pressure correction coefficient (4 bytes)
-    pub grad_p: [f32; 2],         // pressure gradient (8 bytes)
-    pub grad_component: [f32; 2], // velocity gradient component (8 bytes)
-}
-
-impl Default for FluidState {
-    fn default() -> Self {
-        Self {
-            u: [0.0, 0.0],
-            p: 0.0,
-            d_p: 0.0,
-            grad_p: [0.0, 0.0],
-            grad_component: [0.0, 0.0],
-        }
-    }
-}
 
 /// Buffers-only resources (created before pipelines)
 pub struct FieldBuffers {
@@ -60,28 +37,28 @@ pub struct FieldResources {
 
 /// Create only the buffers (before pipelines are created)
 pub fn init_field_buffers(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> FieldBuffers {
-    // --- Create FluidState buffers (consolidated per-cell state) ---
-    let zero_states = vec![FluidState::default(); num_cells as usize];
+    let state_stride = incompressible_momentum_model().state_layout.stride();
+    let zero_state = vec![0.0f32; num_cells as usize * state_stride as usize];
 
     let b_state = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FluidState Buffer"),
-        contents: bytemuck::cast_slice(&zero_states),
+        label: Some("Incompressible State Buffer"),
+        contents: bytemuck::cast_slice(&zero_state),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
     });
 
     let b_state_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FluidState Old Buffer"),
-        contents: bytemuck::cast_slice(&zero_states),
+        label: Some("Incompressible State Old Buffer"),
+        contents: bytemuck::cast_slice(&zero_state),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
     });
 
     let b_state_old_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("FluidState Old Old Buffer"),
-        contents: bytemuck::cast_slice(&zero_states),
+        label: Some("Incompressible State Old Old Buffer"),
+        contents: bytemuck::cast_slice(&zero_state),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
@@ -163,7 +140,7 @@ pub fn create_field_bind_groups(
         };
 
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("FluidState Fields Bind Group {}", i)),
+            label: Some(&format!("Incompressible Fields Bind Group {}", i)),
             layout: bgl_fields,
             entries: &[
                 wgpu::BindGroupEntry {

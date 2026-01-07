@@ -69,26 +69,23 @@ var<storage, read> solution: array<f32>;
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
-    let stride = 7u;
     let num_cells = arrayLength(&state);
-    if (idx * stride >= num_cells) {
+    if (idx * 7u >= num_cells) {
         return;
     }
     let rho_base = state[idx * 7u + 0u];
-    let rho_u_base = vec2<f32>(state[idx * 7u + 1u], state[idx * 7u + 2u]);
+    let rho_u_base: vec2<f32> = vec2<f32>(state[idx * 7u + 1u], state[idx * 7u + 2u]);
     let rho_e_base = state[idx * 7u + 3u];
     let base = idx * 4u;
     let delta_rho = solution[base + 0u];
-    let delta_rho_u_x = solution[base + 1u];
-    let delta_rho_u_y = solution[base + 2u];
+    let delta_rho_u: vec2<f32> = vec2<f32>(solution[base + 1u], solution[base + 2u]);
     let delta_rho_e = solution[base + 3u];
     let relax = constants.alpha_u;
-    var rho_new = rho_base + relax * delta_rho;
-    var rho_u_new_x = rho_u_base.x + relax * delta_rho_u_x;
-    var rho_u_new_y = rho_u_base.y + relax * delta_rho_u_y;
-    var rho_e_new = rho_e_base + relax * delta_rho_e;
+    let rho_new = rho_base + relax * delta_rho;
+    let rho_u_new: vec2<f32> = rho_u_base + delta_rho_u * relax;
+    let rho_e_new = rho_e_base + relax * delta_rho_e;
     state[idx * 7u + 0u] = rho_new;
-    state[idx * 7u + 1u] = rho_u_new_x;
-    state[idx * 7u + 2u] = rho_u_new_y;
+    state[idx * 7u + 1u] = rho_u_new.x;
+    state[idx * 7u + 2u] = rho_u_new.y;
     state[idx * 7u + 3u] = rho_e_new;
 }

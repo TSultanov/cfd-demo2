@@ -1,9 +1,10 @@
-use super::state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
+use super::dsl as typed;
+use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
-    StructField, Type,
+    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
+    StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -193,50 +194,105 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let rho_field = fields.rho.name();
     let rho_u_field = fields.rho_u.name();
     let rho_e_field = fields.rho_e.name();
-    let stride = layout.stride();
-    let rho_target = state_scalar_expr(layout, "state", "idx", rho_field);
-    let rho_u_x_target = state_component_expr(layout, "state", "idx", rho_u_field, 0);
-    let rho_u_y_target = state_component_expr(layout, "state", "idx", rho_u_field, 1);
-    let rho_e_target = state_scalar_expr(layout, "state", "idx", rho_e_field);
+    let rho_target = state_scalar(layout, "state", "idx", rho_field);
+    let rho_u_x_target = state_component(layout, "state", "idx", rho_u_field, 0);
+    let rho_u_y_target = state_component(layout, "state", "idx", rho_u_field, 1);
+    let rho_e_target = state_scalar(layout, "state", "idx", rho_e_field);
 
     stmts.push(dsl::let_("idx", "global_id.x"));
-    stmts.push(dsl::let_("stride", &format!("{stride}u")));
-    stmts.push(dsl::let_("num_cells", "arrayLength(&state)"));
-    stmts.push(dsl::if_block(
-        "idx * stride >= num_cells",
+    stmts.push(dsl::let_expr(
+        "num_cells",
+        Expr::call_named(
+            "arrayLength",
+            vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("state"))],
+        ),
+    ));
+    stmts.push(dsl::if_block_expr(
+        Expr::binary(
+            Expr::binary(
+                Expr::ident("idx"),
+                BinaryOp::Mul,
+                Expr::lit_u32(layout.stride()),
+            ),
+            BinaryOp::GreaterEq,
+            Expr::ident("num_cells"),
+        ),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
 
-    let rho_base_expr = state_scalar_expr(layout, "state", "idx", rho_field);
-    let rho_u_base_expr = state_vec2_expr(layout, "state", "idx", rho_u_field);
-    let rho_e_base_expr = state_scalar_expr(layout, "state", "idx", rho_e_field);
-    stmts.push(dsl::let_("rho_base", &rho_base_expr));
-    stmts.push(dsl::let_("rho_u_base", &rho_u_base_expr));
-    stmts.push(dsl::let_("rho_e_base", &rho_e_base_expr));
-
-    stmts.push(dsl::let_("base", "idx * 4u"));
-    stmts.push(dsl::let_("delta_rho", "solution[base + 0u]"));
-    stmts.push(dsl::let_("delta_rho_u_x", "solution[base + 1u]"));
-    stmts.push(dsl::let_("delta_rho_u_y", "solution[base + 2u]"));
-    stmts.push(dsl::let_("delta_rho_e", "solution[base + 3u]"));
-
-    stmts.push(dsl::let_("relax", "constants.alpha_u"));
-    stmts.push(dsl::var("rho_new", "rho_base + relax * delta_rho"));
-    stmts.push(dsl::var(
-        "rho_u_new_x",
-        "rho_u_base.x + relax * delta_rho_u_x",
+    stmts.push(dsl::let_expr(
+        "rho_base",
+        state_scalar(layout, "state", "idx", rho_field),
     ));
-    stmts.push(dsl::var(
-        "rho_u_new_y",
-        "rho_u_base.y + relax * delta_rho_u_y",
+    stmts.push(dsl::let_typed_expr(
+        "rho_u_base",
+        Type::vec2_f32(),
+        state_vec2(layout, "state", "idx", rho_u_field),
     ));
-    stmts.push(dsl::var("rho_e_new", "rho_e_base + relax * delta_rho_e"));
+    stmts.push(dsl::let_expr(
+        "rho_e_base",
+        state_scalar(layout, "state", "idx", rho_e_field),
+    ));
 
-    stmts.push(dsl::assign(&rho_target, "rho_new"));
-    stmts.push(dsl::assign(&rho_u_x_target, "rho_u_new_x"));
-    stmts.push(dsl::assign(&rho_u_y_target, "rho_u_new_y"));
-    stmts.push(dsl::assign(&rho_e_target, "rho_e_new"));
+    stmts.push(dsl::let_expr(
+        "base",
+        Expr::binary(Expr::ident("idx"), BinaryOp::Mul, Expr::lit_u32(4)),
+    ));
+    let solution_at = |offset: u32| {
+        Expr::ident("solution").index(Expr::binary(
+            Expr::ident("base"),
+            BinaryOp::Add,
+            Expr::lit_u32(offset),
+        ))
+    };
+    stmts.push(dsl::let_expr("delta_rho", solution_at(0)));
+    stmts.push(dsl::let_typed_expr(
+        "delta_rho_u",
+        Type::vec2_f32(),
+        typed::VecExpr::<2>::from_components([solution_at(1), solution_at(2)]).expr(),
+    ));
+    stmts.push(dsl::let_expr("delta_rho_e", solution_at(3)));
+
+    stmts.push(dsl::let_expr(
+        "relax",
+        Expr::ident("constants").field("alpha_u"),
+    ));
+    stmts.push(dsl::let_expr(
+        "rho_new",
+        Expr::binary(
+            Expr::ident("rho_base"),
+            BinaryOp::Add,
+            Expr::binary(Expr::ident("relax"), BinaryOp::Mul, Expr::ident("delta_rho")),
+        ),
+    ));
+    stmts.push(dsl::let_typed_expr(
+        "rho_u_new",
+        Type::vec2_f32(),
+        typed::VecExpr::<2>::from_expr(Expr::ident("rho_u_base")).add(
+            &typed::VecExpr::<2>::from_expr(Expr::ident("delta_rho_u"))
+                .mul_scalar(Expr::ident("relax")),
+        ).expr(),
+    ));
+    stmts.push(dsl::let_expr(
+        "rho_e_new",
+        Expr::binary(
+            Expr::ident("rho_e_base"),
+            BinaryOp::Add,
+            Expr::binary(Expr::ident("relax"), BinaryOp::Mul, Expr::ident("delta_rho_e")),
+        ),
+    ));
+
+    stmts.push(dsl::assign_expr(rho_target, Expr::ident("rho_new")));
+    stmts.push(dsl::assign_expr(
+        rho_u_x_target,
+        Expr::ident("rho_u_new").field("x"),
+    ));
+    stmts.push(dsl::assign_expr(
+        rho_u_y_target,
+        Expr::ident("rho_u_new").field("y"),
+    ));
+    stmts.push(dsl::assign_expr(rho_e_target, Expr::ident("rho_e_new")));
 
     Block::new(stmts)
 }

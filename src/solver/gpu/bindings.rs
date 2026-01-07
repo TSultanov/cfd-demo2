@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: df7c4931e0fab59889f459bcedcd890aa17d141605db1e1a0fc7af351e926ad6
+// SourceHash: 5e22e47601c3de5181ac6d0e3a4f12867e26886f35c1a8c9c2a054871e3b89fc
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -4703,11 +4703,6 @@ var<storage> solution: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var rho_new: f32;
-    var rho_u_new_x: f32;
-    var rho_u_new_y: f32;
-    var rho_e_new: f32;
-
     let idx = global_id.x;
     let num_cells = arrayLength((&state));
     if ((idx * 7u) >= num_cells) {
@@ -4720,22 +4715,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rho_e_base = state[((idx * 7u) + 3u)];
     let base = (idx * 4u);
     let delta_rho = solution[(base + 0u)];
-    let delta_rho_u_x = solution[(base + 1u)];
-    let delta_rho_u_y = solution[(base + 2u)];
+    let _e47 = solution[(base + 1u)];
+    let _e52 = solution[(base + 2u)];
+    let delta_rho_u = vec2<f32>(_e47, _e52);
     let delta_rho_e = solution[(base + 3u)];
     let relax = constants.alpha_u;
-    rho_new = (rho_base + (relax * delta_rho));
-    rho_u_new_x = (rho_u_base.x + (relax * delta_rho_u_x));
-    rho_u_new_y = (rho_u_base.y + (relax * delta_rho_u_y));
-    rho_e_new = (rho_e_base + (relax * delta_rho_e));
-    let _e81 = rho_new;
-    state[((idx * 7u) + 0u)] = _e81;
-    let _e88 = rho_u_new_x;
-    state[((idx * 7u) + 1u)] = _e88;
-    let _e95 = rho_u_new_y;
-    state[((idx * 7u) + 2u)] = _e95;
-    let _e102 = rho_e_new;
-    state[((idx * 7u) + 3u)] = _e102;
+    let rho_new = (rho_base + (relax * delta_rho));
+    let rho_u_new = (rho_u_base + (delta_rho_u * relax));
+    let rho_e_new = (rho_e_base + (relax * delta_rho_e));
+    state[((idx * 7u) + 0u)] = rho_new;
+    state[((idx * 7u) + 1u)] = rho_u_new.x;
+    state[((idx * 7u) + 2u)] = rho_u_new.y;
+    state[((idx * 7u) + 3u)] = rho_e_new;
     return;
 }
 "#;
@@ -8896,12 +8887,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rho_u = vec2<f32>(_e20, _e27);
     let rho_e = state[((idx * 7u) + 3u)];
     let inv_rho = (1f / max(rho, 0.00000001f));
-    let u_x = (rho_u.x * inv_rho);
-    let u_y = (rho_u.y * inv_rho);
-    let ke = ((0.5f * rho) * ((u_x * u_x) + (u_y * u_y)));
-    let p_val = max(0f, (0.4f * (rho_e - ke)));
-    state[((idx * 7u) + 5u)] = u_x;
-    state[((idx * 7u) + 6u)] = u_y;
+    let u = (rho_u * inv_rho);
+    let u2_ = dot(u, u);
+    let ke = ((0.5f * rho) * u2_);
+    let p_val = max(0f, (0.39999998f * (rho_e - ke)));
+    state[((idx * 7u) + 5u)] = u.x;
+    state[((idx * 7u) + 6u)] = u.y;
     state[((idx * 7u) + 4u)] = p_val;
     return;
 }

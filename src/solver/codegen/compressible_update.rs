@@ -1,9 +1,10 @@
-use super::state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
+use super::dsl as typed;
+use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, Block, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
-    StructField, Type,
+    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
+    StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -183,36 +184,93 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let rho_e_field = fields.rho_e.name();
     let p_field = fields.p.name();
     let u_field = fields.u.name();
-    let gamma = "1.4";
+    let gamma = 1.4_f32;
+    let gamma_minus_1 = gamma - 1.0;
 
     stmts.push(dsl::let_("idx", "global_id.x"));
-    stmts.push(dsl::let_("num_cells", "arrayLength(&state)"));
-    stmts.push(dsl::let_("stride", &format!("{}u", layout.stride())));
-    stmts.push(dsl::if_block(
-        "idx * stride >= num_cells",
+    stmts.push(dsl::let_expr(
+        "num_cells",
+        Expr::call_named(
+            "arrayLength",
+            vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("state"))],
+        ),
+    ));
+    stmts.push(dsl::if_block_expr(
+        Expr::binary(
+            Expr::binary(
+                Expr::ident("idx"),
+                BinaryOp::Mul,
+                Expr::lit_u32(layout.stride()),
+            ),
+            BinaryOp::GreaterEq,
+            Expr::ident("num_cells"),
+        ),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
 
-    let rho_expr = state_scalar_expr(layout, "state", "idx", rho_field);
-    let rho_u_expr = state_vec2_expr(layout, "state", "idx", rho_u_field);
-    let rho_e_expr = state_scalar_expr(layout, "state", "idx", rho_e_field);
+    stmts.push(dsl::let_expr(
+        "rho",
+        state_scalar(layout, "state", "idx", rho_field),
+    ));
+    stmts.push(dsl::let_typed_expr(
+        "rho_u",
+        Type::vec2_f32(),
+        state_vec2(layout, "state", "idx", rho_u_field),
+    ));
+    stmts.push(dsl::let_expr(
+        "rho_e",
+        state_scalar(layout, "state", "idx", rho_e_field),
+    ));
 
-    stmts.push(dsl::let_("rho", &rho_expr));
-    stmts.push(dsl::let_("rho_u", &rho_u_expr));
-    stmts.push(dsl::let_("rho_e", &rho_e_expr));
-    stmts.push(dsl::let_("inv_rho", "1.0 / max(rho, 1e-8)"));
-    stmts.push(dsl::let_("u_x", "rho_u.x * inv_rho"));
-    stmts.push(dsl::let_("u_y", "rho_u.y * inv_rho"));
-    stmts.push(dsl::let_("ke", "0.5 * rho * (u_x * u_x + u_y * u_y)"));
-    stmts.push(dsl::let_("p_val", &format!("max(0.0, ({gamma} - 1.0) * (rho_e - ke))")));
+    stmts.push(dsl::let_expr(
+        "inv_rho",
+        Expr::binary(
+            Expr::lit_f32(1.0),
+            BinaryOp::Div,
+            Expr::call_named("max", vec![Expr::ident("rho"), Expr::lit_f32(1e-8)]),
+        ),
+    ));
+    stmts.push(dsl::let_typed_expr(
+        "u",
+        Type::vec2_f32(),
+        typed::VecExpr::<2>::from_expr(Expr::ident("rho_u"))
+            .mul_scalar(Expr::ident("inv_rho"))
+            .expr(),
+    ));
+    stmts.push(dsl::let_expr(
+        "u2",
+        typed::VecExpr::<2>::from_expr(Expr::ident("u")).dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u"))),
+    ));
+    stmts.push(dsl::let_expr(
+        "ke",
+        Expr::binary(
+            Expr::binary(Expr::lit_f32(0.5), BinaryOp::Mul, Expr::ident("rho")),
+            BinaryOp::Mul,
+            Expr::ident("u2"),
+        ),
+    ));
+    stmts.push(dsl::let_expr(
+        "p_val",
+        Expr::call_named(
+            "max",
+            vec![
+                Expr::lit_f32(0.0),
+                Expr::binary(
+                    Expr::lit_f32(gamma_minus_1),
+                    BinaryOp::Mul,
+                    Expr::binary(Expr::ident("rho_e"), BinaryOp::Sub, Expr::ident("ke")),
+                ),
+            ],
+        ),
+    ));
 
-    let u_x_target = state_component_expr(layout, "state", "idx", u_field, 0);
-    let u_y_target = state_component_expr(layout, "state", "idx", u_field, 1);
-    let p_target = state_component_expr(layout, "state", "idx", p_field, 0);
-    stmts.push(dsl::assign(&u_x_target, "u_x"));
-    stmts.push(dsl::assign(&u_y_target, "u_y"));
-    stmts.push(dsl::assign(&p_target, "p_val"));
+    let u_x_target = state_component(layout, "state", "idx", u_field, 0);
+    let u_y_target = state_component(layout, "state", "idx", u_field, 1);
+    let p_target = state_component(layout, "state", "idx", p_field, 0);
+    stmts.push(dsl::assign_expr(u_x_target, Expr::ident("u").field("x")));
+    stmts.push(dsl::assign_expr(u_y_target, Expr::ident("u").field("y")));
+    stmts.push(dsl::assign_expr(p_target, Expr::ident("p_val")));
 
     Block::new(stmts)
 }

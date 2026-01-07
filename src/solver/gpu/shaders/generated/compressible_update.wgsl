@@ -65,19 +65,18 @@ var<storage, read> state_iter: array<f32>;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
     let num_cells = arrayLength(&state);
-    let stride = 7u;
-    if (idx * stride >= num_cells) {
+    if (idx * 7u >= num_cells) {
         return;
     }
     let rho = state[idx * 7u + 0u];
-    let rho_u = vec2<f32>(state[idx * 7u + 1u], state[idx * 7u + 2u]);
+    let rho_u: vec2<f32> = vec2<f32>(state[idx * 7u + 1u], state[idx * 7u + 2u]);
     let rho_e = state[idx * 7u + 3u];
-    let inv_rho = 1.0 / max(rho, 1e-8);
-    let u_x = rho_u.x * inv_rho;
-    let u_y = rho_u.y * inv_rho;
-    let ke = 0.5 * rho * (u_x * u_x + u_y * u_y);
-    let p_val = max(0.0, (1.4 - 1.0) * (rho_e - ke));
-    state[idx * 7u + 5u] = u_x;
-    state[idx * 7u + 6u] = u_y;
+    let inv_rho = 1.0 / max(rho, 0.00000001);
+    let u: vec2<f32> = rho_u * inv_rho;
+    let u2 = dot(u, u);
+    let ke = 0.5 * rho * u2;
+    let p_val = max(0.0, 0.39999998 * (rho_e - ke));
+    state[idx * 7u + 5u] = u.x;
+    state[idx * 7u + 6u] = u.y;
     state[idx * 7u + 4u] = p_val;
 }

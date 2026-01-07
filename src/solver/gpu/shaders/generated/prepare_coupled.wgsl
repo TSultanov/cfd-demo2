@@ -119,11 +119,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let center_vec: vec2<f32> = vec2<f32>(center.x, center.y);
     let vol = cell_vols[idx];
     let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[idx + 1];
+    let end = cell_face_offsets[idx + 1u];
     var diag_coeff: f32 = 0.0;
-    let u_n_val = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
+    let u_n_val: vec2<f32> = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
     let rho_cell = constants.density;
-    var time_coeff = vol * rho_cell / constants.dt;
+    var time_coeff: f32 = vol * rho_cell / constants.dt;
     if (constants.time_scheme == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
@@ -133,7 +133,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     diag_coeff += time_coeff;
     let val_c_p = state[idx * 8u + 2u];
     var grad_p_accum: vec2<f32> = vec2<f32>(0.0, 0.0);
-    let u_val = vec2<f32>(state[idx * 8u + 0u], state[idx * 8u + 1u]);
+    let u_val: vec2<f32> = vec2<f32>(state[idx * 8u + 0u], state[idx * 8u + 1u]);
     var g_u: vec2<f32> = vec2<f32>(0.0, 0.0);
     var g_v: vec2<f32> = vec2<f32>(0.0, 0.0);
     for (var k = start; k < end; k++) {
@@ -158,32 +158,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var flux: f32 = 0.0;
         var rho_face: f32 = rho_cell;
         if (neigh_idx != -1) {
-            let n_idx = u32(neigh_idx);
+            let n_idx: u32 = u32(neigh_idx);
             let c_neigh = cell_centers[n_idx];
             let c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
-            let u_own = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
-            let u_ngh = vec2<f32>(state[n_idx * 8u + 0u], state[n_idx * 8u + 1u]);
+            let u_own: vec2<f32> = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
+            let u_ngh: vec2<f32> = vec2<f32>(state[n_idx * 8u + 0u], state[n_idx * 8u + 1u]);
             let dp_own = state[owner * 8u + 3u];
             let dp_ngh = state[n_idx * 8u + 3u];
-            let gp_own = vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]);
-            let gp_ngh = vec2<f32>(state[n_idx * 8u + 4u], state[n_idx * 8u + 5u]);
+            let gp_own: vec2<f32> = vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]);
+            let gp_ngh: vec2<f32> = vec2<f32>(state[n_idx * 8u + 4u], state[n_idx * 8u + 5u]);
             let p_own = state[owner * 8u + 2u];
             let p_ngh = state[n_idx * 8u + 2u];
             let d_own = distance(c_owner_vec, f_center_vec);
             let d_ngh = distance(c_neigh_vec, f_center_vec);
             let total_dist = d_own + d_ngh;
-            var lambda = 0.5;
-            if (total_dist > 1e-6) {
+            var lambda: f32 = 0.5;
+            if (total_dist > 0.000001) {
                 lambda = d_ngh / total_dist;
             }
             let lambda_other = 1.0 - lambda;
             rho_face = constants.density;
             let u_face: vec2<f32> = u_own * lambda + u_ngh * lambda_other;
-            let dp_face = lambda * dp_own + (1.0 - lambda) * dp_ngh;
+            let dp_face = lambda * dp_own + lambda_other * dp_ngh;
             let gp_face: vec2<f32> = gp_own * lambda + gp_ngh * lambda_other;
             let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
             let dist_proj = abs(dot(d_vec, normal_flux_vec));
-            let dist = max(dist_proj, 1e-6);
+            let dist = max(dist_proj, 0.000001);
             let grad_p_n = dot(gp_face, normal_flux_vec);
             let p_grad_f = (p_ngh - p_own) / dist;
             let rc_term = dp_face * area * (grad_p_n - p_grad_f);
@@ -199,7 +199,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     flux = 0.0;
                 } else {
                     if (boundary_type == 2u) {
-                        let u_own = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
+                        let u_own: vec2<f32> = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
                         let u_n = dot(u_own, normal_flux_vec);
                         let raw_flux = rho_face * u_n * area;
                         flux = max(0.0, raw_flux);
@@ -210,13 +210,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (owner == idx) {
             fluxes[face_idx] = flux;
         }
-        var flux_out = flux;
+        var flux_out: f32 = flux;
         if (owner != idx) {
             flux_out = -flux;
         }
         var other_center: Vector2;
-        var is_boundary = false;
-        var other_idx = 0u;
+        var is_boundary: bool = false;
+        var other_idx: u32 = 0u;
         if (neigh_idx != -1) {
             other_idx = u32(neigh_idx);
             if (owner != idx) {
@@ -262,15 +262,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_c = distance(center_vec, f_center_vec);
             let d_o = distance(other_center_vec, f_center_vec);
             let total_dist_p = d_c + d_o;
-            var lambda_p = 0.5;
-            if (total_dist_p > 1e-6) {
+            var lambda_p: f32 = 0.5;
+            if (total_dist_p > 0.000001) {
                 lambda_p = d_o / total_dist_p;
             }
             let val_other_p = state[other_idx * 8u + 2u];
             let val_f_p = lambda_p * val_c_p + (1.0 - lambda_p) * val_other_p;
             grad_p_accum += face_vec * val_f_p;
         } else {
-            var val_f_p = val_c_p;
+            var val_f_p: f32 = val_c_p;
             if (boundary_type == 2u) {
                 val_f_p = 0.0;
             }
@@ -278,11 +278,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         var u_face_vel: vec2<f32> = vec2<f32>(0.0, 0.0);
         if (!is_boundary) {
-            let u_other = vec2<f32>(state[other_idx * 8u + 0u], state[other_idx * 8u + 1u]);
+            let u_other: vec2<f32> = vec2<f32>(state[other_idx * 8u + 0u], state[other_idx * 8u + 1u]);
             let d_c = distance(center_vec, f_center_vec);
             let d_o = distance(other_center_vec, f_center_vec);
             let total_dist = d_c + d_o;
-            if (total_dist > 1e-6) {
+            if (total_dist > 0.000001) {
                 let lambda = d_o / total_dist;
                 let lambda_other = 1.0 - lambda;
                 u_face_vel = u_val * lambda + u_other * lambda_other;
@@ -304,7 +304,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         g_u += face_vec * u_face_vel.x;
         g_v += face_vec * u_face_vel.y;
     }
-    if (abs(diag_coeff) > 1e-20) {
+    if (abs(diag_coeff) > 0.00000000000000000001) {
         state[idx * 8u + 3u] = vol / diag_coeff;
     } else {
         state[idx * 8u + 3u] = 0.0;

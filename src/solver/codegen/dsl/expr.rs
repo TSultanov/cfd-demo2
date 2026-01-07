@@ -166,6 +166,156 @@ impl TypedExpr {
             }),
         }
     }
+
+    pub fn abs(&self) -> Result<Self, DslError> {
+        match (self.ty.scalar, self.ty.shape) {
+            (ScalarType::F32, Shape::Scalar | Shape::Vec(_)) => Ok(Self::new(
+                Expr::call_named("abs", vec![self.to_wgsl()]),
+                self.ty,
+                self.unit,
+            )),
+            _ => Err(DslError::Unsupported { op: "abs", ty: self.ty }),
+        }
+    }
+
+    pub fn min(&self, rhs: &Self) -> Result<Self, DslError> {
+        if self.ty != rhs.ty {
+            return Err(DslError::TypeMismatch {
+                op: "min",
+                lhs: self.ty,
+                rhs: rhs.ty,
+            });
+        }
+        if self.unit != rhs.unit {
+            return Err(DslError::UnitMismatch {
+                op: "min",
+                lhs: self.unit,
+                rhs: rhs.unit,
+            });
+        }
+        Ok(Self::new(
+            Expr::call_named("min", vec![self.to_wgsl(), rhs.to_wgsl()]),
+            self.ty,
+            self.unit,
+        ))
+    }
+
+    pub fn max(&self, rhs: &Self) -> Result<Self, DslError> {
+        if self.ty != rhs.ty {
+            return Err(DslError::TypeMismatch {
+                op: "max",
+                lhs: self.ty,
+                rhs: rhs.ty,
+            });
+        }
+        if self.unit != rhs.unit {
+            return Err(DslError::UnitMismatch {
+                op: "max",
+                lhs: self.unit,
+                rhs: rhs.unit,
+            });
+        }
+        Ok(Self::new(
+            Expr::call_named("max", vec![self.to_wgsl(), rhs.to_wgsl()]),
+            self.ty,
+            self.unit,
+        ))
+    }
+
+    pub fn component(&self, index: u8) -> Result<Self, DslError> {
+        match (self.ty.scalar, self.ty.shape) {
+            (ScalarType::F32, Shape::Vec(2) | Shape::Vec(3) | Shape::Vec(4)) => {
+                let field = match index {
+                    0 => "x",
+                    1 => "y",
+                    2 => "z",
+                    3 => "w",
+                    _ => {
+                        return Err(DslError::Unsupported {
+                            op: "component",
+                            ty: self.ty,
+                        })
+                    }
+                };
+                Ok(Self::new(
+                    self.to_wgsl().field(field),
+                    DslType::f32(),
+                    self.unit,
+                ))
+            }
+            _ => Err(DslError::Unsupported {
+                op: "component",
+                ty: self.ty,
+            }),
+        }
+    }
+
+    pub fn dot(&self, rhs: &Self) -> Result<Self, DslError> {
+        match (self.ty.scalar, self.ty.shape, rhs.ty.scalar, rhs.ty.shape) {
+            (ScalarType::F32, Shape::Vec(n), ScalarType::F32, Shape::Vec(m)) if n == m => Ok(
+                Self::new(
+                    Expr::call_named("dot", vec![self.to_wgsl(), rhs.to_wgsl()]),
+                    DslType::f32(),
+                    self.unit * rhs.unit,
+                ),
+            ),
+            _ => Err(DslError::TypeMismatch {
+                op: "dot",
+                lhs: self.ty,
+                rhs: rhs.ty,
+            }),
+        }
+    }
+}
+
+impl std::ops::Add for TypedExpr {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        TypedExpr::add(&self, &rhs).unwrap_or_else(|err| {
+            panic!("typed add failed: {err}");
+        })
+    }
+}
+
+impl std::ops::Sub for TypedExpr {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        TypedExpr::sub(&self, &rhs).unwrap_or_else(|err| {
+            panic!("typed sub failed: {err}");
+        })
+    }
+}
+
+impl std::ops::Mul for TypedExpr {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        TypedExpr::mul(&self, &rhs).unwrap_or_else(|err| {
+            panic!("typed mul failed: {err}");
+        })
+    }
+}
+
+impl std::ops::Div for TypedExpr {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        TypedExpr::div(&self, &rhs).unwrap_or_else(|err| {
+            panic!("typed div failed: {err}");
+        })
+    }
+}
+
+impl std::ops::Neg for TypedExpr {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        TypedExpr::neg(&self).unwrap_or_else(|err| {
+            panic!("typed neg failed: {err}");
+        })
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::dsl as typed;
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
-use super::state_access::{state_scalar_expr, state_vec2_expr};
+use super::state_access::{state_scalar, state_vec2};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
@@ -296,51 +296,91 @@ fn main_body(
 ) -> Block {
     let mut stmts = Vec::new();
 
-    stmts.push(dsl::let_("idx", "global_id.x"));
-    stmts.push(dsl::if_block(
-        "idx >= arrayLength(&cell_vols)",
+    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::if_block_expr(
+        Expr::binary(
+            Expr::ident("idx"),
+            BinaryOp::GreaterEq,
+            Expr::call_named(
+                "arrayLength",
+                vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("cell_vols"))],
+            ),
+        ),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
-    stmts.push(dsl::let_("start", "cell_face_offsets[idx]"));
-    stmts.push(dsl::let_("end", "cell_face_offsets[idx + 1]"));
-    stmts.push(dsl::let_("center", "cell_centers[idx]"));
+    stmts.push(dsl::let_expr(
+        "start",
+        dsl::array_access("cell_face_offsets", Expr::ident("idx")),
+    ));
+    stmts.push(dsl::let_expr(
+        "end",
+        dsl::array_access("cell_face_offsets", Expr::ident("idx") + Expr::lit_u32(1)),
+    ));
+    stmts.push(dsl::let_expr(
+        "center",
+        dsl::array_access("cell_centers", Expr::ident("idx")),
+    ));
     stmts.push(dsl::let_typed_expr(
         "center_vec",
         Type::vec2_f32(),
         typed::VecExpr::<2>::from_xy_fields(Expr::ident("center")).expr(),
     ));
-    stmts.push(dsl::let_("vol", "cell_vols[idx]"));
-    stmts.push(dsl::var_typed("diag_coeff", Type::F32, Some("0.0")));
-    stmts.push(dsl::var_typed("rhs_val", Type::F32, Some("0.0")));
+    stmts.push(dsl::let_expr(
+        "vol",
+        dsl::array_access("cell_vols", Expr::ident("idx")),
+    ));
+    stmts.push(dsl::var_typed_expr("diag_coeff", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::var_typed_expr("rhs_val", Type::F32, Some(Expr::lit_f32(0.0))));
 
     let d_p_field = fields.d_p.name();
     let grad_p_field = fields.grad_p.name();
-    let d_p_idx_expr = state_scalar_expr(layout, "state", "idx", d_p_field);
-    let grad_p_idx_expr = state_vec2_expr(layout, "state", "idx", grad_p_field);
+    let d_p_idx_expr = state_scalar(layout, "state", "idx", d_p_field);
+    let grad_p_idx_expr = state_vec2(layout, "state", "idx", grad_p_field);
     let pressure_coeff_face_expr = coeff_face_expr(
         layout,
         plan.diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
         "idx",
         "other_idx",
-        "lambda",
-        "d_p_face",
+        Expr::ident("lambda"),
+        Expr::ident("d_p_face"),
     );
     let pressure_coeff_cell_expr = coeff_cell_expr(
         layout,
         plan.diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
         "idx",
-        "d_p_own",
+        Expr::ident("d_p_own"),
     );
 
     let mut loop_body = Vec::new();
-    loop_body.push(dsl::let_("face_idx", "cell_faces[k]"));
-    loop_body.push(dsl::let_("owner", "face_owner[face_idx]"));
-    loop_body.push(dsl::let_("neigh_idx", "face_neighbor[face_idx]"));
-    loop_body.push(dsl::let_("boundary_type", "face_boundary[face_idx]"));
-    loop_body.push(dsl::let_("area", "face_areas[face_idx]"));
-    loop_body.push(dsl::let_("f_center", "face_centers[face_idx]"));
-    loop_body.push(dsl::let_("c_owner", "cell_centers[owner]"));
+    loop_body.push(dsl::let_expr(
+        "face_idx",
+        dsl::array_access("cell_faces", Expr::ident("k")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "owner",
+        dsl::array_access("face_owner", Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "neigh_idx",
+        dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "boundary_type",
+        dsl::array_access("face_boundary", Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "area",
+        dsl::array_access("face_areas", Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "f_center",
+        dsl::array_access("face_centers", Expr::ident("face_idx")),
+    ));
+    loop_body.push(dsl::let_expr(
+        "c_owner",
+        dsl::array_access("cell_centers", Expr::ident("owner")),
+    ));
     loop_body.push(dsl::let_typed_expr(
         "c_owner_vec",
         Type::vec2_f32(),
@@ -375,15 +415,19 @@ fn main_body(
         )]),
         None,
     ));
-    loop_body.push(dsl::var_typed("normal_sign", Type::F32, Some("1.0")));
-    loop_body.push(dsl::if_block(
-        "owner != idx",
+    loop_body.push(dsl::var_typed_expr(
+        "normal_sign",
+        Type::F32,
+        Some(Expr::lit_f32(1.0)),
+    ));
+    loop_body.push(dsl::if_block_expr(
+        Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
         dsl::block(vec![
             dsl::assign_expr(
                 Expr::ident("normal_vec"),
                 typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
             ),
-            dsl::assign("normal_sign", "-1.0"),
+            dsl::assign_expr(Expr::ident("normal_sign"), Expr::lit_f32(-1.0)),
         ]),
         None,
     ));
@@ -394,35 +438,55 @@ fn main_body(
             .mul_scalar(Expr::ident("area"))
             .expr(),
     ));
-    loop_body.push(dsl::let_("flux", "fluxes[face_idx] * normal_sign"));
-    loop_body.push(dsl::assign_op(AssignOp::Sub, "rhs_val", "flux"));
-    loop_body.push(dsl::var_typed(
+    loop_body.push(dsl::let_expr(
+        "flux",
+        dsl::array_access("fluxes", Expr::ident("face_idx")) * Expr::ident("normal_sign"),
+    ));
+    loop_body.push(dsl::assign_op_expr(
+        AssignOp::Sub,
+        Expr::ident("rhs_val"),
+        Expr::ident("flux"),
+    ));
+    loop_body.push(dsl::var_typed_expr(
         "other_center",
         Type::Custom("Vector2".to_string()),
         None,
     ));
-    loop_body.push(dsl::var("is_boundary", "false"));
-    loop_body.push(dsl::var("other_idx", "idx"));
-    loop_body.push(dsl::var_typed("d_p_neigh", Type::F32, Some("0.0")));
+    loop_body.push(dsl::var_typed_expr(
+        "is_boundary",
+        Type::Bool,
+        Some(Expr::lit_bool(false)),
+    ));
+    loop_body.push(dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))));
+    loop_body.push(dsl::var_typed_expr("d_p_neigh", Type::F32, Some(Expr::lit_f32(0.0))));
 
-    let d_p_other_expr = state_scalar_expr(layout, "state", "other_idx", d_p_field);
+    let d_p_other_expr = state_scalar(layout, "state", "other_idx", d_p_field);
 
-    loop_body.push(dsl::if_block(
-        "neigh_idx != -1",
+    loop_body.push(dsl::if_block_expr(
+        Expr::binary(Expr::ident("neigh_idx"), BinaryOp::NotEqual, Expr::lit_i32(-1)),
         dsl::block(vec![
-            dsl::var("other_idx", "u32(neigh_idx)"),
-            dsl::if_block(
-                "owner != idx",
-                dsl::block(vec![dsl::assign("other_idx", "owner")]),
+            dsl::assign_expr(
+                Expr::ident("other_idx"),
+                Expr::call_named("u32", vec![Expr::ident("neigh_idx")]),
+            ),
+            dsl::if_block_expr(
+                Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("other_idx"),
+                    Expr::ident("owner"),
+                )]),
                 None,
             ),
-            dsl::assign("other_center", "cell_centers[other_idx]"),
-            dsl::assign("d_p_neigh", &d_p_other_expr),
+            dsl::assign_expr(
+                Expr::ident("other_center"),
+                dsl::array_access("cell_centers", Expr::ident("other_idx")),
+            ),
+            dsl::assign_expr(Expr::ident("d_p_neigh"), d_p_other_expr),
         ]),
         Some(dsl::block(vec![
-            dsl::assign("is_boundary", "true"),
-            dsl::assign("other_center", "f_center"),
-            dsl::assign("d_p_neigh", &d_p_idx_expr),
+            dsl::assign_expr(Expr::ident("is_boundary"), Expr::lit_bool(true)),
+            dsl::assign_expr(Expr::ident("other_center"), Expr::ident("f_center")),
+            dsl::assign_expr(Expr::ident("d_p_neigh"), d_p_idx_expr.clone()),
         ])),
     ));
 
@@ -454,17 +518,31 @@ fn main_body(
                 vec![Expr::ident("other_center_vec"), Expr::ident("f_center_vec")],
             ),
         ),
-        dsl::let_("total_dist", "d_own + d_neigh"),
-        dsl::var("lambda", "0.5"),
-        dsl::if_block(
-            "total_dist > 1e-6",
-            dsl::block(vec![dsl::assign("lambda", "d_neigh / total_dist")]),
+        dsl::let_expr("total_dist", Expr::ident("d_own") + Expr::ident("d_neigh")),
+        dsl::var_typed_expr("lambda", Type::F32, Some(Expr::lit_f32(0.5))),
+        dsl::if_block_expr(
+            Expr::binary(
+                Expr::ident("total_dist"),
+                BinaryOp::Greater,
+                Expr::lit_f32(1e-6),
+            ),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("lambda"),
+                Expr::ident("d_neigh") / Expr::ident("total_dist"),
+            )]),
             None,
         ),
-        dsl::let_("d_p_own", &d_p_idx_expr),
-        dsl::let_("d_p_face", "lambda * d_p_own + (1.0 - lambda) * d_p_neigh"),
-        dsl::let_("pressure_coeff_face", &pressure_coeff_face_expr),
-        dsl::let_("coeff", "pressure_coeff_face * area / dist"),
+        dsl::let_expr("d_p_own", d_p_idx_expr.clone()),
+        dsl::let_expr(
+            "d_p_face",
+            Expr::ident("lambda") * Expr::ident("d_p_own")
+                + (Expr::lit_f32(1.0) - Expr::ident("lambda")) * Expr::ident("d_p_neigh"),
+        ),
+        dsl::let_expr("pressure_coeff_face", pressure_coeff_face_expr.clone()),
+        dsl::let_expr(
+            "coeff",
+            Expr::ident("pressure_coeff_face") * Expr::ident("area") / Expr::ident("dist"),
+        ),
         dsl::let_expr(
             "mat_idx",
             dsl::array_access("cell_face_matrix_indices", Expr::ident("k")),
@@ -482,7 +560,11 @@ fn main_body(
             )]),
             None,
         ),
-        dsl::assign_op(AssignOp::Add, "diag_coeff", "coeff"),
+        dsl::assign_op_expr(
+            AssignOp::Add,
+            Expr::ident("diag_coeff"),
+            Expr::ident("coeff"),
+        ),
         dsl::let_expr(
             "area_over_dist",
             Expr::binary(Expr::ident("area"), BinaryOp::Div, Expr::ident("dist")),
@@ -498,11 +580,14 @@ fn main_body(
                 .expr(),
         ),
         dsl::let_expr("k_mag", Expr::call_named("length", vec![Expr::ident("k_raw")])),
-        dsl::let_("k_limit", "0.5 * area"),
-        dsl::var("k_scale", "1.0"),
-        dsl::if_block(
-            "k_mag > k_limit",
-            dsl::block(vec![dsl::assign("k_scale", "k_limit / k_mag")]),
+        dsl::let_expr("k_limit", Expr::lit_f32(0.5) * Expr::ident("area")),
+        dsl::var_typed_expr("k_scale", Type::F32, Some(Expr::lit_f32(1.0))),
+        dsl::if_block_expr(
+            Expr::binary(Expr::ident("k_mag"), BinaryOp::Greater, Expr::ident("k_limit")),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("k_scale"),
+                Expr::ident("k_limit") / Expr::ident("k_mag"),
+            )]),
             None,
         ),
         dsl::let_typed_expr(
@@ -512,21 +597,33 @@ fn main_body(
                 .mul_scalar(Expr::ident("k_scale"))
                 .expr(),
         ),
-        dsl::var("other_idx_p", "u32(neigh_idx)"),
-        dsl::if_block(
-            "owner != idx",
-            dsl::block(vec![dsl::assign("other_idx_p", "owner")]),
+        dsl::var_typed_expr(
+            "other_idx_p",
+            Type::U32,
+            Some(Expr::call_named("u32", vec![Expr::ident("neigh_idx")])),
+        ),
+        dsl::if_block_expr(
+            Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+            dsl::block(vec![dsl::assign_expr(Expr::ident("other_idx_p"), Expr::ident("owner"))]),
             None,
         ),
-        dsl::let_("grad_p_own", &grad_p_idx_expr),
-        dsl::let_(
+        dsl::let_typed_expr("grad_p_own", Type::vec2_f32(), grad_p_idx_expr.clone()),
+        dsl::let_typed_expr(
             "grad_p_neigh",
-            &state_vec2_expr(layout, "state", "other_idx_p", grad_p_field),
+            Type::vec2_f32(),
+            state_vec2(layout, "state", "other_idx_p", grad_p_field),
         ),
-        dsl::var("interp_f", "0.5"),
-        dsl::if_block(
-            "total_dist > 1e-6",
-            dsl::block(vec![dsl::assign("interp_f", "d_own / total_dist")]),
+        dsl::var_typed_expr("interp_f", Type::F32, Some(Expr::lit_f32(0.5))),
+        dsl::if_block_expr(
+            Expr::binary(
+                Expr::ident("total_dist"),
+                BinaryOp::Greater,
+                Expr::lit_f32(1e-6),
+            ),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("interp_f"),
+                Expr::ident("d_own") / Expr::ident("total_dist"),
+            )]),
             None,
         ),
         dsl::let_typed_expr(
@@ -553,33 +650,61 @@ fn main_body(
                     .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("k_vec"))),
             ),
         ),
-        dsl::assign_op(AssignOp::Sub, "rhs_val", "correction_flux"),
+        dsl::assign_op_expr(
+            AssignOp::Sub,
+            Expr::ident("rhs_val"),
+            Expr::ident("correction_flux"),
+        ),
     ]);
 
-    let boundary_block = dsl::block(vec![dsl::if_block(
-        "boundary_type == 2u",
+    let boundary_block = dsl::block(vec![dsl::if_block_expr(
+        Expr::binary(
+            Expr::ident("boundary_type"),
+            BinaryOp::Equal,
+            Expr::lit_u32(2),
+        ),
         dsl::block(vec![
-            dsl::let_("dx", "center.x - f_center.x"),
-            dsl::let_("dy", "center.y - f_center.y"),
-            dsl::let_("dist", "sqrt(dx*dx + dy*dy)"),
-            dsl::let_("d_p_own", &d_p_idx_expr),
-            dsl::let_("pressure_coeff_cell", &pressure_coeff_cell_expr),
-            dsl::let_("coeff", "pressure_coeff_cell * area / dist"),
-            dsl::assign_op(AssignOp::Add, "diag_coeff", "coeff"),
+            dsl::let_expr(
+                "dx",
+                Expr::ident("center").field("x") - Expr::ident("f_center").field("x"),
+            ),
+            dsl::let_expr(
+                "dy",
+                Expr::ident("center").field("y") - Expr::ident("f_center").field("y"),
+            ),
+            dsl::let_expr(
+                "dist",
+                Expr::call_named(
+                    "sqrt",
+                    vec![Expr::ident("dx") * Expr::ident("dx")
+                        + Expr::ident("dy") * Expr::ident("dy")],
+                ),
+            ),
+            dsl::let_expr("d_p_own", d_p_idx_expr.clone()),
+            dsl::let_expr("pressure_coeff_cell", pressure_coeff_cell_expr.clone()),
+            dsl::let_expr(
+                "coeff",
+                Expr::ident("pressure_coeff_cell") * Expr::ident("area") / Expr::ident("dist"),
+            ),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("diag_coeff"),
+                Expr::ident("coeff"),
+            ),
         ]),
         None,
     )]);
 
-    loop_body.push(dsl::if_block(
-        "!is_boundary",
+    loop_body.push(dsl::if_block_expr(
+        Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
         internal_block,
         Some(boundary_block),
     ));
 
-    stmts.push(dsl::for_loop(
-        dsl::for_init_var("k", "start"),
-        "k < end",
-        dsl::for_step_increment("k"),
+    stmts.push(dsl::for_loop_expr(
+        dsl::for_init_var_expr("k", Expr::ident("start")),
+        Expr::binary(Expr::ident("k"), BinaryOp::Less, Expr::ident("end")),
+        dsl::for_step_increment_expr(Expr::ident("k")),
         dsl::block(loop_body),
     ));
 

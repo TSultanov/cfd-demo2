@@ -210,21 +210,24 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     let coupled_stride_u32 = coupled_stride as u32;
     let p_offset_u32 = p_offset as u32;
 
-    stmts.push(dsl::let_("idx", "global_id.x"));
-    stmts.push(dsl::let_("lid", "local_id.x"));
-    stmts.push(dsl::var_typed("diff_u", Type::F32, Some("0.0")));
-    stmts.push(dsl::var_typed("diff_p", Type::F32, Some("0.0")));
-    stmts.push(dsl::let_(
+    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::let_expr("lid", Expr::ident("local_id").field("x")));
+    stmts.push(dsl::var_typed_expr("diff_u", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::var_typed_expr("diff_p", Type::F32, Some(Expr::lit_f32(0.0))));
+    stmts.push(dsl::let_expr(
         "num_cells",
-        &format!("arrayLength(&state) / {}u", stride),
+        Expr::call_named(
+            "arrayLength",
+            vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("state"))],
+        ) / Expr::lit_u32(stride),
     ));
 
     let u_x_target = state_component(layout, "state", "idx", u_field, 0);
     let u_y_target = state_component(layout, "state", "idx", u_field, 1);
     let p_target = state_component(layout, "state", "idx", p_field, 0);
 
-    stmts.push(dsl::if_block(
-        "idx < num_cells",
+    stmts.push(dsl::if_block_expr(
+        Expr::binary(Expr::ident("idx"), BinaryOp::Less, Expr::ident("num_cells")),
         dsl::block(vec![
             dsl::let_expr(
                 "u_new",
@@ -339,15 +342,15 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
         Expr::ident("lid"),
         Expr::ident("diff_p"),
     ));
-    stmts.push(dsl::call_stmt("workgroupBarrier()"));
+    stmts.push(dsl::call_stmt_expr(Expr::call_named("workgroupBarrier", Vec::new())));
 
-    stmts.push(dsl::for_loop(
-        dsl::for_init_var("stride", "32u"),
-        "stride > 0u",
-        dsl::for_step_assign("stride", "stride / 2u"),
+    stmts.push(dsl::for_loop_expr(
+        dsl::for_init_var_expr("stride", Expr::lit_u32(32)),
+        Expr::binary(Expr::ident("stride"), BinaryOp::Greater, Expr::lit_u32(0)),
+        dsl::for_step_assign_expr(Expr::ident("stride"), Expr::ident("stride") / Expr::lit_u32(2)),
         dsl::block(vec![
-            dsl::if_block(
-                "lid < stride",
+            dsl::if_block_expr(
+                Expr::binary(Expr::ident("lid"), BinaryOp::Less, Expr::ident("stride")),
                 dsl::block(vec![
                     dsl::assign_expr(
                         dsl::array_access("shared_max_u", Expr::ident("lid")),
@@ -386,12 +389,12 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                 ]),
                 None,
             ),
-            dsl::call_stmt("workgroupBarrier()"),
+            dsl::call_stmt_expr(Expr::call_named("workgroupBarrier", Vec::new())),
         ]),
     ));
 
-    stmts.push(dsl::if_block(
-        "lid == 0u",
+    stmts.push(dsl::if_block_expr(
+        Expr::binary(Expr::ident("lid"), BinaryOp::Equal, Expr::lit_u32(0)),
         dsl::block(vec![
             dsl::call_stmt_expr(Expr::call_named(
                 "atomicMax",

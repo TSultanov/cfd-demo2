@@ -109,7 +109,7 @@ var<storage, read_write> diag_v_inv: array<f32>;
 var<storage, read_write> diag_p_inv: array<f32>;
 
 fn safe_inverse(val: f32) -> f32 {
-    if (abs(val) > 1e-14) {
+    if (abs(val) > 0.00000000000001) {
         return 1.0 / val;
     }
     return 0.0;
@@ -127,11 +127,11 @@ fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32,
     var rhs_y: f32 = base_coeff * phi_n.y;
     if (time_scheme == 1u) {
         let r = dt / dt_old;
-        diag = rho * vol / dt * (1.0 + 2.0 * r) / (1.0 + r);
+        diag = base_coeff * (1.0 + 2.0 * r) / (1.0 + r);
         let factor_n = 1.0 + r;
         let factor_nm1 = r * r / (1.0 + r);
-        rhs_x = rho * vol / dt * (factor_n * phi_n.x - factor_nm1 * phi_nm1.x);
-        rhs_y = rho * vol / dt * (factor_n * phi_n.y - factor_nm1 * phi_nm1.y);
+        rhs_x = base_coeff * (factor_n * phi_n.x - factor_nm1 * phi_nm1.x);
+        rhs_y = base_coeff * (factor_n * phi_n.y - factor_nm1 * phi_nm1.y);
     }
     return vec3<f32>(diag, rhs_x, rhs_y);
 }
@@ -221,9 +221,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let center = cell_centers[idx];
     let vol = cell_vols[idx];
     let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[idx + 1];
+    let end = cell_face_offsets[idx + 1u];
     let scalar_offset = scalar_row_offsets[idx];
-    let num_neighbors = scalar_row_offsets[idx + 1] - scalar_offset;
+    let num_neighbors = scalar_row_offsets[idx + 1u] - scalar_offset;
     let start_row_0 = 9u * scalar_offset;
     let start_row_1 = start_row_0 + 3u * num_neighbors;
     let start_row_2 = start_row_0 + 6u * num_neighbors;
@@ -235,15 +235,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
     var rhs_p: f32 = 0.0;
     var scalar_diag_p: f32 = 0.0;
-    let u_n = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
+    let u_n: vec2<f32> = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
     let rho = constants.density;
-    var coeff_time = vol * rho / constants.dt;
+    var coeff_time: f32 = vol * rho / constants.dt;
     var rhs_time: vec2<f32> = u_n * coeff_time;
     if (constants.time_scheme == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
         let r = dt / dt_old;
-        let u_nm1 = vec2<f32>(state_old_old[idx * 8u + 0u], state_old_old[idx * 8u + 1u]);
+        let u_nm1: vec2<f32> = vec2<f32>(state_old_old[idx * 8u + 0u], state_old_old[idx * 8u + 1u]);
         coeff_time = vol * rho / dt * (1.0 + 2.0 * r) / (1.0 + r);
         let factor_n = 1.0 + r;
         let factor_nm1 = r * r / (1.0 + r);
@@ -256,7 +256,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let owner = face_owner[face_idx];
         let neigh_idx = face_neighbor[face_idx];
         let boundary_type = face_boundary[face_idx];
-        var normal = face_normals[face_idx];
+        var normal: Vector2 = face_normals[face_idx];
         let area = face_areas[face_idx];
         let f_center = face_centers[face_idx];
         var normal_sign: f32 = 1.0;
@@ -269,8 +269,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let face_vec: vec2<f32> = vec2<f32>(normal.x, normal.y) * area;
         let flux = fluxes[face_idx] * normal_sign;
         var other_center: Vector2;
-        var is_boundary = false;
-        var other_idx = 0u;
+        var is_boundary: bool = false;
+        var other_idx: u32 = 0u;
         var d_p_neigh: f32 = 0.0;
         if (neigh_idx != -1) {
             other_idx = u32(neigh_idx);
@@ -292,12 +292,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let conv_coeff_diag = conv_coeff.x;
         let conv_coeff_off = conv_coeff.y;
         let scalar_mat_idx = cell_face_matrix_indices[k];
-        var neighbor_rank = 0u;
-        if (scalar_mat_idx != 4294967295u) {
-            neighbor_rank = scalar_mat_idx - scalar_offset;
-        } else {
-            neighbor_rank = scalar_mat_idx - scalar_offset;
-        }
+        let neighbor_rank = scalar_mat_idx - scalar_offset;
         if (!is_boundary) {
             let coeff = conv_coeff_off - diff_coeff;
             diag_uv += vec2<f32>(diff_coeff + conv_coeff_diag, diff_coeff + conv_coeff_diag);
@@ -350,8 +345,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
             let d_neigh = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
             let total_dist = d_own + d_neigh;
-            var lambda = 0.5;
-            if (total_dist > 1e-6) {
+            var lambda: f32 = 0.5;
+            if (total_dist > 0.000001) {
                 lambda = d_neigh / total_dist;
             }
             sum_diag_uv_p += face_vec * lambda;

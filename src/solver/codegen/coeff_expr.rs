@@ -1,7 +1,8 @@
-use crate::solver::codegen::state_access::state_scalar_expr;
+use crate::solver::codegen::state_access::state_scalar;
+use crate::solver::codegen::wgsl_ast::{Expr, Literal};
 use crate::solver::model::backend::{Coefficient, FieldKind, StateLayout};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum CoeffSample<'a> {
     Cell {
         idx: &'a str,
@@ -9,25 +10,25 @@ enum CoeffSample<'a> {
     Face {
         owner_idx: &'a str,
         neighbor_idx: &'a str,
-        interp: &'a str,
+        interp: Expr,
     },
 }
 
-fn f32_literal(value: f64) -> String {
-    format!("{value:.8}")
+fn f32_literal(value: f64) -> Expr {
+    Expr::Literal(Literal::Float(format!("{value:.8}")))
 }
 
-fn coeff_named_expr(name: &str) -> Option<String> {
+fn coeff_named_expr(name: &str) -> Option<Expr> {
     match name {
-        "rho" => Some("constants.density".to_string()),
+        "rho" => Some(Expr::ident("constants").field("density")),
         // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
         // but `nu` is conventionally kinematic viscosity; accept both for now.
-        "mu" | "nu" => Some("constants.viscosity".to_string()),
+        "mu" | "nu" => Some(Expr::ident("constants").field("viscosity")),
         _ => None,
     }
 }
 
-fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>) -> String {
+fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>) -> Expr {
     match coeff {
         Coefficient::Constant { value, .. } => f32_literal(*value),
         Coefficient::Field(field) => {
@@ -37,16 +38,16 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                 }
                 match sample {
                     CoeffSample::Cell { idx } => {
-                        state_scalar_expr(layout, "state", idx, field.name())
+                        state_scalar(layout, "state", idx, field.name())
                     }
                     CoeffSample::Face {
                         owner_idx,
                         neighbor_idx,
                         interp,
                     } => {
-                        let own = state_scalar_expr(layout, "state", owner_idx, field.name());
-                        let neigh = state_scalar_expr(layout, "state", neighbor_idx, field.name());
-                        format!("{interp} * {own} + (1.0 - {interp}) * {neigh}")
+                        let own = state_scalar(layout, "state", owner_idx, field.name());
+                        let neigh = state_scalar(layout, "state", neighbor_idx, field.name());
+                        interp.clone() * own + (Expr::lit_f32(1.0) - interp) * neigh
                     }
                 }
             } else {
@@ -59,9 +60,9 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
             }
         }
         Coefficient::Product(lhs, rhs) => {
-            let left = coeff_expr(layout, lhs, sample);
-            let right = coeff_expr(layout, rhs, sample);
-            format!("({left}) * ({right})")
+            let lhs_expr = coeff_expr(layout, lhs, sample.clone());
+            let rhs_expr = coeff_expr(layout, rhs, sample);
+            lhs_expr * rhs_expr
         }
     }
 }
@@ -70,10 +71,10 @@ pub fn coeff_cell_expr(
     layout: &StateLayout,
     coeff: Option<&Coefficient>,
     idx: &str,
-    fallback: &str,
-) -> String {
+    fallback: Expr,
+) -> Expr {
     match coeff {
-        None => fallback.to_string(),
+        None => fallback,
         Some(value) => coeff_expr(layout, value, CoeffSample::Cell { idx }),
     }
 }
@@ -83,11 +84,11 @@ pub fn coeff_face_expr(
     coeff: Option<&Coefficient>,
     owner_idx: &str,
     neighbor_idx: &str,
-    interp: &str,
-    fallback: &str,
-) -> String {
+    interp: Expr,
+    fallback: Expr,
+) -> Expr {
     match coeff {
-        None => fallback.to_string(),
+        None => fallback,
         Some(value) => coeff_expr(
             layout,
             value,
@@ -117,10 +118,17 @@ mod tests {
         )
         .unwrap();
 
-        let expr = coeff_face_expr(&layout, Some(&coeff), "i", "j", "0.5", "1.0");
+        let expr = coeff_face_expr(
+            &layout,
+            Some(&coeff),
+            "i",
+            "j",
+            Expr::lit_f32(0.5),
+            Expr::lit_f32(1.0),
+        );
         assert_eq!(
-            expr,
-            "(constants.density) * (0.5 * state[i * 1u + 0u] + (1.0 - 0.5) * state[j * 1u + 0u])"
+            expr.to_string(),
+            "constants.density * (0.5 * state[i * 1u + 0u] + (1.0 - 0.5) * state[j * 1u + 0u])"
         );
     }
 
@@ -139,7 +147,7 @@ mod tests {
         ));
 
         let coeff = Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap();
-        let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", "1.0");
-        assert_eq!(expr, "state[idx * 1u + 0u]");
+        let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", Expr::lit_f32(1.0));
+        assert_eq!(expr.to_string(), "state[idx * 1u + 0u]");
     }
 }

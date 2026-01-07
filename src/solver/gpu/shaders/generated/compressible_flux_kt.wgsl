@@ -117,23 +117,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (dot(face_center_vec - center_owner_vec, normal_vec) < 0.0) {
         normal_vec = -normal_vec;
     }
-    var is_boundary = false;
-    var other_idx = owner;
+    var is_boundary: bool = false;
+    var other_idx: u32 = owner;
     let rho_l_cell = state_old[owner * 7u + 0u];
-    let rho_u_l_cell = vec2<f32>(state_old[owner * 7u + 1u], state_old[owner * 7u + 2u]);
+    let rho_u_l_cell: vec2<f32> = vec2<f32>(state_old[owner * 7u + 1u], state_old[owner * 7u + 2u]);
     let rho_e_l_cell = state_old[owner * 7u + 3u];
-    var rho_l = rho_l_cell;
-    var rho_u_l = rho_u_l_cell;
-    var rho_e_l = rho_e_l_cell;
-    var rho_r = rho_l;
-    var rho_u_r = rho_u_l;
-    var rho_e_r = rho_e_l;
-    var center_r = face_center;
+    var rho_l: f32 = rho_l_cell;
+    var rho_u_l: vec2<f32> = rho_u_l_cell;
+    var rho_e_l: f32 = rho_e_l_cell;
+    var rho_r: f32 = rho_l;
+    var rho_u_r: vec2<f32> = rho_u_l;
+    var rho_e_r: f32 = rho_e_l;
+    var center_r: Vector2 = face_center;
     if (neighbor != -1) {
-        let neigh_idx = u32(neighbor);
+        let neigh_idx: u32 = u32(neighbor);
         other_idx = neigh_idx;
         let rho_neigh = state_old[neigh_idx * 7u + 0u];
-        let rho_u_neigh = vec2<f32>(state_old[neigh_idx * 7u + 1u], state_old[neigh_idx * 7u + 2u]);
+        let rho_u_neigh: vec2<f32> = vec2<f32>(state_old[neigh_idx * 7u + 1u], state_old[neigh_idx * 7u + 2u]);
         let rho_e_neigh = state_old[neigh_idx * 7u + 3u];
         rho_r = rho_neigh;
         rho_u_r = rho_u_neigh;
@@ -151,7 +151,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let rho_r_cell = rho_r;
-    let rho_u_r_cell = rho_u_r;
+    let rho_u_r_cell: vec2<f32> = rho_u_r;
     let rho_e_r_cell = rho_e_r;
     if (!is_boundary && constants.scheme == 1u) {
         let r_l_x = face_center.x - center_owner.x;
@@ -221,25 +221,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rho_u_r = vec2<f32>(rho_u_x_r_face, rho_u_y_r_face);
         rho_e_r = rho_e_r_face;
     }
-    let inv_rho_l = 1.0 / max(rho_l, 1e-8);
+    let inv_rho_l = 1.0 / max(rho_l, 0.00000001);
     let u_l: vec2<f32> = rho_u_l * inv_rho_l;
     let ke_l = 0.5 * rho_l * dot(u_l, u_l);
-    let p_l = max(0.0, (1.4 - 1.0) * (rho_e_l - ke_l));
+    let p_l = max(0.0, 0.39999998 * (rho_e_l - ke_l));
     let u_n_l = dot(u_l, normal_vec);
     let c_l = sqrt(1.4 * p_l * inv_rho_l);
-    let inv_rho_r = 1.0 / max(rho_r, 1e-8);
+    let inv_rho_r = 1.0 / max(rho_r, 0.00000001);
     let u_r: vec2<f32> = rho_u_r * inv_rho_r;
     let ke_r = 0.5 * rho_r * dot(u_r, u_r);
-    let p_r = max(0.0, (1.4 - 1.0) * (rho_e_r - ke_r));
+    let p_r = max(0.0, 0.39999998 * (rho_e_r - ke_r));
     let u_n_r = dot(u_r, normal_vec);
     let c_r = sqrt(1.4 * p_r * inv_rho_r);
     let u_face: vec2<f32> = (u_l + u_r) * 0.5;
     let u_face_n = dot(u_face, normal_vec);
     let c_bar = 0.5 * (c_l + c_r);
-    let mach = abs(u_face_n) / max(c_bar, 1e-6);
+    let mach = abs(u_face_n) / max(c_bar, 0.000001);
     let mach2 = mach * mach;
-    var c_l_eff = c_l;
-    var c_r_eff = c_r;
+    var c_l_eff: f32 = c_l;
+    var c_r_eff: f32 = c_r;
     if (constants.precond_model == 0u) {
         c_l_eff = c_l * mach;
         c_r_eff = c_r * mach;
@@ -257,14 +257,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let mu = constants.viscosity;
     let a_plus = max(0.0, max(u_n_l + c_l_eff, u_n_r + c_r_eff));
     let a_minus = min(0.0, min(u_n_l - c_l_eff, u_n_r - c_r_eff));
-    let denom = max(a_plus - a_minus, 1e-6);
+    let denom = max(a_plus - a_minus, 0.000001);
     let a_prod = a_plus * a_minus;
     let a_pos = a_plus / denom;
     let a_neg = 1.0 - a_pos;
     let a_prod_scaled = a_prod / denom;
     let flux_rho_l = rho_l * u_n_l;
     let flux_rho_r = rho_r * u_n_r;
-    var flux_rho = a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l);
+    var flux_rho: f32 = a_pos * flux_rho_l + a_neg * flux_rho_r + a_prod_scaled * (rho_r - rho_l);
     let flux_rho_u_l: vec2<f32> = rho_u_l * u_n_l + normal_vec * p_l;
     let flux_rho_u_r: vec2<f32> = rho_u_r * u_n_r + normal_vec * p_r;
     let rho_u_jump: vec2<f32> = rho_u_r - rho_u_l;
@@ -274,9 +274,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     flux_rho_u = flux_rho_u + diff_u;
     let flux_rho_e_l = (rho_e_l + p_l) * u_n_l;
     let flux_rho_e_r = (rho_e_r + p_r) * u_n_r;
-    var flux_rho_e = a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l);
-    let inv_rho_l_cell = 1.0 / max(rho_l_cell, 1e-8);
-    let inv_rho_r_cell = 1.0 / max(rho_r_cell, 1e-8);
+    var flux_rho_e: f32 = a_pos * flux_rho_e_l + a_neg * flux_rho_e_r + a_prod_scaled * (rho_e_r - rho_e_l);
+    let inv_rho_l_cell = 1.0 / max(rho_l_cell, 0.00000001);
+    let inv_rho_r_cell = 1.0 / max(rho_r_cell, 0.00000001);
     let u_l_cell: vec2<f32> = rho_u_l_cell * inv_rho_l_cell;
     let u_r_cell: vec2<f32> = rho_u_r_cell * inv_rho_r_cell;
     let u2_l_cell = dot(u_l_cell, u_l_cell);
@@ -297,7 +297,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let grad_u2_r_vec: vec2<f32> = grad_u_x_r_vec * 2.0 * u_r_cell.x + grad_u_y_r_vec * 2.0 * u_r_cell.y;
     let grad_rho_u2_l_vec: vec2<f32> = grad_rho_l_vec * u2_l_cell + grad_u2_l_vec * rho_l_cell;
     let grad_rho_u2_r_vec: vec2<f32> = grad_rho_r_vec * u2_r_cell + grad_u2_r_vec * rho_r_cell;
-    let gamma_minus_1 = 1.4 - 1.0;
+    let gamma_minus_1 = 0.39999998;
     let grad_p_l_vec: vec2<f32> = (grad_rho_e_l_vec - grad_rho_u2_l_vec * 0.5) * gamma_minus_1;
     let grad_p_r_vec: vec2<f32> = (grad_rho_e_r_vec - grad_rho_u2_r_vec * 0.5) * gamma_minus_1;
     let grad_p_l_n = dot(grad_p_l_vec, normal_vec);
@@ -306,13 +306,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let grad_p_jump_n = (p_r - p_l) / dist;
     let rho_face = 0.5 * (rho_l + rho_r);
     let p_bar = 0.5 * (p_l + p_r);
-    let dp_rel = abs(p_r - p_l) / max(p_bar, 1e-6);
+    let dp_rel = abs(p_r - p_l) / max(p_bar, 0.000001);
     if (!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
         let pc_theta = min(1.0, max(mach2, constants.precond_theta_floor));
         let pc_low_mach = 1.0 - pc_theta;
         let pc_smooth = 1.0 / (1.0 + dp_rel / 0.2 * dp_rel / 0.2);
         let pc_alpha = constants.pressure_coupling_alpha * pc_low_mach * pc_smooth;
-        let m_corr = pc_alpha * constants.dt / max(rho_face, 1e-8) * (grad_p_face_n - grad_p_jump_n);
+        let m_corr = pc_alpha * constants.dt / max(rho_face, 0.00000001) * (grad_p_face_n - grad_p_jump_n);
         let h_l = (rho_e_l + p_l) * inv_rho_l;
         let h_r = (rho_e_r + p_r) * inv_rho_r;
         let h_face = 0.5 * (h_l + h_r);

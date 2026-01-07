@@ -187,7 +187,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let gamma = 1.4_f32;
     let gamma_minus_1 = gamma - 1.0;
 
-    stmts.push(dsl::let_("idx", "global_id.x"));
+    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::let_expr(
         "num_cells",
         Expr::call_named(

@@ -859,6 +859,46 @@ impl Expr {
     }
 }
 
+impl std::ops::Add for Expr {
+    type Output = Expr;
+
+    fn add(self, rhs: Expr) -> Self::Output {
+        Expr::binary(self, BinaryOp::Add, rhs)
+    }
+}
+
+impl std::ops::Sub for Expr {
+    type Output = Expr;
+
+    fn sub(self, rhs: Expr) -> Self::Output {
+        Expr::binary(self, BinaryOp::Sub, rhs)
+    }
+}
+
+impl std::ops::Mul for Expr {
+    type Output = Expr;
+
+    fn mul(self, rhs: Expr) -> Self::Output {
+        Expr::binary(self, BinaryOp::Mul, rhs)
+    }
+}
+
+impl std::ops::Div for Expr {
+    type Output = Expr;
+
+    fn div(self, rhs: Expr) -> Self::Output {
+        Expr::binary(self, BinaryOp::Div, rhs)
+    }
+}
+
+impl std::ops::Neg for Expr {
+    type Output = Expr;
+
+    fn neg(self) -> Self::Output {
+        Expr::unary(UnaryOp::Negate, self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     Ident(String),

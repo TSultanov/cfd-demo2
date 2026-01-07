@@ -95,7 +95,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[idx + 1];
+    let end = cell_face_offsets[idx + 1u];
     let center = cell_centers[idx];
     let center_vec: vec2<f32> = vec2<f32>(center.x, center.y);
     let vol = cell_vols[idx];
@@ -124,11 +124,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let flux = fluxes[face_idx] * normal_sign;
         rhs_val -= flux;
         var other_center: Vector2;
-        var is_boundary = false;
-        var other_idx = idx;
+        var is_boundary: bool = false;
+        var other_idx: u32 = idx;
         var d_p_neigh: f32 = 0.0;
         if (neigh_idx != -1) {
-            var other_idx = u32(neigh_idx);
+            other_idx = u32(neigh_idx);
             if (owner != idx) {
                 other_idx = owner;
             }
@@ -146,8 +146,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let d_own = distance(center_vec, f_center_vec);
             let d_neigh = distance(other_center_vec, f_center_vec);
             let total_dist = d_own + d_neigh;
-            var lambda = 0.5;
-            if (total_dist > 1e-6) {
+            var lambda: f32 = 0.5;
+            if (total_dist > 0.000001) {
                 lambda = d_neigh / total_dist;
             }
             let d_p_own = state[idx * 8u + 3u];
@@ -163,19 +163,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let k_raw: vec2<f32> = face_vec - d_vec * area_over_dist;
             let k_mag = length(k_raw);
             let k_limit = 0.5 * area;
-            var k_scale = 1.0;
+            var k_scale: f32 = 1.0;
             if (k_mag > k_limit) {
                 k_scale = k_limit / k_mag;
             }
             let k_vec: vec2<f32> = k_raw * k_scale;
-            var other_idx_p = u32(neigh_idx);
+            var other_idx_p: u32 = u32(neigh_idx);
             if (owner != idx) {
                 other_idx_p = owner;
             }
-            let grad_p_own = vec2<f32>(state[idx * 8u + 4u], state[idx * 8u + 5u]);
-            let grad_p_neigh = vec2<f32>(state[other_idx_p * 8u + 4u], state[other_idx_p * 8u + 5u]);
-            var interp_f = 0.5;
-            if (total_dist > 1e-6) {
+            let grad_p_own: vec2<f32> = vec2<f32>(state[idx * 8u + 4u], state[idx * 8u + 5u]);
+            let grad_p_neigh: vec2<f32> = vec2<f32>(state[other_idx_p * 8u + 4u], state[other_idx_p * 8u + 5u]);
+            var interp_f: f32 = 0.5;
+            if (total_dist > 0.000001) {
                 interp_f = d_own / total_dist;
             }
             let grad_p_f: vec2<f32> = grad_p_own + (grad_p_neigh - grad_p_own) * interp_f;

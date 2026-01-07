@@ -98,22 +98,22 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (dot(face_center_vec - c_owner_vec, normal_vec) < 0.0) {
         normal_vec = -normal_vec;
     }
-    var u_face = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
-    var d_p_face = state[owner * 8u + 3u];
-    var grad_p_avg = vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]);
-    var rho_face = constants.density;
+    var u_face: vec2<f32> = vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]);
+    var d_p_face: f32 = state[owner * 8u + 3u];
+    var grad_p_avg: vec2<f32> = vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]);
+    var rho_face: f32 = constants.density;
     if (neighbor != -1) {
         let neigh_idx = u32(neighbor);
-        let u_neigh = vec2<f32>(state[neigh_idx * 8u + 0u], state[neigh_idx * 8u + 1u]);
+        let u_neigh: vec2<f32> = vec2<f32>(state[neigh_idx * 8u + 0u], state[neigh_idx * 8u + 1u]);
         let d_p_neigh = state[neigh_idx * 8u + 3u];
-        let grad_p_neigh = vec2<f32>(state[neigh_idx * 8u + 4u], state[neigh_idx * 8u + 5u]);
+        let grad_p_neigh: vec2<f32> = vec2<f32>(state[neigh_idx * 8u + 4u], state[neigh_idx * 8u + 5u]);
         let c_neigh = cell_centers[neigh_idx];
         let c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
         let d_own = distance(c_owner_vec, face_center_vec);
         let d_neigh = distance(c_neigh_vec, face_center_vec);
         let total_dist = d_own + d_neigh;
         var lambda: f32 = 0.5;
-        if (total_dist > 1e-6) {
+        if (total_dist > 0.000001) {
             lambda = d_neigh / total_dist;
         }
         let lambda_other = 1.0 - lambda;
@@ -124,7 +124,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         grad_p_avg = grad_p_avg * lambda + grad_p_neigh * lambda_other;
         let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
         let dist_proj = abs(dot(d_vec, normal_vec));
-        let dist = max(dist_proj, 1e-6);
+        let dist = max(dist_proj, 0.000001);
         let p_own = state[owner * 8u + 2u];
         let p_neigh = state[neigh_idx * 8u + 2u];
         let grad_p_n = dot(grad_p_avg, normal_vec);
@@ -145,7 +145,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     let u_n = dot(u_face, normal_vec);
                     var rc_term: f32 = 0.0;
                     let dist_face = distance(c_owner_vec, face_center_vec);
-                    if (dist_face > 1e-6) {
+                    if (dist_face > 0.000001) {
                         rc_term = 0.0;
                     }
                     let raw_flux = rho_face * (u_n * area + rc_term);

@@ -199,7 +199,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let rho_u_y_target = state_component(layout, "state", "idx", rho_u_field, 1);
     let rho_e_target = state_scalar(layout, "state", "idx", rho_e_field);
 
-    stmts.push(dsl::let_("idx", "global_id.x"));
+    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::let_expr(
         "num_cells",
         Expr::call_named(

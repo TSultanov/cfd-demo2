@@ -33,6 +33,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added cached default `ModelSpec`s for GPU codepaths that need access to layout/unknown metadata without threading a `ModelSpec` everywhere (`src/solver/gpu/model_defaults.rs`).
 - Added a generic (model-driven) scheme expansion pass that reports required auxiliary computations (currently: gradient needs for higher-order convection) (`src/solver/model/backend/scheme_expansion.rs`).
 - Used the scheme expansion to skip compressible gradient dispatches for first-order runs by selecting first-order vs reconstruction kernel graphs at runtime (`src/solver/gpu/compressible_solver.rs`).
+- Plumbed the same scheme expansion result into the incompressible coupled solver loop via `GpuSolver.scheme_needs_gradients` (replacing direct `scheme != 0` checks) (`src/solver/gpu/solver.rs`, `src/solver/gpu/coupled_solver.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:

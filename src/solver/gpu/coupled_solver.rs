@@ -335,7 +335,7 @@ impl GpuSolver {
             // Compute Gradients AND Assemble Coupled System (Merged Dispatch)
             if self.coupled_resources.is_some() {
                 // Merged Prepare Coupled Pass (Flux, D_P, Grad P, Grad U, Grad V)
-                let needs_prepare = iter > 0 || self.constants.scheme != 0;
+                let needs_prepare = iter > 0 || self.scheme_needs_gradients;
                 if needs_prepare {
                     // Ensure component is 0 for d_p calculation (if needed)
                     if iter > 0 {

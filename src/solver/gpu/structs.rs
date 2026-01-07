@@ -234,6 +234,7 @@ pub struct GpuSolver {
     pub num_faces: u32,
 
     pub constants: GpuConstants,
+    pub scheme_needs_gradients: bool,
 
     // Solver Stats
     pub stats_ux: Mutex<LinearSolverStats>,

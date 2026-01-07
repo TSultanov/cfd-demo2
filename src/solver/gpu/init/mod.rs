@@ -52,7 +52,7 @@ impl GpuSolver {
             fields::create_field_bind_groups(&context.device, field_buffers, &bgl_fields);
 
         // Misc
-        Self {
+        let mut solver = Self {
             context,
             // Mesh
             b_face_owner: mesh_res.b_face_owner,
@@ -80,6 +80,7 @@ impl GpuSolver {
             b_constants: fields_res.b_constants,
             bg_fields: fields_res.bg_fields,
             constants: fields_res.constants,
+            scheme_needs_gradients: false,
 
             // Linear Solver
             b_row_offsets: linear_res.b_row_offsets,
@@ -156,7 +157,9 @@ impl GpuSolver {
             coupled_prepare_assembly_graph: GpuSolver::build_coupled_prepare_assembly_graph(),
             coupled_assembly_graph: GpuSolver::build_coupled_assembly_graph(),
             coupled_update_graph: GpuSolver::build_coupled_update_graph(),
-        }
+        };
+        solver.update_needs_gradients();
+        solver
     }
 }
 pub mod compressible_fields;

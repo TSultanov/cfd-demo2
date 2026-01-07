@@ -5,8 +5,18 @@ use super::coupled_solver_fgmres::FgmresResources;
 use super::model_defaults::default_incompressible_model;
 use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
+use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
+use crate::solver::scheme::Scheme;
 
 impl GpuSolver {
+    pub(crate) fn update_needs_gradients(&mut self) {
+        let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
+        let registry = SchemeRegistry::new(scheme);
+        self.scheme_needs_gradients = expand_schemes(&default_incompressible_model().system, &registry)
+            .map(|expansion| expansion.needs_gradients())
+            .unwrap_or(true);
+    }
+
     pub fn set_u(&self, u: &[(f64, f64)]) {
         let layout = &default_incompressible_model().state_layout;
         let stride = layout.stride() as usize;
@@ -68,6 +78,7 @@ impl GpuSolver {
     pub fn set_scheme(&mut self, scheme: u32) {
         self.constants.scheme = scheme;
         self.update_constants();
+        self.update_needs_gradients();
     }
 
     pub fn set_time_scheme(&mut self, scheme: u32) {

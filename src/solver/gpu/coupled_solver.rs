@@ -55,6 +55,10 @@ fn coupled_context(solver: &GpuSolver) -> &GpuContext {
     &solver.context
 }
 
+fn coupled_graph_init_prepare(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+    &solver.coupled_init_prepare_graph
+}
+
 fn coupled_graph_prepare_assembly(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
     &solver.coupled_prepare_assembly_graph
 }
@@ -116,6 +120,11 @@ impl GpuSolver {
         solver.coupled_last_linear_stats = solver.solve_coupled_system();
     }
 
+    fn coupled_host_set_component_0(solver: &mut GpuSolver) {
+        solver.constants.component = 0;
+        solver.update_constants();
+    }
+
     fn coupled_host_clear_max_diff(solver: &mut GpuSolver) {
         if !solver.coupled_should_clear_max_diff {
             return;
@@ -141,6 +150,23 @@ impl GpuSolver {
                 PlanNode::Host(HostNode {
                     label: "coupled:solve_coupled_system",
                     run: GpuSolver::coupled_host_solve,
+                }),
+            ],
+        )
+    }
+
+    fn build_coupled_init_plan() -> ExecutionPlan<GpuSolver> {
+        ExecutionPlan::new(
+            coupled_context,
+            vec![
+                PlanNode::Host(HostNode {
+                    label: "coupled:set_component_0",
+                    run: GpuSolver::coupled_host_set_component_0,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "coupled:init_prepare",
+                    graph: coupled_graph_init_prepare,
+                    mode: GraphExecMode::SingleSubmit,
                 }),
             ],
         )
@@ -183,6 +209,11 @@ impl GpuSolver {
     fn coupled_iter_plan_prepare_assembly_solve() -> &'static ExecutionPlan<GpuSolver> {
         static PLAN: std::sync::OnceLock<ExecutionPlan<GpuSolver>> = std::sync::OnceLock::new();
         PLAN.get_or_init(GpuSolver::build_coupled_iter_plan_prepare_assembly_solve)
+    }
+
+    fn coupled_init_plan() -> &'static ExecutionPlan<GpuSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuSolver>> = std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuSolver::build_coupled_init_plan)
     }
 
     fn coupled_iter_plan_assembly_solve() -> &'static ExecutionPlan<GpuSolver> {
@@ -244,13 +275,7 @@ impl GpuSolver {
         // Initialize fluxes and d_p (and gradients)
         {
             let init_dispatch_start = Instant::now();
-
-            // Ensure component is 0 for d_p calculation (if needed)
-            self.constants.component = 0;
-            self.update_constants();
-
-            self.coupled_init_prepare_graph
-                .execute(&self.context, &*self);
+            GpuSolver::coupled_init_plan().execute(self);
             self.profiling_stats.record_location(
                 "coupled:init_prepare",
                 ProfileCategory::GpuDispatch,

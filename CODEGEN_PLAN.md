@@ -13,6 +13,9 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
     - Includes `identity()`, `from_entries(...)`, diagonal updates (`assign_op_diag`), matrix multiplication (`mul_mat`), and prefix var helpers (`var_prefix`).
   - `VecExpr<const N>` for `vecN<f32>` expressions and basic vector algebra (used to remove per-component loops).
     - Includes bridging helpers like `to_vector2_struct()` for writing into `Vector2` storage buffers.
+  - Named axes + broadcasting are now available for the most common CFD dimensions:
+    - `AxisXY`/`XY` for `{x,y}` and `AxisCons`/`Cons` for `{rho, rhoU.x, rhoU.y, rhoE}`.
+    - `NamedVecExpr`/`NamedMatExpr` wrap `VecExpr`/`MatExpr` and provide `at(...)` access, broadcast multiplies, and row-contraction (`contract_rows`) for dot/reduction-style operations.
 - Sparse matrix types exist in the DSL (`src/solver/codegen/dsl/matrix.rs`):
   - `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, `BlockCsrSoaEntry`, `BlockShape`
 - Migration is in progress:
@@ -30,6 +33,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
     - Jacobians (`jac_l`, `jac_r`) are built from matrix algebra and scattered via `BlockCsrSoaEntry`.
     - Inlet/wall boundary conditions are expressed as `jac_l + jac_r * T_bc` using `mul_mat`.
     - Removed per-entry temporary scalars like `jac_l_00` and `A_l_10` in favor of matrix notation (`a_l_mat`, `a_r_mat`).
+    - Viscous-energy Jacobian terms now use named tensor ops (`du_dU`, `d_diff`, `du_face`, `d_e_visc`) instead of hand-expanded `du_lx_drho`/`d_e_visc_l_rho`-style scalar boilerplate.
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the primary safety net for refactors.
 
 ## Goals
@@ -70,6 +74,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Unify sparse storage layouts behind a small API (contiguous vs row-split SoA) and provide safe scatter/accumulate helpers.
 - Expand dense tensor support:
   - Current: `MatExpr<const R, const C>` and `VecExpr<const N>` are Expr-level helpers for unrolled ops/scatters, vector algebra, and small matrix multiplication.
+  - Current (new): `NamedVecExpr`/`NamedMatExpr` enable axis-aware indexing and reduction/broadcast operations for `XY` and conserved-variable axes.
   - Missing: a typed variant (`TypedMat`) that tracks per-entry `DslType`/`UnitDim` and supports more ops (e.g. block transforms and structured assembly).
   - Partial: basic vector helpers exist in `wgsl_dsl` (`vec2<f32>` construction + `dot/min/max`).
   - Missing: typed vectors/matrices (units + shapes) and higher-level ops (e.g. mat-vec, vector-valued reconstruction, structured tensor access).

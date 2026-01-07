@@ -2,6 +2,56 @@ use crate::solver::codegen::wgsl_ast::{AssignOp, BinaryOp, Expr, Literal, Stmt};
 
 use super::matrix::BlockCsrSoaEntry;
 
+pub trait Axis<const N: usize> {
+    type Index: Copy;
+
+    fn to_usize(index: Self::Index) -> usize;
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum XY {
+    X,
+    Y,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct AxisXY;
+
+impl Axis<2> for AxisXY {
+    type Index = XY;
+
+    fn to_usize(index: Self::Index) -> usize {
+        match index {
+            XY::X => 0,
+            XY::Y => 1,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Cons {
+    Rho,
+    Ru,
+    Rv,
+    Re,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct AxisCons;
+
+impl Axis<4> for AxisCons {
+    type Index = Cons;
+
+    fn to_usize(index: Self::Index) -> usize {
+        match index {
+            Cons::Rho => 0,
+            Cons::Ru => 1,
+            Cons::Rv => 2,
+            Cons::Re => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct VecExpr<const N: usize> {
     expr: Expr,
@@ -23,6 +73,28 @@ impl<const N: usize> VecExpr<N> {
 
     pub fn expr(&self) -> Expr {
         self.expr.clone()
+    }
+
+    pub fn component(&self, index: usize) -> Expr {
+        if index >= N {
+            panic!("vector component {index} out of bounds for VecExpr<{N}>");
+        }
+        let ctor_name = match N {
+            2 => Some("vec2<f32>"),
+            3 => Some("vec3<f32>"),
+            4 => Some("vec4<f32>"),
+            _ => None,
+        };
+        if let Some(ctor_name) = ctor_name {
+            if let Expr::Call { callee, args } = &self.expr {
+                if let Expr::Ident(name) = callee.as_ref() {
+                    if name == ctor_name && args.len() == N {
+                        return args[index].clone();
+                    }
+                }
+            }
+        }
+        self.expr().field(vec_field_name(index))
     }
 
     pub fn from_components(components: [Expr; N]) -> Self {
@@ -68,6 +140,67 @@ impl VecExpr<2> {
             "Vector2",
             vec![self.expr().field("x"), self.expr().field("y")],
         )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedVecExpr<const N: usize, Ax> {
+    vec: VecExpr<N>,
+    _axis: std::marker::PhantomData<Ax>,
+}
+
+impl<const N: usize, Ax> NamedVecExpr<N, Ax> {
+    pub fn from_vec(vec: VecExpr<N>) -> Self {
+        Self {
+            vec,
+            _axis: std::marker::PhantomData,
+        }
+    }
+
+    pub fn from_expr(expr: Expr) -> Self {
+        Self::from_vec(VecExpr::from_expr(expr))
+    }
+
+    pub fn expr(&self) -> Expr {
+        self.vec.expr()
+    }
+
+    pub fn vec_expr(&self) -> VecExpr<N> {
+        self.vec.clone()
+    }
+
+    pub fn add(&self, rhs: &Self) -> Self {
+        Self::from_vec(self.vec.add(&rhs.vec))
+    }
+
+    pub fn sub(&self, rhs: &Self) -> Self {
+        Self::from_vec(self.vec.sub(&rhs.vec))
+    }
+
+    pub fn neg(&self) -> Self {
+        Self::from_vec(self.vec.neg())
+    }
+
+    pub fn mul_scalar(&self, scalar: Expr) -> Self {
+        Self::from_vec(self.vec.mul_scalar(scalar))
+    }
+
+    pub fn div_scalar(&self, scalar: Expr) -> Self {
+        Self::from_vec(self.vec.div_scalar(scalar))
+    }
+
+    pub fn dot(&self, rhs: &Self) -> Expr {
+        self.vec.dot(&rhs.vec)
+    }
+
+    fn component(&self, index: usize) -> Expr {
+        self.vec.component(index)
+    }
+}
+
+impl<const N: usize, Ax: Axis<N>> NamedVecExpr<N, Ax> {
+    pub fn at(&self, index: Ax::Index) -> Expr {
+        self.component(Ax::to_usize(index))
     }
 }
 
@@ -250,6 +383,112 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedMatExpr<const R: usize, const C: usize, RowAx, ColAx> {
+    mat: MatExpr<R, C>,
+    _row: std::marker::PhantomData<RowAx>,
+    _col: std::marker::PhantomData<ColAx>,
+}
+
+impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, ColAx> {
+    pub fn from_mat(mat: MatExpr<R, C>) -> Self {
+        Self {
+            mat,
+            _row: std::marker::PhantomData,
+            _col: std::marker::PhantomData,
+        }
+    }
+
+    pub fn from_entries(entries: [[Expr; C]; R]) -> Self {
+        Self::from_mat(MatExpr::from_entries(entries))
+    }
+
+    pub fn entry(&self, row: usize, col: usize) -> Expr {
+        self.mat.entry(row, col)
+    }
+
+    pub fn at(&self, row: RowAx::Index, col: ColAx::Index) -> Expr
+    where
+        RowAx: Axis<R>,
+        ColAx: Axis<C>,
+    {
+        self.entry(RowAx::to_usize(row), ColAx::to_usize(col))
+    }
+
+    pub fn add(&self, rhs: &Self) -> Self {
+        Self::from_mat(self.mat.add(&rhs.mat))
+    }
+
+    pub fn sub(&self, rhs: &Self) -> Self {
+        Self::from_mat(self.mat.sub(&rhs.mat))
+    }
+
+    pub fn mul_scalar(&self, scalar: Expr) -> Self {
+        Self::from_mat(self.mat.mul_scalar(scalar))
+    }
+
+    pub fn mat_expr(&self) -> MatExpr<R, C> {
+        self.mat.clone()
+    }
+
+    pub fn mul_row_broadcast(&self, row: &NamedVecExpr<R, RowAx>) -> Self {
+        Self::from_mat(MatExpr::from_fn(|r, c| {
+            let entry = self.entry(r, c);
+            let scale = row.component(r);
+            if expr_is_zero(&entry) || expr_is_zero(&scale) {
+                return Expr::lit_f32(0.0);
+            }
+            if expr_is_one(&scale) {
+                return entry;
+            }
+            Expr::binary(entry, BinaryOp::Mul, scale)
+        }))
+    }
+
+    pub fn mul_col_broadcast(&self, col: &NamedVecExpr<C, ColAx>) -> Self {
+        Self::from_mat(MatExpr::from_fn(|r, c| {
+            let entry = self.entry(r, c);
+            let scale = col.component(c);
+            if expr_is_zero(&entry) || expr_is_zero(&scale) {
+                return Expr::lit_f32(0.0);
+            }
+            if expr_is_one(&scale) {
+                return entry;
+            }
+            Expr::binary(entry, BinaryOp::Mul, scale)
+        }))
+    }
+
+    pub fn contract_rows(&self, row: &NamedVecExpr<R, RowAx>) -> NamedVecExpr<C, ColAx> {
+        NamedVecExpr::from_vec(VecExpr::<C>::from_components(std::array::from_fn(|c| {
+            let mut acc: Option<Expr> = None;
+            for r in 0..R {
+                let lhs = self.entry(r, c);
+                let rhs = row.component(r);
+                if expr_is_zero(&lhs) || expr_is_zero(&rhs) {
+                    continue;
+                }
+                let term = if expr_is_one(&lhs) {
+                    rhs
+                } else if expr_is_one(&rhs) {
+                    lhs
+                } else {
+                    Expr::binary(lhs, BinaryOp::Mul, rhs)
+                };
+                acc = Some(match acc {
+                    None => term,
+                    Some(prev) => Expr::binary(prev, BinaryOp::Add, term),
+                });
+            }
+            acc.unwrap_or_else(|| Expr::lit_f32(0.0))
+        })))
+    }
+
+    pub fn mul_mat<const D: usize, OutColAx>(&self, rhs: &NamedMatExpr<C, D, ColAx, OutColAx>) -> NamedMatExpr<R, D, RowAx, OutColAx> {
+        NamedMatExpr::from_mat(self.mat.mul_mat(&rhs.mat))
+    }
+}
+
 impl<const N: usize> MatExpr<N, N> {
     pub fn identity() -> Self {
         Self::from_fn(|row, col| {
@@ -259,6 +498,16 @@ impl<const N: usize> MatExpr<N, N> {
                 Expr::lit_f32(0.0)
             }
         })
+    }
+}
+
+fn vec_field_name(index: usize) -> &'static str {
+    match index {
+        0 => "x",
+        1 => "y",
+        2 => "z",
+        3 => "w",
+        _ => panic!("unsupported vector field {index}; expected 0..4"),
     }
 }
 
@@ -326,5 +575,27 @@ mod tests {
         assert_eq!(prod.entry(0, 1).to_string(), "a_01");
         assert_eq!(prod.entry(1, 0).to_string(), "a_10");
         assert_eq!(prod.entry(1, 1).to_string(), "a_11");
+    }
+
+    #[test]
+    fn named_vec_at_uses_axis_swizzles() {
+        let u = NamedVecExpr::<4, AxisCons>::from_expr(Expr::ident("u"));
+        assert_eq!(u.at(Cons::Rho).to_string(), "u.x");
+        assert_eq!(u.at(Cons::Ru).to_string(), "u.y");
+        assert_eq!(u.at(Cons::Rv).to_string(), "u.z");
+        assert_eq!(u.at(Cons::Re).to_string(), "u.w");
+
+        let v = NamedVecExpr::<2, AxisXY>::from_expr(Expr::ident("v"));
+        assert_eq!(v.at(XY::X).to_string(), "v.x");
+        assert_eq!(v.at(XY::Y).to_string(), "v.y");
+    }
+
+    #[test]
+    fn named_mat_contract_rows_builds_vec() {
+        let mat = NamedMatExpr::<2, 4, AxisXY, AxisCons>::from_mat(MatExpr::from_prefix("m"));
+        let v = NamedVecExpr::<2, AxisXY>::from_expr(Expr::ident("v"));
+        let out = mat.contract_rows(&v);
+        assert_eq!(out.at(Cons::Rho).to_string(), "m_00 * v.x + m_10 * v.y");
+        assert_eq!(out.at(Cons::Re).to_string(), "m_03 * v.x + m_13 * v.y");
     }
 }

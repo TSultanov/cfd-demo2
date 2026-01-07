@@ -5,7 +5,7 @@ use super::state_access::{state_scalar_expr, state_vec2_expr};
 use super::reconstruction::limited_linear_reconstruct_face;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
-    Param, Stmt, StructDef, StructField, Type,
+    Param, Stmt, StructDef, StructField, Type, UnaryOp,
 };
 use super::wgsl_dsl as dsl;
 
@@ -1057,89 +1057,23 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("a_l", "a_plus / denom"));
     loop_body.push(dsl::let_("a_r", "-a_minus / denom"));
 
-    loop_body.push(dsl::let_("mu_over_dist", "mu / dist"));
-    loop_body.push(dsl::let_("du_lx_drho", "-u_l_x * inv_rho_l"));
-    loop_body.push(dsl::let_("du_lx_dru", "inv_rho_l"));
-    loop_body.push(dsl::let_("du_lx_drv", "0.0"));
-    loop_body.push(dsl::let_("du_ly_drho", "-u_l_y * inv_rho_l"));
-    loop_body.push(dsl::let_("du_ly_dru", "0.0"));
-    loop_body.push(dsl::let_("du_ly_drv", "inv_rho_l"));
-
-    loop_body.push(dsl::let_("du_rx_drho", "-u_r_x * inv_rho_r"));
-    loop_body.push(dsl::let_("du_rx_dru", "inv_rho_r"));
-    loop_body.push(dsl::let_("du_rx_drv", "0.0"));
-    loop_body.push(dsl::let_("du_ry_drho", "-u_r_y * inv_rho_r"));
-    loop_body.push(dsl::let_("du_ry_dru", "0.0"));
-    loop_body.push(dsl::let_("du_ry_drv", "inv_rho_r"));
-
-    loop_body.push(dsl::let_("d_diff_x_l_rho", "mu_over_dist * du_lx_drho"));
-    loop_body.push(dsl::let_("d_diff_x_l_ru", "mu_over_dist * du_lx_dru"));
-    loop_body.push(dsl::let_("d_diff_x_l_rv", "0.0"));
-    loop_body.push(dsl::let_("d_diff_x_l_re", "0.0"));
-    loop_body.push(dsl::let_("d_diff_y_l_rho", "mu_over_dist * du_ly_drho"));
-    loop_body.push(dsl::let_("d_diff_y_l_ru", "0.0"));
-    loop_body.push(dsl::let_("d_diff_y_l_rv", "mu_over_dist * du_ly_drv"));
-    loop_body.push(dsl::let_("d_diff_y_l_re", "0.0"));
-
-    loop_body.push(dsl::let_("d_diff_x_r_rho", "-mu_over_dist * du_rx_drho"));
-    loop_body.push(dsl::let_("d_diff_x_r_ru", "-mu_over_dist * du_rx_dru"));
-    loop_body.push(dsl::let_("d_diff_x_r_rv", "0.0"));
-    loop_body.push(dsl::let_("d_diff_x_r_re", "0.0"));
-    loop_body.push(dsl::let_("d_diff_y_r_rho", "-mu_over_dist * du_ry_drho"));
-    loop_body.push(dsl::let_("d_diff_y_r_ru", "0.0"));
-    loop_body.push(dsl::let_("d_diff_y_r_rv", "-mu_over_dist * du_ry_drv"));
-    loop_body.push(dsl::let_("d_diff_y_r_re", "0.0"));
-
-    loop_body.push(dsl::let_("du_face_x_l_rho", "0.5 * du_lx_drho"));
-    loop_body.push(dsl::let_("du_face_x_l_ru", "0.5 * du_lx_dru"));
-    loop_body.push(dsl::let_("du_face_x_l_rv", "0.0"));
-    loop_body.push(dsl::let_("du_face_x_l_re", "0.0"));
-    loop_body.push(dsl::let_("du_face_y_l_rho", "0.5 * du_ly_drho"));
-    loop_body.push(dsl::let_("du_face_y_l_ru", "0.0"));
-    loop_body.push(dsl::let_("du_face_y_l_rv", "0.5 * du_ly_drv"));
-    loop_body.push(dsl::let_("du_face_y_l_re", "0.0"));
-
-    loop_body.push(dsl::let_("du_face_x_r_rho", "0.5 * du_rx_drho"));
-    loop_body.push(dsl::let_("du_face_x_r_ru", "0.5 * du_rx_dru"));
-    loop_body.push(dsl::let_("du_face_x_r_rv", "0.0"));
-    loop_body.push(dsl::let_("du_face_x_r_re", "0.0"));
-    loop_body.push(dsl::let_("du_face_y_r_rho", "0.5 * du_ry_drho"));
-    loop_body.push(dsl::let_("du_face_y_r_ru", "0.0"));
-    loop_body.push(dsl::let_("du_face_y_r_rv", "0.5 * du_ry_drv"));
-    loop_body.push(dsl::let_("du_face_y_r_re", "0.0"));
-
-    loop_body.push(dsl::let_(
-        "d_e_visc_l_rho",
-        "d_diff_x_l_rho * u_face_x + diff_u_x * du_face_x_l_rho + d_diff_y_l_rho * u_face_y + diff_u_y * du_face_y_l_rho",
+    loop_body.push(dsl::let_expr(
+        "mu_over_dist",
+        Expr::binary(Expr::ident("mu"), BinaryOp::Div, Expr::ident("dist")),
     ));
-    loop_body.push(dsl::let_(
-        "d_e_visc_l_ru",
-        "d_diff_x_l_ru * u_face_x + diff_u_x * du_face_x_l_ru + d_diff_y_l_ru * u_face_y + diff_u_y * du_face_y_l_ru",
+    loop_body.push(dsl::let_expr(
+        "u_face_vec",
+        Expr::call_named(
+            "vec2<f32>",
+            vec![Expr::ident("u_face_x"), Expr::ident("u_face_y")],
+        ),
     ));
-    loop_body.push(dsl::let_(
-        "d_e_visc_l_rv",
-        "d_diff_x_l_rv * u_face_x + diff_u_x * du_face_x_l_rv + d_diff_y_l_rv * u_face_y + diff_u_y * du_face_y_l_rv",
-    ));
-    loop_body.push(dsl::let_(
-        "d_e_visc_l_re",
-        "d_diff_x_l_re * u_face_x + diff_u_x * du_face_x_l_re + d_diff_y_l_re * u_face_y + diff_u_y * du_face_y_l_re",
-    ));
-
-    loop_body.push(dsl::let_(
-        "d_e_visc_r_rho",
-        "d_diff_x_r_rho * u_face_x + diff_u_x * du_face_x_r_rho + d_diff_y_r_rho * u_face_y + diff_u_y * du_face_y_r_rho",
-    ));
-    loop_body.push(dsl::let_(
-        "d_e_visc_r_ru",
-        "d_diff_x_r_ru * u_face_x + diff_u_x * du_face_x_r_ru + d_diff_y_r_ru * u_face_y + diff_u_y * du_face_y_r_ru",
-    ));
-    loop_body.push(dsl::let_(
-        "d_e_visc_r_rv",
-        "d_diff_x_r_rv * u_face_x + diff_u_x * du_face_x_r_rv + d_diff_y_r_rv * u_face_y + diff_u_y * du_face_y_r_rv",
-    ));
-    loop_body.push(dsl::let_(
-        "d_e_visc_r_re",
-        "d_diff_x_r_re * u_face_x + diff_u_x * du_face_x_r_re + d_diff_y_r_re * u_face_y + diff_u_y * du_face_y_r_re",
+    loop_body.push(dsl::let_expr(
+        "diff_u_vec",
+        Expr::call_named(
+            "vec2<f32>",
+            vec![Expr::ident("diff_u_x"), Expr::ident("diff_u_y")],
+        ),
     ));
 
     let a_prod_scaled = Expr::ident("a_prod_scaled");
@@ -1166,6 +1100,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let dp_dre_r = Expr::ident("dp_dre_r");
     let h_l = Expr::ident("H_l");
     let h_r = Expr::ident("H_r");
+    let mu_over_dist = Expr::ident("mu_over_dist");
+
+    let u_face = typed::NamedVecExpr::<2, typed::AxisXY>::from_expr(Expr::ident("u_face_vec"));
+    let diff_u = typed::NamedVecExpr::<2, typed::AxisXY>::from_expr(Expr::ident("diff_u_vec"));
 
     let a_l_mat = typed::MatExpr::<4, 4>::from_entries([
         [zero.clone(), nx.clone(), ny.clone(), zero.clone()],
@@ -1299,56 +1237,89 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ],
     ]);
 
+    let velocity_jacobian = |u_x: Expr, u_y: Expr, inv_rho: Expr| {
+        typed::NamedMatExpr::<2, 4, typed::AxisXY, typed::AxisCons>::from_entries([
+            [
+                Expr::binary(
+                    Expr::unary(UnaryOp::Negate, u_x),
+                    BinaryOp::Mul,
+                    inv_rho.clone(),
+                ),
+                inv_rho.clone(),
+                zero.clone(),
+                zero.clone(),
+            ],
+            [
+                Expr::binary(
+                    Expr::unary(UnaryOp::Negate, u_y),
+                    BinaryOp::Mul,
+                    inv_rho.clone(),
+                ),
+                zero.clone(),
+                inv_rho,
+                zero.clone(),
+            ],
+        ])
+    };
+
+    let du_l_d_cons =
+        velocity_jacobian(u_l_x.clone(), u_l_y.clone(), Expr::ident("inv_rho_l"));
+    let du_r_d_cons =
+        velocity_jacobian(u_r_x.clone(), u_r_y.clone(), Expr::ident("inv_rho_r"));
+
+    let d_diff_l = du_l_d_cons.mul_scalar(mu_over_dist.clone());
+    let d_diff_r = du_r_d_cons.mul_scalar(Expr::unary(UnaryOp::Negate, mu_over_dist.clone()));
+
+    let du_face_l = du_l_d_cons.mul_scalar(Expr::lit_f32(0.5));
+    let du_face_r = du_r_d_cons.mul_scalar(Expr::lit_f32(0.5));
+
+    let d_e_visc_l = d_diff_l
+        .contract_rows(&u_face)
+        .add(&du_face_l.contract_rows(&diff_u));
+    let d_e_visc_r = d_diff_r
+        .contract_rows(&u_face)
+        .add(&du_face_r.contract_rows(&diff_u));
+
     let visc_l = typed::MatExpr::<4, 4>::from_entries([
+        [zero.clone(), zero.clone(), zero.clone(), zero.clone()],
         [
-            zero.clone(),
-            zero.clone(),
-            zero.clone(),
-            zero.clone(),
+            d_diff_l.at(typed::XY::X, typed::Cons::Rho),
+            d_diff_l.at(typed::XY::X, typed::Cons::Ru),
+            d_diff_l.at(typed::XY::X, typed::Cons::Rv),
+            d_diff_l.at(typed::XY::X, typed::Cons::Re),
         ],
         [
-            Expr::ident("d_diff_x_l_rho"),
-            Expr::ident("d_diff_x_l_ru"),
-            Expr::ident("d_diff_x_l_rv"),
-            Expr::ident("d_diff_x_l_re"),
+            d_diff_l.at(typed::XY::Y, typed::Cons::Rho),
+            d_diff_l.at(typed::XY::Y, typed::Cons::Ru),
+            d_diff_l.at(typed::XY::Y, typed::Cons::Rv),
+            d_diff_l.at(typed::XY::Y, typed::Cons::Re),
         ],
         [
-            Expr::ident("d_diff_y_l_rho"),
-            Expr::ident("d_diff_y_l_ru"),
-            Expr::ident("d_diff_y_l_rv"),
-            Expr::ident("d_diff_y_l_re"),
-        ],
-        [
-            Expr::ident("d_e_visc_l_rho"),
-            Expr::ident("d_e_visc_l_ru"),
-            Expr::ident("d_e_visc_l_rv"),
-            Expr::ident("d_e_visc_l_re"),
+            d_e_visc_l.at(typed::Cons::Rho),
+            d_e_visc_l.at(typed::Cons::Ru),
+            d_e_visc_l.at(typed::Cons::Rv),
+            d_e_visc_l.at(typed::Cons::Re),
         ],
     ]);
     let visc_r = typed::MatExpr::<4, 4>::from_entries([
+        [zero.clone(), zero.clone(), zero.clone(), zero.clone()],
         [
-            zero.clone(),
-            zero.clone(),
-            zero.clone(),
-            zero.clone(),
+            d_diff_r.at(typed::XY::X, typed::Cons::Rho),
+            d_diff_r.at(typed::XY::X, typed::Cons::Ru),
+            d_diff_r.at(typed::XY::X, typed::Cons::Rv),
+            d_diff_r.at(typed::XY::X, typed::Cons::Re),
         ],
         [
-            Expr::ident("d_diff_x_r_rho"),
-            Expr::ident("d_diff_x_r_ru"),
-            Expr::ident("d_diff_x_r_rv"),
-            Expr::ident("d_diff_x_r_re"),
+            d_diff_r.at(typed::XY::Y, typed::Cons::Rho),
+            d_diff_r.at(typed::XY::Y, typed::Cons::Ru),
+            d_diff_r.at(typed::XY::Y, typed::Cons::Rv),
+            d_diff_r.at(typed::XY::Y, typed::Cons::Re),
         ],
         [
-            Expr::ident("d_diff_y_r_rho"),
-            Expr::ident("d_diff_y_r_ru"),
-            Expr::ident("d_diff_y_r_rv"),
-            Expr::ident("d_diff_y_r_re"),
-        ],
-        [
-            Expr::ident("d_e_visc_r_rho"),
-            Expr::ident("d_e_visc_r_ru"),
-            Expr::ident("d_e_visc_r_rv"),
-            Expr::ident("d_e_visc_r_re"),
+            d_e_visc_r.at(typed::Cons::Rho),
+            d_e_visc_r.at(typed::Cons::Ru),
+            d_e_visc_r.at(typed::Cons::Rv),
+            d_e_visc_r.at(typed::Cons::Re),
         ],
     ]);
 

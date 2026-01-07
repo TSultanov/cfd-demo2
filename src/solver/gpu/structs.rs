@@ -1,6 +1,7 @@
 use super::async_buffer::AsyncScalarReader;
 use super::context::GpuContext;
 use super::coupled_solver_fgmres::FgmresResources;
+use super::kernel_graph::KernelGraph;
 use super::profiling::ProfilingStats;
 use bytemuck::{Pod, Zeroable};
 use std::cell::RefCell;
@@ -260,4 +261,10 @@ pub struct GpuSolver {
 
     // Cache of persistent staging buffers for GPU->CPU reads, keyed by exact size in bytes
     pub staging_buffers: Mutex<HashMap<u64, wgpu::Buffer>>,
+
+    // Prebuilt compute graphs for coupled solver dispatch.
+    pub coupled_init_prepare_graph: KernelGraph<GpuSolver>,
+    pub coupled_prepare_assembly_graph: KernelGraph<GpuSolver>,
+    pub coupled_assembly_graph: KernelGraph<GpuSolver>,
+    pub coupled_update_graph: KernelGraph<GpuSolver>,
 }

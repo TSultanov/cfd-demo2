@@ -15,6 +15,7 @@
 // - p is the pressure field
 // - b_u is the momentum source term
 
+use super::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
 use super::profiling::ProfileCategory;
 use super::structs::{GpuSolver, LinearSolverStats};
 use std::time::Instant;
@@ -24,15 +25,81 @@ use std::time::Instant;
 /// WARNING: This adds significant GPU-CPU synchronization overhead (~65ms per step).
 const DEBUG_READS_ENABLED: bool = false;
 
+fn coupled_workgroups_cells(solver: &GpuSolver) -> (u32, u32, u32) {
+    let workgroup_size = 64;
+    (solver.num_cells.div_ceil(workgroup_size), 1, 1)
+}
+
+fn coupled_bind_mesh_fields_solver(solver: &GpuSolver, cpass: &mut wgpu::ComputePass) {
+    let res = solver
+        .coupled_resources
+        .as_ref()
+        .expect("Coupled resources not initialized");
+    cpass.set_bind_group(0, &solver.bg_mesh, &[]);
+    cpass.set_bind_group(1, &solver.bg_fields, &[]);
+    cpass.set_bind_group(2, &res.bg_solver, &[]);
+}
+
+fn coupled_bind_fields_coupled_solution(solver: &GpuSolver, cpass: &mut wgpu::ComputePass) {
+    let res = solver
+        .coupled_resources
+        .as_ref()
+        .expect("Coupled resources not initialized");
+    cpass.set_bind_group(0, &solver.bg_fields, &[]);
+    cpass.set_bind_group(1, &res.bg_coupled_solution, &[]);
+}
+
 impl GpuSolver {
+    pub(super) fn build_coupled_init_prepare_graph() -> KernelGraph<GpuSolver> {
+        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+            label: "coupled:init_prepare",
+            pipeline: |s| &s.pipeline_prepare_coupled,
+            bind_groups: coupled_bind_mesh_fields_solver,
+            workgroups: coupled_workgroups_cells,
+        })])
+    }
+
+    pub(super) fn build_coupled_prepare_assembly_graph() -> KernelGraph<GpuSolver> {
+        KernelGraph::new(vec![
+            KernelNode::Compute(ComputeNode {
+                label: "coupled:prepare",
+                pipeline: |s| &s.pipeline_prepare_coupled,
+                bind_groups: coupled_bind_mesh_fields_solver,
+                workgroups: coupled_workgroups_cells,
+            }),
+            KernelNode::Compute(ComputeNode {
+                label: "coupled:assembly_merged",
+                pipeline: |s| &s.pipeline_coupled_assembly_merged,
+                bind_groups: coupled_bind_mesh_fields_solver,
+                workgroups: coupled_workgroups_cells,
+            }),
+        ])
+    }
+
+    pub(super) fn build_coupled_assembly_graph() -> KernelGraph<GpuSolver> {
+        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+            label: "coupled:assembly_merged",
+            pipeline: |s| &s.pipeline_coupled_assembly_merged,
+            bind_groups: coupled_bind_mesh_fields_solver,
+            workgroups: coupled_workgroups_cells,
+        })])
+    }
+
+    pub(super) fn build_coupled_update_graph() -> KernelGraph<GpuSolver> {
+        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+            label: "coupled:update_fields_max_diff",
+            pipeline: |s| &s.pipeline_update_from_coupled,
+            bind_groups: coupled_bind_fields_coupled_solution,
+            workgroups: coupled_workgroups_cells,
+        })])
+    }
+
     /// Performs a single timestep using the coupled solver approach.
     ///
     /// Unlike segregated predictors that iterate between momentum and pressure solves,
     /// the coupled solver assembles and solves the full block system in one go,
     /// with outer iterations for non-linearity.
     pub fn step_coupled(&mut self) {
-        let workgroup_size = 64;
-        let num_groups_cells = self.num_cells.div_ceil(workgroup_size);
         let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
 
         // We need to access coupled resources. If not available, return.
@@ -76,32 +143,13 @@ impl GpuSolver {
         // Initialize fluxes and d_p (and gradients)
         {
             let init_dispatch_start = Instant::now();
-            let mut encoder =
-                self.context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Init Flux and D_P Encoder"),
-                    });
-
-            let res = self.coupled_resources.as_ref().unwrap();
 
             // Ensure component is 0 for d_p calculation (if needed)
             self.constants.component = 0;
             self.update_constants();
 
-            {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Init Prepare Coupled Pass"),
-                    timestamp_writes: None,
-                });
-                cpass.set_pipeline(&self.pipeline_prepare_coupled);
-                cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                cpass.set_bind_group(1, &self.bg_fields, &[]);
-                cpass.set_bind_group(2, &res.bg_solver, &[]);
-                cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-            }
-
-            self.context.queue.submit(Some(encoder.finish()));
+            self.coupled_init_prepare_graph
+                .execute(&self.context, &*self);
             self.profiling_stats.record_location(
                 "coupled:init_prepare",
                 ProfileCategory::GpuDispatch,
@@ -160,14 +208,6 @@ impl GpuSolver {
             // Compute Gradients AND Assemble Coupled System (Merged Dispatch)
             if self.coupled_resources.is_some() {
                 let dispatch_start = Instant::now();
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Coupled Step Encoder"),
-                        });
-
-                let res = self.coupled_resources.as_ref().unwrap();
 
                 // Merged Prepare Coupled Pass (Flux, D_P, Grad P, Grad U, Grad V)
                 if iter > 0 || self.constants.scheme != 0 {
@@ -184,31 +224,12 @@ impl GpuSolver {
                         );
                     }
 
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Prepare Coupled Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_prepare_coupled);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &res.bg_solver, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
+                    self.coupled_prepare_assembly_graph
+                        .execute(&self.context, &*self);
+                } else {
+                    self.coupled_assembly_graph.execute(&self.context, &*self);
                 }
 
-                // 2. Coupled Assembly Merged
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Coupled Assembly Merged Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_coupled_assembly_merged);
-                    cpass.set_bind_group(0, &self.bg_mesh, &[]);
-                    cpass.set_bind_group(1, &self.bg_fields, &[]);
-                    cpass.set_bind_group(2, &res.bg_solver, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-
-                self.context.queue.submit(Some(encoder.finish()));
                 self.profiling_stats.record_location(
                     "coupled:gradient_assembly_merged",
                     ProfileCategory::GpuDispatch,
@@ -377,26 +398,7 @@ impl GpuSolver {
                 }
 
                 let dispatch_start = Instant::now();
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Update Fields & Max Diff Encoder"),
-                        });
-
-                // Update Fields
-                {
-                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Update Fields Pass"),
-                        timestamp_writes: None,
-                    });
-                    cpass.set_pipeline(&self.pipeline_update_from_coupled);
-                    cpass.set_bind_group(0, &self.bg_fields, &[]);
-                    cpass.set_bind_group(1, &res.bg_coupled_solution, &[]);
-                    cpass.dispatch_workgroups(num_groups_cells, 1, 1);
-                }
-
-                self.context.queue.submit(Some(encoder.finish()));
+                self.coupled_update_graph.execute(&self.context, &*self);
                 self.profiling_stats.record_location(
                     "coupled:update_fields_max_diff",
                     ProfileCategory::GpuDispatch,

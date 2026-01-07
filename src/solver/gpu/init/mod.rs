@@ -150,6 +150,10 @@ impl GpuSolver {
             should_stop: false,
             profiling_stats: Arc::new(ProfilingStats::new()),
             staging_buffers: Mutex::new(std::collections::HashMap::new()),
+            coupled_init_prepare_graph: GpuSolver::build_coupled_init_prepare_graph(),
+            coupled_prepare_assembly_graph: GpuSolver::build_coupled_prepare_assembly_graph(),
+            coupled_assembly_graph: GpuSolver::build_coupled_assembly_graph(),
+            coupled_update_graph: GpuSolver::build_coupled_update_graph(),
         }
     }
 }

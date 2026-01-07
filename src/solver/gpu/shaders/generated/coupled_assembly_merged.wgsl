@@ -227,23 +227,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start_row_0 = 9u * scalar_offset;
     let start_row_1 = start_row_0 + 3u * num_neighbors;
     let start_row_2 = start_row_0 + 6u * num_neighbors;
-    var diag_u: f32 = 0.0;
-    var diag_v: f32 = 0.0;
+    var diag_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
     var diag_p: f32 = 0.0;
-    var sum_diag_up: f32 = 0.0;
-    var sum_diag_vp: f32 = 0.0;
-    var sum_diag_pu: f32 = 0.0;
-    var sum_diag_pv: f32 = 0.0;
+    var sum_diag_uv_p: vec2<f32> = vec2<f32>(0.0, 0.0);
+    var sum_diag_p_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
     var sum_diag_pp: f32 = 0.0;
-    var rhs_u: f32 = 0.0;
-    var rhs_v: f32 = 0.0;
+    var rhs_uv: vec2<f32> = vec2<f32>(0.0, 0.0);
     var rhs_p: f32 = 0.0;
     var scalar_diag_p: f32 = 0.0;
     let u_n = vec2<f32>(state_old[idx * 8u + 0u], state_old[idx * 8u + 1u]);
     let rho = constants.density;
     var coeff_time = vol * rho / constants.dt;
-    var rhs_time_u = coeff_time * u_n.x;
-    var rhs_time_v = coeff_time * u_n.y;
+    var rhs_time: vec2<f32> = u_n * coeff_time;
     if (constants.time_scheme == 1u) {
         let dt = constants.dt;
         let dt_old = constants.dt_old;
@@ -252,13 +247,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         coeff_time = vol * rho / dt * (1.0 + 2.0 * r) / (1.0 + r);
         let factor_n = 1.0 + r;
         let factor_nm1 = r * r / (1.0 + r);
-        rhs_time_u = vol * rho / dt * (factor_n * u_n.x - factor_nm1 * u_nm1.x);
-        rhs_time_v = vol * rho / dt * (factor_n * u_n.y - factor_nm1 * u_nm1.y);
+        rhs_time = vol * rho / dt * (factor_n * u_n - factor_nm1 * u_nm1);
     }
-    diag_u += coeff_time;
-    diag_v += coeff_time;
-    rhs_u += rhs_time_u;
-    rhs_v += rhs_time_v;
+    diag_uv += vec2<f32>(coeff_time, coeff_time);
+    rhs_uv += rhs_time;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -273,6 +265,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             normal.y = -normal.y;
             normal_sign = -1.0;
         }
+        let normal_vec: vec2<f32> = vec2<f32>(normal.x, normal.y);
+        let face_vec: vec2<f32> = vec2<f32>(normal.x, normal.y) * area;
         let flux = fluxes[face_idx] * normal_sign;
         var other_center: Vector2;
         var is_boundary = false;
@@ -291,10 +285,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             other_center = f_center;
             d_p_neigh = state[idx * 8u + 3u];
         }
-        let d_vec_x = other_center.x - center.x;
-        let d_vec_y = other_center.y - center.y;
-        let dist_proj = abs(d_vec_x * normal.x + d_vec_y * normal.y);
-        let dist = max(dist_proj, 1e-6);
+        let dist_proj = abs(dot(vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y), normal_vec));
+        let dist = max(dist_proj, 0.000001);
         let diff_coeff = codegen_diff_coeff(constants.viscosity, area, dist);
         let conv_coeff = codegen_conv_coeff(flux);
         let conv_coeff_diag = conv_coeff.x;
@@ -308,8 +300,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         if (!is_boundary) {
             let coeff = conv_coeff_off - diff_coeff;
-            diag_u += diff_coeff + conv_coeff_diag;
-            diag_v += diff_coeff + conv_coeff_diag;
+            diag_uv += vec2<f32>(diff_coeff + conv_coeff_diag, diff_coeff + conv_coeff_diag);
             let scheme_id: u32 = 0u;
             if (scheme_id != 0u) {
                 let u_own = vec2<f32>(state[idx * 8u + 0u], state[idx * 8u + 1u]);
@@ -354,10 +345,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         }
                     }
                 }
-                let correction_u = flux * (phi_ho_u - phi_upwind_u);
-                let correction_v = flux * (phi_ho_v - phi_upwind_v);
-                rhs_u -= correction_u;
-                rhs_v -= correction_v;
+                rhs_uv -= (vec2<f32>(phi_ho_u, phi_ho_v) - vec2<f32>(phi_upwind_u, phi_upwind_v)) * flux;
             }
             let d_own = distance(vec2<f32>(center.x, center.y), vec2<f32>(f_center.x, f_center.y));
             let d_neigh = distance(vec2<f32>(other_center.x, other_center.y), vec2<f32>(f_center.x, f_center.y));
@@ -366,14 +354,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if (total_dist > 1e-6) {
                 lambda = d_neigh / total_dist;
             }
-            let pg_force_x = area * normal.x;
-            let pg_force_y = area * normal.y;
-            sum_diag_up += lambda * pg_force_x;
-            sum_diag_vp += lambda * pg_force_y;
-            let div_coeff_x = normal.x * area;
-            let div_coeff_y = normal.y * area;
-            sum_diag_pu += lambda * div_coeff_x;
-            sum_diag_pv += lambda * div_coeff_y;
+            sum_diag_uv_p += face_vec * lambda;
+            sum_diag_p_uv += face_vec * lambda;
             let d_p_own = state[idx * 8u + 3u];
             let d_p_face = lambda * d_p_own + (1.0 - lambda) * d_p_neigh;
             let pressure_coeff_face = constants.density * (lambda * state[idx * 8u + 3u] + (1.0 - lambda) * state[other_idx * 8u + 3u]);
@@ -386,53 +368,37 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             scalar_diag_p += scalar_coeff;
             matrix_values[start_row_0 + 3u * neighbor_rank + 0u] = coeff;
             matrix_values[start_row_0 + 3u * neighbor_rank + 1u] = 0.0;
-            matrix_values[start_row_0 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * pg_force_x;
+            matrix_values[start_row_0 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * face_vec.x;
             matrix_values[start_row_1 + 3u * neighbor_rank + 0u] = 0.0;
             matrix_values[start_row_1 + 3u * neighbor_rank + 1u] = coeff;
-            matrix_values[start_row_1 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * pg_force_y;
-            matrix_values[start_row_2 + 3u * neighbor_rank + 0u] = (1.0 - lambda) * div_coeff_x;
-            matrix_values[start_row_2 + 3u * neighbor_rank + 1u] = (1.0 - lambda) * div_coeff_y;
+            matrix_values[start_row_1 + 3u * neighbor_rank + 2u] = (1.0 - lambda) * face_vec.y;
+            matrix_values[start_row_2 + 3u * neighbor_rank + 0u] = (1.0 - lambda) * face_vec.x;
+            matrix_values[start_row_2 + 3u * neighbor_rank + 1u] = (1.0 - lambda) * face_vec.y;
             matrix_values[start_row_2 + 3u * neighbor_rank + 2u] = -lapl_coeff;
         } else {
             if (boundary_type == 1u) {
                 let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
-                let u_bc_x = constants.inlet_velocity * ramp;
-                let u_bc_y = 0.0;
-                diag_u += diff_coeff;
-                diag_v += diff_coeff;
-                rhs_u += diff_coeff * u_bc_x;
-                rhs_v += diff_coeff * u_bc_y;
+                let u_bc: vec2<f32> = vec2<f32>(constants.inlet_velocity * ramp, 0.0);
+                diag_uv += vec2<f32>(diff_coeff, diff_coeff);
+                rhs_uv += u_bc * diff_coeff;
                 if (flux > 0.0) {
-                    diag_u += flux;
-                    diag_v += flux;
+                    diag_uv += vec2<f32>(flux, flux);
                 } else {
-                    rhs_u -= flux * u_bc_x;
-                    rhs_v -= flux * u_bc_y;
+                    rhs_uv -= u_bc * flux;
                 }
-                let pg_force_x = area * normal.x;
-                let pg_force_y = area * normal.y;
-                sum_diag_up += pg_force_x;
-                sum_diag_vp += pg_force_y;
-                let flux_bc = (u_bc_x * normal.x + u_bc_y * normal.y) * area;
+                sum_diag_uv_p += face_vec;
+                let flux_bc = dot(u_bc, face_vec);
                 rhs_p -= flux_bc;
             } else {
                 if (boundary_type == 3u) {
-                    diag_u += diff_coeff;
-                    diag_v += diff_coeff;
-                    let pg_force_x = area * normal.x;
-                    let pg_force_y = area * normal.y;
-                    sum_diag_up += pg_force_x;
-                    sum_diag_vp += pg_force_y;
+                    diag_uv += vec2<f32>(diff_coeff, diff_coeff);
+                    sum_diag_uv_p += face_vec;
                 } else {
                     if (boundary_type == 2u) {
                         if (flux > 0.0) {
-                            diag_u += flux;
-                            diag_v += flux;
+                            diag_uv += vec2<f32>(flux, flux);
                         }
-                        let div_coeff_x = normal.x * area;
-                        let div_coeff_y = normal.y * area;
-                        sum_diag_pu += div_coeff_x;
-                        sum_diag_pv += div_coeff_y;
+                        sum_diag_p_uv += face_vec;
                         let d_p_own = state[idx * 8u + 3u];
                         let pressure_coeff_cell = constants.density * state[idx * 8u + 3u];
                         let lapl_coeff = pressure_coeff_cell * area / dist;
@@ -446,20 +412,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let scalar_diag_idx = diagonal_indices[idx];
     let diag_rank = scalar_diag_idx - scalar_offset;
-    matrix_values[start_row_0 + 3u * diag_rank + 0u] = diag_u;
+    matrix_values[start_row_0 + 3u * diag_rank + 0u] = diag_uv.x;
     matrix_values[start_row_0 + 3u * diag_rank + 1u] = 0.0;
-    matrix_values[start_row_0 + 3u * diag_rank + 2u] = sum_diag_up;
+    matrix_values[start_row_0 + 3u * diag_rank + 2u] = sum_diag_uv_p.x;
     matrix_values[start_row_1 + 3u * diag_rank + 0u] = 0.0;
-    matrix_values[start_row_1 + 3u * diag_rank + 1u] = diag_v;
-    matrix_values[start_row_1 + 3u * diag_rank + 2u] = sum_diag_vp;
-    matrix_values[start_row_2 + 3u * diag_rank + 0u] = sum_diag_pu;
-    matrix_values[start_row_2 + 3u * diag_rank + 1u] = sum_diag_pv;
+    matrix_values[start_row_1 + 3u * diag_rank + 1u] = diag_uv.y;
+    matrix_values[start_row_1 + 3u * diag_rank + 2u] = sum_diag_uv_p.y;
+    matrix_values[start_row_2 + 3u * diag_rank + 0u] = sum_diag_p_uv.x;
+    matrix_values[start_row_2 + 3u * diag_rank + 1u] = sum_diag_p_uv.y;
     matrix_values[start_row_2 + 3u * diag_rank + 2u] = diag_p + sum_diag_pp;
-    rhs[idx * 3u + 0u] = rhs_u;
-    rhs[idx * 3u + 1u] = rhs_v;
+    rhs[idx * 3u + 0u] = rhs_uv.x;
+    rhs[idx * 3u + 1u] = rhs_uv.y;
     rhs[idx * 3u + 2u] = rhs_p;
     scalar_matrix_values[scalar_diag_idx] = scalar_diag_p;
-    diag_u_inv[idx] = safe_inverse(diag_u);
-    diag_v_inv[idx] = safe_inverse(diag_v);
+    diag_u_inv[idx] = safe_inverse(diag_uv.x);
+    diag_v_inv[idx] = safe_inverse(diag_uv.y);
     diag_p_inv[idx] = safe_inverse(scalar_diag_p);
 }

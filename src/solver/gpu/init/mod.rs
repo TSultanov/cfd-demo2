@@ -143,6 +143,8 @@ impl GpuSolver {
             fgmres_resources: None,
             n_outer_correctors: 20,
             coupled_resources: Some(linear_res.coupled_resources),
+            coupled_should_clear_max_diff: false,
+            coupled_last_linear_stats: Default::default(),
             variance_history: Vec::new(),
             degenerate_count: 0,
             prev_u_cpu: Vec::new(),

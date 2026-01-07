@@ -248,6 +248,8 @@ pub struct GpuSolver {
     pub n_outer_correctors: u32,
 
     pub coupled_resources: Option<CoupledSolverResources>,
+    pub coupled_should_clear_max_diff: bool,
+    pub coupled_last_linear_stats: LinearSolverStats,
 
     // Evolution check
     pub variance_history: Vec<(f64, f64)>,

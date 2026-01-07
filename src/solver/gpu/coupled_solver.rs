@@ -15,6 +15,8 @@
 // - p is the pressure field
 // - b_u is the momentum source term
 
+use super::context::GpuContext;
+use super::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
 use super::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
 use super::profiling::ProfileCategory;
 use super::structs::{GpuSolver, LinearSolverStats};
@@ -47,6 +49,22 @@ fn coupled_bind_fields_coupled_solution(solver: &GpuSolver, cpass: &mut wgpu::Co
         .expect("Coupled resources not initialized");
     cpass.set_bind_group(0, &solver.bg_fields, &[]);
     cpass.set_bind_group(1, &res.bg_coupled_solution, &[]);
+}
+
+fn coupled_context(solver: &GpuSolver) -> &GpuContext {
+    &solver.context
+}
+
+fn coupled_graph_prepare_assembly(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+    &solver.coupled_prepare_assembly_graph
+}
+
+fn coupled_graph_assembly(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+    &solver.coupled_assembly_graph
+}
+
+fn coupled_graph_update(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+    &solver.coupled_update_graph
 }
 
 impl GpuSolver {
@@ -92,6 +110,89 @@ impl GpuSolver {
             bind_groups: coupled_bind_fields_coupled_solution,
             workgroups: coupled_workgroups_cells,
         })])
+    }
+
+    fn coupled_host_solve(solver: &mut GpuSolver) {
+        solver.coupled_last_linear_stats = solver.solve_coupled_system();
+    }
+
+    fn coupled_host_clear_max_diff(solver: &mut GpuSolver) {
+        if !solver.coupled_should_clear_max_diff {
+            return;
+        }
+        let Some(res) = solver.coupled_resources.as_ref() else {
+            return;
+        };
+        solver
+            .context
+            .queue
+            .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
+    }
+
+    fn build_coupled_iter_plan_prepare_assembly_solve() -> ExecutionPlan<GpuSolver> {
+        ExecutionPlan::new(
+            coupled_context,
+            vec![
+                PlanNode::Graph(GraphNode {
+                    label: "coupled:gradient_assembly_merged",
+                    graph: coupled_graph_prepare_assembly,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+                PlanNode::Host(HostNode {
+                    label: "coupled:solve_coupled_system",
+                    run: GpuSolver::coupled_host_solve,
+                }),
+            ],
+        )
+    }
+
+    fn build_coupled_iter_plan_assembly_solve() -> ExecutionPlan<GpuSolver> {
+        ExecutionPlan::new(
+            coupled_context,
+            vec![
+                PlanNode::Graph(GraphNode {
+                    label: "coupled:gradient_assembly_merged",
+                    graph: coupled_graph_assembly,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+                PlanNode::Host(HostNode {
+                    label: "coupled:solve_coupled_system",
+                    run: GpuSolver::coupled_host_solve,
+                }),
+            ],
+        )
+    }
+
+    fn build_coupled_update_plan() -> ExecutionPlan<GpuSolver> {
+        ExecutionPlan::new(
+            coupled_context,
+            vec![
+                PlanNode::Host(HostNode {
+                    label: "coupled:clear_max_diff",
+                    run: GpuSolver::coupled_host_clear_max_diff,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "coupled:update_fields_max_diff",
+                    graph: coupled_graph_update,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+            ],
+        )
+    }
+
+    fn coupled_iter_plan_prepare_assembly_solve() -> &'static ExecutionPlan<GpuSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuSolver>> = std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuSolver::build_coupled_iter_plan_prepare_assembly_solve)
+    }
+
+    fn coupled_iter_plan_assembly_solve() -> &'static ExecutionPlan<GpuSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuSolver>> = std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuSolver::build_coupled_iter_plan_assembly_solve)
+    }
+
+    fn coupled_update_plan() -> &'static ExecutionPlan<GpuSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuSolver>> = std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuSolver::build_coupled_update_plan)
     }
 
     /// Performs a single timestep using the coupled solver approach.
@@ -207,10 +308,9 @@ impl GpuSolver {
 
             // Compute Gradients AND Assemble Coupled System (Merged Dispatch)
             if self.coupled_resources.is_some() {
-                let dispatch_start = Instant::now();
-
                 // Merged Prepare Coupled Pass (Flux, D_P, Grad P, Grad U, Grad V)
-                if iter > 0 || self.constants.scheme != 0 {
+                let needs_prepare = iter > 0 || self.constants.scheme != 0;
+                if needs_prepare {
                     // Ensure component is 0 for d_p calculation (if needed)
                     if iter > 0 {
                         self.constants.component = 0;
@@ -223,19 +323,32 @@ impl GpuSolver {
                             std::mem::size_of_val(&self.constants) as u64,
                         );
                     }
-
-                    self.coupled_prepare_assembly_graph
-                        .execute(&self.context, &*self);
-                } else {
-                    self.coupled_assembly_graph.execute(&self.context, &*self);
                 }
 
-                self.profiling_stats.record_location(
-                    "coupled:gradient_assembly_merged",
-                    ProfileCategory::GpuDispatch,
-                    dispatch_start.elapsed(),
-                    0,
-                );
+                let timings = if needs_prepare {
+                    GpuSolver::coupled_iter_plan_prepare_assembly_solve().execute(self)
+                } else {
+                    GpuSolver::coupled_iter_plan_assembly_solve().execute(self)
+                };
+
+                let assembly_secs = timings.seconds_for("coupled:gradient_assembly_merged");
+                if assembly_secs > 0.0 {
+                    self.profiling_stats.record_location(
+                        "coupled:gradient_assembly_merged",
+                        ProfileCategory::GpuDispatch,
+                        std::time::Duration::from_secs_f64(assembly_secs),
+                        0,
+                    );
+                }
+                let solve_secs = timings.seconds_for("coupled:solve_coupled_system");
+                if solve_secs > 0.0 {
+                    self.profiling_stats.record_location(
+                        "coupled:solve_coupled_system",
+                        ProfileCategory::CpuCompute,
+                        std::time::Duration::from_secs_f64(solve_secs),
+                        0,
+                    );
+                }
             }
 
             // Debug: Check matrix and RHS after assembly on first iteration - DEBUG READS
@@ -359,7 +472,7 @@ impl GpuSolver {
             }
 
             // 3. Solve Coupled System using FGMRES-based coupled solver (CPU-side Krylov, GPU SpMV/precond)
-            let stats = self.solve_coupled_system();
+            let stats = self.coupled_last_linear_stats;
             *self.stats_p.lock().unwrap() = stats;
             let io_start = Instant::now();
             if !quiet {
@@ -381,30 +494,29 @@ impl GpuSolver {
 
             // 4. Update Fields & Compute Max Diff
             {
-                let res = self.coupled_resources.as_ref().unwrap();
-
-                // Clear max diff result buffer before update (using atomics in shader)
+                self.coupled_should_clear_max_diff = iter > 0;
+                let timings = GpuSolver::coupled_update_plan().execute(self);
                 if iter > 0 {
-                    let clear_write_start = Instant::now();
-                    self.context
-                        .queue
-                        .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
-                    self.profiling_stats.record_location(
-                        "coupled:clear_max_diff",
-                        ProfileCategory::GpuWrite,
-                        clear_write_start.elapsed(),
-                        8,
-                    );
+                    let clear_secs = timings.seconds_for("coupled:clear_max_diff");
+                    if clear_secs > 0.0 {
+                        self.profiling_stats.record_location(
+                            "coupled:clear_max_diff",
+                            ProfileCategory::GpuWrite,
+                            std::time::Duration::from_secs_f64(clear_secs),
+                            8,
+                        );
+                    }
                 }
 
-                let dispatch_start = Instant::now();
-                self.coupled_update_graph.execute(&self.context, &*self);
-                self.profiling_stats.record_location(
-                    "coupled:update_fields_max_diff",
-                    ProfileCategory::GpuDispatch,
-                    dispatch_start.elapsed(),
-                    0,
-                );
+                let update_secs = timings.seconds_for("coupled:update_fields_max_diff");
+                if update_secs > 0.0 {
+                    self.profiling_stats.record_location(
+                        "coupled:update_fields_max_diff",
+                        ProfileCategory::GpuDispatch,
+                        std::time::Duration::from_secs_f64(update_secs),
+                        0,
+                    );
+                }
             }
 
             // Check convergence using GPU-computed max-diff (Async)

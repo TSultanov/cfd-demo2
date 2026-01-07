@@ -12,6 +12,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
   - `MatExpr<const R, const C>` for building small dense matrix expressions and emitting unrolled assigns/scatters.
     - Includes `identity()`, `from_entries(...)`, diagonal updates (`assign_op_diag`), matrix multiplication (`mul_mat`), and prefix var helpers (`var_prefix`).
   - `VecExpr<const N>` for `vecN<f32>` expressions and basic vector algebra (used to remove per-component loops).
+    - Includes bridging helpers like `to_vector2_struct()` for writing into `Vector2` storage buffers.
 - Sparse matrix types exist in the DSL (`src/solver/codegen/dsl/matrix.rs`):
   - `CsrPattern`, `CsrMatrix`, `BlockCsrMatrix`, `BlockCsrSoaMatrix`, `BlockCsrSoaEntry`, `BlockShape`
 - Migration is in progress:
@@ -24,7 +25,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
     - `prepare_coupled`, `flux_rhie_chow`, `pressure_assembly`
   - Compressible per-face kernels now use `VecExpr` for momentum/velocity algebra:
     - `compressible_apply`/`compressible_update` treat momentum updates as `vec2` and use AST assigns for state writes.
-    - `compressible_flux_kt` computes KT momentum flux as a `vec2`, uses `dot(u, normal_vec)`, and orients normals by checking `dot(face_center - owner_center, normal_vec)`.
+    - `compressible_flux_kt` computes KT momentum flux as a `vec2`, uses `dot(u, normal_vec)`, vectorizes viscous diffusion and pressure-coupling updates, and orients normals via `dot(face_center - owner_center, normal_vec)`.
   - `compressible_assembly` migrated the matrix-heavy parts to `MatExpr`:
     - Jacobians (`jac_l`, `jac_r`) are built from matrix algebra and scattered via `BlockCsrSoaEntry`.
     - Inlet/wall boundary conditions are expressed as `jac_l + jac_r * T_bc` using `mul_mat`.
@@ -44,6 +45,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 
 - Keep adding small AST helpers where repeated patterns show up (array indexing, block scatters, component swizzles).
 - Migrate kernels one-by-one, preferring the most string-fragile sections first:
+  - `compressible_flux_kt`, `prepare_coupled`, `flux_rhie_chow`, `pressure_assembly`, `compressible_apply`, `compressible_update`: major x/y duplication removed via `VecExpr`, but many scalar `dsl::let_(&str)` remain; continue converting to `let_expr`/AST where practical.
   - `compressible_assembly`: matrix/tensor portions are now `MatExpr`-based; remaining work is converting scalar/intermediate math away from `dsl::let_(&str)` and other parse-based helpers.
   - `coupled_assembly`: continue replacing remaining string-based math (still some `dsl::let_(&str)` + `Vector2` component access in face loops).
 - Once migrations are sufficiently complete, gate `wgsl_dsl::expr(&str)` behind tests/debug (or deprecate it).
@@ -81,5 +83,7 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 **Deliverable:** migrated kernels remain behaviorally stable while removing strings.
 
 - Track per-kernel migration status (AST-only vs mixed vs string-heavy).
+  - Mostly `VecExpr`/AST (still some strings): `compressible_apply`, `compressible_update`, `compressible_flux_kt`, `prepare_coupled`, `flux_rhie_chow`, `pressure_assembly`, `coupled_assembly`.
+  - `MatExpr` for block assembly but still string-heavy elsewhere: `compressible_assembly`.
 - Add “golden WGSL” parity tests (string compare against committed generated files) *only* for kernels under active migration.
 - Keep the 1D plot regressions as the runtime validation layer for solver behavior.

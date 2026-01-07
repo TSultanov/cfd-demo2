@@ -1,6 +1,6 @@
 use crate::solver::gpu::compressible_solver::GpuCompressibleSolver;
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::gpu::structs::{GpuSolver, PreconditionerType};
+use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
 use crate::solver::scheme::Scheme;
@@ -84,6 +84,20 @@ impl GpuUnifiedSolver {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.num_cells,
             UnifiedSolverBackend::Compressible(solver) => solver.num_cells,
+        }
+    }
+
+    pub fn time(&self) -> f32 {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => solver.constants.time,
+            UnifiedSolverBackend::Compressible(solver) => solver.constants.time,
+        }
+    }
+
+    pub fn dt(&self) -> f32 {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => solver.constants.dt,
+            UnifiedSolverBackend::Compressible(solver) => solver.constants.dt,
         }
     }
 
@@ -181,6 +195,41 @@ impl GpuUnifiedSolver {
             UnifiedSolverBackend::Incompressible(_) => {}
             UnifiedSolverBackend::Compressible(solver) => solver.set_outer_iters(iters),
         }
+    }
+
+    pub fn incompressible_set_should_stop(&mut self, value: bool) {
+        if let UnifiedSolverBackend::Incompressible(solver) = &mut self.backend {
+            solver.should_stop = value;
+        }
+    }
+
+    pub fn incompressible_should_stop(&self) -> bool {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => solver.should_stop,
+            UnifiedSolverBackend::Compressible(_) => false,
+        }
+    }
+
+    pub fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)> {
+        let UnifiedSolverBackend::Incompressible(solver) = &self.backend else {
+            return None;
+        };
+        Some((
+            *solver.outer_iterations.lock().unwrap(),
+            *solver.outer_residual_u.lock().unwrap(),
+            *solver.outer_residual_p.lock().unwrap(),
+        ))
+    }
+
+    pub fn incompressible_linear_stats(&self) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
+        let UnifiedSolverBackend::Incompressible(solver) = &self.backend else {
+            return None;
+        };
+        Some((
+            *solver.stats_ux.lock().unwrap(),
+            *solver.stats_uy.lock().unwrap(),
+            *solver.stats_p.lock().unwrap(),
+        ))
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {

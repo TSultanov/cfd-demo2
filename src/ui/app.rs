@@ -1,9 +1,11 @@
+use crate::solver::gpu::enums::TimeScheme as GpuTimeScheme;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
-use crate::solver::gpu::{GpuCompressibleSolver, GpuSolver};
+use crate::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
 };
+use crate::solver::model::{compressible_model, incompressible_momentum_model};
 use crate::solver::scheme::Scheme;
 use crate::ui::cfd_renderer;
 use eframe::egui;
@@ -157,21 +159,6 @@ impl Fluid {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
-enum TimeScheme {
-    Euler,
-    BDF2,
-}
-
-impl TimeScheme {
-    fn gpu_id(self) -> u32 {
-        match self {
-            TimeScheme::Euler => 0,
-            TimeScheme::BDF2 => 1,
-        }
-    }
-}
-
 // Cached GPU solver stats for UI display (avoids lock contention)
 #[allow(dead_code)]
 #[derive(Default, Clone)]
@@ -188,8 +175,7 @@ struct CachedGpuStats {
 }
 
 pub struct CFDApp {
-    gpu_solver: Option<Arc<Mutex<GpuSolver>>>,
-    gpu_compressible_solver: Option<Arc<Mutex<GpuCompressibleSolver>>>,
+    gpu_unified_solver: Option<Arc<Mutex<GpuUnifiedSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
     shared_results: SharedResults,
     shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
@@ -216,7 +202,7 @@ pub struct CFDApp {
     render_mode: RenderMode,
     alpha_u: f64,
     alpha_p: f64,
-    time_scheme: TimeScheme,
+    time_scheme: GpuTimeScheme,
     inlet_velocity: f32,
     ramp_time: f32,
     selected_preconditioner: PreconditionerType,
@@ -300,8 +286,7 @@ impl CFDApp {
             };
 
         Self {
-            gpu_solver: None,
-            gpu_compressible_solver: None,
+            gpu_unified_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
             shared_results: Arc::new(Mutex::new(None)),
             shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
@@ -331,7 +316,7 @@ impl CFDApp {
             render_mode: RenderMode::GpuDirect,
             alpha_u: 1.0,
             alpha_p: 1.0,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: GpuTimeScheme::Euler,
             inlet_velocity: 1.0,
             ramp_time: 0.001,
             selected_preconditioner: PreconditionerType::Jacobi,
@@ -343,22 +328,11 @@ impl CFDApp {
         }
     }
 
-    fn with_gpu_solver<F>(&self, f: F)
+    fn with_unified_solver<F>(&self, f: F)
     where
-        F: FnOnce(&mut GpuSolver),
+        F: FnOnce(&mut GpuUnifiedSolver),
     {
-        if let Some(solver) = &self.gpu_solver {
-            if let Ok(mut guard) = solver.lock() {
-                f(&mut guard);
-            }
-        }
-    }
-
-    fn with_compressible_solver<F>(&self, f: F)
-    where
-        F: FnOnce(&mut GpuCompressibleSolver),
-    {
-        if let Some(solver) = &self.gpu_compressible_solver {
+        if let Some(solver) = &self.gpu_unified_solver {
             if let Ok(mut guard) = solver.lock() {
                 f(&mut guard);
             }
@@ -368,20 +342,9 @@ impl CFDApp {
     fn update_renderer_field(&self) {
         if let (Some(renderer), Some(device)) = (&self.cfd_renderer, &self.wgpu_device) {
             if let Ok(mut renderer) = renderer.lock() {
-                match self.solver_kind {
-                    SolverKind::Incompressible => {
-                        if let Some(solver) = &self.gpu_solver {
-                            if let Ok(solver) = solver.lock() {
-                                renderer.update_bind_group(device, &solver.b_state);
-                            }
-                        }
-                    }
-                    SolverKind::Compressible => {
-                        if let Some(solver) = &self.gpu_compressible_solver {
-                            if let Ok(solver) = solver.lock() {
-                                renderer.update_bind_group(device, &solver.b_state);
-                            }
-                        }
+                if let Some(solver) = &self.gpu_unified_solver {
+                    if let Ok(solver) = solver.lock() {
+                        renderer.update_bind_group(device, solver.state_buffer());
                     }
                 }
             }
@@ -396,60 +359,69 @@ impl CFDApp {
         let n_cells = mesh.num_cells();
         let initial_u = self.build_initial_velocity(&mesh);
         let initial_p = vec![0.0; n_cells];
-        self.gpu_solver = None;
-        self.gpu_compressible_solver = None;
+        self.gpu_unified_solver = None;
 
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                let mut gpu_solver = pollster::block_on(GpuSolver::new(
-                    &mesh,
-                    self.wgpu_device.clone(),
-                    self.wgpu_queue.clone(),
-                ));
-                gpu_solver.set_dt(self.timestep as f32);
-                gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
-                gpu_solver.set_density(self.current_fluid.density as f32);
-                gpu_solver.set_scheme(self.selected_scheme.gpu_id());
-                gpu_solver.set_alpha_u(self.alpha_u as f32);
-                gpu_solver.set_alpha_p(self.alpha_p as f32);
-                gpu_solver.set_time_scheme(self.time_scheme.gpu_id());
-                gpu_solver.set_u(&initial_u);
-                gpu_solver.set_p(&initial_p);
-                gpu_solver.set_inlet_velocity(self.inlet_velocity);
-                gpu_solver.set_ramp_time(self.ramp_time);
-                gpu_solver.set_precond_type(self.selected_preconditioner);
-                gpu_solver.initialize_history();
-
-                self.cached_u = initial_u;
-                self.cached_p = initial_p;
-                self.gpu_solver = Some(Arc::new(Mutex::new(gpu_solver)));
-            }
+        let (model, initial_u, initial_p, cached_p) = match self.solver_kind {
+            SolverKind::Incompressible => (
+                incompressible_momentum_model(),
+                Some(initial_u),
+                Some(initial_p),
+                None,
+            ),
             SolverKind::Compressible => {
-                let mut gpu_solver = pollster::block_on(GpuCompressibleSolver::new(
-                    &mesh,
-                    self.wgpu_device.clone(),
-                    self.wgpu_queue.clone(),
-                ));
-                gpu_solver.set_dt(self.timestep as f32);
-                gpu_solver.set_time_scheme(self.time_scheme.gpu_id());
-                gpu_solver.set_scheme(self.selected_scheme.gpu_id());
-                gpu_solver.set_inlet_velocity(self.inlet_velocity);
-                gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
                 let p_ref = self
                     .current_fluid
                     .pressure_for_density(self.current_fluid.density);
+                (compressible_model(), None, None, Some(p_ref))
+            }
+        };
+
+        let config = SolverConfig {
+            advection_scheme: self.selected_scheme,
+            time_scheme: self.time_scheme,
+            preconditioner: self.selected_preconditioner,
+        };
+
+        let mut gpu_solver = pollster::block_on(GpuUnifiedSolver::new(
+            &mesh,
+            model,
+            config,
+            self.wgpu_device.clone(),
+            self.wgpu_queue.clone(),
+        ))
+        .expect("failed to initialize unified GPU solver");
+        gpu_solver.set_dt(self.timestep as f32);
+        gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
+        gpu_solver.set_inlet_velocity(self.inlet_velocity);
+        gpu_solver.set_advection_scheme(self.selected_scheme);
+        gpu_solver.set_time_scheme(self.time_scheme);
+        gpu_solver.set_preconditioner(self.selected_preconditioner);
+
+        match self.solver_kind {
+            SolverKind::Incompressible => {
+                gpu_solver.set_density(self.current_fluid.density as f32);
+                gpu_solver.set_alpha_u(self.alpha_u as f32);
+                gpu_solver.set_alpha_p(self.alpha_p as f32);
+                gpu_solver.set_ramp_time(self.ramp_time);
+                gpu_solver.set_u(initial_u.as_ref().unwrap());
+                gpu_solver.set_p(initial_p.as_ref().unwrap());
+                self.cached_u = initial_u.unwrap();
+                self.cached_p = initial_p.unwrap();
+            }
+            SolverKind::Compressible => {
+                let p_ref = cached_p.unwrap();
                 gpu_solver.set_uniform_state(
                     self.current_fluid.density as f32,
                     [0.0, 0.0],
                     p_ref as f32,
                 );
-                gpu_solver.initialize_history();
-
                 self.cached_u = vec![(0.0, 0.0); n_cells];
                 self.cached_p = vec![p_ref; n_cells];
-                self.gpu_compressible_solver = Some(Arc::new(Mutex::new(gpu_solver)));
             }
         }
+
+        gpu_solver.initialize_history();
+        self.gpu_unified_solver = Some(Arc::new(Mutex::new(gpu_solver)));
 
         self.cached_cells = Self::cache_cells(&mesh);
 
@@ -489,20 +461,9 @@ impl CFDApp {
 
             if let Some(queue) = &self.wgpu_queue {
                 renderer.update_mesh(queue, &vertices, &line_vertices);
-                match self.solver_kind {
-                    SolverKind::Incompressible => {
-                        if let Some(gpu_solver) = &self.gpu_solver {
-                            if let Ok(gpu_solver) = gpu_solver.lock() {
-                                renderer.update_bind_group(device, &gpu_solver.b_state);
-                            }
-                        }
-                    }
-                    SolverKind::Compressible => {
-                        if let Some(gpu_solver) = &self.gpu_compressible_solver {
-                            if let Ok(gpu_solver) = gpu_solver.lock() {
-                                renderer.update_bind_group(device, &gpu_solver.b_state);
-                            }
-                        }
+                if let Some(gpu_solver) = &self.gpu_unified_solver {
+                    if let Ok(gpu_solver) = gpu_solver.lock() {
+                        renderer.update_bind_group(device, gpu_solver.state_buffer());
                     }
                 }
             }
@@ -660,9 +621,16 @@ impl CFDApp {
 
     fn render_layout_for_field(&self) -> (u32, u32, u32) {
         let (stride, u_offset, p_offset) = match self.solver_kind {
-            SolverKind::Incompressible => (8u32, 0u32, 2u32),
+            SolverKind::Incompressible => {
+                let model = incompressible_momentum_model();
+                let layout = model.state_layout;
+                let stride = layout.stride();
+                let u_offset = layout.offset_for("U").unwrap_or(0);
+                let p_offset = layout.offset_for("p").unwrap_or(0);
+                (stride, u_offset, p_offset)
+            }
             SolverKind::Compressible => {
-                let model = crate::solver::model::compressible_model();
+                let model = compressible_model();
                 let layout = model.state_layout;
                 let stride = layout.stride();
                 let u_offset = layout.offset_for("u").unwrap_or(0);
@@ -682,13 +650,13 @@ impl CFDApp {
     fn update_gpu_fluid(&self) {
         match self.solver_kind {
             SolverKind::Incompressible => {
-                self.with_gpu_solver(|solver| {
+                self.with_unified_solver(|solver| {
                     solver.set_density(self.current_fluid.density as f32);
                     solver.set_viscosity(self.current_fluid.viscosity as f32);
                 });
             }
             SolverKind::Compressible => {
-                self.with_compressible_solver(|solver| {
+                self.with_unified_solver(|solver| {
                     solver.set_viscosity(self.current_fluid.viscosity as f32);
                 });
             }
@@ -696,77 +664,39 @@ impl CFDApp {
     }
 
     fn update_gpu_dt(&self) {
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                self.with_gpu_solver(|solver| solver.set_dt(self.timestep as f32));
-            }
-            SolverKind::Compressible => {
-                self.with_compressible_solver(|solver| solver.set_dt(self.timestep as f32));
-            }
-        }
+        self.with_unified_solver(|solver| solver.set_dt(self.timestep as f32));
     }
 
     fn update_gpu_scheme(&self) {
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                self.with_gpu_solver(|solver| solver.set_scheme(self.selected_scheme.gpu_id()));
-            }
-            SolverKind::Compressible => {
-                self.with_compressible_solver(|solver| {
-                    solver.set_scheme(self.selected_scheme.gpu_id());
-                });
-            }
-        }
+        self.with_unified_solver(|solver| solver.set_advection_scheme(self.selected_scheme));
     }
 
     fn update_gpu_alpha_u(&self) {
-        if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_gpu_solver(|solver| solver.set_alpha_u(self.alpha_u as f32));
-        }
+        self.with_unified_solver(|solver| solver.set_alpha_u(self.alpha_u as f32));
     }
 
     fn update_gpu_alpha_p(&self) {
         if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_gpu_solver(|solver| solver.set_alpha_p(self.alpha_p as f32));
+            self.with_unified_solver(|solver| solver.set_alpha_p(self.alpha_p as f32));
         }
     }
 
     fn update_gpu_time_scheme(&self) {
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                self.with_gpu_solver(|solver| solver.set_time_scheme(self.time_scheme.gpu_id()));
-            }
-            SolverKind::Compressible => {
-                self.with_compressible_solver(|solver| {
-                    solver.set_time_scheme(self.time_scheme.gpu_id());
-                });
-            }
-        }
+        self.with_unified_solver(|solver| solver.set_time_scheme(self.time_scheme));
     }
 
     fn update_gpu_inlet_velocity(&self) {
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                self.with_gpu_solver(|solver| solver.set_inlet_velocity(self.inlet_velocity));
-            }
-            SolverKind::Compressible => {
-                self.with_compressible_solver(|solver| {
-                    solver.set_inlet_velocity(self.inlet_velocity);
-                });
-            }
-        }
+        self.with_unified_solver(|solver| solver.set_inlet_velocity(self.inlet_velocity));
     }
 
     fn update_gpu_ramp_time(&self) {
         if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_gpu_solver(|solver| solver.set_ramp_time(self.ramp_time));
+            self.with_unified_solver(|solver| solver.set_ramp_time(self.ramp_time));
         }
     }
 
     fn update_gpu_preconditioner(&self) {
-        if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_gpu_solver(|solver| solver.set_precond_type(self.selected_preconditioner));
-        }
+        self.with_unified_solver(|solver| solver.set_preconditioner(self.selected_preconditioner));
     }
 }
 
@@ -1074,13 +1004,17 @@ impl eframe::App for CFDApp {
                         .selected_text(format!("{:?}", self.time_scheme))
                         .show_ui(ui, |ui| {
                             if ui
-                                .selectable_value(&mut self.time_scheme, TimeScheme::Euler, "Euler")
+                                .selectable_value(
+                                    &mut self.time_scheme,
+                                    GpuTimeScheme::Euler,
+                                    "Euler",
+                                )
                                 .clicked()
                             {
                                 self.update_gpu_time_scheme();
                             }
                             if ui
-                                .selectable_value(&mut self.time_scheme, TimeScheme::BDF2, "BDF2")
+                                .selectable_value(&mut self.time_scheme, GpuTimeScheme::BDF2, "BDF2")
                                 .clicked()
                             {
                                 self.update_gpu_time_scheme();
@@ -1116,10 +1050,7 @@ impl eframe::App for CFDApp {
                         self.init_solver();
                     }
 
-                    let has_solver = match self.solver_kind {
-                        SolverKind::Incompressible => self.gpu_solver.is_some(),
-                        SolverKind::Compressible => self.gpu_compressible_solver.is_some(),
-                    };
+                    let has_solver = self.gpu_unified_solver.is_some();
 
                     if has_solver
                         && ui
@@ -1137,170 +1068,92 @@ impl eframe::App for CFDApp {
                             let ctx_clone = ctx.clone();
                             let min_cell_size_clone = self.actual_min_cell_size;
 
-                            match self.solver_kind {
-                                SolverKind::Incompressible => {
-                                    if let Some(gpu_solver) = &self.gpu_solver {
-                                        if let Ok(mut solver) = gpu_solver.lock() {
-                                            solver.should_stop = false;
+                            if let Some(gpu_solver) = &self.gpu_unified_solver {
+                                if let Ok(mut solver) = gpu_solver.lock() {
+                                    solver.incompressible_set_should_stop(false);
+                                }
+
+                                let solver_arc = gpu_solver.clone();
+                                let solver_kind = self.solver_kind;
+                                thread::spawn(move || {
+                                    while running_flag.load(Ordering::Relaxed) {
+                                        if let Ok(mut solver) = solver_arc.lock() {
+                                            let start = std::time::Instant::now();
+                                            solver.step();
+
+                                            if solver.incompressible_should_stop() {
+                                                running_flag.store(false, Ordering::Relaxed);
+                                            }
+
+                                            let step_time = start.elapsed().as_secs_f32() * 1000.0;
+                                            let u = pollster::block_on(solver.get_u());
+                                            let p = pollster::block_on(solver.get_p());
+
+                                            let (adaptive_dt, target_cfl) =
+                                                if let Ok(params) = shared_params.lock() {
+                                                    (params.adaptive_dt, params.target_cfl)
+                                                } else {
+                                                    (false, 0.9)
+                                                };
+
+                                            if adaptive_dt {
+                                                let mut max_vel = 0.0f64;
+                                                for (vx, vy) in &u {
+                                                    let v = (vx.powi(2) + vy.powi(2)).sqrt();
+                                                    if v > max_vel {
+                                                        max_vel = v;
+                                                    }
+                                                }
+
+                                                if max_vel > 1e-6 {
+                                                    let current_dt = solver.dt() as f64;
+                                                    let mut next_dt =
+                                                        target_cfl * min_cell_size_clone / max_vel;
+
+                                                    if next_dt > current_dt * 1.2 {
+                                                        next_dt = current_dt * 1.2;
+                                                    }
+
+                                                    next_dt = next_dt.clamp(1e-9, 100.0);
+                                                    solver.set_dt(next_dt as f32);
+                                                }
+                                            }
+
+                                            let mut stats = CachedGpuStats {
+                                                time: solver.time(),
+                                                dt: solver.dt(),
+                                                step_time_ms: step_time,
+                                                ..Default::default()
+                                            };
+
+                                            if matches!(solver_kind, SolverKind::Incompressible) {
+                                                if let Some((iters, res_u, res_p)) =
+                                                    solver.incompressible_outer_stats()
+                                                {
+                                                    stats.outer_iterations = iters;
+                                                    stats.outer_residual_u = res_u;
+                                                    stats.outer_residual_p = res_p;
+                                                }
+                                                if let Some((ux, uy, p_stats)) =
+                                                    solver.incompressible_linear_stats()
+                                                {
+                                                    stats.stats_ux = ux;
+                                                    stats.stats_uy = uy;
+                                                    stats.stats_p = p_stats;
+                                                }
+                                            }
+
+                                            if let Ok(mut results) = shared_results.lock() {
+                                                *results = Some((u, p));
+                                            }
+                                            if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
+                                                *gpu_stats = stats;
+                                            }
                                         }
-
-                                        let solver_arc = gpu_solver.clone();
-                                        thread::spawn(move || {
-                                            while running_flag.load(Ordering::Relaxed) {
-                                                if let Ok(mut solver) = solver_arc.lock() {
-                                                    let start = std::time::Instant::now();
-                                                    solver.step();
-
-                                                    if solver.should_stop {
-                                                        running_flag.store(false, Ordering::Relaxed);
-                                                    }
-
-                                                    let step_time =
-                                                        start.elapsed().as_secs_f32() * 1000.0;
-                                                    let u = pollster::block_on(solver.get_u());
-                                                    let p = pollster::block_on(solver.get_p());
-
-                                                    let (adaptive_dt, target_cfl) =
-                                                        if let Ok(params) = shared_params.lock() {
-                                                            (params.adaptive_dt, params.target_cfl)
-                                                        } else {
-                                                            (false, 0.9)
-                                                        };
-
-                                                    if adaptive_dt {
-                                                        let mut max_vel = 0.0f64;
-                                                        for (vx, vy) in &u {
-                                                            let v =
-                                                                (vx.powi(2) + vy.powi(2)).sqrt();
-                                                            if v > max_vel {
-                                                                max_vel = v;
-                                                            }
-                                                        }
-
-                                                        if max_vel > 1e-6 {
-                                                            let current_dt =
-                                                                solver.constants.dt as f64;
-                                                            let mut next_dt =
-                                                                target_cfl * min_cell_size_clone
-                                                                    / max_vel;
-
-                                                            // Limit increase to 1.2x to prevent shock
-                                                            if next_dt > current_dt * 1.2 {
-                                                                next_dt = current_dt * 1.2;
-                                                            }
-
-                                                            next_dt =
-                                                                next_dt.clamp(1e-9, 100.0);
-                                                            solver.set_dt(next_dt as f32);
-                                                        }
-                                                    }
-
-                                                    let stats = CachedGpuStats {
-                                                        time: solver.constants.time,
-                                                        dt: solver.constants.dt,
-                                                        stats_ux: *solver.stats_ux.lock().unwrap(),
-                                                        stats_uy: *solver.stats_uy.lock().unwrap(),
-                                                        stats_p: *solver.stats_p.lock().unwrap(),
-                                                        outer_residual_u: *solver
-                                                            .outer_residual_u
-                                                            .lock()
-                                                            .unwrap(),
-                                                        outer_residual_p: *solver
-                                                            .outer_residual_p
-                                                            .lock()
-                                                            .unwrap(),
-                                                        outer_iterations: *solver
-                                                            .outer_iterations
-                                                            .lock()
-                                                            .unwrap(),
-                                                        step_time_ms: step_time,
-                                                    };
-
-                                                    if let Ok(mut results) = shared_results.lock() {
-                                                        *results = Some((u, p));
-                                                    }
-                                                    if let Ok(mut gpu_stats) =
-                                                        shared_gpu_stats.lock()
-                                                    {
-                                                        *gpu_stats = stats;
-                                                    }
-                                                }
-                                                ctx_clone.request_repaint();
-                                                thread::sleep(std::time::Duration::from_millis(1));
-                                            }
-                                        });
+                                        ctx_clone.request_repaint();
+                                        thread::sleep(std::time::Duration::from_millis(1));
                                     }
-                                }
-                                SolverKind::Compressible => {
-                                    if let Some(gpu_solver) = &self.gpu_compressible_solver {
-                                        let solver_arc = gpu_solver.clone();
-                                        thread::spawn(move || {
-                                            while running_flag.load(Ordering::Relaxed) {
-                                                if let Ok(mut solver) = solver_arc.lock() {
-                                                    let start = std::time::Instant::now();
-                                                    solver.step();
-
-                                                    let step_time =
-                                                        start.elapsed().as_secs_f32() * 1000.0;
-                                                    let u = pollster::block_on(solver.get_u());
-                                                    let p = pollster::block_on(solver.get_p());
-
-                                                    let (adaptive_dt, target_cfl) =
-                                                        if let Ok(params) = shared_params.lock() {
-                                                            (params.adaptive_dt, params.target_cfl)
-                                                        } else {
-                                                            (false, 0.9)
-                                                        };
-
-                                                    if adaptive_dt {
-                                                        let mut max_vel = 0.0f64;
-                                                        for (vx, vy) in &u {
-                                                            let v =
-                                                                (vx.powi(2) + vy.powi(2)).sqrt();
-                                                            if v > max_vel {
-                                                                max_vel = v;
-                                                            }
-                                                        }
-
-                                                        if max_vel > 1e-6 {
-                                                            let current_dt =
-                                                                solver.constants.dt as f64;
-                                                            let mut next_dt =
-                                                                target_cfl * min_cell_size_clone
-                                                                    / max_vel;
-
-                                                            if next_dt > current_dt * 1.2 {
-                                                                next_dt = current_dt * 1.2;
-                                                            }
-
-                                                            next_dt =
-                                                                next_dt.clamp(1e-9, 100.0);
-                                                            solver.set_dt(next_dt as f32);
-                                                        }
-                                                    }
-
-                                                    let stats = CachedGpuStats {
-                                                        time: solver.constants.time,
-                                                        dt: solver.constants.dt,
-                                                        step_time_ms: step_time,
-                                                        ..Default::default()
-                                                    };
-
-                                                    if let Ok(mut results) = shared_results.lock() {
-                                                        *results = Some((u, p));
-                                                    }
-                                                    if let Ok(mut gpu_stats) =
-                                                        shared_gpu_stats.lock()
-                                                    {
-                                                        *gpu_stats = stats;
-                                                    }
-                                                }
-                                                ctx_clone.request_repaint();
-                                                thread::sleep(std::time::Duration::from_millis(1));
-                                            }
-                                        });
-                                    }
-                                }
+                                });
                             }
                         } else {
                             self.gpu_solver_running.store(false, Ordering::Relaxed);
@@ -1329,10 +1182,7 @@ impl eframe::App for CFDApp {
                 });
         });
 
-        let has_solver = match self.solver_kind {
-            SolverKind::Incompressible => self.gpu_solver.is_some(),
-            SolverKind::Compressible => self.gpu_compressible_solver.is_some(),
-        };
+        let has_solver = self.gpu_unified_solver.is_some();
 
         let (min_val, max_val, values) = if has_solver {
             if let Ok(mut results) = self.shared_results.lock() {

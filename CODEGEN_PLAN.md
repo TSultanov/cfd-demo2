@@ -25,6 +25,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Planized the compressible implicit outer-iteration body (grad+assembly → host FGMRES → snapshot/apply) using `ExecutionPlan`, keeping behavior but moving sequencing into the common plan layer.
 - Planized the incompressible coupled iteration’s assembly+solve stage and update stage using `ExecutionPlan` (assembly via `KernelGraph`, host FGMRES solve as a plugin node, update kernel as `KernelGraph`).
 - Expanded `GpuUnifiedSolver` to provide a real shared surface (common setters + `get_u/get_p/get_rho`) and migrated the 1D regression test harness to run compressible/incompressible cases through it (`tests/gpu_1d_structured_regression_test.rs`).
+- Migrated the UI app to `GpuUnifiedSolver` and switched plotting to use `StateLayout`-derived offsets instead of hardcoded packing (`src/ui/app.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
@@ -56,6 +57,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 3. **Unify state packing + unknown layout**
    - Make all models use `StateLayout`-driven packed state (like compressible) so init/update/plotting don’t need per-model structs.
    - Compute unknown count from equation targets (sum of field component counts); build CSR expansion generically for any block size.
+   - Status: plotting/UI now uses `StateLayout`; runtime packing still needs consolidation.
 4. **Generic scheme expansion**
    - Implement “needs gradients?” and “needs reconstruction?” detection per term/scheme.
    - Auto-generate gradient kernels per required field (instead of hardcoded `grad_rho`, `grad_u`, etc.).
@@ -72,6 +74,10 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 8. **Test/validation automation**
    - Run all 1D cases across all combinations of temporal (Euler/BDF2) × spatial (Upwind/SOU/QUICK) schemes.
    - Store plots under `target/test_plots/*` with a consistent naming scheme; add a small summary index (text/HTML) to spot regressions quickly.
+
+### Gap Check (Are We Approaching The Goal?)
+- The common *runtime sequencing* layer now exists (`KernelGraph` + `ExecutionPlan`) and both incompressible and compressible paths are progressively being expressed in it.
+- The solver still relies on model-family-specific kernels and host-side control flow for convergence + linear solves; the next material step is to derive plans from `ModelSpec`/`DiscreteSystem` rather than hardcoding per-solver pipelines.
 
 ### Decisions (Chosen)
 - **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).

@@ -1,7 +1,7 @@
 use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::gpu::enums::TimeScheme;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
-use cfd2::solver::model::generic_diffusion_demo_model;
+use cfd2::solver::model::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};
 use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
@@ -107,4 +107,45 @@ fn gpu_unified_solver_runs_generic_heat_step() {
         factor,
         best_fit
     );
+}
+
+#[test]
+fn gpu_unified_solver_runs_generic_heat_step_neumann() {
+    let mesh = build_rect_mesh(0.05);
+    let dt = 1e-2;
+    let model = generic_diffusion_demo_neumann_model();
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::Euler,
+        preconditioner: cfd2::solver::gpu::structs::PreconditionerType::Jacobi,
+    };
+
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
+        .expect("solver init");
+    solver.set_dt(dt as f32);
+
+    let phi_old: Vec<f64> = mesh
+        .cell_cx
+        .iter()
+        .map(|&x| (std::f64::consts::PI * x).cos())
+        .collect();
+    solver
+        .set_field_scalar("phi", &phi_old)
+        .expect("set field");
+
+    solver.step();
+
+    let phi_new = pollster::block_on(solver.get_field_scalar("phi")).expect("get field");
+
+    // demo model uses kappa=1.0, and has homogeneous Neumann at inlet/outlet.
+    let factor = 1.0 / (1.0 + std::f64::consts::PI * std::f64::consts::PI * dt);
+    let expected: Vec<f64> = phi_old.iter().map(|v| v * factor).collect();
+
+    let mut sum = 0.0;
+    for (value, target) in phi_new.iter().zip(expected.iter()) {
+        let diff = value - target;
+        sum += diff * diff;
+    }
+    let rms = (sum / phi_new.len() as f64).sqrt();
+    assert!(rms < 3e-2, "rms error {:.3e} (expected factor {:.6})", rms, factor);
 }

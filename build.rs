@@ -60,7 +60,8 @@ mod solver {
         pub use definitions::{
             compressible_model, compressible_system, incompressible_momentum_model,
             incompressible_momentum_system, generic_diffusion_demo_model, CompressibleFields,
-            GenericCoupledFields, IncompressibleMomentumFields, ModelFields, ModelSpec,
+            generic_diffusion_demo_neumann_model, GenericCoupledFields, IncompressibleMomentumFields,
+            ModelFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
@@ -290,6 +291,14 @@ fn main() {
     if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
         &manifest_dir,
         &generic_model,
+        &schemes,
+    ) {
+        panic!("codegen failed: {}", err);
+    }
+    let generic_neumann_model = solver::model::generic_diffusion_demo_neumann_model();
+    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
+        &manifest_dir,
+        &generic_neumann_model,
         &schemes,
     ) {
         panic!("codegen failed: {}", err);

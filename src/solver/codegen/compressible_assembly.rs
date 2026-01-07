@@ -1057,50 +1057,6 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::let_("a_l", "a_plus / denom"));
     loop_body.push(dsl::let_("a_r", "-a_minus / denom"));
 
-    loop_body.push(dsl::let_("A_l_10", "-u_l_x * u_n_l + dp_drho_l * normal.x"));
-    loop_body.push(dsl::let_(
-        "A_l_11",
-        "u_n_l + u_l_x * normal.x + dp_dru_l * normal.x",
-    ));
-    loop_body.push(dsl::let_("A_l_12", "u_l_x * normal.y + dp_drv_l * normal.x"));
-    loop_body.push(dsl::let_("A_l_13", "dp_dre_l * normal.x"));
-    loop_body.push(dsl::let_("A_l_20", "-u_l_y * u_n_l + dp_drho_l * normal.y"));
-    loop_body.push(dsl::let_(
-        "A_l_21",
-        "u_l_y * normal.x + dp_dru_l * normal.y",
-    ));
-    loop_body.push(dsl::let_(
-        "A_l_22",
-        "u_n_l + u_l_y * normal.y + dp_drv_l * normal.y",
-    ));
-    loop_body.push(dsl::let_("A_l_23", "dp_dre_l * normal.y"));
-    loop_body.push(dsl::let_("A_l_30", "-H_l * u_n_l + dp_drho_l * u_n_l"));
-    loop_body.push(dsl::let_("A_l_31", "H_l * normal.x + dp_dru_l * u_n_l"));
-    loop_body.push(dsl::let_("A_l_32", "H_l * normal.y + dp_drv_l * u_n_l"));
-    loop_body.push(dsl::let_("A_l_33", &format!("{gamma} * u_n_l")));
-
-    loop_body.push(dsl::let_("A_r_10", "-u_r_x * u_n_r + dp_drho_r * normal.x"));
-    loop_body.push(dsl::let_(
-        "A_r_11",
-        "u_n_r + u_r_x * normal.x + dp_dru_r * normal.x",
-    ));
-    loop_body.push(dsl::let_("A_r_12", "u_r_x * normal.y + dp_drv_r * normal.x"));
-    loop_body.push(dsl::let_("A_r_13", "dp_dre_r * normal.x"));
-    loop_body.push(dsl::let_("A_r_20", "-u_r_y * u_n_r + dp_drho_r * normal.y"));
-    loop_body.push(dsl::let_(
-        "A_r_21",
-        "u_r_y * normal.x + dp_dru_r * normal.y",
-    ));
-    loop_body.push(dsl::let_(
-        "A_r_22",
-        "u_n_r + u_r_y * normal.y + dp_drv_r * normal.y",
-    ));
-    loop_body.push(dsl::let_("A_r_23", "dp_dre_r * normal.y"));
-    loop_body.push(dsl::let_("A_r_30", "-H_r * u_n_r + dp_drho_r * u_n_r"));
-    loop_body.push(dsl::let_("A_r_31", "H_r * normal.x + dp_dru_r * u_n_r"));
-    loop_body.push(dsl::let_("A_r_32", "H_r * normal.y + dp_drv_r * u_n_r"));
-    loop_body.push(dsl::let_("A_r_33", &format!("{gamma} * u_n_r")));
-
     loop_body.push(dsl::let_("mu_over_dist", "mu / dist"));
     loop_body.push(dsl::let_("du_lx_drho", "-u_l_x * inv_rho_l"));
     loop_body.push(dsl::let_("du_lx_dru", "inv_rho_l"));
@@ -1192,164 +1148,219 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let normal = Expr::ident("normal");
     let nx = normal.clone().field("x");
     let ny = normal.clone().field("y");
-    let jac_l = typed::MatExpr::<4, 4>::from_fn(|row, col| match (row, col) {
-        (0, 0) => Expr::binary(Expr::lit_f32(0.0), BinaryOp::Sub, a_prod_scaled.clone()),
-        (0, 1) => Expr::binary(a_l.clone(), BinaryOp::Mul, nx.clone()),
-        (0, 2) => Expr::binary(a_l.clone(), BinaryOp::Mul, ny.clone()),
-        (0, 3) => Expr::lit_f32(0.0),
-        (1, 0) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_10")),
-            BinaryOp::Add,
+    let zero = Expr::lit_f32(0.0);
+    let gamma = Expr::lit_f32(1.4);
+    let u_n_l = Expr::ident("u_n_l");
+    let u_n_r = Expr::ident("u_n_r");
+    let u_l_x = Expr::ident("u_l_x");
+    let u_l_y = Expr::ident("u_l_y");
+    let u_r_x = Expr::ident("u_r_x");
+    let u_r_y = Expr::ident("u_r_y");
+    let dp_drho_l = Expr::ident("dp_drho_l");
+    let dp_dru_l = Expr::ident("dp_dru_l");
+    let dp_drv_l = Expr::ident("dp_drv_l");
+    let dp_dre_l = Expr::ident("dp_dre_l");
+    let dp_drho_r = Expr::ident("dp_drho_r");
+    let dp_dru_r = Expr::ident("dp_dru_r");
+    let dp_drv_r = Expr::ident("dp_drv_r");
+    let dp_dre_r = Expr::ident("dp_dre_r");
+    let h_l = Expr::ident("H_l");
+    let h_r = Expr::ident("H_r");
+
+    let a_l_mat = typed::MatExpr::<4, 4>::from_entries([
+        [zero.clone(), nx.clone(), ny.clone(), zero.clone()],
+        [
+            Expr::binary(
+                Expr::binary(dp_drho_l.clone(), BinaryOp::Mul, nx.clone()),
+                BinaryOp::Sub,
+                Expr::binary(u_l_x.clone(), BinaryOp::Mul, u_n_l.clone()),
+            ),
+            Expr::binary(
+                u_n_l.clone(),
+                BinaryOp::Add,
+                Expr::binary(
+                    nx.clone(),
+                    BinaryOp::Mul,
+                    Expr::binary(u_l_x.clone(), BinaryOp::Add, dp_dru_l.clone()),
+                ),
+            ),
+            Expr::binary(
+                Expr::binary(u_l_x.clone(), BinaryOp::Mul, ny.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_drv_l.clone(), BinaryOp::Mul, nx.clone()),
+            ),
+            Expr::binary(dp_dre_l.clone(), BinaryOp::Mul, nx.clone()),
+        ],
+        [
+            Expr::binary(
+                Expr::binary(dp_drho_l.clone(), BinaryOp::Mul, ny.clone()),
+                BinaryOp::Sub,
+                Expr::binary(u_l_y.clone(), BinaryOp::Mul, u_n_l.clone()),
+            ),
+            Expr::binary(
+                Expr::binary(u_l_y.clone(), BinaryOp::Mul, nx.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_dru_l.clone(), BinaryOp::Mul, ny.clone()),
+            ),
+            Expr::binary(
+                u_n_l.clone(),
+                BinaryOp::Add,
+                Expr::binary(
+                    ny.clone(),
+                    BinaryOp::Mul,
+                    Expr::binary(u_l_y.clone(), BinaryOp::Add, dp_drv_l.clone()),
+                ),
+            ),
+            Expr::binary(dp_dre_l.clone(), BinaryOp::Mul, ny.clone()),
+        ],
+        [
+            Expr::binary(
+                u_n_l.clone(),
+                BinaryOp::Mul,
+                Expr::binary(dp_drho_l.clone(), BinaryOp::Sub, h_l.clone()),
+            ),
+            Expr::binary(
+                Expr::binary(h_l.clone(), BinaryOp::Mul, nx.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_dru_l.clone(), BinaryOp::Mul, u_n_l.clone()),
+            ),
+            Expr::binary(
+                Expr::binary(h_l.clone(), BinaryOp::Mul, ny.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_drv_l.clone(), BinaryOp::Mul, u_n_l.clone()),
+            ),
+            Expr::binary(gamma.clone(), BinaryOp::Mul, u_n_l.clone()),
+        ],
+    ]);
+
+    let a_r_mat = typed::MatExpr::<4, 4>::from_entries([
+        [zero.clone(), nx.clone(), ny.clone(), zero.clone()],
+        [
+            Expr::binary(
+                Expr::binary(dp_drho_r.clone(), BinaryOp::Mul, nx.clone()),
+                BinaryOp::Sub,
+                Expr::binary(u_r_x.clone(), BinaryOp::Mul, u_n_r.clone()),
+            ),
+            Expr::binary(
+                u_n_r.clone(),
+                BinaryOp::Add,
+                Expr::binary(
+                    nx.clone(),
+                    BinaryOp::Mul,
+                    Expr::binary(u_r_x.clone(), BinaryOp::Add, dp_dru_r.clone()),
+                ),
+            ),
+            Expr::binary(
+                Expr::binary(u_r_x.clone(), BinaryOp::Mul, ny.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_drv_r.clone(), BinaryOp::Mul, nx.clone()),
+            ),
+            Expr::binary(dp_dre_r.clone(), BinaryOp::Mul, nx.clone()),
+        ],
+        [
+            Expr::binary(
+                Expr::binary(dp_drho_r.clone(), BinaryOp::Mul, ny.clone()),
+                BinaryOp::Sub,
+                Expr::binary(u_r_y.clone(), BinaryOp::Mul, u_n_r.clone()),
+            ),
+            Expr::binary(
+                Expr::binary(u_r_y.clone(), BinaryOp::Mul, nx.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_dru_r.clone(), BinaryOp::Mul, ny.clone()),
+            ),
+            Expr::binary(
+                u_n_r.clone(),
+                BinaryOp::Add,
+                Expr::binary(
+                    ny.clone(),
+                    BinaryOp::Mul,
+                    Expr::binary(u_r_y.clone(), BinaryOp::Add, dp_drv_r.clone()),
+                ),
+            ),
+            Expr::binary(dp_dre_r.clone(), BinaryOp::Mul, ny.clone()),
+        ],
+        [
+            Expr::binary(
+                u_n_r.clone(),
+                BinaryOp::Mul,
+                Expr::binary(dp_drho_r.clone(), BinaryOp::Sub, h_r.clone()),
+            ),
+            Expr::binary(
+                Expr::binary(h_r.clone(), BinaryOp::Mul, nx.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_dru_r.clone(), BinaryOp::Mul, u_n_r.clone()),
+            ),
+            Expr::binary(
+                Expr::binary(h_r.clone(), BinaryOp::Mul, ny.clone()),
+                BinaryOp::Add,
+                Expr::binary(dp_drv_r.clone(), BinaryOp::Mul, u_n_r.clone()),
+            ),
+            Expr::binary(gamma, BinaryOp::Mul, u_n_r.clone()),
+        ],
+    ]);
+
+    let visc_l = typed::MatExpr::<4, 4>::from_entries([
+        [
+            zero.clone(),
+            zero.clone(),
+            zero.clone(),
+            zero.clone(),
+        ],
+        [
             Expr::ident("d_diff_x_l_rho"),
-        ),
-        (1, 1) => Expr::binary(
-            Expr::binary(
-                Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_11")),
-                BinaryOp::Sub,
-                a_prod_scaled.clone(),
-            ),
-            BinaryOp::Add,
             Expr::ident("d_diff_x_l_ru"),
-        ),
-        (1, 2) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_12")),
-            BinaryOp::Add,
             Expr::ident("d_diff_x_l_rv"),
-        ),
-        (1, 3) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_13")),
-            BinaryOp::Add,
             Expr::ident("d_diff_x_l_re"),
-        ),
-        (2, 0) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_20")),
-            BinaryOp::Add,
+        ],
+        [
             Expr::ident("d_diff_y_l_rho"),
-        ),
-        (2, 1) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_21")),
-            BinaryOp::Add,
             Expr::ident("d_diff_y_l_ru"),
-        ),
-        (2, 2) => Expr::binary(
-            Expr::binary(
-                Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_22")),
-                BinaryOp::Sub,
-                a_prod_scaled.clone(),
-            ),
-            BinaryOp::Add,
             Expr::ident("d_diff_y_l_rv"),
-        ),
-        (2, 3) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_23")),
-            BinaryOp::Add,
             Expr::ident("d_diff_y_l_re"),
-        ),
-        (3, 0) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_30")),
-            BinaryOp::Add,
+        ],
+        [
             Expr::ident("d_e_visc_l_rho"),
-        ),
-        (3, 1) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_31")),
-            BinaryOp::Add,
             Expr::ident("d_e_visc_l_ru"),
-        ),
-        (3, 2) => Expr::binary(
-            Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_32")),
-            BinaryOp::Add,
             Expr::ident("d_e_visc_l_rv"),
-        ),
-        (3, 3) => Expr::binary(
-            Expr::binary(
-                Expr::binary(a_l.clone(), BinaryOp::Mul, Expr::ident("A_l_33")),
-                BinaryOp::Sub,
-                a_prod_scaled.clone(),
-            ),
-            BinaryOp::Add,
             Expr::ident("d_e_visc_l_re"),
-        ),
-        _ => unreachable!("invalid jac_l entry ({row},{col})"),
-    });
-    let jac_r = typed::MatExpr::<4, 4>::from_fn(|row, col| match (row, col) {
-        (0, 0) => a_prod_scaled.clone(),
-        (0, 1) => Expr::binary(a_r.clone(), BinaryOp::Mul, nx.clone()),
-        (0, 2) => Expr::binary(a_r.clone(), BinaryOp::Mul, ny.clone()),
-        (0, 3) => Expr::lit_f32(0.0),
-        (1, 0) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_10")),
-            BinaryOp::Add,
+        ],
+    ]);
+    let visc_r = typed::MatExpr::<4, 4>::from_entries([
+        [
+            zero.clone(),
+            zero.clone(),
+            zero.clone(),
+            zero.clone(),
+        ],
+        [
             Expr::ident("d_diff_x_r_rho"),
-        ),
-        (1, 1) => Expr::binary(
-            Expr::binary(
-                Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_11")),
-                BinaryOp::Add,
-                a_prod_scaled.clone(),
-            ),
-            BinaryOp::Add,
             Expr::ident("d_diff_x_r_ru"),
-        ),
-        (1, 2) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_12")),
-            BinaryOp::Add,
             Expr::ident("d_diff_x_r_rv"),
-        ),
-        (1, 3) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_13")),
-            BinaryOp::Add,
             Expr::ident("d_diff_x_r_re"),
-        ),
-        (2, 0) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_20")),
-            BinaryOp::Add,
+        ],
+        [
             Expr::ident("d_diff_y_r_rho"),
-        ),
-        (2, 1) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_21")),
-            BinaryOp::Add,
             Expr::ident("d_diff_y_r_ru"),
-        ),
-        (2, 2) => Expr::binary(
-            Expr::binary(
-                Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_22")),
-                BinaryOp::Add,
-                a_prod_scaled.clone(),
-            ),
-            BinaryOp::Add,
             Expr::ident("d_diff_y_r_rv"),
-        ),
-        (2, 3) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_23")),
-            BinaryOp::Add,
             Expr::ident("d_diff_y_r_re"),
-        ),
-        (3, 0) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_30")),
-            BinaryOp::Add,
+        ],
+        [
             Expr::ident("d_e_visc_r_rho"),
-        ),
-        (3, 1) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_31")),
-            BinaryOp::Add,
             Expr::ident("d_e_visc_r_ru"),
-        ),
-        (3, 2) => Expr::binary(
-            Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_32")),
-            BinaryOp::Add,
             Expr::ident("d_e_visc_r_rv"),
-        ),
-        (3, 3) => Expr::binary(
-            Expr::binary(
-                Expr::binary(a_r.clone(), BinaryOp::Mul, Expr::ident("A_r_33")),
-                BinaryOp::Add,
-                a_prod_scaled.clone(),
-            ),
-            BinaryOp::Add,
             Expr::ident("d_e_visc_r_re"),
-        ),
-        _ => unreachable!("invalid jac_r entry ({row},{col})"),
-    });
+        ],
+    ]);
+
+    let diag_term = typed::MatExpr::<4, 4>::identity().mul_scalar(a_prod_scaled.clone());
+    let jac_l = a_l_mat
+        .mul_scalar(a_l.clone())
+        .add(&visc_l)
+        .sub(&diag_term);
+    let jac_r = a_r_mat
+        .mul_scalar(a_r.clone())
+        .add(&visc_r)
+        .add(&diag_term);
 
     let mut interior_matrix_stmts = vec![
         dsl::let_("scalar_mat_idx", "cell_face_matrix_indices[face_offset]"),
@@ -1617,6 +1628,7 @@ mod tests {
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("sum_rho"));
         assert!(wgsl.contains("rhs_time_rho"));
-        assert!(wgsl.contains("A_l_10"));
+        assert!(wgsl.contains("dp_drho_l"));
+        assert!(!wgsl.contains("A_l_10"));
     }
 }

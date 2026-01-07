@@ -113,18 +113,46 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
 
     pub fn add(&self, rhs: &Self) -> Self {
         Self::from_fn(|row, col| {
-            Expr::binary(self.entry(row, col), BinaryOp::Add, rhs.entry(row, col))
+            let lhs = self.entry(row, col);
+            let rhs = rhs.entry(row, col);
+            if expr_is_zero(&lhs) {
+                return rhs;
+            }
+            if expr_is_zero(&rhs) {
+                return lhs;
+            }
+            Expr::binary(lhs, BinaryOp::Add, rhs)
         })
     }
 
     pub fn sub(&self, rhs: &Self) -> Self {
         Self::from_fn(|row, col| {
-            Expr::binary(self.entry(row, col), BinaryOp::Sub, rhs.entry(row, col))
+            let lhs = self.entry(row, col);
+            let rhs = rhs.entry(row, col);
+            if expr_is_zero(&rhs) {
+                return lhs;
+            }
+            Expr::binary(lhs, BinaryOp::Sub, rhs)
         })
     }
 
     pub fn mul_scalar(&self, scalar: Expr) -> Self {
-        Self::from_fn(|row, col| Expr::binary(self.entry(row, col), BinaryOp::Mul, scalar.clone()))
+        if expr_is_one(&scalar) {
+            return self.clone();
+        }
+        if expr_is_zero(&scalar) {
+            return Self::from_fn(|_, _| Expr::lit_f32(0.0));
+        }
+        Self::from_fn(|row, col| {
+            let entry = self.entry(row, col);
+            if expr_is_zero(&entry) {
+                return Expr::lit_f32(0.0);
+            }
+            if expr_is_one(&entry) {
+                return scalar.clone();
+            }
+            Expr::binary(entry, BinaryOp::Mul, scalar.clone())
+        })
     }
 
     pub fn mul_mat<const D: usize>(&self, rhs: &MatExpr<C, D>) -> MatExpr<R, D> {

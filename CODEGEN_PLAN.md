@@ -61,11 +61,11 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
    - Run all 1D cases across all combinations of temporal (Euler/BDF2) × spatial (Upwind/SOU/QUICK) schemes.
    - Store plots under `target/test_plots/*` with a consistent naming scheme; add a small summary index (text/HTML) to spot regressions quickly.
 
-### Open Questions / Decisions Needed
-- **Dynamic vs generated kernels**: do we pre-generate kernels for each known model (current approach) or move to runtime compilation/reflection?
-- **Flux handling in the model AST**: should `FluxRef` always be an external field, or can it have a definitional expression/closure attached?
-- **Preconditioning strategy**: default to generic block-Jacobi for all models, with optional specialized preconditioners (Schur) when the model provides a partition.
-- **Nonlinear iteration**: Picard vs Newton; and how to derive “nonlinear dependencies” from the model/closures.
+### Decisions (Chosen)
+- **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).
+- **Flux closures**: represent as plugin nodes in the `KernelGraph` (declared inputs/outputs), not as inline AST expressions.
+- **Preconditioning**: default to generic Jacobi for all models; compressible can add specialized preconditioners.
+- **Nonlinear iteration**: configurable (e.g. Picard/Newton); `SolverConfig` selects the strategy.
 
 ## Notes / Constraints
 - `build.rs` `include!()`s codegen modules; new build-time-only modules must be added there.

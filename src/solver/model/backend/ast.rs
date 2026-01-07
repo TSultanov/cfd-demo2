@@ -350,6 +350,13 @@ impl EquationSystem {
     pub fn equations(&self) -> &[Equation] {
         &self.equations
     }
+
+    pub fn unknowns_per_cell(&self) -> u32 {
+        self.equations
+            .iter()
+            .map(|eqn| eqn.target.kind().component_count() as u32)
+            .sum()
+    }
 }
 
 impl Default for EquationSystem {

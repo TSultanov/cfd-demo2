@@ -174,10 +174,11 @@ impl GpuCompressibleSolver {
         let context = GpuContext::new(device, queue).await;
         let num_cells = mesh.cell_cx.len() as u32;
         let num_faces = mesh.face_owner.len() as u32;
-        let num_unknowns = num_cells * 4;
         let profile = CompressibleProfile::new();
 
         let model = compressible_model();
+        let unknowns_per_cell = model.system.unknowns_per_cell();
+        let num_unknowns = num_cells * unknowns_per_cell;
         let layout = &model.state_layout;
         let offsets = CompressibleOffsets {
             stride: layout.stride(),
@@ -257,7 +258,8 @@ impl GpuCompressibleSolver {
 
         let scalar_row_offsets = mesh_res.row_offsets.clone();
         let scalar_col_indices = mesh_res.col_indices.clone();
-        let (row_offsets, col_indices) = build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, 4);
+        let (row_offsets, col_indices) =
+            build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, unknowns_per_cell);
         let block_row_offsets = row_offsets.clone();
         let block_col_indices = col_indices.clone();
         let matrix_res = matrix::init_matrix(&context.device, &row_offsets, &col_indices);
@@ -928,4 +930,3 @@ fn ping_pong_indices(step_index: usize) -> (usize, usize, usize) {
         _ => (0, 1, 2),
     }
 }
-

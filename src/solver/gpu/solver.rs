@@ -4,33 +4,35 @@ use std::sync::Arc;
 use super::coupled_solver_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
 use super::structs::GpuSolver;
+use crate::solver::model::incompressible_momentum_model;
 
 impl GpuSolver {
     pub fn set_u(&self, u: &[(f64, f64)]) {
-        use super::init::fields::FluidState;
-        // Read existing state, update u, write back
-        // FluidState is 32 bytes per cell: u(8), p(4), d_p(4), grad_p(8), grad_component(8)
-        let mut states = vec![FluidState::default(); self.num_cells as usize];
+        let layout = &incompressible_momentum_model().state_layout;
+        let stride = layout.stride() as usize;
+        let u_offset = layout.offset_for("U").unwrap_or(0) as usize;
+        let mut state = vec![0.0f32; self.num_cells as usize * stride];
         for (i, &(ux, uy)) in u.iter().enumerate() {
-            states[i].u = [ux as f32, uy as f32];
+            let base = i * stride + u_offset;
+            state[base] = ux as f32;
+            state[base + 1] = uy as f32;
         }
-        // Write full state buffer (for initialization)
         self.context
             .queue
-            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&states));
+            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&state));
     }
 
     pub fn set_p(&self, p: &[f64]) {
-        use super::init::fields::FluidState;
-        // Read existing state, update p, write back
-        let mut states = vec![FluidState::default(); self.num_cells as usize];
+        let layout = &incompressible_momentum_model().state_layout;
+        let stride = layout.stride() as usize;
+        let p_offset = layout.offset_for("p").unwrap_or(0) as usize;
+        let mut state = vec![0.0f32; self.num_cells as usize * stride];
         for (i, &pval) in p.iter().enumerate() {
-            states[i].p = pval as f32;
+            state[i * stride + p_offset] = pval as f32;
         }
-        // Write full state buffer (for initialization)
         self.context
             .queue
-            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&states));
+            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&state));
     }
 
     pub fn set_dt(&mut self, dt: f32) {
@@ -95,36 +97,45 @@ impl GpuSolver {
     }
 
     pub async fn get_u(&self) -> Vec<(f64, f64)> {
-        use super::init::fields::FluidState;
-        // FluidState is 32 bytes per cell
+        let layout = &incompressible_momentum_model().state_layout;
+        let stride = layout.stride() as usize;
+        let u_offset = layout.offset_for("U").unwrap_or(0) as usize;
         let data = self
-            .read_buffer(&self.b_state, (self.num_cells as u64) * 32)
+            .read_buffer(&self.b_state, (self.num_cells as u64) * stride as u64 * 4)
             .await;
-        let states: &[FluidState] = bytemuck::cast_slice(&data);
-        states
-            .iter()
-            .map(|s| (s.u[0] as f64, s.u[1] as f64))
+        let state: &[f32] = bytemuck::cast_slice(&data);
+        (0..self.num_cells as usize)
+            .map(|i| {
+                let base = i * stride + u_offset;
+                (state[base] as f64, state[base + 1] as f64)
+            })
             .collect()
     }
 
     pub async fn get_p(&self) -> Vec<f64> {
-        use super::init::fields::FluidState;
-        // FluidState is 32 bytes per cell
+        let layout = &incompressible_momentum_model().state_layout;
+        let stride = layout.stride() as usize;
+        let p_offset = layout.offset_for("p").unwrap_or(0) as usize;
         let data = self
-            .read_buffer(&self.b_state, (self.num_cells as u64) * 32)
+            .read_buffer(&self.b_state, (self.num_cells as u64) * stride as u64 * 4)
             .await;
-        let states: &[FluidState] = bytemuck::cast_slice(&data);
-        states.iter().map(|s| s.p as f64).collect()
+        let state: &[f32] = bytemuck::cast_slice(&data);
+        (0..self.num_cells as usize)
+            .map(|i| state[i * stride + p_offset] as f64)
+            .collect()
     }
 
     pub async fn get_d_p(&self) -> Vec<f64> {
-        use super::init::fields::FluidState;
-        // FluidState is 32 bytes per cell
+        let layout = &incompressible_momentum_model().state_layout;
+        let stride = layout.stride() as usize;
+        let dp_offset = layout.offset_for("d_p").unwrap_or(0) as usize;
         let data = self
-            .read_buffer(&self.b_state, (self.num_cells as u64) * 32)
+            .read_buffer(&self.b_state, (self.num_cells as u64) * stride as u64 * 4)
             .await;
-        let states: &[FluidState] = bytemuck::cast_slice(&data);
-        states.iter().map(|s| s.d_p as f64).collect()
+        let state: &[f32] = bytemuck::cast_slice(&data);
+        (0..self.num_cells as usize)
+            .map(|i| state[i * stride + dp_offset] as f64)
+            .collect()
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
@@ -281,8 +292,8 @@ impl GpuSolver {
                     label: Some("Initialize History Encoder"),
                 });
 
-        // FluidState is 32 bytes per cell
-        let state_size = (self.num_cells as u64) * 32;
+        let stride = incompressible_momentum_model().state_layout.stride() as u64;
+        let state_size = (self.num_cells as u64) * stride * 4;
 
         // Copy state to state_old
         encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old, 0, state_size);

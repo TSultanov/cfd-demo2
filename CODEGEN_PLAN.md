@@ -28,6 +28,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Planized the incompressible coupled solver’s init/prepare stage (host constant update + init prepare kernel) using `ExecutionPlan` as well (`src/solver/gpu/coupled_solver.rs`).
 - Expanded `GpuUnifiedSolver` to provide a real shared surface (common setters + `get_u/get_p/get_rho`) and migrated the 1D regression test harness to run compressible/incompressible cases through it (`tests/gpu_1d_structured_regression_test.rs`).
 - Migrated the UI app to `GpuUnifiedSolver` and switched plotting to use `StateLayout`-derived offsets instead of hardcoded packing (`src/ui/app.rs`).
+- Removed `FluidState` struct dependence from the public incompressible GPU read/write helpers by using `StateLayout` offsets instead (`src/solver/gpu/solver.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:

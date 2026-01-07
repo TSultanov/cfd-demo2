@@ -6,8 +6,8 @@ use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::csr::build_block_csr;
+use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
-use crate::solver::model::incompressible_momentum_model;
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
 
@@ -182,7 +182,7 @@ fn init_coupled_resources(
     scalar_col_indices: &[u32],
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
-    let unknowns_per_cell = incompressible_momentum_model().system.unknowns_per_cell();
+    let unknowns_per_cell = default_incompressible_model().system.unknowns_per_cell();
     debug_assert_eq!(
         unknowns_per_cell, 3,
         "incompressible coupled solver currently assumes 2x velocity + pressure"

@@ -18,9 +18,9 @@
 use super::context::GpuContext;
 use super::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
 use super::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
+use super::model_defaults::default_incompressible_model;
 use super::profiling::ProfileCategory;
 use super::structs::{GpuSolver, LinearSolverStats};
-use crate::solver::model::incompressible_momentum_model;
 use std::time::Instant;
 
 /// Enable debug reads for diagnosing matrix assembly issues.
@@ -391,7 +391,7 @@ impl GpuSolver {
                     0,
                 );
                 let res = self.coupled_resources.as_ref().unwrap();
-                let unknowns_per_cell = incompressible_momentum_model().system.unknowns_per_cell();
+                let unknowns_per_cell = default_incompressible_model().system.unknowns_per_cell();
 
                 // Read diagonal entries (sample first few) - DEBUG READS
                 let read_start = Instant::now();

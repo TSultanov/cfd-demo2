@@ -19,9 +19,9 @@
 use super::async_buffer::AsyncScalarReader;
 use super::bindings;
 use super::linear_solver::amg::{AmgResources, CsrMatrix};
+use super::model_defaults::default_incompressible_model;
 use super::profiling::ProfileCategory;
 use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
-use crate::solver::model::incompressible_momentum_model;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use std::time::Instant;
 
@@ -166,7 +166,7 @@ impl GpuSolver {
         self.coupled_resources
             .as_ref()
             .map(|res| res.num_unknowns)
-            .unwrap_or(self.num_cells * incompressible_momentum_model().system.unknowns_per_cell())
+            .unwrap_or(self.num_cells * default_incompressible_model().system.unknowns_per_cell())
     }
 
     fn ensure_fgmres_resources(&mut self, max_restart: usize) {

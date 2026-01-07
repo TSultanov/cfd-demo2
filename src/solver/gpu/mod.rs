@@ -12,6 +12,7 @@ pub mod execution_plan;
 pub mod init;
 pub mod kernel_graph;
 pub mod linear_solver;
+pub mod model_defaults;
 pub mod profiling;
 pub mod solver;
 pub mod structs;

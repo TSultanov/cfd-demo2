@@ -14,6 +14,11 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Typed WGSL enums exist in the DSL and on the GPU side (e.g. boundary/time schemes), and kernels use them for branching.
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the main safety net for refactors.
 
+## Unified Solver Progress (So Far)
+- Added `GpuUnifiedSolver` + `SolverConfig` as a single entrypoint wrapper over the existing incompressible/compressible GPU solvers (`src/solver/gpu/unified_solver.rs`).
+- Removed `ModelSpec.kernel_plan` storage; kernel plans are derived via `ModelSpec::kernel_plan()` (still model-family specific for now).
+- Shared block-CSR expansion (`src/solver/gpu/csr.rs`) and derived compressible unknown count from `EquationSystem::unknowns_per_cell()`.
+
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
 - incompressible (coupled)
@@ -35,10 +40,10 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 5. **Runtime**: a generic dispatcher runs the `KernelGraph` for each timestep/nonlinear iteration and calls a generic linear solver with the chosen preconditioner chain.
 
 ### Milestones (Iterative)
-1. **Unify the runtime interface (no behavior change)**
+1. **Unify the runtime interface (no behavior change)** (DONE: wrapper + config)
    - Introduce `SolverConfig` (time scheme, spatial scheme(s), linear solver, preconditioner chain, tolerances).
    - Add a thin `GpuUnifiedSolver` wrapper that can host the *existing* incompressible and compressible solvers behind one entrypoint (temporary adapters).
-2. **Derive `kernel_plan` instead of hardcoding it**
+2. **Derive `kernel_plan` instead of hardcoding it** (DONE: derived accessor, still uses model-family mapping)
    - Replace `ModelSpec.kernel_plan` with a derived plan: `derive_kernel_plan(model, config)`.
    - Start by matching existing pipelines (incompressible: prepare→assemble→pressure→update→flux; compressible: flux→grad→assembly→apply→update).
 3. **Unify state packing + unknown layout**

@@ -546,7 +546,7 @@ fn codegen_diff_coeff_fn() -> Function {
 
 fn format_coeff(coeff: &Coefficient) -> String {
     match coeff {
-        Coefficient::Constant(value) => format!("const({})", value),
+        Coefficient::Constant { value, .. } => format!("const({})", value),
         Coefficient::Field(field) => format!("field({})", field.name()),
         Coefficient::Product(lhs, rhs) => {
             format!("product({}, {})", format_coeff(lhs), format_coeff(rhs))
@@ -640,13 +640,14 @@ mod tests {
     use crate::solver::model::backend::ast::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::units::{si, UnitDim};
 
     #[test]
     fn generate_wgsl_emits_terms_and_metadata() {
-        let u = vol_vector("U");
-        let p = vol_scalar("p");
-        let phi = surface_scalar("phi");
-        let mu = vol_scalar("mu");
+        let u = vol_vector("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
 
         let mut eqn = crate::solver::model::backend::ast::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
@@ -667,7 +668,7 @@ mod tests {
             Scheme::QUICK,
         );
 
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl(&discrete);
 
         assert!(wgsl.contains("// equation: U (vector2)"));
@@ -684,8 +685,8 @@ mod tests {
     fn format_helpers_cover_constant_coeff_and_schemes() {
         let coeff = Coefficient::constant(1.5);
         assert_eq!(format_coeff(&coeff), "const(1.5)");
-        let rho = vol_scalar("rho");
-        let d_p = vol_scalar("d_p");
+        let rho = vol_scalar("rho", si::DENSITY);
+        let d_p = vol_scalar("d_p", si::D_P);
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
             Coefficient::field(d_p).unwrap(),
@@ -705,7 +706,7 @@ mod tests {
 
     #[test]
     fn generated_line_omits_optional_fields_when_absent() {
-        let u = vol_vector("U");
+        let u = vol_vector("U", si::VELOCITY);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvc::grad(u.clone()));
 
@@ -713,7 +714,7 @@ mod tests {
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl(&discrete);
 
         assert!(wgsl.contains("term: grad"));
@@ -723,16 +724,17 @@ mod tests {
 
     #[test]
     fn generate_wgsl_includes_ddt_and_source_terms() {
-        let u = vol_vector("U");
+        let u = vol_vector("U", si::VELOCITY);
+        let source_u = vol_vector("Su", UnitDim::new(0, 1, -2));
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()))
-            .with_term(fvc::source(u.clone()));
+            .with_term(fvc::source(source_u));
 
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl(&discrete);
 
         assert!(wgsl.contains("term: ddt"));
@@ -749,8 +751,8 @@ mod tests {
 
     #[test]
     fn term_function_name_includes_flux_and_scheme() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi.face");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi.face", si::MASS_FLUX);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
 
@@ -765,26 +767,31 @@ mod tests {
             Scheme::QUICK,
         );
 
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let name = term_function_name(&discrete.equations[0].ops[0]);
         assert_eq!(name, "term_div_phi_face_U_quick");
     }
 
     #[test]
     fn generate_wgsl_emits_term_math() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
+        let u = vol_vector("U", si::VELOCITY);
+        let rho = vol_scalar("rho", si::DENSITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
-            .with_term(fvm::ddt(u.clone()))
+            .with_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()))
             .with_term(fvm::div(phi, u.clone()))
-            .with_term(fvc::grad(vol_scalar("p")))
-            .with_term(fvm::laplacian(Coefficient::constant(0.1), u.clone()));
+            .with_term(fvc::grad(p))
+            .with_term(fvm::laplacian(
+                Coefficient::constant_unit(0.1, si::DYNAMIC_VISCOSITY),
+                u.clone(),
+            ));
 
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl(&discrete);
 
         assert!(wgsl.contains("fn term_ddt_U_upwind"));
@@ -798,16 +805,16 @@ mod tests {
 
     #[test]
     fn equation_function_name_is_sanitized() {
-        let field = vol_vector("U-1");
+        let field = vol_vector("U-1", si::VELOCITY);
         let name = equation_function_name(&field);
         assert_eq!(name, "assemble_U_1");
     }
 
     #[test]
     fn generate_wgsl_library_emits_codegen_assemble() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
-        let mu = vol_scalar("mu");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
@@ -819,7 +826,7 @@ mod tests {
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl_library(&discrete);
 
         assert!(wgsl.contains("codegen_assemble_U"));
@@ -830,7 +837,7 @@ mod tests {
 
     #[test]
     fn generate_wgsl_library_omits_conv_coeff_when_no_convection() {
-        let u = vol_vector("U");
+        let u = vol_vector("U", si::VELOCITY);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
 
@@ -838,7 +845,7 @@ mod tests {
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl_library(&discrete);
 
         assert!(!wgsl.contains("codegen_conv_coeff"));
@@ -847,8 +854,8 @@ mod tests {
 
     #[test]
     fn generate_wgsl_library_emits_diff_coeff_for_laplacian() {
-        let u = vol_vector("U");
-        let mu = vol_scalar("mu");
+        let u = vol_vector("U", si::VELOCITY);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::laplacian(
                 Coefficient::field(mu).unwrap(),
@@ -859,7 +866,7 @@ mod tests {
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let wgsl = generate_wgsl_library(&discrete);
 
         assert!(wgsl.contains("codegen_diff_coeff"));

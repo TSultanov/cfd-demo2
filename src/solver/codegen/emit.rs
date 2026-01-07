@@ -81,7 +81,7 @@ fn generate_kernel_wgsl(
     schemes: &SchemeRegistry,
     kind: KernelKind,
 ) -> Result<String, String> {
-    let discrete = lower_system(&model.system, schemes);
+    let discrete = lower_system(&model.system, schemes).map_err(|err| err.to_string())?;
     let wgsl = match kind {
         KernelKind::PrepareCoupled => {
             let fields = model
@@ -269,6 +269,7 @@ mod tests {
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
+    use crate::solver::units::si;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -323,14 +324,14 @@ mod tests {
 
     #[test]
     fn write_wgsl_file_creates_parent_and_writes_content() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
         let eqn = Equation::new(u.clone()).with_term(fvm::div(phi, u));
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
 
         let output_path = temp_output_path();
         let output = write_wgsl_file(&discrete, &output_path).unwrap();
@@ -344,14 +345,14 @@ mod tests {
 
     #[test]
     fn write_wgsl_file_skips_write_when_unchanged() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
         let eqn = Equation::new(u.clone()).with_term(fvm::div(phi, u));
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
 
         let output_path = temp_output_path();
         let first = write_wgsl_file(&discrete, &output_path).unwrap();
@@ -375,14 +376,14 @@ mod tests {
 
     #[test]
     fn write_wgsl_in_dir_writes_into_generated_folder() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
         let eqn = Equation::new(u.clone()).with_term(fvm::div(phi, u));
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
 
         let base_dir = temp_base_dir();
         let output = write_wgsl_in_dir(&discrete, &base_dir, "debug.wgsl").unwrap();

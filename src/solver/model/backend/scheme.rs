@@ -93,11 +93,12 @@ impl Default for SchemeRegistry {
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar};
+    use crate::solver::units::si;
 
     #[test]
     fn scheme_registry_uses_default_when_unset() {
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let term = fvm::div(surface_scalar("phi"), vol_scalar("U"));
+        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
         assert_eq!(registry.scheme_for(&term), Scheme::Upwind);
     }
 
@@ -106,7 +107,7 @@ mod tests {
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_op(TermOp::Div, Scheme::QUICK);
 
-        let term = fvm::div(surface_scalar("phi"), vol_scalar("U"));
+        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
         assert_eq!(registry.scheme_for(&term), Scheme::QUICK);
     }
 
@@ -115,8 +116,8 @@ mod tests {
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_op(TermOp::Div, Scheme::QUICK);
 
-        let flux = surface_scalar("phi");
-        let field = vol_scalar("U");
+        let flux = surface_scalar("phi", si::MASS_FLUX);
+        let field = vol_scalar("U", si::VELOCITY);
         registry.set_for_term(TermOp::Div, Some(&flux), &field, Scheme::SecondOrderUpwind);
 
         let term = fvm::div(flux, field);
@@ -126,7 +127,7 @@ mod tests {
     #[test]
     fn scheme_registry_default_impl_uses_upwind() {
         let registry = SchemeRegistry::default();
-        let term = fvm::div(surface_scalar("phi"), vol_scalar("U"));
+        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
         assert_eq!(registry.scheme_for(&term), Scheme::Upwind);
     }
 
@@ -135,7 +136,7 @@ mod tests {
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term_names(TermOp::Div, Some("phi"), "U", Scheme::QUICK);
 
-        let term = fvm::div(surface_scalar("phi"), vol_scalar("U"));
+        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
         assert_eq!(registry.scheme_for(&term), Scheme::QUICK);
     }
 }

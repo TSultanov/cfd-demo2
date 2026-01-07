@@ -29,7 +29,7 @@ fn coeff_named_expr(name: &str) -> Option<String> {
 
 fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>) -> String {
     match coeff {
-        Coefficient::Constant(value) => f32_literal(*value),
+        Coefficient::Constant { value, .. } => f32_literal(*value),
         Coefficient::Field(field) => {
             if let Some(state_field) = layout.field(field.name()) {
                 if state_field.kind() != FieldKind::Scalar {
@@ -104,15 +104,16 @@ pub fn coeff_face_expr(
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
+    use crate::solver::units::si;
 
     #[test]
     fn coeff_expr_handles_product_and_constants() {
-        let rho = vol_scalar("rho");
-        let d_p = vol_scalar("d_p");
+        let rho = vol_scalar("rho", si::DENSITY);
+        let d_p = vol_scalar("d_p", si::D_P);
         let layout = StateLayout::new(vec![d_p]);
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
-            Coefficient::field(vol_scalar("d_p")).unwrap(),
+            Coefficient::field(vol_scalar("d_p", si::D_P)).unwrap(),
         )
         .unwrap();
 
@@ -125,10 +126,10 @@ mod tests {
 
     #[test]
     fn coeff_expr_rejects_vector_coefficients() {
-        let u = vol_vector("U");
-        let layout = StateLayout::new(vec![vol_scalar("p")]);
+        let u = vol_vector("U", si::VELOCITY);
+        let layout = StateLayout::new(vec![vol_scalar("p", si::PRESSURE)]);
         let err = Coefficient::product(
-            Coefficient::field(vol_scalar("p")).unwrap(),
+            Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap(),
             Coefficient::Field(u),
         )
         .unwrap_err();
@@ -137,7 +138,7 @@ mod tests {
             crate::solver::model::backend::ast::CodegenError::NonScalarCoefficient { .. }
         ));
 
-        let coeff = Coefficient::field(vol_scalar("p")).unwrap();
+        let coeff = Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap();
         let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", "1.0");
         assert_eq!(expr, "state[idx * 1u + 0u]");
     }

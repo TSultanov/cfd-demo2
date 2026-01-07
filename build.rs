@@ -3,6 +3,9 @@ use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
 
 #[allow(dead_code)]
 mod solver {
+    pub mod units {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/units.rs"));
+    }
     pub mod scheme {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/scheme.rs"));
     }

@@ -1,9 +1,10 @@
 use super::backend::ast::{
-    fvc, fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef,
-    FluxRef,
+    fvc, fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
+    FieldRef, FluxRef,
 };
 use super::backend::state_layout::StateLayout;
 use super::kernel::{KernelKind, KernelPlan};
+use crate::solver::units::si;
 
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
@@ -50,14 +51,14 @@ pub struct IncompressibleMomentumFields {
 impl IncompressibleMomentumFields {
     pub fn new() -> Self {
         Self {
-            u: vol_vector("U"),
-            p: vol_scalar("p"),
-            phi: surface_scalar("phi"),
-            mu: vol_scalar("mu"),
-            rho: vol_scalar("rho"),
-            d_p: vol_scalar("d_p"),
-            grad_p: vol_vector("grad_p"),
-            grad_component: vol_vector("grad_component"),
+            u: vol_vector("U", si::VELOCITY),
+            p: vol_scalar("p", si::PRESSURE),
+            phi: surface_scalar("phi", si::MASS_FLUX),
+            mu: vol_scalar("mu", si::DYNAMIC_VISCOSITY),
+            rho: vol_scalar("rho", si::DENSITY),
+            d_p: vol_scalar("d_p", si::D_P),
+            grad_p: vol_vector("grad_p", si::PRESSURE_GRADIENT),
+            grad_component: vol_vector("grad_component", si::INV_TIME),
         }
     }
 }
@@ -78,15 +79,15 @@ pub struct CompressibleFields {
 impl CompressibleFields {
     pub fn new() -> Self {
         Self {
-            rho: vol_scalar("rho"),
-            rho_u: vol_vector("rho_u"),
-            rho_e: vol_scalar("rho_e"),
-            p: vol_scalar("p"),
-            u: vol_vector("u"),
-            mu: vol_scalar("mu"),
-            phi_rho: surface_scalar("phi_rho"),
-            phi_rho_u: surface_scalar("phi_rho_u"),
-            phi_rho_e: surface_scalar("phi_rho_e"),
+            rho: vol_scalar("rho", si::DENSITY),
+            rho_u: vol_vector("rho_u", si::MOMENTUM_DENSITY),
+            rho_e: vol_scalar("rho_e", si::ENERGY_DENSITY),
+            p: vol_scalar("p", si::PRESSURE),
+            u: vol_vector("u", si::VELOCITY),
+            mu: vol_scalar("mu", si::DYNAMIC_VISCOSITY),
+            phi_rho: surface_scalar("phi_rho", si::MASS_FLUX),
+            phi_rho_u: surface_vector("phi_rho_u", si::FORCE),
+            phi_rho_e: surface_scalar("phi_rho_e", si::POWER),
         }
     }
 }
@@ -122,22 +123,14 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
 
 fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     let rho_eqn =
-        (fvm::ddt(fields.rho) + fvm::div(fields.phi_rho, fields.rho)).eqn(fields.rho);
+        (fvm::ddt(fields.rho) + fvm::div_flux(fields.phi_rho, fields.rho)).eqn(fields.rho);
     let rho_u_eqn =
         (fvm::ddt(fields.rho_u)
-            + fvm::div(fields.phi_rho_u, fields.rho_u)
-            + fvm::laplacian(
-                Coefficient::field(fields.mu).expect("mu must be scalar"),
-                fields.rho_u,
-            ))
+            + fvm::div_flux(fields.phi_rho_u, fields.rho_u))
             .eqn(fields.rho_u);
     let rho_e_eqn =
         (fvm::ddt(fields.rho_e)
-            + fvm::div(fields.phi_rho_e, fields.rho_e)
-            + fvm::laplacian(
-                Coefficient::field(fields.mu).expect("mu must be scalar"),
-                fields.rho_e,
-            ))
+            + fvm::div_flux(fields.phi_rho_e, fields.rho_e))
             .eqn(fields.rho_e);
 
     let mut system = EquationSystem::new();
@@ -250,8 +243,8 @@ mod tests {
     fn compressible_model_defines_conservative_equations() {
         let model = compressible_model();
         assert_eq!(model.system.equations().len(), 3);
-        assert_eq!(model.system.equations()[1].terms().len(), 3);
-        assert_eq!(model.system.equations()[2].terms().len(), 3);
+        assert_eq!(model.system.equations()[1].terms().len(), 2);
+        assert_eq!(model.system.equations()[2].terms().len(), 2);
         assert!(model.kernel_plan.contains(KernelKind::CompressibleFluxKt));
         assert!(matches!(model.fields, ModelFields::Compressible(_)));
     }

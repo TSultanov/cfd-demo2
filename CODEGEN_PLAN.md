@@ -7,7 +7,11 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - A WGSL AST exists (`src/solver/codegen/wgsl_ast.rs`) with a precedence-aware renderer; kernels can build expressions without parsing strings.
 - Typed DSL scaffolding exists (`src/solver/codegen/dsl/*`):
   - `DslType`/`Shape` + `TypedExpr`
-  - `UnitDim` uses **SI base dimensions** (M/L/T) and supports **rational exponents** (e.g. `sqrt`).
+  - `UnitDim` lives in `src/solver/units.rs` (shared across solver + codegen) and uses **SI base dimensions** (M/L/T) with **rational exponents** (e.g. `sqrt`).
+- Physical-units-aware validation is enforced in the model DSL (`src/solver/model/backend/ast.rs`):
+  - `vol_scalar`/`vol_vector`/`surface_scalar` require units.
+  - `EquationSystem::validate_units()` checks FV-integrated term units and is called during lowering (`lower_system`).
+  - `StateLayout` stores per-field units and `state_*_typed` accessors return `TypedExpr` with units for kernel codegen.
 - Dense tensor helpers exist in the DSL (`src/solver/codegen/dsl/tensor.rs`):
   - `MatExpr<const R, const C>` for building small dense matrix expressions and emitting unrolled assigns/scatters.
     - Includes `identity()`, `from_entries(...)`, diagonal updates (`assign_op_diag`), matrix multiplication (`mul_mat`), and prefix var helpers (`var_prefix`).
@@ -60,13 +64,12 @@ This file tracks *codegen* work only. Solver physics/tuning tasks should live el
 - Add typed helpers for common intrinsics and comparisons (`min/max/abs/select/clamp`, comparisons, `dot`, component access).
 - Make unit/type diagnostics actionable (include operation + field/var names where possible).
 
-### 3) Attach SI Units to Model/State Access (Enforce Them)
-**Deliverable:** state loads/stores and coefficients carry units and are checked in codegen.
+### 3) Extend Unit Checking Into Codegen (TypedExpr Everywhere)
+**Deliverable:** fewer unit bugs while migrating kernels by building most math through `TypedExpr`.
 
-- Define an SI unit map for core fields and constants (at minimum):
-  - `rho` [kg/m³], `p` [Pa], `U` [m/s], `rhoU` [kg/(m²·s)], `rhoE` [Pa], `mu` [Pa·s], `dt` [s].
-- Provide typed state/coeff access helpers that return `TypedExpr` with `UnitDim` + `DslType`.
-- Add unit tests for invalid operations (e.g. `p + U`, `sqrt(rho)` without compensating units) with clear error messages.
+- Convert `coeff_expr` and other remaining string-built helpers to return AST/`TypedExpr` where practical.
+- Expand `TypedExpr` intrinsics as needed (`pow`, `min/max`, `dot`, `select/clamp`) while preserving unit rules.
+- Prefer `state_*_typed` accessors in new/refactored kernels so units are available during expression construction (even though they’re erased in WGSL output).
 
 ### 4) Higher-Level Matrix DSL (Block/CSR Assembly)
 **Deliverable:** matrix-heavy kernels stop hand-writing `_00/_01/...` patterns.

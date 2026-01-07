@@ -1,7 +1,7 @@
 use crate::solver::scheme::Scheme;
 
 use crate::solver::model::backend::ast::{
-    Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp,
+    Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp, UnitValidationError,
 };
 use crate::solver::model::backend::SchemeRegistry;
 
@@ -48,7 +48,11 @@ pub struct DiscreteSystem {
     pub equations: Vec<DiscreteEquation>,
 }
 
-pub fn lower_system(system: &EquationSystem, schemes: &SchemeRegistry) -> DiscreteSystem {
+pub fn lower_system(
+    system: &EquationSystem,
+    schemes: &SchemeRegistry,
+) -> Result<DiscreteSystem, UnitValidationError> {
+    system.validate_units()?;
     let mut equations = Vec::new();
     for equation in system.equations() {
         let mut ops = Vec::new();
@@ -60,13 +64,13 @@ pub fn lower_system(system: &EquationSystem, schemes: &SchemeRegistry) -> Discre
             ops,
         });
     }
-    DiscreteSystem { equations }
+    Ok(DiscreteSystem { equations })
 }
 
 fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> DiscreteOp {
     let kind = match term.op {
         TermOp::Ddt => DiscreteOpKind::TimeDerivative,
-        TermOp::Div => DiscreteOpKind::Convection,
+        TermOp::Div | TermOp::DivFlux => DiscreteOpKind::Convection,
         TermOp::Grad => DiscreteOpKind::Gradient,
         TermOp::Laplacian => DiscreteOpKind::Diffusion,
         TermOp::Source => DiscreteOpKind::Source,
@@ -86,26 +90,29 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
+    use crate::solver::units::si;
 
     #[test]
     fn lower_system_maps_all_term_kinds() {
-        let u = vol_vector("U");
-        let p = vol_scalar("p");
-        let phi = surface_scalar("phi");
-        let mu = vol_scalar("mu");
+        let u = vol_vector("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let rho = vol_scalar("rho", si::DENSITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let source_u = vol_vector("Su", si::PRESSURE_GRADIENT);
 
         let mut eqn = crate::solver::model::backend::ast::Equation::new(u.clone());
-        eqn.add_term(fvm::ddt(u.clone()));
+        eqn.add_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()));
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
         eqn.add_term(fvc::grad(p.clone()));
         eqn.add_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
-        eqn.add_term(fvc::source(u.clone()));
+        eqn.add_term(fvc::source(source_u));
 
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
 
         assert_eq!(discrete.equations.len(), 1);
         let ops = &discrete.equations[0].ops;
@@ -120,8 +127,8 @@ mod tests {
 
     #[test]
     fn lower_system_applies_scheme_registry() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
 
         let mut eqn = crate::solver::model::backend::ast::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
@@ -132,7 +139,7 @@ mod tests {
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(TermOp::Div, Some(&phi), &u, Scheme::QUICK);
 
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         assert_eq!(discrete.equations[0].ops[0].scheme, Scheme::QUICK);
     }
 }

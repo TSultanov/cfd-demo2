@@ -972,7 +972,7 @@ mod tests {
     fn prepare_coupled_codegen_emits_state_arrays() {
         let model = incompressible_momentum_model();
         let schemes = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&model.system, &schemes);
+        let discrete = lower_system(&model.system, &schemes).unwrap();
         let fields = model.fields.incompressible().expect("incompressible fields");
         let wgsl = generate_prepare_coupled_wgsl(&discrete, &model.state_layout, fields);
         assert!(wgsl.contains("state: array<f32>"));

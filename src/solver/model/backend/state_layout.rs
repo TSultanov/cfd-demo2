@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use super::ast::{FieldKind, FieldRef};
+use crate::solver::units::UnitDim;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateField {
     name: String,
     kind: FieldKind,
     offset: u32,
+    unit: UnitDim,
 }
 
 impl StateField {
@@ -20,6 +22,10 @@ impl StateField {
 
     pub fn offset(&self) -> u32 {
         self.offset
+    }
+
+    pub fn unit(&self) -> UnitDim {
+        self.unit
     }
 
     pub fn component_count(&self) -> u32 {
@@ -40,17 +46,29 @@ pub struct StateLayout {
 impl StateLayout {
     pub fn new(fields: Vec<FieldRef>) -> Self {
         let mut offsets = HashMap::new();
-        let mut layout_fields = Vec::new();
+        let mut layout_fields: Vec<StateField> = Vec::new();
         let mut offset = 0u32;
 
         for field in fields {
-            if offsets.contains_key(field.name()) {
+            if let Some(&idx) = offsets.get(field.name()) {
+                let existing: &StateField = &layout_fields[idx];
+                if existing.kind != field.kind() || existing.unit != field.unit() {
+                    panic!(
+                        "duplicate field '{}' has mismatched kind/unit (existing kind={}, unit={}, new kind={}, unit={})",
+                        field.name(),
+                        existing.kind.as_str(),
+                        existing.unit,
+                        field.kind().as_str(),
+                        field.unit()
+                    );
+                }
                 continue;
             }
             let entry = StateField {
                 name: field.name().to_string(),
                 kind: field.kind(),
                 offset,
+                unit: field.unit(),
             };
             offsets.insert(entry.name.clone(), layout_fields.len());
             offset += entry.component_count();
@@ -93,14 +111,15 @@ impl StateLayout {
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
+    use crate::solver::units::si;
 
     #[test]
     fn state_layout_assigns_offsets_and_stride() {
-        let u = vol_vector("U");
-        let p = vol_scalar("p");
-        let d_p = vol_scalar("d_p");
-        let grad_p = vol_vector("grad_p");
-        let grad_comp = vol_vector("grad_component");
+        let u = vol_vector("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let d_p = vol_scalar("d_p", si::D_P);
+        let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
+        let grad_comp = vol_vector("grad_component", si::INV_TIME);
 
         let layout = StateLayout::new(vec![u, p, d_p, grad_p, grad_comp]);
         assert_eq!(layout.stride(), 8);

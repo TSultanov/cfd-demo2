@@ -1,6 +1,7 @@
 use cfd2::solver::gpu::GpuSolver;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
+use cfd2::solver::units::{si, UnitDim};
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {
@@ -54,7 +55,7 @@ fn build_rect_mesh(cell_size: f64) -> Mesh {
 }
 
 fn build_laplace_system() -> EquationSystem {
-    let phi = vol_scalar("phi");
+    let phi = vol_scalar("phi", si::DIMENSIONLESS);
     let eqn = fvm::laplacian(Coefficient::constant(1.0), phi).eqn(phi);
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
@@ -62,16 +63,18 @@ fn build_laplace_system() -> EquationSystem {
 }
 
 fn build_poisson_system() -> EquationSystem {
-    let phi = vol_scalar("phi");
-    let eqn = fvm::laplacian(Coefficient::constant(1.0), phi) + fvm::source(phi);
+    let phi = vol_scalar("phi", si::DIMENSIONLESS);
+    let source = vol_scalar("source", UnitDim::new(0, -2, 0));
+    let eqn = fvm::laplacian(Coefficient::constant(1.0), phi) + fvm::source(source);
     let mut system = EquationSystem::new();
     system.add_equation(eqn.eqn(phi));
     system
 }
 
 fn build_heat_system(alpha: f64) -> EquationSystem {
-    let phi = vol_scalar("phi");
-    let eqn = fvm::ddt(phi) + fvm::laplacian(Coefficient::constant(alpha), phi);
+    let phi = vol_scalar("phi", si::DIMENSIONLESS);
+    let eqn = fvm::ddt(phi)
+        + fvm::laplacian(Coefficient::constant_unit(alpha, UnitDim::new(0, 2, -1)), phi);
     let mut system = EquationSystem::new();
     system.add_equation(eqn.eqn(phi));
     system
@@ -155,7 +158,7 @@ where
 {
     fn eval_coeff_scalar(coeff: &Coefficient) -> f64 {
         match coeff {
-            Coefficient::Constant(value) => *value,
+            Coefficient::Constant { value, .. } => *value,
             Coefficient::Field(field) => {
                 panic!("coefficient field not supported: {}", field.name())
             }

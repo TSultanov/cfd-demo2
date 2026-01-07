@@ -1017,14 +1017,15 @@ mod tests {
     use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
+    use crate::solver::units::si;
 
     fn default_layout() -> StateLayout {
         StateLayout::new(vec![
-            vol_vector("U"),
-            vol_scalar("p"),
-            vol_scalar("d_p"),
-            vol_vector("grad_p"),
-            vol_vector("grad_component"),
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+            vol_scalar("d_p", si::D_P),
+            vol_vector("grad_p", si::PRESSURE_GRADIENT),
+            vol_vector("grad_component", si::INV_TIME),
         ])
     }
 
@@ -1034,11 +1035,11 @@ mod tests {
 
     #[test]
     fn generate_coupled_assembly_wgsl_includes_codegen_helpers() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
-        let mu = vol_scalar("mu");
-        let p = vol_scalar("p");
-        let d_p = vol_scalar("d_p");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let d_p = vol_scalar("d_p", si::D_P);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(
@@ -1054,7 +1055,7 @@ mod tests {
         );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let layout = default_layout();
         let fields = default_fields();
         let wgsl = generate_coupled_assembly_wgsl(&discrete, &layout, &fields);
@@ -1066,10 +1067,10 @@ mod tests {
 
     #[test]
     fn coupled_assembly_codegen_embeds_scheme_id_from_registry() {
-        let u = vol_vector("U");
-        let phi = surface_scalar("phi");
-        let p = vol_scalar("p");
-        let d_p = vol_scalar("d_p");
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let p = vol_scalar("p", si::PRESSURE);
+        let d_p = vol_scalar("d_p", si::D_P);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
@@ -1088,7 +1089,7 @@ mod tests {
             Scheme::QUICK,
         );
 
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let fields = default_fields();
         let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), &fields);
 
@@ -1097,9 +1098,9 @@ mod tests {
 
     #[test]
     fn coupled_assembly_codegen_zeros_diffusion_when_missing() {
-        let u = vol_vector("U");
-        let p = vol_scalar("p");
-        let d_p = vol_scalar("d_p");
+        let u = vol_vector("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let d_p = vol_scalar("d_p", si::D_P);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
@@ -1111,7 +1112,7 @@ mod tests {
         );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let fields = default_fields();
         let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), &fields);
 
@@ -1120,11 +1121,11 @@ mod tests {
 
     #[test]
     fn coupled_assembly_codegen_maps_named_coefficients() {
-        let u = vol_vector("U");
-        let mu = vol_scalar("mu");
-        let rho = vol_scalar("rho");
-        let p = vol_scalar("p");
-        let d_p = vol_scalar("d_p");
+        let u = vol_vector("U", si::VELOCITY);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let rho = vol_scalar("rho", si::DENSITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let d_p = vol_scalar("d_p", si::D_P);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::ddt_coeff(
                 Coefficient::field(rho).unwrap(),
@@ -1143,7 +1144,7 @@ mod tests {
         );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &registry);
+        let discrete = lower_system(&system, &registry).unwrap();
         let fields = default_fields();
         let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), &fields);
 

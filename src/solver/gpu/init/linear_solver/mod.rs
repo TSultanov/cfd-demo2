@@ -7,6 +7,7 @@ use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
+use crate::solver::model::incompressible_momentum_model;
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
 
@@ -181,8 +182,15 @@ fn init_coupled_resources(
     scalar_col_indices: &[u32],
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
-    let num_coupled_cells = num_cells * 3;
-    let (row_offsets, col_indices) = build_block_csr(scalar_row_offsets, scalar_col_indices, 3);
+    let unknowns_per_cell = incompressible_momentum_model().system.unknowns_per_cell();
+    debug_assert_eq!(
+        unknowns_per_cell, 3,
+        "incompressible coupled solver currently assumes 2x velocity + pressure"
+    );
+
+    let num_coupled_cells = num_cells * unknowns_per_cell;
+    let (row_offsets, col_indices) =
+        build_block_csr(scalar_row_offsets, scalar_col_indices, unknowns_per_cell);
     debug_assert_eq!(row_offsets.len(), num_coupled_cells as usize + 1);
 
     // 2. Init Matrix Buffers
@@ -216,7 +224,7 @@ fn init_coupled_resources(
         mapped_at_creation: false,
     });
 
-    // 3. Init State Buffers (size * 3)
+    // 3. Init State Buffers (size * unknowns_per_cell)
     let state_res = state::init_state(device, num_coupled_cells);
 
     // Create preconditioner buffers (Moved up for bg_solver)

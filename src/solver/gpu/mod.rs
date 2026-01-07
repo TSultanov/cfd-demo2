@@ -6,6 +6,7 @@ pub mod compressible_solver;
 pub mod context;
 pub mod coupled_solver;
 pub mod coupled_solver_fgmres;
+pub mod enums;
 pub mod init;
 pub mod linear_solver;
 pub mod profiling;

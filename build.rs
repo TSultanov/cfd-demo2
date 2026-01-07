@@ -9,6 +9,11 @@ mod solver {
     pub mod scheme {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/scheme.rs"));
     }
+    pub mod gpu {
+        pub mod enums {
+            include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/gpu/enums.rs"));
+        }
+    }
     pub mod model {
         pub mod backend {
             pub mod ast {
@@ -60,13 +65,19 @@ mod solver {
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
     }
-    pub mod codegen {
-        pub mod dsl {
-            pub mod expr {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/expr.rs"
-                ));
+        pub mod codegen {
+            pub mod dsl {
+                pub mod enums {
+                    include!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/src/solver/codegen/dsl/enums.rs"
+                    ));
+                }
+                pub mod expr {
+                    include!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/src/solver/codegen/dsl/expr.rs"
+                    ));
             }
             pub mod matrix {
                 include!(concat!(
@@ -93,6 +104,8 @@ mod solver {
                 ));
             }
 
+            #[allow(unused_imports)]
+            pub use enums::{EnumExpr, WgslEnum};
             #[allow(unused_imports)]
             pub use expr::{DslError, TypedExpr};
             #[allow(unused_imports)]

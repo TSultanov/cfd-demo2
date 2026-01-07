@@ -1,6 +1,8 @@
 use crate::solver::scheme::Scheme;
+use crate::solver::gpu::enums::TimeScheme;
 
 use crate::solver::model::backend::ast::{Coefficient, Discretization, FieldKind};
+use super::dsl::EnumExpr;
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::wgsl_ast::{Block, Expr, Function, Item, Module, Param, Stmt, Type};
 use super::wgsl_dsl as dsl;
@@ -156,7 +158,7 @@ fn term_ddt_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("base_coeff") * Expr::ident("phi_n").field("y")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::ident("time_scheme").eq(1u32),
+                EnumExpr::<TimeScheme>::from_expr(Expr::ident("time_scheme")).eq(TimeScheme::BDF2),
                 dsl::block(vec![
                     dsl::let_expr("r", Expr::ident("dt") / Expr::ident("dt_old")),
                     dsl::assign_expr(
@@ -199,7 +201,7 @@ fn term_ddt_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("base_coeff") * Expr::ident("phi_n")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::ident("time_scheme").eq(1u32),
+                EnumExpr::<TimeScheme>::from_expr(Expr::ident("time_scheme")).eq(TimeScheme::BDF2),
                 dsl::block(vec![
                     dsl::let_expr("r", Expr::ident("dt") / Expr::ident("dt_old")),
                     dsl::assign_expr(

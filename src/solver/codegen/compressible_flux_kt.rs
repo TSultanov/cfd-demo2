@@ -3,6 +3,8 @@ use super::reconstruction::limited_linear_reconstruct_face;
 use super::dsl as typed;
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
+use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::scheme::Scheme;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
     StructField, Type,
@@ -411,10 +413,12 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ])
     };
 
+    let boundary_type =
+        typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"));
     let boundary_block = dsl::block(vec![
         dsl::assign_expr(Expr::ident("is_boundary"), true),
         dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(1u32),
+            boundary_type.eq(GpuBoundaryType::Inlet),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("rho_u_r"),
                 typed::VecExpr::<2>::from_components([
@@ -424,7 +428,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
                 .expr(),
             )]),
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(3u32),
+                boundary_type.eq(GpuBoundaryType::Wall),
                 dsl::block(vec![
                     // Slip wall: reflect only the normal component of momentum.
                     dsl::let_expr(
@@ -618,9 +622,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     // - `scheme=1` enables limited linear reconstruction.
     stmts.push(dsl::if_block_expr(
         (!Expr::ident("is_boundary"))
-            & Expr::ident("constants")
-                .field("scheme")
-                .eq(1u32),
+            & typed::EnumExpr::<Scheme>::from_expr(Expr::ident("constants").field("scheme"))
+                .eq(Scheme::SecondOrderUpwind),
         reconstruct_block,
         None,
     ));

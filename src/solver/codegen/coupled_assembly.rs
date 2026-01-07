@@ -4,8 +4,10 @@ use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::reconstruction::scalar_reconstruction;
 use super::state_access::{state_scalar, state_vec2};
+use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
+use crate::solver::scheme::Scheme;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
@@ -463,9 +465,10 @@ fn main_body(
             Some(Expr::ident("u_n") * Expr::ident("coeff_time")),
         ));
         stmts.push(dsl::if_block_expr(
-            Expr::ident("constants")
-                .field("time_scheme")
-                .eq(1u32),
+            typed::EnumExpr::<TimeScheme>::from_expr(
+                Expr::ident("constants").field("time_scheme"),
+            )
+            .eq(TimeScheme::BDF2),
             dsl::block(vec![
                 dsl::let_expr("dt", Expr::ident("constants").field("dt")),
                 dsl::let_expr("dt_old", Expr::ident("constants").field("dt_old")),
@@ -799,13 +802,16 @@ fn main_body(
         ]);
 
         let boundary_stmt = dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(1u32),
+            typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"))
+                .eq(GpuBoundaryType::Inlet),
             inlet_block,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(3u32),
+                typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"))
+                    .eq(GpuBoundaryType::Wall),
                 wall_block,
                 Some(dsl::block(vec![dsl::if_block_expr(
-                    Expr::ident("boundary_type").eq(2u32),
+                    typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"))
+                        .eq(GpuBoundaryType::Outlet),
                     outlet_block,
                     None,
                 )])),
@@ -829,14 +835,15 @@ fn main_body(
         ];
 
         if let Some(conv_op) = &plan.convection {
-            let scheme_id = conv_op.scheme as u32;
+            let scheme_id = conv_op.scheme.gpu_id();
             interior_stmts.push(dsl::let_typed_expr(
                 "scheme_id",
                 Type::U32,
                 scheme_id,
             ));
+            let scheme = typed::EnumExpr::<Scheme>::from_expr(Expr::ident("scheme_id"));
             interior_stmts.push(dsl::if_block_expr(
-                Expr::ident("scheme_id").ne(0u32),
+                scheme.ne(Scheme::Upwind),
                 {
                     let mut ho_block = vec![
                         dsl::let_expr("u_own", state_vec2(layout, "state", "idx", u_field)),
@@ -847,7 +854,7 @@ fn main_body(
                     ];
                     let (u_stmts, u_vars) = scalar_reconstruction(
                         "u",
-                        Expr::ident("scheme_id"),
+                        scheme,
                         Expr::ident("flux"),
                         Expr::ident("u_own").field("x"),
                         Expr::ident("u_neigh").field("x"),
@@ -860,7 +867,7 @@ fn main_body(
                     ho_block.extend(u_stmts);
                     let (v_stmts, v_vars) = scalar_reconstruction(
                         "v",
-                        Expr::ident("scheme_id"),
+                        scheme,
                         Expr::ident("flux"),
                         Expr::ident("u_own").field("y"),
                         Expr::ident("u_neigh").field("y"),

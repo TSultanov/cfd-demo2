@@ -2,6 +2,7 @@ use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::dsl as typed;
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::state_access::{state_scalar, state_vec2};
+use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
@@ -627,8 +628,9 @@ fn main_body(
         ),
     ]);
 
+    let bc_type = typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"));
     let boundary_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::ident("boundary_type").eq(2u32),
+        bc_type.eq(GpuBoundaryType::Outlet),
         dsl::block(vec![
             dsl::let_expr(
                 "dx",

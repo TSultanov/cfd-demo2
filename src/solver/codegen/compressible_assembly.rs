@@ -1,5 +1,7 @@
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
+use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
+use crate::solver::scheme::Scheme;
 use super::dsl as typed;
 use super::state_access::{state_scalar, state_vec2};
 use super::reconstruction::limited_linear_reconstruct_face;
@@ -531,9 +533,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
 
     stmts.push(dsl::if_block_expr(
-        Expr::ident("constants")
-            .field("time_scheme")
-            .eq(1u32),
+        typed::EnumExpr::<TimeScheme>::from_expr(Expr::ident("constants").field("time_scheme"))
+            .eq(TimeScheme::BDF2),
         bdf2_block,
         None,
     ));
@@ -691,11 +692,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ]);
 
+    let boundary_type =
+        typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"));
     let boundary_state = dsl::block(vec![dsl::if_block_expr(
-        Expr::ident("boundary_type").eq(1u32),
+        boundary_type.eq(GpuBoundaryType::Inlet),
         inlet_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(3u32),
+            boundary_type.eq(GpuBoundaryType::Wall),
             wall_block,
             None,
         )])),
@@ -866,7 +869,9 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     // - `scheme=0` and `scheme=2` default to piecewise-constant states.
     // - `scheme=1` enables limited linear reconstruction.
     loop_body.push(dsl::if_block_expr(
-        (!Expr::ident("is_boundary")) & Expr::ident("scheme_id").eq(1u32),
+        (!Expr::ident("is_boundary"))
+            & typed::EnumExpr::<Scheme>::from_expr(Expr::ident("scheme_id"))
+                .eq(Scheme::SecondOrderUpwind),
         reconstruct_block,
         None,
     ));
@@ -1819,11 +1824,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             dsl::block(wall)
         };
 
+        let boundary_type =
+            typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"));
         let boundary_stmt = dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(1u32),
+            boundary_type.eq(GpuBoundaryType::Inlet),
             inlet_block,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(3u32),
+                boundary_type.eq(GpuBoundaryType::Wall),
                 wall_block,
                 Some(default_block),
             )])),

@@ -1,5 +1,7 @@
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
+use super::dsl::EnumExpr;
+use crate::solver::scheme::Scheme;
 
 #[derive(Debug, Clone)]
 pub struct ScalarReconstruction {
@@ -9,7 +11,7 @@ pub struct ScalarReconstruction {
 
 pub fn scalar_reconstruction(
     prefix: &str,
-    scheme_id: Expr,
+    scheme: EnumExpr<Scheme>,
     flux: Expr,
     phi_own: Expr,
     phi_neigh: Expr,
@@ -79,10 +81,10 @@ pub fn scalar_reconstruction(
     )]);
 
     stmts.push(dsl::if_block_expr(
-        scheme_id.eq(1u32),
+        scheme.eq(Scheme::SecondOrderUpwind),
         sou_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            scheme_id.eq(2u32),
+            scheme.eq(Scheme::QUICK),
             quick_block,
             None,
         )])),

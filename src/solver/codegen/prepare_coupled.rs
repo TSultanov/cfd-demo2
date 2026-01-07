@@ -3,6 +3,7 @@ use super::dsl as typed;
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::state_access::{state_component, state_scalar, state_vec2};
+use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
@@ -382,9 +383,10 @@ fn main_body(
             Some(Expr::ident("vol") * Expr::ident("rho_cell") / Expr::ident("constants").field("dt")),
         ));
         stmts.push(dsl::if_block_expr(
-            Expr::ident("constants")
-                .field("time_scheme")
-                .eq(1u32),
+            typed::EnumExpr::<TimeScheme>::from_expr(
+                Expr::ident("constants").field("time_scheme"),
+            )
+            .eq(TimeScheme::BDF2),
             dsl::block(vec![
                 dsl::let_expr("dt", Expr::ident("constants").field("dt")),
                 dsl::let_expr("dt_old", Expr::ident("constants").field("dt_old")),
@@ -582,14 +584,15 @@ fn main_body(
         ),
     ]);
 
+    let bc_type = typed::EnumExpr::<GpuBoundaryType>::from_expr(Expr::ident("boundary_type"));
     let boundary_flux = dsl::block(vec![dsl::if_block_expr(
-        Expr::ident("boundary_type").eq(1u32),
+        bc_type.eq(GpuBoundaryType::Inlet),
         inlet_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(3u32),
+            bc_type.eq(GpuBoundaryType::Wall),
             wall_block,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(2u32),
+                bc_type.eq(GpuBoundaryType::Outlet),
                 outlet_block,
                 None,
             )])),
@@ -849,13 +852,13 @@ fn main_body(
             Expr::ident("diff_coeff") + Expr::ident("conv_coeff_diag"),
         )]),
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(1u32),
+            bc_type.eq(GpuBoundaryType::Inlet),
             inlet_diag,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::ident("boundary_type").eq(3u32),
+                bc_type.eq(GpuBoundaryType::Wall),
                 wall_diag,
                 Some(dsl::block(vec![dsl::if_block_expr(
-                    Expr::ident("boundary_type").eq(2u32),
+                    bc_type.eq(GpuBoundaryType::Outlet),
                     outlet_diag,
                     None,
                 )])),
@@ -900,7 +903,7 @@ fn main_body(
     let grad_boundary = dsl::block(vec![
         dsl::var_typed_expr("val_f_p", Type::F32, Some(Expr::ident("val_c_p"))),
         dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(2u32),
+            bc_type.eq(GpuBoundaryType::Outlet),
             dsl::block(vec![dsl::assign_expr(Expr::ident("val_f_p"), 0.0)]),
             None,
         ),
@@ -995,10 +998,10 @@ fn main_body(
     )]);
 
     let boundary_vel = dsl::block(vec![dsl::if_block_expr(
-        Expr::ident("boundary_type").eq(1u32),
+        bc_type.eq(GpuBoundaryType::Inlet),
         inlet_vel,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::ident("boundary_type").eq(3u32),
+            bc_type.eq(GpuBoundaryType::Wall),
             wall_vel,
             Some(outlet_vel),
         )])),

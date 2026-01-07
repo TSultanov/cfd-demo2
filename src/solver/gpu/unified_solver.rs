@@ -63,6 +63,9 @@ impl GpuUnifiedSolver {
                 apply_config_compressible(&mut solver, config);
                 UnifiedSolverBackend::Compressible(solver)
             }
+            ModelFields::GenericCoupled(_) => {
+                return Err("GpuUnifiedSolver does not support GenericCoupled models yet".to_string());
+            }
         };
 
         Ok(Self {

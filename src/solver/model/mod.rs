@@ -5,7 +5,7 @@ pub mod kernel;
 
 pub use definitions::{
     compressible_model, compressible_system, incompressible_momentum_model,
-    incompressible_momentum_system, CompressibleFields, IncompressibleMomentumFields, ModelFields,
-    ModelSpec,
+    incompressible_momentum_system, generic_diffusion_demo_model, CompressibleFields,
+    GenericCoupledFields, IncompressibleMomentumFields, ModelFields, ModelSpec,
 };
 pub use kernel::{KernelKind, KernelPlan};

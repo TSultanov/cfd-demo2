@@ -7,6 +7,7 @@ pub mod coupled_assembly;
 pub mod dsl;
 pub mod emit;
 pub mod flux_rhie_chow;
+pub mod generic_coupled_kernels;
 pub mod ir;
 pub mod plan;
 pub mod prepare_coupled;

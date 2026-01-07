@@ -11,6 +11,9 @@ pub enum KernelKind {
     CompressibleGradients,
     CompressibleUpdate,
     CompressibleFluxKt,
+    GenericCoupledAssembly,
+    GenericCoupledApply,
+    GenericCoupledUpdate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

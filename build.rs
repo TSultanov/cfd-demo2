@@ -59,8 +59,8 @@ mod solver {
         #[allow(unused_imports)]
         pub use definitions::{
             compressible_model, compressible_system, incompressible_momentum_model,
-            incompressible_momentum_system, CompressibleFields, IncompressibleMomentumFields,
-            ModelFields, ModelSpec,
+            incompressible_momentum_system, generic_diffusion_demo_model, CompressibleFields,
+            GenericCoupledFields, IncompressibleMomentumFields, ModelFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
@@ -151,6 +151,12 @@ mod solver {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/solver/codegen/coupled_assembly.rs"
+            ));
+        }
+        pub mod generic_coupled_kernels {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/generic_coupled_kernels.rs"
             ));
         }
         pub mod coeff_expr {
@@ -276,6 +282,14 @@ fn main() {
     if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
         &manifest_dir,
         &compressible_model,
+        &schemes,
+    ) {
+        panic!("codegen failed: {}", err);
+    }
+    let generic_model = solver::model::generic_diffusion_demo_model();
+    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
+        &manifest_dir,
+        &generic_model,
         &schemes,
     ) {
         panic!("codegen failed: {}", err);

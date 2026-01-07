@@ -34,6 +34,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added a generic (model-driven) scheme expansion pass that reports required auxiliary computations (currently: gradient needs for higher-order convection) (`src/solver/model/backend/scheme_expansion.rs`).
 - Used the scheme expansion to skip compressible gradient dispatches for first-order runs by selecting first-order vs reconstruction kernel graphs at runtime (`src/solver/gpu/compressible_solver.rs`).
 - Plumbed the same scheme expansion result into the incompressible coupled solver loop via `GpuSolver.scheme_needs_gradients` (replacing direct `scheme != 0` checks) (`src/solver/gpu/solver.rs`, `src/solver/gpu/coupled_solver.rs`).
+- Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
@@ -74,6 +75,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
    - Generate matrix + RHS assembly for implicit terms and RHS-only contributions for explicit terms (from `DiscreteSystem`).
    - Generate an `apply(A, x)` kernel (SpMV + optional explicit parts) so the same linear solver kernels can be reused.
    - Generate time-integration updates (Euler/BDF2) from config (and required history buffers).
+   - Status: generic `ddt` (Euler/BDF2) + `laplacian` assembly, generic CSR SpMV apply, and generic state update are emitted; BC handling and convection/source/cross-coupling are not yet implemented.
 6. **Model “closures” as plugins (for incompressible + compressible specifics)**
    - Represent computed fluxes (Rhie–Chow, KT) and EOS/primitive recovery as explicit plan nodes (“closure kernels”) with declared inputs/outputs.
    - Keep these as small, swappable components so other models can plug in different closures.

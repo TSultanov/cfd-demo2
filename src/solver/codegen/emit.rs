@@ -7,6 +7,10 @@ use super::compressible_gradients::generate_compressible_gradients_wgsl;
 use super::compressible_flux_kt::generate_compressible_flux_kt_wgsl;
 use super::compressible_update::generate_compressible_update_wgsl;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
+use super::generic_coupled_kernels::{
+    generate_generic_coupled_apply_wgsl, generate_generic_coupled_assembly_wgsl,
+    generate_generic_coupled_update_wgsl,
+};
 use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use super::ir::{lower_system, DiscreteSystem};
 use super::prepare_coupled::generate_prepare_coupled_wgsl;
@@ -73,6 +77,9 @@ fn kernel_output_name(kind: KernelKind) -> &'static str {
         KernelKind::CompressibleGradients => "compressible_gradients.wgsl",
         KernelKind::CompressibleUpdate => "compressible_update.wgsl",
         KernelKind::CompressibleFluxKt => "compressible_flux_kt.wgsl",
+        KernelKind::GenericCoupledAssembly => "generic_coupled_assembly.wgsl",
+        KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl",
+        KernelKind::GenericCoupledUpdate => "generic_coupled_update.wgsl",
     }
 }
 
@@ -153,6 +160,13 @@ fn generate_kernel_wgsl(
                 .compressible()
                 .ok_or_else(|| "compressible_flux_kt requires compressible fields".to_string())?;
             generate_compressible_flux_kt_wgsl(&model.state_layout, fields)
+        }
+        KernelKind::GenericCoupledAssembly => {
+            generate_generic_coupled_assembly_wgsl(&discrete, &model.state_layout)
+        }
+        KernelKind::GenericCoupledApply => generate_generic_coupled_apply_wgsl(),
+        KernelKind::GenericCoupledUpdate => {
+            generate_generic_coupled_update_wgsl(&discrete, &model.state_layout)
         }
     };
     Ok(wgsl)

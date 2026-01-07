@@ -17,6 +17,7 @@ pub struct ModelSpec {
 pub enum ModelFields {
     Incompressible(IncompressibleMomentumFields),
     Compressible(CompressibleFields),
+    GenericCoupled(GenericCoupledFields),
 }
 
 impl ModelSpec {
@@ -36,6 +37,11 @@ impl ModelSpec {
                 KernelKind::CompressibleApply,
                 KernelKind::CompressibleUpdate,
             ]),
+            ModelFields::GenericCoupled(_) => KernelPlan::new(vec![
+                KernelKind::GenericCoupledAssembly,
+                KernelKind::GenericCoupledApply,
+                KernelKind::GenericCoupledUpdate,
+            ]),
         }
     }
 }
@@ -53,6 +59,24 @@ impl ModelFields {
             ModelFields::Compressible(fields) => Some(fields),
             _ => None,
         }
+    }
+
+    pub fn generic_coupled(&self) -> Option<&GenericCoupledFields> {
+        match self {
+            ModelFields::GenericCoupled(fields) => Some(fields),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericCoupledFields {
+    pub state: Vec<FieldRef>,
+}
+
+impl GenericCoupledFields {
+    pub fn new(state: Vec<FieldRef>) -> Self {
+        Self { state }
     }
 }
 
@@ -195,6 +219,22 @@ pub fn compressible_model() -> ModelSpec {
         system,
         state_layout: layout,
         fields: ModelFields::Compressible(fields),
+    }
+}
+
+pub fn generic_diffusion_demo_model() -> ModelSpec {
+    let phi = vol_scalar("phi", si::DIMENSIONLESS);
+    let kappa = Coefficient::constant_unit(1.0, si::AREA / si::TIME);
+    let eqn = (fvm::ddt(phi) + fvm::laplacian(kappa, phi)).eqn(phi);
+
+    let mut system = EquationSystem::new();
+    system.add_equation(eqn);
+
+    let layout = StateLayout::new(vec![phi]);
+    ModelSpec {
+        system,
+        state_layout: layout,
+        fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
     }
 }
 

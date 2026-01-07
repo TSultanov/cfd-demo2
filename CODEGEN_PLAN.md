@@ -24,6 +24,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added an `ExecutionPlan` layer that can sequence GPU `KernelGraph` nodes and host/plugin steps uniformly (`src/solver/gpu/execution_plan.rs`); compressible explicit stepping uses it as the first integration point.
 - Planized the compressible implicit outer-iteration body (grad+assembly → host FGMRES → snapshot/apply) using `ExecutionPlan`, keeping behavior but moving sequencing into the common plan layer.
 - Planized the incompressible coupled iteration’s assembly+solve stage and update stage using `ExecutionPlan` (assembly via `KernelGraph`, host FGMRES solve as a plugin node, update kernel as `KernelGraph`).
+- Expanded `GpuUnifiedSolver` to provide a real shared surface (common setters + `get_u/get_p/get_rho`) and migrated the 1D regression test harness to run compressible/incompressible cases through it (`tests/gpu_1d_structured_regression_test.rs`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:

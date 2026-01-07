@@ -1,6 +1,12 @@
-use cfd2::solver::gpu::{GpuCompressibleSolver, GpuSolver};
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuCompressibleSolver, GpuSolver, GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh};
+use cfd2::solver::mesh::{
+    generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh,
+};
+use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
+use cfd2::solver::scheme::Scheme;
 use image::{Rgb, RgbImage};
 use nalgebra::{Point2, Vector2};
 use std::fs;
@@ -23,11 +29,7 @@ fn draw_line(img: &mut RgbImage, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgb<
     let mut err = dx + dy;
 
     loop {
-        if x0 >= 0
-            && y0 >= 0
-            && (x0 as u32) < img.width()
-            && (y0 as u32) < img.height()
-        {
+        if x0 >= 0 && y0 >= 0 && (x0 as u32) < img.width() && (y0 as u32) < img.height() {
             img.put_pixel(x0 as u32, y0 as u32, color);
         }
         if x0 == x1 && y0 == y1 {
@@ -275,7 +277,14 @@ fn sod_solve_star(left: Primitive1D, right: Primitive1D, gamma: f64) -> (f64, f6
     (p, u)
 }
 
-fn sod_sample(x: f64, t: f64, x0: f64, left: Primitive1D, right: Primitive1D, gamma: f64) -> Primitive1D {
+fn sod_sample(
+    x: f64,
+    t: f64,
+    x0: f64,
+    left: Primitive1D,
+    right: Primitive1D,
+    gamma: f64,
+) -> Primitive1D {
     if t <= 0.0 {
         return if x < x0 { left } else { right };
     }
@@ -295,7 +304,8 @@ fn sod_sample(x: f64, t: f64, x0: f64, left: Primitive1D, right: Primitive1D, ga
         let pr = p_star / p_l;
         let rho_star = rho_l * (pr + (gamma - 1.0) / (gamma + 1.0))
             / ((gamma - 1.0) / (gamma + 1.0) * pr + 1.0);
-        let s = left.u - c_l * (0.5 * (gamma + 1.0) / gamma * pr + 0.5 * (gamma - 1.0) / gamma).sqrt();
+        let s =
+            left.u - c_l * (0.5 * (gamma + 1.0) / gamma * pr + 0.5 * (gamma - 1.0) / gamma).sqrt();
         (rho_star, Some(s), None, None)
     } else {
         let pr = p_star / p_l;
@@ -311,7 +321,8 @@ fn sod_sample(x: f64, t: f64, x0: f64, left: Primitive1D, right: Primitive1D, ga
         let pr = p_star / p_r;
         let rho_star = rho_r * (pr + (gamma - 1.0) / (gamma + 1.0))
             / ((gamma - 1.0) / (gamma + 1.0) * pr + 1.0);
-        let s = right.u + c_r * (0.5 * (gamma + 1.0) / gamma * pr + 0.5 * (gamma - 1.0) / gamma).sqrt();
+        let s =
+            right.u + c_r * (0.5 * (gamma + 1.0) / gamma * pr + 0.5 * (gamma - 1.0) / gamma).sqrt();
         (rho_star, Some(s), None, None)
     } else {
         let pr = p_star / p_r;
@@ -389,10 +400,7 @@ fn sod_sample(x: f64, t: f64, x0: f64, left: Primitive1D, right: Primitive1D, ga
 }
 
 fn total_variation(values: &[f64]) -> f64 {
-    values
-        .windows(2)
-        .map(|w| (w[1] - w[0]).abs())
-        .sum::<f64>()
+    values.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f64>()
 }
 
 fn count_local_extrema(values: &[f64], eps: f64) -> usize {
@@ -453,14 +461,26 @@ fn incompressible_structured_mesh_preserves_rest_state() {
         BoundaryType::Wall,
         BoundaryType::Wall,
     );
-    let mut solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::BDF2,
+        preconditioner: PreconditionerType::Jacobi,
+    };
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        incompressible_momentum_model(),
+        config,
+        None,
+        None,
+    ))
+    .unwrap();
     solver.set_dt(0.02);
     solver.set_density(1.0);
     solver.set_viscosity(0.05);
-    solver.set_scheme(0);
+    solver.set_advection_scheme(Scheme::Upwind);
     solver.set_alpha_u(0.7);
     solver.set_alpha_p(0.3);
-    solver.set_time_scheme(1);
+    solver.set_time_scheme(TimeScheme::BDF2);
     solver.set_inlet_velocity(0.0);
     solver.set_ramp_time(0.0);
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
@@ -543,19 +563,37 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
             "acoustic total time mismatch t={t} t_total={t_total}"
         );
         for &scheme in &[0u32, 1u32, 2u32] {
-            let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+            let scheme_enum = match scheme {
+                0 => Scheme::Upwind,
+                1 => Scheme::SecondOrderUpwind,
+                2 => Scheme::QUICK,
+                _ => Scheme::Upwind,
+            };
+            let config = SolverConfig {
+                advection_scheme: scheme_enum,
+                time_scheme: TimeScheme::Euler,
+                preconditioner: PreconditionerType::Jacobi,
+            };
+            let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+                &mesh,
+                compressible_model(),
+                config,
+                None,
+                None,
+            ))
+            .unwrap();
             solver.set_dt(dt);
-            solver.set_time_scheme(0);
+            solver.set_time_scheme(TimeScheme::Euler);
             solver.set_viscosity(0.0);
             solver.set_inlet_velocity(0.0);
-            solver.set_scheme(scheme);
+            solver.set_advection_scheme(scheme_enum);
             solver.set_outer_iters(if time_scheme == 1 { 2 } else { 1 });
             solver.set_state_fields(&rho, &u, &p);
             solver.initialize_history();
 
             if time_scheme == 1 {
                 solver.step();
-                solver.set_time_scheme(1);
+                solver.set_time_scheme(TimeScheme::BDF2);
                 for _ in 1..steps {
                     solver.step();
                 }
@@ -588,10 +626,7 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
                 })
                 .collect();
 
-            let max_p = p_final
-                .iter()
-                .cloned()
-                .fold(f64::NEG_INFINITY, f64::max);
+            let max_p = p_final.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             let min_p = p_final.iter().cloned().fold(f64::INFINITY, f64::min);
             let rel_l2 = l2_error(&p_final, &p_expected) / amp.max(1e-12);
             let tv_norm = total_variation(&p_final) / amp.max(1e-12);
@@ -664,7 +699,11 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
             let rel_l2_max = if strict { 0.6 } else { 1.2 };
             let tv_max = if strict { 6.0 } else { 15.0 };
             let extrema_max = if strict { 6 } else { 80 };
-            let min_p_floor = if strict { base_p - 0.2 * amp } else { base_p - 0.5 * amp };
+            let min_p_floor = if strict {
+                base_p - 0.2 * amp
+            } else {
+                base_p - 0.5 * amp
+            };
             let max_p_ceiling = if strict {
                 base_p + 1.6 * amp
             } else {
@@ -779,20 +818,30 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     let p_comp = pollster::block_on(comp.get_p());
 
     if debug {
-        let (min_u_inc, max_u_inc) = u_incomp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, (ux, uy)| {
-            let mag = (ux * ux + uy * uy).sqrt();
-            (acc.0.min(mag), acc.1.max(mag))
-        });
-        let (min_u_cmp, max_u_cmp) = u_comp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, (ux, uy)| {
-            let mag = (ux * ux + uy * uy).sqrt();
-            (acc.0.min(mag), acc.1.max(mag))
-        });
-        let (min_p_inc, max_p_inc) = p_incomp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
-            (acc.0.min(v), acc.1.max(v))
-        });
-        let (min_p_cmp, max_p_cmp) = p_comp.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
-            (acc.0.min(v), acc.1.max(v))
-        });
+        let (min_u_inc, max_u_inc) =
+            u_incomp
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, (ux, uy)| {
+                    let mag = (ux * ux + uy * uy).sqrt();
+                    (acc.0.min(mag), acc.1.max(mag))
+                });
+        let (min_u_cmp, max_u_cmp) =
+            u_comp
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, (ux, uy)| {
+                    let mag = (ux * ux + uy * uy).sqrt();
+                    (acc.0.min(mag), acc.1.max(mag))
+                });
+        let (min_p_inc, max_p_inc) = p_incomp
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
+                (acc.0.min(v), acc.1.max(v))
+            });
+        let (min_p_cmp, max_p_cmp) = p_comp
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
+                (acc.0.min(v), acc.1.max(v))
+            });
         println!(
             "low_mach_debug: |u|_inc=[{min_u_inc:.3},{max_u_inc:.3}] |u|_cmp=[{min_u_cmp:.3},{max_u_cmp:.3}] p_inc=[{min_p_inc:.3},{max_p_inc:.3}] p_cmp=[{min_p_cmp:.3},{max_p_cmp:.3}]"
         );
@@ -871,7 +920,11 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     );
     let _ = fs::write(out.join("summary.txt"), summary);
 
-    assert!(checker < 1.0, "checkerboarding metric {:.3} too high", checker);
+    assert!(
+        checker < 1.0,
+        "checkerboarding metric {:.3} too high",
+        checker
+    );
     let mut l2 = 0.0f64;
     for (a, b) in u_incomp_sorted.iter().zip(u_comp_sorted.iter()) {
         let d = a - b;
@@ -957,19 +1010,37 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
         }
 
         for &scheme in &[0u32, 1u32, 2u32] {
-            let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+            let scheme_enum = match scheme {
+                0 => Scheme::Upwind,
+                1 => Scheme::SecondOrderUpwind,
+                2 => Scheme::QUICK,
+                _ => Scheme::Upwind,
+            };
+            let config = SolverConfig {
+                advection_scheme: scheme_enum,
+                time_scheme: TimeScheme::Euler,
+                preconditioner: PreconditionerType::Jacobi,
+            };
+            let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+                &mesh,
+                compressible_model(),
+                config,
+                None,
+                None,
+            ))
+            .unwrap();
             solver.set_dt(dt);
-            solver.set_time_scheme(0);
+            solver.set_time_scheme(TimeScheme::Euler);
             solver.set_viscosity(0.0);
             solver.set_inlet_velocity(0.0);
-            solver.set_scheme(scheme);
+            solver.set_advection_scheme(scheme_enum);
             solver.set_outer_iters(if time_scheme == 1 { 3 } else { 1 });
             solver.set_state_fields(&rho, &u, &p);
             solver.initialize_history();
 
             if time_scheme == 1 {
                 solver.step();
-                solver.set_time_scheme(1);
+                solver.set_time_scheme(TimeScheme::BDF2);
                 for _ in 1..steps {
                     solver.step();
                 }
@@ -1062,7 +1133,10 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
             if time_scheme == 0 && scheme == 1 {
                 assert!(rel_l2_rho < 0.12, "rho error too large ({rel_l2_rho:.3})");
                 assert!(rel_l2_p < 0.18, "p error too large ({rel_l2_p:.3})");
-                assert!(extrema_rho <= 70, "rho has too many extrema ({extrema_rho})");
+                assert!(
+                    extrema_rho <= 70,
+                    "rho has too many extrema ({extrema_rho})"
+                );
                 assert!(extrema_p <= 80, "p has too many extrema ({extrema_p})");
                 assert!(tv_rho < 6.0, "rho TV too high ({tv_rho:.3})");
                 assert!(tv_p < 8.0, "p TV too high ({tv_p:.3})");

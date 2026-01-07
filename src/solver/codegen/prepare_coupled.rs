@@ -6,8 +6,8 @@ use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
-    Param, Stmt, StorageClass, StructDef, StructField, Type, UnaryOp,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
+    StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -343,14 +343,10 @@ fn main_body(
 
     stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("idx"),
-            BinaryOp::GreaterEq,
-            Expr::call_named(
-                "arrayLength",
-                vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("cell_vols"))],
-            ),
-        ),
+        Expr::ident("idx").ge(Expr::call_named(
+            "arrayLength",
+            vec![Expr::ident("cell_vols").addr_of()],
+        )),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -386,11 +382,9 @@ fn main_body(
             Some(Expr::ident("vol") * Expr::ident("rho_cell") / Expr::ident("constants").field("dt")),
         ));
         stmts.push(dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("constants").field("time_scheme"),
-                BinaryOp::Equal,
-                Expr::lit_u32(1),
-            ),
+            Expr::ident("constants")
+                .field("time_scheme")
+                .eq(Expr::lit_u32(1)),
             dsl::block(vec![
                 dsl::let_expr("dt", Expr::ident("constants").field("dt")),
                 dsl::let_expr("dt_old", Expr::ident("constants").field("dt_old")),
@@ -483,7 +477,7 @@ fn main_body(
         ),
     ));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+        Expr::ident("owner").ne(Expr::ident("idx")),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal_vec"),
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
@@ -511,11 +505,9 @@ fn main_body(
     let owner_face_d_vec = typed::VecExpr::<2>::from_expr(Expr::ident("f_center_vec"))
         .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("c_owner_vec")));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            owner_face_d_vec.dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_flux_vec"))),
-            BinaryOp::Less,
-            Expr::lit_f32(0.0),
-        ),
+        owner_face_d_vec
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_flux_vec")))
+            .lt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal_flux_vec"),
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_flux_vec"))
@@ -561,29 +553,19 @@ fn main_body(
             "u_bc",
             Type::vec2_f32(),
             typed::VecExpr::<2>::from_components([
-                Expr::binary(
-                    Expr::ident("constants").field("inlet_velocity"),
-                    BinaryOp::Mul,
-                    Expr::ident("ramp"),
-                ),
+                Expr::ident("constants").field("inlet_velocity") * Expr::ident("ramp"),
                 Expr::lit_f32(0.0),
             ])
             .expr(),
         ),
         dsl::assign_expr(
             Expr::ident("flux"),
-            Expr::binary(
-                Expr::binary(
-                    Expr::ident("rho_face"),
-                    BinaryOp::Mul,
-                    Expr::call_named(
-                        "dot",
-                        vec![Expr::ident("u_bc"), Expr::ident("normal_flux_vec")],
-                    ),
-                ),
-                BinaryOp::Mul,
-                Expr::ident("area"),
-            ),
+            Expr::ident("rho_face")
+                * Expr::call_named(
+                    "dot",
+                    vec![Expr::ident("u_bc"), Expr::ident("normal_flux_vec")],
+                )
+                * Expr::ident("area"),
         ),
     ]);
 
@@ -607,25 +589,13 @@ fn main_body(
     ]);
 
     let boundary_flux = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("boundary_type"),
-            BinaryOp::Equal,
-            Expr::lit_u32(1),
-        ),
+        Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
         inlet_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(3),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
             wall_block,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("boundary_type"),
-                    BinaryOp::Equal,
-                    Expr::lit_u32(2),
-                ),
+                Expr::ident("boundary_type").eq(Expr::lit_u32(2)),
                 outlet_block,
                 None,
             )])),
@@ -633,7 +603,7 @@ fn main_body(
     )]);
 
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("neigh_idx"), BinaryOp::NotEqual, Expr::lit_i32(-1)),
+        Expr::ident("neigh_idx").ne(Expr::lit_i32(-1)),
         dsl::block(vec![
             dsl::let_typed_expr(
                 "n_idx",
@@ -674,11 +644,7 @@ fn main_body(
             dsl::let_expr("total_dist", Expr::ident("d_own") + Expr::ident("d_ngh")),
             dsl::var_typed_expr("lambda", Type::F32, Some(Expr::lit_f32(0.5))),
             dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("total_dist"),
-                    BinaryOp::Greater,
-                    Expr::lit_f32(1e-6),
-                ),
+                Expr::ident("total_dist").gt(Expr::lit_f32(1e-6)),
                 dsl::block(vec![dsl::assign_expr(
                     Expr::ident("lambda"),
                     Expr::ident("d_ngh") / Expr::ident("total_dist"),
@@ -767,7 +733,7 @@ fn main_body(
     ));
 
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("owner"), BinaryOp::Equal, Expr::ident("idx")),
+        Expr::ident("owner").eq(Expr::ident("idx")),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("fluxes").index(Expr::ident("face_idx")),
             Expr::ident("flux"),
@@ -781,10 +747,10 @@ fn main_body(
         Some(Expr::ident("flux")),
     ));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+        Expr::ident("owner").ne(Expr::ident("idx")),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("flux_out"),
-            Expr::unary(UnaryOp::Negate, Expr::ident("flux")),
+            -Expr::ident("flux"),
         )]),
         None,
     ));
@@ -805,14 +771,14 @@ fn main_body(
         Some(Expr::lit_u32(0)),
     ));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("neigh_idx"), BinaryOp::NotEqual, Expr::lit_i32(-1)),
+        Expr::ident("neigh_idx").ne(Expr::lit_i32(-1)),
         dsl::block(vec![
             dsl::assign_expr(
                 Expr::ident("other_idx"),
                 Expr::call_named("u32", vec![Expr::ident("neigh_idx")]),
             ),
             dsl::if_block_expr(
-                Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+                Expr::ident("owner").ne(Expr::ident("idx")),
                 dsl::block(vec![dsl::assign_expr(
                     Expr::ident("other_idx"),
                     Expr::ident("owner"),
@@ -853,11 +819,7 @@ fn main_body(
         Some(Expr::lit_f32(0.0)),
     ));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("flux_out"),
-            BinaryOp::Greater,
-            Expr::lit_f32(0.0),
-        ),
+        Expr::ident("flux_out").gt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("conv_coeff_diag"),
             Expr::ident("flux_out"),
@@ -872,11 +834,7 @@ fn main_body(
             Expr::ident("diff_coeff"),
         ),
         dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("flux_out"),
-                BinaryOp::Greater,
-                Expr::lit_f32(0.0),
-            ),
+            Expr::ident("flux_out").gt(Expr::lit_f32(0.0)),
             dsl::block(vec![dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident("diag_coeff"),
@@ -887,11 +845,7 @@ fn main_body(
     ]);
     let wall_diag = inlet_diag.clone();
     let outlet_diag = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("flux_out"),
-            BinaryOp::Greater,
-            Expr::lit_f32(0.0),
-        ),
+        Expr::ident("flux_out").gt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_op_expr(
             AssignOp::Add,
             Expr::ident("diag_coeff"),
@@ -901,32 +855,20 @@ fn main_body(
     )]);
 
     loop_body.push(dsl::if_block_expr(
-        Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
+        !Expr::ident("is_boundary"),
         dsl::block(vec![dsl::assign_op_expr(
             AssignOp::Add,
             Expr::ident("diag_coeff"),
             Expr::ident("diff_coeff") + Expr::ident("conv_coeff_diag"),
         )]),
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(1),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
             inlet_diag,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("boundary_type"),
-                    BinaryOp::Equal,
-                    Expr::lit_u32(3),
-                ),
+                Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
                 wall_diag,
                 Some(dsl::block(vec![dsl::if_block_expr(
-                    Expr::binary(
-                        Expr::ident("boundary_type"),
-                        BinaryOp::Equal,
-                        Expr::lit_u32(2),
-                    ),
+                    Expr::ident("boundary_type").eq(Expr::lit_u32(2)),
                     outlet_diag,
                     None,
                 )])),
@@ -953,11 +895,7 @@ fn main_body(
         dsl::let_expr("total_dist_p", Expr::ident("d_c") + Expr::ident("d_o")),
         dsl::var_typed_expr("lambda_p", Type::F32, Some(Expr::lit_f32(0.5))),
         dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("total_dist_p"),
-                BinaryOp::Greater,
-                Expr::lit_f32(1e-6),
-            ),
+            Expr::ident("total_dist_p").gt(Expr::lit_f32(1e-6)),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("lambda_p"),
                 Expr::ident("d_o") / Expr::ident("total_dist_p"),
@@ -981,11 +919,7 @@ fn main_body(
     let grad_boundary = dsl::block(vec![
         dsl::var_typed_expr("val_f_p", Type::F32, Some(Expr::ident("val_c_p"))),
         dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(2),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(2)),
             dsl::block(vec![dsl::assign_expr(Expr::ident("val_f_p"), Expr::lit_f32(0.0))]),
             None,
         ),
@@ -998,7 +932,7 @@ fn main_body(
         ),
     ]);
     loop_body.push(dsl::if_block_expr(
-        Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
+        !Expr::ident("is_boundary"),
         grad_internal,
         Some(grad_boundary),
     ));
@@ -1028,7 +962,7 @@ fn main_body(
         ),
         dsl::let_expr("total_dist", Expr::ident("d_c") + Expr::ident("d_o")),
         dsl::if_block_expr(
-            Expr::binary(Expr::ident("total_dist"), BinaryOp::Greater, Expr::lit_f32(1e-6)),
+            Expr::ident("total_dist").gt(Expr::lit_f32(1e-6)),
             dsl::block(vec![
                 dsl::let_expr("lambda", Expr::ident("d_o") / Expr::ident("total_dist")),
                 dsl::let_expr(
@@ -1073,11 +1007,7 @@ fn main_body(
         dsl::assign_expr(
             Expr::ident("u_face_vel"),
             typed::VecExpr::<2>::from_components([
-                Expr::binary(
-                    Expr::ident("constants").field("inlet_velocity"),
-                    BinaryOp::Mul,
-                    Expr::ident("ramp"),
-                ),
+                Expr::ident("constants").field("inlet_velocity") * Expr::ident("ramp"),
                 Expr::lit_f32(0.0),
             ])
             .expr(),
@@ -1093,25 +1023,17 @@ fn main_body(
     )]);
 
     let boundary_vel = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("boundary_type"),
-            BinaryOp::Equal,
-            Expr::lit_u32(1),
-        ),
+        Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
         inlet_vel,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(3),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
             wall_vel,
             Some(outlet_vel),
         )])),
     )]);
 
     loop_body.push(dsl::if_block_expr(
-        Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
+        !Expr::ident("is_boundary"),
         internal_vel,
         Some(boundary_vel),
     ));
@@ -1133,20 +1055,16 @@ fn main_body(
 
     stmts.push(dsl::for_loop_expr(
         dsl::for_init_var_expr("k", Expr::ident("start")),
-        Expr::binary(Expr::ident("k"), BinaryOp::Less, Expr::ident("end")),
+        Expr::ident("k").lt(Expr::ident("end")),
         dsl::for_step_increment_expr(Expr::ident("k")),
         dsl::block(loop_body),
     ));
 
     let d_p_target = state_component(layout, "state", "idx", d_p_field, 0);
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::call_named("abs", vec![Expr::ident("diag_coeff")]),
-            BinaryOp::Greater,
-            Expr::lit_f32(1e-20),
-        ),
+        Expr::call_named("abs", vec![Expr::ident("diag_coeff")]).gt(Expr::lit_f32(1e-20)),
         dsl::block(vec![dsl::assign_expr(
-            d_p_target.clone(),
+            d_p_target,
             Expr::ident("vol") / Expr::ident("diag_coeff"),
         )]),
         Some(dsl::block(vec![dsl::assign_expr(

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -547,38 +548,164 @@ impl fmt::Display for Attribute {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Expr(u32);
+
+#[derive(Debug, Clone)]
+enum ExprNode {
     Literal(Literal),
     Ident(String),
-    Field(Box<Expr>, String),
-    Index(Box<Expr>, Box<Expr>),
-    Unary {
-        op: UnaryOp,
-        expr: Box<Expr>,
-    },
-    Binary {
-        left: Box<Expr>,
-        op: BinaryOp,
-        right: Box<Expr>,
-    },
-    Call {
-        callee: Box<Expr>,
-        args: Vec<Expr>,
-    },
+    Field { base: Expr, field: String },
+    Index { base: Expr, index: Expr },
+    Unary { op: UnaryOp, expr: Expr },
+    Binary { left: Expr, op: BinaryOp, right: Expr },
+    Call { callee: Expr, args: Vec<Expr> },
+}
+
+thread_local! {
+    static EXPR_ARENA: RefCell<Vec<ExprNode>> = RefCell::new(Vec::new());
+}
+
+impl Expr {
+    fn alloc(node: ExprNode) -> Self {
+        EXPR_ARENA.with(|arena| {
+            let mut arena = arena.borrow_mut();
+            let id = u32::try_from(arena.len()).expect("expression arena overflow");
+            arena.push(node);
+            Expr(id)
+        })
+    }
+
+    fn with_node<R>(self, f: impl FnOnce(&ExprNode) -> R) -> R {
+        EXPR_ARENA.with(|arena| {
+            let arena = arena.borrow();
+            let node = arena
+                .get(self.0 as usize)
+                .unwrap_or_else(|| panic!("invalid Expr id {}", self.0));
+            f(node)
+        })
+    }
+
+    fn unary(op: UnaryOp, expr: Expr) -> Self {
+        Expr::alloc(ExprNode::Unary { op, expr })
+    }
+
+    fn binary(left: Expr, op: BinaryOp, right: Expr) -> Self {
+        Expr::alloc(ExprNode::Binary { left, op, right })
+    }
+
+    fn format_f32_literal(value: f32) -> String {
+        let mut out = if value.is_finite() {
+            format!("{value}")
+        } else if value.is_nan() {
+            "nan()".to_string()
+        } else if value.is_sign_positive() {
+            "inf()".to_string()
+        } else {
+            "-inf()".to_string()
+        };
+        if !out.contains('.') && !out.contains('e') && !out.contains('E') && !out.ends_with(')') {
+            out.push_str(".0");
+        }
+        out
+    }
+
+    pub fn ident(name: impl Into<String>) -> Self {
+        Expr::alloc(ExprNode::Ident(name.into()))
+    }
+
+    pub fn lit_bool(value: bool) -> Self {
+        Expr::alloc(ExprNode::Literal(Literal::Bool(value)))
+    }
+
+    pub fn lit_i32(value: i32) -> Self {
+        Expr::alloc(ExprNode::Literal(Literal::Int(value)))
+    }
+
+    pub fn lit_u32(value: u32) -> Self {
+        Expr::alloc(ExprNode::Literal(Literal::Uint(value)))
+    }
+
+    pub fn lit_f32(value: f32) -> Self {
+        Expr::alloc(ExprNode::Literal(Literal::Float(Self::format_f32_literal(value))))
+    }
+
+    pub fn field(self, field: impl Into<String>) -> Self {
+        Expr::alloc(ExprNode::Field {
+            base: self,
+            field: field.into(),
+        })
+    }
+
+    pub fn index(self, index: Expr) -> Self {
+        Expr::alloc(ExprNode::Index { base: self, index })
+    }
+
+    pub fn call(callee: Expr, args: Vec<Expr>) -> Self {
+        Expr::alloc(ExprNode::Call { callee, args })
+    }
+
+    pub fn call_named(name: &str, args: Vec<Expr>) -> Self {
+        Expr::call(Expr::ident(name), args)
+    }
+
+    pub fn addr_of(self) -> Self {
+        Expr::unary(UnaryOp::AddressOf, self)
+    }
+
+    pub fn lt(self, rhs: Expr) -> Self {
+        Expr::binary(self, BinaryOp::Less, rhs)
+    }
+
+    pub fn le(self, rhs: Expr) -> Self {
+        Expr::binary(self, BinaryOp::LessEq, rhs)
+    }
+
+    pub fn gt(self, rhs: Expr) -> Self {
+        Expr::binary(self, BinaryOp::Greater, rhs)
+    }
+
+    pub fn ge(self, rhs: Expr) -> Self {
+        Expr::binary(self, BinaryOp::GreaterEq, rhs)
+    }
+
+    pub fn eq(self, rhs: Expr) -> Self {
+        Expr::binary(self, BinaryOp::Equal, rhs)
+    }
+
+    pub fn ne(self, rhs: Expr) -> Self {
+        Expr::binary(self, BinaryOp::NotEqual, rhs)
+    }
+
+    pub fn try_call_named(self, name: &str) -> Option<Vec<Expr>> {
+        self.with_node(|node| match node {
+            ExprNode::Call { callee, args } => callee.with_node(|callee_node| match callee_node {
+                ExprNode::Ident(callee_name) if callee_name == name => Some(args.clone()),
+                _ => None,
+            }),
+            _ => None,
+        })
+    }
+
+    pub fn try_f32_literal(self) -> Option<f32> {
+        self.with_node(|node| match node {
+            ExprNode::Literal(Literal::Float(value)) => value.parse::<f32>().ok(),
+            _ => None,
+        })
+    }
 }
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        render_expr(self, f, Precedence::Lowest)
+        render_expr(*self, f, Precedence::Lowest)
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Literal {
+#[derive(Debug, Clone)]
+enum Literal {
     Bool(bool),
-    Int(String),
-    Uint(String),
+    Int(i32),
+    Uint(u32),
     Float(String),
 }
 
@@ -587,14 +714,14 @@ impl fmt::Display for Literal {
         match self {
             Literal::Bool(value) => write!(f, "{}", if *value { "true" } else { "false" }),
             Literal::Int(value) => write!(f, "{}", value),
-            Literal::Uint(value) => write!(f, "{}", value),
+            Literal::Uint(value) => write!(f, "{}u", value),
             Literal::Float(value) => write!(f, "{}", value),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnaryOp {
+enum UnaryOp {
     Negate,
     Not,
     AddressOf,
@@ -611,7 +738,7 @@ impl fmt::Display for UnaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOp {
+enum BinaryOp {
     Add,
     Sub,
     Mul,
@@ -673,67 +800,67 @@ enum Precedence {
     Postfix,
 }
 
-fn render_expr(expr: &Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) -> fmt::Result {
-    match expr {
-        Expr::Literal(lit) => write!(f, "{}", lit),
-        Expr::Ident(name) => write!(f, "{}", name),
-        Expr::Field(base, field) => {
-            let needs_paren = expr_precedence(base) < Precedence::Postfix;
+fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) -> fmt::Result {
+    expr.with_node(|node| match node {
+        ExprNode::Literal(lit) => write!(f, "{}", lit),
+        ExprNode::Ident(name) => write!(f, "{}", name),
+        ExprNode::Field { base, field } => {
+            let needs_paren = expr_precedence(*base) < Precedence::Postfix;
             if needs_paren {
                 write!(f, "(")?;
             }
-            render_expr(base, f, Precedence::Postfix)?;
+            render_expr(*base, f, Precedence::Postfix)?;
             if needs_paren {
                 write!(f, ")")?;
             }
             write!(f, ".{}", field)
         }
-        Expr::Index(base, index) => {
-            let needs_paren = expr_precedence(base) < Precedence::Postfix;
+        ExprNode::Index { base, index } => {
+            let needs_paren = expr_precedence(*base) < Precedence::Postfix;
             if needs_paren {
                 write!(f, "(")?;
             }
-            render_expr(base, f, Precedence::Postfix)?;
+            render_expr(*base, f, Precedence::Postfix)?;
             if needs_paren {
                 write!(f, ")")?;
             }
             write!(f, "[")?;
-            render_expr(index, f, Precedence::Lowest)?;
+            render_expr(*index, f, Precedence::Lowest)?;
             write!(f, "]")
         }
-        Expr::Unary { op, expr } => {
+        ExprNode::Unary { op, expr } => {
             let prec = Precedence::Prefix;
             let needs_paren = prec < parent_prec;
             if needs_paren {
                 write!(f, "(")?;
             }
             write!(f, "{}", op)?;
-            render_expr(expr, f, prec)?;
+            render_expr(*expr, f, prec)?;
             if needs_paren {
                 write!(f, ")")?;
             }
             Ok(())
         }
-        Expr::Binary { left, op, right } => {
+        ExprNode::Binary { left, op, right } => {
             let prec = op.precedence();
             let needs_paren = prec < parent_prec;
             if needs_paren {
                 write!(f, "(")?;
             }
-            render_expr(left, f, prec)?;
+            render_expr(*left, f, prec)?;
             write!(f, " {} ", op)?;
-            render_expr(right, f, prec)?;
+            render_expr(*right, f, prec)?;
             if needs_paren {
                 write!(f, ")")?;
             }
             Ok(())
         }
-        Expr::Call { callee, args } => {
-            let needs_paren = expr_precedence(callee) < Precedence::Postfix;
+        ExprNode::Call { callee, args } => {
+            let needs_paren = expr_precedence(*callee) < Precedence::Postfix;
             if needs_paren {
                 write!(f, "(")?;
             }
-            render_expr(callee, f, Precedence::Postfix)?;
+            render_expr(*callee, f, Precedence::Postfix)?;
             if needs_paren {
                 write!(f, ")")?;
             }
@@ -742,121 +869,22 @@ fn render_expr(expr: &Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence)
                 if idx > 0 {
                     write!(f, ", ")?;
                 }
-                render_expr(arg, f, Precedence::Lowest)?;
+                render_expr(*arg, f, Precedence::Lowest)?;
             }
             write!(f, ")")
         }
-    }
+    })
 }
 
-fn expr_precedence(expr: &Expr) -> Precedence {
-    match expr {
-        Expr::Literal(_) | Expr::Ident(_) => Precedence::Postfix,
-        Expr::Field(_, _) | Expr::Index(_, _) | Expr::Call { .. } => Precedence::Postfix,
-        Expr::Unary { .. } => Precedence::Prefix,
-        Expr::Binary { op, .. } => op.precedence(),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParseError {
-    UnexpectedToken(String),
-    UnexpectedEof,
-    InvalidExpression(String),
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseError::UnexpectedToken(token) => write!(f, "unexpected token '{}'", token),
-            ParseError::UnexpectedEof => write!(f, "unexpected end of input"),
-            ParseError::InvalidExpression(expr) => write!(f, "invalid expression '{}'", expr),
+fn expr_precedence(expr: Expr) -> Precedence {
+    expr.with_node(|node| match node {
+        ExprNode::Literal(_) | ExprNode::Ident(_) => Precedence::Postfix,
+        ExprNode::Field { .. } | ExprNode::Index { .. } | ExprNode::Call { .. } => {
+            Precedence::Postfix
         }
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-impl Expr {
-    pub fn parse(input: &str) -> Result<Self, ParseError> {
-        let mut lexer = Lexer::new(input);
-        let mut tokens = Vec::new();
-        while let Some(token) = lexer.next_token()? {
-            tokens.push(token);
-        }
-        let mut parser = Parser::new(tokens);
-        let expr = parser.parse_expression(Precedence::Lowest)?;
-        if parser.peek().is_some() {
-            return Err(ParseError::InvalidExpression(input.to_string()));
-        }
-        Ok(expr)
-    }
-
-    pub fn ident(name: impl Into<String>) -> Self {
-        Expr::Ident(name.into())
-    }
-
-    pub fn lit_bool(value: bool) -> Self {
-        Expr::Literal(Literal::Bool(value))
-    }
-
-    pub fn lit_i32(value: i32) -> Self {
-        Expr::Literal(Literal::Int(value.to_string()))
-    }
-
-    pub fn lit_u32(value: u32) -> Self {
-        Expr::Literal(Literal::Uint(format!("{value}u")))
-    }
-
-    pub fn lit_f32(value: f32) -> Self {
-        let mut out = if value.is_finite() {
-            format!("{value}")
-        } else if value.is_nan() {
-            "nan()".to_string()
-        } else if value.is_sign_positive() {
-            "inf()".to_string()
-        } else {
-            "-inf()".to_string()
-        };
-        if !out.contains('.') && !out.contains('e') && !out.contains('E') && !out.ends_with(')') {
-            out.push_str(".0");
-        }
-        Expr::Literal(Literal::Float(out))
-    }
-
-    pub fn field(self, field: impl Into<String>) -> Self {
-        Expr::Field(Box::new(self), field.into())
-    }
-
-    pub fn index(self, index: Expr) -> Self {
-        Expr::Index(Box::new(self), Box::new(index))
-    }
-
-    pub fn unary(op: UnaryOp, expr: Expr) -> Self {
-        Expr::Unary {
-            op,
-            expr: Box::new(expr),
-        }
-    }
-
-    pub fn binary(left: Expr, op: BinaryOp, right: Expr) -> Self {
-        Expr::Binary {
-            left: Box::new(left),
-            op,
-            right: Box::new(right),
-        }
-    }
-
-    pub fn call(callee: Expr, args: Vec<Expr>) -> Self {
-        Expr::Call {
-            callee: Box::new(callee),
-            args,
-        }
-    }
-
-    pub fn call_named(name: &str, args: Vec<Expr>) -> Self {
-        Expr::call(Expr::ident(name), args)
-    }
+        ExprNode::Unary { .. } => Precedence::Prefix,
+        ExprNode::Binary { op, .. } => op.precedence(),
+    })
 }
 
 impl std::ops::Add for Expr {
@@ -899,407 +927,27 @@ impl std::ops::Neg for Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Token {
-    Ident(String),
-    Int(String),
-    Uint(String),
-    Float(String),
-    Bool(bool),
-    LParen,
-    RParen,
-    LBracket,
-    RBracket,
-    Dot,
-    Comma,
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Less,
-    LessEq,
-    Greater,
-    GreaterEq,
-    EqualEqual,
-    NotEqual,
-    AndAnd,
-    OrOr,
-    Bang,
-    Amp,
-}
+impl std::ops::Not for Expr {
+    type Output = Expr;
 
-struct Lexer<'a> {
-    chars: std::str::Chars<'a>,
-    lookahead: Option<char>,
-}
-
-impl<'a> Lexer<'a> {
-    fn new(input: &'a str) -> Self {
-        let mut chars = input.chars();
-        let lookahead = chars.next();
-        Self {
-            chars,
-            lookahead,
-        }
-    }
-
-    fn next_char(&mut self) -> Option<char> {
-        let current = self.lookahead;
-        self.lookahead = self.chars.next();
-        current
-    }
-
-    fn peek_char(&self) -> Option<char> {
-        self.lookahead
-    }
-
-    fn consume_while<F>(&mut self, mut predicate: F) -> String
-    where
-        F: FnMut(char) -> bool,
-    {
-        let mut out = String::new();
-        while let Some(ch) = self.peek_char() {
-            if !predicate(ch) {
-                break;
-            }
-            out.push(ch);
-            self.next_char();
-        }
-        out
-    }
-
-    fn skip_whitespace(&mut self) {
-        self.consume_while(|ch| ch.is_whitespace());
-    }
-
-    fn next_token(&mut self) -> Result<Option<Token>, ParseError> {
-        self.skip_whitespace();
-        let ch = match self.peek_char() {
-            Some(ch) => ch,
-            None => return Ok(None),
-        };
-        match ch {
-            '(' => {
-                self.next_char();
-                Ok(Some(Token::LParen))
-            }
-            ')' => {
-                self.next_char();
-                Ok(Some(Token::RParen))
-            }
-            '[' => {
-                self.next_char();
-                Ok(Some(Token::LBracket))
-            }
-            ']' => {
-                self.next_char();
-                Ok(Some(Token::RBracket))
-            }
-            '.' => {
-                self.next_char();
-                Ok(Some(Token::Dot))
-            }
-            ',' => {
-                self.next_char();
-                Ok(Some(Token::Comma))
-            }
-            '+' => {
-                self.next_char();
-                Ok(Some(Token::Plus))
-            }
-            '-' => {
-                self.next_char();
-                Ok(Some(Token::Minus))
-            }
-            '*' => {
-                self.next_char();
-                Ok(Some(Token::Star))
-            }
-            '/' => {
-                self.next_char();
-                Ok(Some(Token::Slash))
-            }
-            '&' => {
-                self.next_char();
-                if self.peek_char() == Some('&') {
-                    self.next_char();
-                    Ok(Some(Token::AndAnd))
-                } else {
-                    Ok(Some(Token::Amp))
-                }
-            }
-            '|' => {
-                self.next_char();
-                if self.peek_char() == Some('|') {
-                    self.next_char();
-                    Ok(Some(Token::OrOr))
-                } else {
-                    Err(ParseError::UnexpectedToken("|".to_string()))
-                }
-            }
-            '!' => {
-                self.next_char();
-                if self.peek_char() == Some('=') {
-                    self.next_char();
-                    Ok(Some(Token::NotEqual))
-                } else {
-                    Ok(Some(Token::Bang))
-                }
-            }
-            '=' => {
-                self.next_char();
-                if self.peek_char() == Some('=') {
-                    self.next_char();
-                    Ok(Some(Token::EqualEqual))
-                } else {
-                    Err(ParseError::UnexpectedToken("=".to_string()))
-                }
-            }
-            '<' => {
-                self.next_char();
-                if self.peek_char() == Some('=') {
-                    self.next_char();
-                    Ok(Some(Token::LessEq))
-                } else {
-                    Ok(Some(Token::Less))
-                }
-            }
-            '>' => {
-                self.next_char();
-                if self.peek_char() == Some('=') {
-                    self.next_char();
-                    Ok(Some(Token::GreaterEq))
-                } else {
-                    Ok(Some(Token::Greater))
-                }
-            }
-            ch if ch.is_ascii_digit() || ch == '.' => {
-                let token = self.lex_number()?;
-                Ok(Some(token))
-            }
-            ch if is_ident_start(ch) => {
-                let ident = self.consume_while(is_ident_continue);
-                let token = match ident.as_str() {
-                    "true" => Token::Bool(true),
-                    "false" => Token::Bool(false),
-                    _ => Token::Ident(ident),
-                };
-                Ok(Some(token))
-            }
-            other => Err(ParseError::UnexpectedToken(other.to_string())),
-        }
-    }
-
-    fn lex_number(&mut self) -> Result<Token, ParseError> {
-        let mut value = String::new();
-        if let Some(ch) = self.peek_char() {
-            if ch == '.' {
-                value.push('.');
-                self.next_char();
-            }
-        }
-        value.push_str(&self.consume_while(|c| c.is_ascii_digit()));
-        if self.peek_char() == Some('.') {
-            value.push('.');
-            self.next_char();
-            value.push_str(&self.consume_while(|c| c.is_ascii_digit()));
-        }
-        if matches!(self.peek_char(), Some('e') | Some('E')) {
-            value.push(self.next_char().unwrap());
-            if matches!(self.peek_char(), Some('+') | Some('-')) {
-                value.push(self.next_char().unwrap());
-            }
-            value.push_str(&self.consume_while(|c| c.is_ascii_digit()));
-        }
-        if self.peek_char() == Some('u') {
-            value.push('u');
-            self.next_char();
-            return Ok(Token::Uint(value));
-        }
-        if value.contains('.') || value.contains('e') || value.contains('E') {
-            Ok(Token::Float(value))
-        } else {
-            Ok(Token::Int(value))
-        }
+    fn not(self) -> Self::Output {
+        Expr::unary(UnaryOp::Not, self)
     }
 }
 
-fn is_ident_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_'
-}
+impl std::ops::BitAnd for Expr {
+    type Output = Expr;
 
-fn is_ident_continue(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '<' || ch == '>'
-}
-
-struct Parser {
-    tokens: Vec<Token>,
-    pos: usize,
-}
-
-impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
-    }
-
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
-    }
-
-    fn next(&mut self) -> Option<Token> {
-        let token = self.tokens.get(self.pos).cloned();
-        self.pos += 1;
-        token
-    }
-
-    fn parse_expression(&mut self, min_prec: Precedence) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_prefix()?;
-        loop {
-            expr = match self.peek() {
-                Some(Token::Dot) => {
-                    self.next();
-                    let field = match self.next() {
-                        Some(Token::Ident(name)) => name,
-                        Some(token) => return Err(ParseError::UnexpectedToken(format!("{:?}", token))),
-                        None => return Err(ParseError::UnexpectedEof),
-                    };
-                    Expr::Field(Box::new(expr), field)
-                }
-                Some(Token::LBracket) => {
-                    self.next();
-                    let index = self.parse_expression(Precedence::Lowest)?;
-                    match self.next() {
-                        Some(Token::RBracket) => {}
-                        Some(token) => return Err(ParseError::UnexpectedToken(format!("{:?}", token))),
-                        None => return Err(ParseError::UnexpectedEof),
-                    }
-                    Expr::Index(Box::new(expr), Box::new(index))
-                }
-                Some(Token::LParen) => {
-                    let args = self.parse_call_args()?;
-                    Expr::Call {
-                        callee: Box::new(expr),
-                        args,
-                    }
-                }
-                Some(token) => {
-                    if let Some((op, prec)) = binary_op(token) {
-                        if prec < min_prec {
-                            break;
-                        }
-                        self.next();
-                        let right = self.parse_expression(prec.next())?;
-                        Expr::Binary {
-                            left: Box::new(expr),
-                            op,
-                            right: Box::new(right),
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                None => break,
-            };
-        }
-        Ok(expr)
-    }
-
-    fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
-        match self.next() {
-            Some(Token::Ident(name)) => Ok(Expr::Ident(name)),
-            Some(Token::Bool(value)) => Ok(Expr::Literal(Literal::Bool(value))),
-            Some(Token::Int(value)) => Ok(Expr::Literal(Literal::Int(value))),
-            Some(Token::Uint(value)) => Ok(Expr::Literal(Literal::Uint(value))),
-            Some(Token::Float(value)) => Ok(Expr::Literal(Literal::Float(value))),
-            Some(Token::Minus) => {
-                let expr = self.parse_expression(Precedence::Prefix)?;
-                Ok(Expr::Unary {
-                    op: UnaryOp::Negate,
-                    expr: Box::new(expr),
-                })
-            }
-            Some(Token::Bang) => {
-                let expr = self.parse_expression(Precedence::Prefix)?;
-                Ok(Expr::Unary {
-                    op: UnaryOp::Not,
-                    expr: Box::new(expr),
-                })
-            }
-            Some(Token::Amp) => {
-                let expr = self.parse_expression(Precedence::Prefix)?;
-                Ok(Expr::Unary {
-                    op: UnaryOp::AddressOf,
-                    expr: Box::new(expr),
-                })
-            }
-            Some(Token::LParen) => {
-                let expr = self.parse_expression(Precedence::Lowest)?;
-                match self.next() {
-                    Some(Token::RParen) => Ok(expr),
-                    Some(token) => Err(ParseError::UnexpectedToken(format!("{:?}", token))),
-                    None => Err(ParseError::UnexpectedEof),
-                }
-            }
-            Some(token) => Err(ParseError::UnexpectedToken(format!("{:?}", token))),
-            None => Err(ParseError::UnexpectedEof),
-        }
-    }
-
-    fn parse_call_args(&mut self) -> Result<Vec<Expr>, ParseError> {
-        match self.next() {
-            Some(Token::LParen) => {}
-            Some(token) => return Err(ParseError::UnexpectedToken(format!("{:?}", token))),
-            None => return Err(ParseError::UnexpectedEof),
-        }
-        let mut args = Vec::new();
-        if matches!(self.peek(), Some(Token::RParen)) {
-            self.next();
-            return Ok(args);
-        }
-        loop {
-            args.push(self.parse_expression(Precedence::Lowest)?);
-            match self.next() {
-                Some(Token::Comma) => continue,
-                Some(Token::RParen) => break,
-                Some(token) => return Err(ParseError::UnexpectedToken(format!("{:?}", token))),
-                None => return Err(ParseError::UnexpectedEof),
-            }
-        }
-        Ok(args)
+    fn bitand(self, rhs: Expr) -> Self::Output {
+        Expr::binary(self, BinaryOp::And, rhs)
     }
 }
 
-impl Precedence {
-    fn next(self) -> Precedence {
-        match self {
-            Precedence::Lowest => Precedence::Or,
-            Precedence::Or => Precedence::And,
-            Precedence::And => Precedence::Equality,
-            Precedence::Equality => Precedence::Comparison,
-            Precedence::Comparison => Precedence::Sum,
-            Precedence::Sum => Precedence::Product,
-            Precedence::Product => Precedence::Prefix,
-            Precedence::Prefix => Precedence::Postfix,
-            Precedence::Postfix => Precedence::Postfix,
-        }
-    }
-}
+impl std::ops::BitOr for Expr {
+    type Output = Expr;
 
-fn binary_op(token: &Token) -> Option<(BinaryOp, Precedence)> {
-    match token {
-        Token::OrOr => Some((BinaryOp::Or, Precedence::Or)),
-        Token::AndAnd => Some((BinaryOp::And, Precedence::And)),
-        Token::EqualEqual => Some((BinaryOp::Equal, Precedence::Equality)),
-        Token::NotEqual => Some((BinaryOp::NotEqual, Precedence::Equality)),
-        Token::Less => Some((BinaryOp::Less, Precedence::Comparison)),
-        Token::LessEq => Some((BinaryOp::LessEq, Precedence::Comparison)),
-        Token::Greater => Some((BinaryOp::Greater, Precedence::Comparison)),
-        Token::GreaterEq => Some((BinaryOp::GreaterEq, Precedence::Comparison)),
-        Token::Plus => Some((BinaryOp::Add, Precedence::Sum)),
-        Token::Minus => Some((BinaryOp::Sub, Precedence::Sum)),
-        Token::Star => Some((BinaryOp::Mul, Precedence::Product)),
-        Token::Slash => Some((BinaryOp::Div, Precedence::Product)),
-        _ => None,
+    fn bitor(self, rhs: Expr) -> Self::Output {
+        Expr::binary(self, BinaryOp::Or, rhs)
     }
 }
 
@@ -1375,25 +1023,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expr_parser_handles_precedence_and_calls() {
-        let expr = Expr::parse("a + b * c").unwrap();
+    fn expr_builders_render_expected_wgsl() {
+        let expr = Expr::ident("a") + Expr::ident("b") * Expr::ident("c");
         assert_eq!(expr.to_string(), "a + b * c");
 
-        let expr = Expr::parse("arrayLength(&cell_vols)").unwrap();
+        let expr = Expr::call_named("arrayLength", vec![Expr::ident("cell_vols").addr_of()]);
         assert_eq!(expr.to_string(), "arrayLength(&cell_vols)");
 
-        let expr = Expr::parse("vec2<f32>(1.0, 2.0)").unwrap();
+        let expr = Expr::call_named("vec2<f32>", vec![Expr::lit_f32(1.0), Expr::lit_f32(2.0)]);
         assert_eq!(expr.to_string(), "vec2<f32>(1.0, 2.0)");
-    }
-
-    #[test]
-    fn expr_builders_render_expected_wgsl() {
-        let expr = Expr::binary(
-            Expr::ident("a"),
-            BinaryOp::Add,
-            Expr::binary(Expr::ident("b"), BinaryOp::Mul, Expr::ident("c")),
-        );
-        assert_eq!(expr.to_string(), "a + b * c");
 
         let expr = Expr::lit_u32(3);
         assert_eq!(expr.to_string(), "3u");
@@ -1403,11 +1041,11 @@ mod tests {
 
         let expr = Expr::call_named("max", vec![Expr::lit_f32(1.0), Expr::ident("x")]);
         assert_eq!(expr.to_string(), "max(1.0, x)");
-    }
 
-    #[test]
-    fn expr_parser_handles_field_and_index() {
-        let expr = Expr::parse("state[idx].u.x").unwrap();
+        let expr = Expr::ident("state")
+            .index(Expr::ident("idx"))
+            .field("u")
+            .field("x");
         assert_eq!(expr.to_string(), "state[idx].u.x");
     }
 

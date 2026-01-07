@@ -1,4 +1,4 @@
-use super::wgsl_ast::{BinaryOp, Expr, Stmt};
+use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
 
 #[derive(Debug, Clone)]
@@ -23,92 +23,68 @@ pub fn scalar_reconstruction(
     let phi_ho = format!("phi_ho_{prefix}");
 
     let mut stmts = Vec::new();
-    stmts.push(dsl::var_expr(&phi_upwind, phi_own.clone()));
+    stmts.push(dsl::var_expr(&phi_upwind, phi_own));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(flux.clone(), BinaryOp::Less, Expr::lit_f32(0.0)),
+        flux.lt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_upwind),
-            phi_neigh.clone(),
+            phi_neigh,
         )]),
         None,
     ));
     stmts.push(dsl::var_expr(&phi_ho, Expr::ident(&phi_upwind)));
 
-    let xy = |point: &Expr| dsl::vec2_f32(point.clone().field("x"), point.clone().field("y"));
+    let xy = |point: &Expr| dsl::vec2_f32(point.field("x"), point.field("y"));
 
     let sou_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(flux.clone(), BinaryOp::Greater, Expr::lit_f32(0.0)),
+        flux.gt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
-            Expr::binary(
-                phi_own.clone(),
-                BinaryOp::Add,
-                dsl::dot_expr(
-                    dsl::vec2_f32_from_xy_fields(grad_own.clone()),
-                    Expr::binary(xy(&face_center), BinaryOp::Sub, xy(&center)),
+            phi_own
+                + dsl::dot_expr(
+                    dsl::vec2_f32_from_xy_fields(grad_own),
+                    xy(&face_center) - xy(&center),
                 ),
-            ),
         )]),
         Some(dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
-            Expr::binary(
-                phi_neigh.clone(),
-                BinaryOp::Add,
-                dsl::dot_expr(
-                    dsl::vec2_f32_from_xy_fields(grad_neigh.clone()),
-                    Expr::binary(xy(&face_center), BinaryOp::Sub, xy(&other_center)),
+            phi_neigh
+                + dsl::dot_expr(
+                    dsl::vec2_f32_from_xy_fields(grad_neigh),
+                    xy(&face_center) - xy(&other_center),
                 ),
-            ),
         )])),
     )]);
 
     let quick_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(flux.clone(), BinaryOp::Greater, Expr::lit_f32(0.0)),
+        flux.gt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
-            Expr::binary(
-                Expr::binary(
-                    Expr::binary(Expr::lit_f32(0.625), BinaryOp::Mul, phi_own.clone()),
-                    BinaryOp::Add,
-                    Expr::binary(Expr::lit_f32(0.375), BinaryOp::Mul, phi_neigh.clone()),
-                ),
-                BinaryOp::Add,
-                Expr::binary(
-                    Expr::lit_f32(0.125),
-                    BinaryOp::Mul,
-                    dsl::dot_expr(
-                        dsl::vec2_f32_from_xy_fields(grad_own.clone()),
-                        Expr::binary(xy(&other_center), BinaryOp::Sub, xy(&center)),
+            Expr::lit_f32(0.625) * phi_own
+                + Expr::lit_f32(0.375) * phi_neigh
+                + Expr::lit_f32(0.125)
+                    * dsl::dot_expr(
+                        dsl::vec2_f32_from_xy_fields(grad_own),
+                        xy(&other_center) - xy(&center),
                     ),
-                ),
-            ),
         )]),
         Some(dsl::block(vec![dsl::assign_expr(
             Expr::ident(&phi_ho),
-            Expr::binary(
-                Expr::binary(
-                    Expr::binary(Expr::lit_f32(0.625), BinaryOp::Mul, phi_neigh.clone()),
-                    BinaryOp::Add,
-                    Expr::binary(Expr::lit_f32(0.375), BinaryOp::Mul, phi_own.clone()),
-                ),
-                BinaryOp::Add,
-                Expr::binary(
-                    Expr::lit_f32(0.125),
-                    BinaryOp::Mul,
-                    dsl::dot_expr(
-                        dsl::vec2_f32_from_xy_fields(grad_neigh.clone()),
-                        Expr::binary(xy(&center), BinaryOp::Sub, xy(&other_center)),
+            Expr::lit_f32(0.625) * phi_neigh
+                + Expr::lit_f32(0.375) * phi_own
+                + Expr::lit_f32(0.125)
+                    * dsl::dot_expr(
+                        dsl::vec2_f32_from_xy_fields(grad_neigh),
+                        xy(&center) - xy(&other_center),
                     ),
-                ),
-            ),
         )])),
     )]);
 
     stmts.push(dsl::if_block_expr(
-        Expr::binary(scheme_id.clone(), BinaryOp::Equal, Expr::lit_u32(1)),
+        scheme_id.eq(Expr::lit_u32(1)),
         sou_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::binary(scheme_id, BinaryOp::Equal, Expr::lit_u32(2)),
+            scheme_id.eq(Expr::lit_u32(2)),
             quick_block,
             None,
         )])),
@@ -142,7 +118,7 @@ pub fn limited_linear_reconstruct_face(
     let mut stmts = Vec::new();
     stmts.push(dsl::let_expr(
         &diff,
-        Expr::binary(phi_other, BinaryOp::Sub, phi_cell.clone()),
+        phi_other - phi_cell,
     ));
     stmts.push(dsl::let_expr(
         &min_diff,
@@ -165,7 +141,7 @@ pub fn limited_linear_reconstruct_face(
     ));
     stmts.push(dsl::let_expr(
         &phi_face,
-        Expr::binary(phi_cell, BinaryOp::Add, Expr::ident(&delta_limited)),
+        phi_cell + Expr::ident(&delta_limited),
     ));
 
     (stmts, Expr::ident(&phi_face))

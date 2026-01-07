@@ -4,8 +4,8 @@ use super::dsl as typed;
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StructDef, StructField, Type, UnaryOp,
+    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
+    StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -286,14 +286,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             + Expr::ident("global_id").field("x"),
     ));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("idx"),
-            BinaryOp::GreaterEq,
-            Expr::call_named(
-                "arrayLength",
-                vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("face_areas"))],
-            ),
-        ),
+        Expr::ident("idx").ge(Expr::call_named(
+            "arrayLength",
+            vec![Expr::ident("face_areas").addr_of()],
+        )),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -345,11 +341,9 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let owner_face_d_vec = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
         .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("center_owner_vec")));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            owner_face_d_vec.dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
-            BinaryOp::Less,
-            Expr::lit_f32(0.0),
-        ),
+        owner_face_d_vec
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")))
+            .lt(Expr::lit_f32(0.0)),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal_vec"),
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
@@ -420,11 +414,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let boundary_block = dsl::block(vec![
         dsl::assign_expr(Expr::ident("is_boundary"), Expr::lit_bool(true)),
         dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(1),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("rho_u_r"),
                 typed::VecExpr::<2>::from_components([
@@ -434,11 +424,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
                 .expr(),
             )]),
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("boundary_type"),
-                    BinaryOp::Equal,
-                    Expr::lit_u32(3),
-                ),
+                Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
                 dsl::block(vec![
                     // Slip wall: reflect only the normal component of momentum.
                     dsl::let_expr(
@@ -463,7 +449,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
 
     stmts.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("neighbor"), BinaryOp::NotEqual, Expr::lit_i32(-1)),
+        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
         interior_block,
         Some(boundary_block),
     ));
@@ -480,35 +466,19 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         let mut block = Vec::new();
         block.push(dsl::let_expr(
             "r_l_x",
-            Expr::binary(
-                Expr::ident("face_center").field("x"),
-                BinaryOp::Sub,
-                Expr::ident("center_owner").field("x"),
-            ),
+            Expr::ident("face_center").field("x") - Expr::ident("center_owner").field("x"),
         ));
         block.push(dsl::let_expr(
             "r_l_y",
-            Expr::binary(
-                Expr::ident("face_center").field("y"),
-                BinaryOp::Sub,
-                Expr::ident("center_owner").field("y"),
-            ),
+            Expr::ident("face_center").field("y") - Expr::ident("center_owner").field("y"),
         ));
         block.push(dsl::let_expr(
             "r_r_x",
-            Expr::binary(
-                Expr::ident("face_center").field("x"),
-                BinaryOp::Sub,
-                Expr::ident("center_r").field("x"),
-            ),
+            Expr::ident("face_center").field("x") - Expr::ident("center_r").field("x"),
         ));
         block.push(dsl::let_expr(
             "r_r_y",
-            Expr::binary(
-                Expr::ident("face_center").field("y"),
-                BinaryOp::Sub,
-                Expr::ident("center_r").field("y"),
-            ),
+            Expr::ident("face_center").field("y") - Expr::ident("center_r").field("y"),
         ));
 
         // Reconstruct conservative variables directly for robustness.
@@ -647,15 +617,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     // - `scheme=0` and `scheme=2` default to piecewise-constant states.
     // - `scheme=1` enables limited linear reconstruction.
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
-            BinaryOp::And,
-            Expr::binary(
-                Expr::ident("constants").field("scheme"),
-                BinaryOp::Equal,
-                Expr::lit_u32(1),
-            ),
-        ),
+        (!Expr::ident("is_boundary"))
+            & Expr::ident("constants")
+                .field("scheme")
+                .eq(Expr::lit_u32(1)),
         reconstruct_block,
         None,
     ));
@@ -674,12 +639,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "ke_l",
-        Expr::binary(
-            Expr::binary(Expr::lit_f32(0.5), BinaryOp::Mul, Expr::ident("rho_l")),
-            BinaryOp::Mul,
-            typed::VecExpr::<2>::from_expr(Expr::ident("u_l"))
+        Expr::lit_f32(0.5)
+            * Expr::ident("rho_l")
+            * typed::VecExpr::<2>::from_expr(Expr::ident("u_l"))
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_l"))),
-        ),
     ));
     stmts.push(dsl::let_expr(
         "p_l",
@@ -718,12 +681,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "ke_r",
-        Expr::binary(
-            Expr::binary(Expr::lit_f32(0.5), BinaryOp::Mul, Expr::ident("rho_r")),
-            BinaryOp::Mul,
-            typed::VecExpr::<2>::from_expr(Expr::ident("u_r"))
+        Expr::lit_f32(0.5)
+            * Expr::ident("rho_r")
+            * typed::VecExpr::<2>::from_expr(Expr::ident("u_r"))
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_r"))),
-        ),
     ));
     stmts.push(dsl::let_expr(
         "p_r",
@@ -819,20 +780,16 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ]);
     let precond_else_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("constants").field("precond_model"),
-            BinaryOp::Equal,
-            Expr::lit_u32(1),
-        ),
+        Expr::ident("constants")
+            .field("precond_model")
+            .eq(Expr::lit_u32(1)),
         precond_weiss_smith_block,
         None,
     )]);
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("constants").field("precond_model"),
-            BinaryOp::Equal,
-            Expr::lit_u32(0),
-        ),
+        Expr::ident("constants")
+            .field("precond_model")
+            .eq(Expr::lit_u32(0)),
         precond_legacy_block,
         Some(precond_else_block),
     ));
@@ -975,11 +932,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "visc_scale",
-        Expr::binary(
-            Expr::binary(Expr::lit_f32(-1.0), BinaryOp::Mul, Expr::ident("mu")),
-            BinaryOp::Div,
-            Expr::ident("dist"),
-        ),
+        (-Expr::ident("mu")) / Expr::ident("dist"),
     ));
     stmts.push(dsl::let_typed_expr(
         "diff_u",
@@ -1158,18 +1111,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "grad_u2_l_vec",
         Type::vec2_f32(),
         typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_x_l_vec"))
-            .mul_scalar(Expr::binary(
-                Expr::lit_f32(2.0),
-                BinaryOp::Mul,
-                Expr::ident("u_l_cell").field("x"),
-            ))
+            .mul_scalar(Expr::lit_f32(2.0) * Expr::ident("u_l_cell").field("x"))
             .add(
                 &typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_y_l_vec")).mul_scalar(
-                    Expr::binary(
-                        Expr::lit_f32(2.0),
-                        BinaryOp::Mul,
-                        Expr::ident("u_l_cell").field("y"),
-                    ),
+                    Expr::lit_f32(2.0) * Expr::ident("u_l_cell").field("y"),
                 ),
             )
             .expr(),
@@ -1178,18 +1123,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "grad_u2_r_vec",
         Type::vec2_f32(),
         typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_x_r_vec"))
-            .mul_scalar(Expr::binary(
-                Expr::lit_f32(2.0),
-                BinaryOp::Mul,
-                Expr::ident("u_r_cell").field("x"),
-            ))
+            .mul_scalar(Expr::lit_f32(2.0) * Expr::ident("u_r_cell").field("x"))
             .add(
                 &typed::VecExpr::<2>::from_expr(Expr::ident("grad_u_y_r_vec")).mul_scalar(
-                    Expr::binary(
-                        Expr::lit_f32(2.0),
-                        BinaryOp::Mul,
-                        Expr::ident("u_r_cell").field("y"),
-                    ),
+                    Expr::lit_f32(2.0) * Expr::ident("u_r_cell").field("y"),
                 ),
             )
             .expr(),
@@ -1338,34 +1275,21 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ]);
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::binary(
-                Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
-                BinaryOp::And,
-                Expr::binary(
-                    Expr::ident("constants").field("precond_model"),
-                    BinaryOp::NotEqual,
-                    Expr::lit_u32(2),
-                ),
-            ),
-            BinaryOp::And,
-            Expr::binary(
-                Expr::ident("constants").field("pressure_coupling_alpha"),
-                BinaryOp::Greater,
-                Expr::lit_f32(0.0),
-            ),
-        ),
+        (!Expr::ident("is_boundary"))
+            & Expr::ident("constants")
+                .field("precond_model")
+                .ne(Expr::lit_u32(2))
+            & Expr::ident("constants")
+                .field("pressure_coupling_alpha")
+                .gt(Expr::lit_f32(0.0)),
         pressure_coupling_block,
         None,
     ));
     stmts.push(dsl::assign_expr(
         Expr::ident("flux_rho_e"),
-        Expr::binary(
-            Expr::ident("flux_rho_e"),
-            BinaryOp::Add,
-            typed::VecExpr::<2>::from_expr(Expr::ident("diff_u"))
+        Expr::ident("flux_rho_e")
+            + typed::VecExpr::<2>::from_expr(Expr::ident("diff_u"))
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u_face"))),
-        ),
     ));
 
     stmts.push(dsl::let_expr(

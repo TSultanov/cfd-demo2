@@ -1,4 +1,4 @@
-use crate::solver::codegen::wgsl_ast::{BinaryOp, Expr};
+use crate::solver::codegen::wgsl_ast::Expr;
 
 use super::expr::TypedExpr;
 use super::types::{ScalarType, Shape};
@@ -43,16 +43,16 @@ impl CsrPattern {
     }
 
     pub fn row_start(&self, row: &Expr) -> Expr {
-        self.row_offsets.clone().index(row.clone())
+        self.row_offsets.index(*row)
     }
 
     pub fn row_end(&self, row: &Expr) -> Expr {
-        let next = Expr::binary(row.clone(), BinaryOp::Add, Expr::lit_u32(1));
-        self.row_offsets.clone().index(next)
+        let next = *row + Expr::lit_u32(1);
+        self.row_offsets.index(next)
     }
 
     pub fn col_at(&self, nnz_index: &Expr) -> Expr {
-        self.col_indices.clone().index(nnz_index.clone())
+        self.col_indices.index(*nnz_index)
     }
 }
 
@@ -80,7 +80,7 @@ impl CsrMatrix {
 
     pub fn value_at(&self, nnz_index: &Expr) -> TypedExpr {
         TypedExpr::new(
-            self.values.clone().index(nnz_index.clone()),
+            self.values.index(*nnz_index),
             self.entry_ty,
             self.entry_unit,
         )
@@ -117,11 +117,11 @@ impl BlockCsrMatrix {
         assert!(row < self.block.rows, "block row out of bounds");
         assert!(col < self.block.cols, "block col out of bounds");
         let block_stride = Expr::lit_u32(self.block.entry_count());
-        let base = Expr::binary(nnz_index.clone(), BinaryOp::Mul, block_stride);
+        let base = *nnz_index * block_stride;
         let offset = Expr::lit_u32(row as u32 * self.block.cols as u32 + col as u32);
-        let index = Expr::binary(base, BinaryOp::Add, offset);
+        let index = base + offset;
         let ty = DslType::new(self.scalar, Shape::Scalar);
-        TypedExpr::new(self.values.clone().index(index), ty, self.entry_unit)
+        TypedExpr::new(self.values.index(index), ty, self.entry_unit)
     }
 }
 
@@ -175,12 +175,11 @@ impl BlockCsrSoaMatrix {
             .iter()
             .cloned()
             .map(|start| {
-                let offset = Expr::binary(cols.clone(), BinaryOp::Mul, rank.clone());
-                Expr::binary(start, BinaryOp::Add, offset)
+                start + cols * *rank
             })
             .collect();
         BlockCsrSoaEntry::new(
-            self.values.clone(),
+            self.values,
             bases,
             self.block,
             self.scalar,
@@ -231,12 +230,12 @@ impl BlockCsrSoaEntry {
     pub fn index_expr(&self, row: u8, col: u8) -> Expr {
         assert!(row < self.block.rows, "block row out of bounds");
         assert!(col < self.block.cols, "block col out of bounds");
-        let base = self.row_bases[row as usize].clone();
-        Expr::binary(base, BinaryOp::Add, Expr::lit_u32(col as u32))
+        let base = self.row_bases[row as usize];
+        base + Expr::lit_u32(col as u32)
     }
 
     pub fn access_expr(&self, row: u8, col: u8) -> Expr {
-        self.values.clone().index(self.index_expr(row, col))
+        self.values.index(self.index_expr(row, col))
     }
 }
 

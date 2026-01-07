@@ -3,8 +3,8 @@ use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StructDef, StructField, Type, UnaryOp,
+    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
+    StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -192,19 +192,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "num_cells",
         Expr::call_named(
             "arrayLength",
-            vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("state"))],
+            vec![Expr::ident("state").addr_of()],
         ),
     ));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::binary(
-                Expr::ident("idx"),
-                BinaryOp::Mul,
-                Expr::lit_u32(layout.stride()),
-            ),
-            BinaryOp::GreaterEq,
-            Expr::ident("num_cells"),
-        ),
+        (Expr::ident("idx") * Expr::lit_u32(layout.stride())).ge(Expr::ident("num_cells")),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -225,11 +217,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr(
         "inv_rho",
-        Expr::binary(
-            Expr::lit_f32(1.0),
-            BinaryOp::Div,
-            Expr::call_named("max", vec![Expr::ident("rho"), Expr::lit_f32(1e-8)]),
-        ),
+        Expr::lit_f32(1.0) / Expr::call_named("max", vec![Expr::ident("rho"), Expr::lit_f32(1e-8)]),
     ));
     stmts.push(dsl::let_typed_expr(
         "u",
@@ -244,11 +232,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "ke",
-        Expr::binary(
-            Expr::binary(Expr::lit_f32(0.5), BinaryOp::Mul, Expr::ident("rho")),
-            BinaryOp::Mul,
-            Expr::ident("u2"),
-        ),
+        Expr::lit_f32(0.5) * Expr::ident("rho") * Expr::ident("u2"),
     ));
     stmts.push(dsl::let_expr(
         "p_val",
@@ -256,11 +240,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "max",
             vec![
                 Expr::lit_f32(0.0),
-                Expr::binary(
-                    Expr::lit_f32(gamma_minus_1),
-                    BinaryOp::Mul,
-                    Expr::binary(Expr::ident("rho_e"), BinaryOp::Sub, Expr::ident("ke")),
-                ),
+                Expr::lit_f32(gamma_minus_1) * (Expr::ident("rho_e") - Expr::ident("ke")),
             ],
         ),
     ));

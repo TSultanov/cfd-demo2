@@ -2,7 +2,7 @@ use crate::solver::scheme::Scheme;
 
 use crate::solver::model::backend::ast::{Coefficient, Discretization, FieldKind};
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
-use super::wgsl_ast::{BinaryOp, Block, Expr, Function, Item, Module, Param, Stmt, Type};
+use super::wgsl_ast::{Block, Expr, Function, Item, Module, Param, Stmt, Type};
 use super::wgsl_dsl as dsl;
 
 pub fn generate_wgsl(system: &DiscreteSystem) -> String {
@@ -156,11 +156,7 @@ fn term_ddt_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("base_coeff") * Expr::ident("phi_n").field("y")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("time_scheme"),
-                    BinaryOp::Equal,
-                    Expr::lit_u32(1),
-                ),
+                Expr::ident("time_scheme").eq(Expr::lit_u32(1)),
                 dsl::block(vec![
                     dsl::let_expr("r", Expr::ident("dt") / Expr::ident("dt_old")),
                     dsl::assign_expr(
@@ -203,11 +199,7 @@ fn term_ddt_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("base_coeff") * Expr::ident("phi_n")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("time_scheme"),
-                    BinaryOp::Equal,
-                    Expr::lit_u32(1),
-                ),
+                Expr::ident("time_scheme").eq(Expr::lit_u32(1)),
                 dsl::block(vec![
                     dsl::let_expr("r", Expr::ident("dt") / Expr::ident("dt_old")),
                     dsl::assign_expr(
@@ -279,7 +271,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                 Some(Expr::ident("phi_own")),
             ));
             body.push(dsl::if_block_expr(
-                Expr::binary(Expr::ident("flux"), BinaryOp::LessEq, Expr::lit_f32(0.0)),
+                Expr::ident("flux").le(Expr::lit_f32(0.0)),
                 dsl::block(vec![
                     dsl::assign_expr(Expr::ident("phi_upwind"), Expr::ident("phi_neigh")),
                     dsl::assign_expr(Expr::ident("phi_ho"), Expr::ident("phi_neigh")),
@@ -290,7 +282,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             match op.scheme {
                 Scheme::SecondOrderUpwind => {
                     body.push(dsl::if_block_expr(
-                        Expr::binary(Expr::ident("flux"), BinaryOp::Greater, Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
                         dsl::block(vec![
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("x"),
@@ -331,7 +323,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                 }
                 Scheme::QUICK => {
                     body.push(dsl::if_block_expr(
-                        Expr::binary(Expr::ident("flux"), BinaryOp::Greater, Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
                         dsl::block(vec![
                             dsl::assign_expr(
                                 Expr::ident("phi_ho").field("x"),
@@ -423,7 +415,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             body.push(dsl::var_typed_expr("phi_upwind", Type::F32, Some(Expr::ident("phi_own"))));
             body.push(dsl::var_typed_expr("phi_ho", Type::F32, Some(Expr::ident("phi_own"))));
             body.push(dsl::if_block_expr(
-                Expr::binary(Expr::ident("flux"), BinaryOp::LessEq, Expr::lit_f32(0.0)),
+                Expr::ident("flux").le(Expr::lit_f32(0.0)),
                 dsl::block(vec![
                     dsl::assign_expr(Expr::ident("phi_upwind"), Expr::ident("phi_neigh")),
                     dsl::assign_expr(Expr::ident("phi_ho"), Expr::ident("phi_neigh")),
@@ -434,7 +426,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             match op.scheme {
                 Scheme::SecondOrderUpwind => {
                     body.push(dsl::if_block_expr(
-                        Expr::binary(Expr::ident("flux"), BinaryOp::Greater, Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
                         dsl::block(vec![dsl::assign_expr(
                             Expr::ident("phi_ho"),
                             Expr::ident("phi_own")
@@ -455,7 +447,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                 }
                 Scheme::QUICK => {
                     body.push(dsl::if_block_expr(
-                        Expr::binary(Expr::ident("flux"), BinaryOp::Greater, Expr::lit_f32(0.0)),
+                        Expr::ident("flux").gt(Expr::lit_f32(0.0)),
                         dsl::block(vec![dsl::assign_expr(
                             Expr::ident("phi_ho"),
                             Expr::lit_f32(0.625) * Expr::ident("phi_own")
@@ -691,7 +683,7 @@ fn codegen_conv_coeff_fn() -> Function {
         dsl::var_typed_expr("conv_coeff_diag", Type::F32, Some(Expr::lit_f32(0.0))),
         dsl::var_typed_expr("conv_coeff_off", Type::F32, Some(Expr::lit_f32(0.0))),
         dsl::if_block_expr(
-            Expr::binary(Expr::ident("flux"), BinaryOp::Greater, Expr::lit_f32(0.0)),
+            Expr::ident("flux").gt(Expr::lit_f32(0.0)),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("conv_coeff_diag"),
                 Expr::ident("flux"),

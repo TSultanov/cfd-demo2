@@ -3,8 +3,8 @@ use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StructDef, StructField, Type, UnaryOp,
+    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
+    StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -204,19 +204,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         "num_cells",
         Expr::call_named(
             "arrayLength",
-            vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("state"))],
+            vec![Expr::ident("state").addr_of()],
         ),
     ));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::binary(
-                Expr::ident("idx"),
-                BinaryOp::Mul,
-                Expr::lit_u32(layout.stride()),
-            ),
-            BinaryOp::GreaterEq,
-            Expr::ident("num_cells"),
-        ),
+        (Expr::ident("idx") * Expr::lit_u32(layout.stride())).ge(Expr::ident("num_cells")),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -237,14 +229,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr(
         "base",
-        Expr::binary(Expr::ident("idx"), BinaryOp::Mul, Expr::lit_u32(4)),
+        Expr::ident("idx") * Expr::lit_u32(4),
     ));
     let solution_at = |offset: u32| {
-        Expr::ident("solution").index(Expr::binary(
-            Expr::ident("base"),
-            BinaryOp::Add,
-            Expr::lit_u32(offset),
-        ))
+        Expr::ident("solution").index(Expr::ident("base") + Expr::lit_u32(offset))
     };
     stmts.push(dsl::let_expr("delta_rho", solution_at(0)));
     stmts.push(dsl::let_typed_expr(
@@ -260,11 +248,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "rho_new",
-        Expr::binary(
-            Expr::ident("rho_base"),
-            BinaryOp::Add,
-            Expr::binary(Expr::ident("relax"), BinaryOp::Mul, Expr::ident("delta_rho")),
-        ),
+        Expr::ident("rho_base") + Expr::ident("relax") * Expr::ident("delta_rho"),
     ));
     stmts.push(dsl::let_typed_expr(
         "rho_u_new",
@@ -276,11 +260,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "rho_e_new",
-        Expr::binary(
-            Expr::ident("rho_e_base"),
-            BinaryOp::Add,
-            Expr::binary(Expr::ident("relax"), BinaryOp::Mul, Expr::ident("delta_rho_e")),
-        ),
+        Expr::ident("rho_e_base") + Expr::ident("relax") * Expr::ident("delta_rho_e"),
     ));
 
     stmts.push(dsl::assign_expr(rho_target, Expr::ident("rho_new")));

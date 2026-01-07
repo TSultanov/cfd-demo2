@@ -3,8 +3,8 @@ use super::state_access::{state_scalar, state_vec2};
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
-    Param, Stmt, StructDef, StructField, Type, UnaryOp,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
+    StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -280,14 +280,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("idx"),
-            BinaryOp::GreaterEq,
-            Expr::call_named(
-                "arrayLength",
-                vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("cell_vols"))],
-            ),
-        ),
+        Expr::ident("idx").ge(Expr::call_named(
+            "arrayLength",
+            vec![Expr::ident("cell_vols").addr_of()],
+        )),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -305,11 +301,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "end",
-        Expr::ident("cell_face_offsets").index(Expr::binary(
-            Expr::ident("idx"),
-            BinaryOp::Add,
-            Expr::lit_u32(1),
-        )),
+        Expr::ident("cell_face_offsets").index(Expr::ident("idx") + Expr::lit_u32(1)),
     ));
 
     stmts.push(dsl::let_expr("rho_l", rho_expr));
@@ -366,10 +358,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+        Expr::ident("owner").ne(Expr::ident("idx")),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal"),
-            Expr::unary(UnaryOp::Negate, Expr::ident("normal")),
+            -Expr::ident("normal"),
         )]),
         None,
     ));
@@ -386,11 +378,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let rho_u_neigh_expr = state_vec2(layout, "state", "other_idx", rho_u_field);
     let rho_e_neigh_expr = state_scalar(layout, "state", "other_idx", rho_e_field);
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("neighbor"),
-            BinaryOp::NotEqual,
-            Expr::lit_i32(-1),
-        ),
+        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
         dsl::block(vec![
             dsl::var_typed_expr(
                 "other_idx",
@@ -398,7 +386,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
                 Some(Expr::call_named("u32", vec![Expr::ident("neighbor")])),
             ),
             dsl::if_block_expr(
-                Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+                Expr::ident("owner").ne(Expr::ident("idx")),
                 dsl::block(vec![dsl::assign_expr(
                     Expr::ident("other_idx"),
                     Expr::ident("owner"),
@@ -423,46 +411,27 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::var_typed_expr("rho_e_face", Type::F32, Some(Expr::ident("rho_e_l"))));
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("neighbor"),
-            BinaryOp::NotEqual,
-            Expr::lit_i32(-1),
-        ),
+        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
         dsl::block(vec![
             dsl::assign_expr(
                 Expr::ident("rho_face"),
-                Expr::binary(
-                    Expr::lit_f32(0.5),
-                    BinaryOp::Mul,
-                    Expr::binary(Expr::ident("rho_l"), BinaryOp::Add, Expr::ident("rho_r")),
-                ),
+                Expr::lit_f32(0.5) * (Expr::ident("rho_l") + Expr::ident("rho_r")),
             ),
             dsl::assign_expr(
                 Expr::ident("rho_u_face"),
-                Expr::binary(
-                    Expr::lit_f32(0.5),
-                    BinaryOp::Mul,
-                    Expr::binary(Expr::ident("rho_u_l"), BinaryOp::Add, Expr::ident("rho_u_r")),
-                ),
+                Expr::lit_f32(0.5) * (Expr::ident("rho_u_l") + Expr::ident("rho_u_r")),
             ),
             dsl::assign_expr(
                 Expr::ident("rho_e_face"),
-                Expr::binary(
-                    Expr::lit_f32(0.5),
-                    BinaryOp::Mul,
-                    Expr::binary(Expr::ident("rho_e_l"), BinaryOp::Add, Expr::ident("rho_e_r")),
-                ),
+                Expr::lit_f32(0.5) * (Expr::ident("rho_e_l") + Expr::ident("rho_e_r")),
             ),
         ]),
         None,
     ));
 
     let add_flux = |target: &str, face_value: Expr| {
-        let flux = typed::VecExpr::<2>::from_expr(Expr::ident("normal")).mul_scalar(Expr::binary(
-            face_value,
-            BinaryOp::Mul,
-            Expr::ident("area"),
-        ));
+        let flux = typed::VecExpr::<2>::from_expr(Expr::ident("normal"))
+            .mul_scalar(face_value * Expr::ident("area"));
         dsl::assign_op_expr(AssignOp::Add, Expr::ident(target), flux.expr())
     };
 
@@ -479,7 +448,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::for_loop_expr(
         dsl::for_init_var_expr("k", Expr::ident("start")),
-        Expr::binary(Expr::ident("k"), BinaryOp::Less, Expr::ident("end")),
+        Expr::ident("k").lt(Expr::ident("end")),
         dsl::for_step_increment_expr(Expr::ident("k")),
         dsl::block(loop_body),
     ));

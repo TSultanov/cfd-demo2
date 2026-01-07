@@ -4,8 +4,8 @@ use super::dsl as typed;
 use super::state_access::{state_scalar, state_vec2};
 use super::reconstruction::limited_linear_reconstruct_face;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module,
-    Param, Stmt, StructDef, StructField, Type, UnaryOp,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
+    StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -313,14 +313,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("idx"),
-            BinaryOp::GreaterEq,
-            Expr::call_named(
-                "arrayLength",
-                vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("cell_vols"))],
-            ),
-        ),
+        Expr::ident("idx").ge(Expr::call_named(
+            "arrayLength",
+            vec![Expr::ident("cell_vols").addr_of()],
+        )),
         dsl::block(vec![Stmt::Return(None)]),
         None,
     ));
@@ -478,11 +474,9 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ]);
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("constants").field("dtau"),
-            BinaryOp::Greater,
-            Expr::lit_f32(0.0),
-        ),
+        Expr::ident("constants")
+            .field("dtau")
+            .gt(Expr::lit_f32(0.0)),
         pseudo_block,
         None,
     ));
@@ -537,11 +531,9 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
 
     stmts.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("constants").field("time_scheme"),
-            BinaryOp::Equal,
-            Expr::lit_u32(1),
-        ),
+        Expr::ident("constants")
+            .field("time_scheme")
+            .eq(Expr::lit_u32(1)),
         bdf2_block,
         None,
     ));
@@ -597,15 +589,15 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
 
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+        Expr::ident("owner").ne(Expr::ident("idx")),
         dsl::block(vec![
             dsl::assign_expr(
                 Expr::ident("normal").field("x"),
-                Expr::unary(UnaryOp::Negate, Expr::ident("normal").field("x")),
+                -Expr::ident("normal").field("x"),
             ),
             dsl::assign_expr(
                 Expr::ident("normal").field("y"),
-                Expr::unary(UnaryOp::Negate, Expr::ident("normal").field("y")),
+                -Expr::ident("normal").field("y"),
             ),
         ]),
         None,
@@ -619,7 +611,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
         dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("neigh_idx")),
         dsl::if_block_expr(
-            Expr::binary(Expr::ident("owner"), BinaryOp::NotEqual, Expr::ident("idx")),
+            Expr::ident("owner").ne(Expr::ident("idx")),
             dsl::block(vec![dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("owner"))]),
             None,
         ),
@@ -663,7 +655,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::var_typed_expr("rho_e_r", Type::F32, Some(Expr::ident("rho_e_l"))));
 
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("neighbor"), BinaryOp::NotEqual, Expr::lit_i32(-1)),
+        Expr::ident("neighbor").ne(Expr::lit_i32(-1)),
         interior_block,
         Some(boundary_block),
     ));
@@ -700,18 +692,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
 
     let boundary_state = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("boundary_type"),
-            BinaryOp::Equal,
-            Expr::lit_u32(1),
-        ),
+        Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
         inlet_block,
         Some(dsl::block(vec![dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(3),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
             wall_block,
             None,
         )])),
@@ -731,35 +715,19 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         let mut block = Vec::new();
         block.push(dsl::let_expr(
             "r_l_x",
-            Expr::binary(
-                Expr::ident("f_center").field("x"),
-                BinaryOp::Sub,
-                Expr::ident("center").field("x"),
-            ),
+            Expr::ident("f_center").field("x") - Expr::ident("center").field("x"),
         ));
         block.push(dsl::let_expr(
             "r_l_y",
-            Expr::binary(
-                Expr::ident("f_center").field("y"),
-                BinaryOp::Sub,
-                Expr::ident("center").field("y"),
-            ),
+            Expr::ident("f_center").field("y") - Expr::ident("center").field("y"),
         ));
         block.push(dsl::let_expr(
             "r_r_x",
-            Expr::binary(
-                Expr::ident("f_center").field("x"),
-                BinaryOp::Sub,
-                Expr::ident("center_r").field("x"),
-            ),
+            Expr::ident("f_center").field("x") - Expr::ident("center_r").field("x"),
         ));
         block.push(dsl::let_expr(
             "r_r_y",
-            Expr::binary(
-                Expr::ident("f_center").field("y"),
-                BinaryOp::Sub,
-                Expr::ident("center_r").field("y"),
-            ),
+            Expr::ident("f_center").field("y") - Expr::ident("center_r").field("y"),
         ));
 
         // Reconstruct conservative variables directly for robustness.
@@ -898,11 +866,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     // - `scheme=0` and `scheme=2` default to piecewise-constant states.
     // - `scheme=1` enables limited linear reconstruction.
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
-            BinaryOp::And,
-            Expr::binary(Expr::ident("scheme_id"), BinaryOp::Equal, Expr::lit_u32(1)),
-        ),
+        (!Expr::ident("is_boundary")) & Expr::ident("scheme_id").eq(Expr::lit_u32(1)),
         reconstruct_block,
         None,
     ));
@@ -1061,20 +1025,16 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ]);
     let precond_else_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("constants").field("precond_model"),
-            BinaryOp::Equal,
-            Expr::lit_u32(1),
-        ),
+        Expr::ident("constants")
+            .field("precond_model")
+            .eq(Expr::lit_u32(1)),
         precond_weiss_smith_block,
         None,
     )]);
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::ident("constants").field("precond_model"),
-            BinaryOp::Equal,
-            Expr::lit_u32(0),
-        ),
+        Expr::ident("constants")
+            .field("precond_model")
+            .eq(Expr::lit_u32(0)),
         precond_legacy_block,
         Some(precond_else_block),
     ));
@@ -1224,13 +1184,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::let_expr(
         "diff_u_x",
-        Expr::unary(UnaryOp::Negate, Expr::ident("mu"))
+        (-Expr::ident("mu"))
             * (Expr::ident("u_r_x") - Expr::ident("u_l_x"))
             / Expr::ident("dist"),
     ));
     loop_body.push(dsl::let_expr(
         "diff_u_y",
-        Expr::unary(UnaryOp::Negate, Expr::ident("mu"))
+        (-Expr::ident("mu"))
             * (Expr::ident("u_r_y") - Expr::ident("u_l_y"))
             / Expr::ident("dist"),
     ));
@@ -1570,23 +1530,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
     ]);
     loop_body.push(dsl::if_block_expr(
-        Expr::binary(
-            Expr::binary(
-                Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
-                BinaryOp::And,
-                Expr::binary(
-                    Expr::ident("constants").field("precond_model"),
-                    BinaryOp::NotEqual,
-                    Expr::lit_u32(2),
-                ),
-            ),
-            BinaryOp::And,
-            Expr::binary(
-                Expr::ident("constants").field("pressure_coupling_alpha"),
-                BinaryOp::Greater,
-                Expr::lit_f32(0.0),
-            ),
-        ),
+        (!Expr::ident("is_boundary"))
+            & Expr::ident("constants")
+                .field("precond_model")
+                .ne(Expr::lit_u32(2))
+            & Expr::ident("constants")
+                .field("pressure_coupling_alpha")
+                .gt(Expr::lit_f32(0.0)),
         pressure_coupling_block,
         None,
     ));
@@ -1628,11 +1578,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::let_expr(
         "dp_dru_l",
-        Expr::unary(UnaryOp::Negate, Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_l_x"),
+        (-Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_l_x"),
     ));
     loop_body.push(dsl::let_expr(
         "dp_drv_l",
-        Expr::unary(UnaryOp::Negate, Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_l_y"),
+        (-Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_l_y"),
     ));
     loop_body.push(dsl::let_expr("dp_dre_l", Expr::lit_f32(gamma_minus_1)));
     loop_body.push(dsl::let_expr(
@@ -1650,11 +1600,11 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::let_expr(
         "dp_dru_r",
-        Expr::unary(UnaryOp::Negate, Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_r_x"),
+        (-Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_r_x"),
     ));
     loop_body.push(dsl::let_expr(
         "dp_drv_r",
-        Expr::unary(UnaryOp::Negate, Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_r_y"),
+        (-Expr::lit_f32(gamma_minus_1)) * Expr::ident("u_r_y"),
     ));
     loop_body.push(dsl::let_expr("dp_dre_r", Expr::lit_f32(gamma_minus_1)));
     loop_body.push(dsl::let_expr(
@@ -1668,12 +1618,12 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     loop_body.push(dsl::let_expr(
         "a_r",
-        Expr::unary(UnaryOp::Negate, Expr::ident("a_minus")) / Expr::ident("denom"),
+        (-Expr::ident("a_minus")) / Expr::ident("denom"),
     ));
 
     loop_body.push(dsl::let_expr(
         "mu_over_dist",
-        Expr::binary(Expr::ident("mu"), BinaryOp::Div, Expr::ident("dist")),
+        Expr::ident("mu") / Expr::ident("dist"),
     ));
     loop_body.push(dsl::let_expr(
         "u_face_vec",
@@ -1720,169 +1670,71 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     let diff_u = typed::NamedVecExpr::<2, typed::AxisXY>::from_expr(Expr::ident("diff_u_vec"));
 
     let a_l_mat = typed::MatExpr::<4, 4>::from_entries([
-        [zero.clone(), nx.clone(), ny.clone(), zero.clone()],
+        [zero, nx, ny, zero],
         [
-            Expr::binary(
-                Expr::binary(dp_drho_l.clone(), BinaryOp::Mul, nx.clone()),
-                BinaryOp::Sub,
-                Expr::binary(u_l_x.clone(), BinaryOp::Mul, u_n_l.clone()),
-            ),
-            Expr::binary(
-                u_n_l.clone(),
-                BinaryOp::Add,
-                Expr::binary(
-                    nx.clone(),
-                    BinaryOp::Mul,
-                    Expr::binary(u_l_x.clone(), BinaryOp::Add, dp_dru_l.clone()),
-                ),
-            ),
-            Expr::binary(
-                Expr::binary(u_l_x.clone(), BinaryOp::Mul, ny.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_drv_l.clone(), BinaryOp::Mul, nx.clone()),
-            ),
-            Expr::binary(dp_dre_l.clone(), BinaryOp::Mul, nx.clone()),
+            dp_drho_l * nx - u_l_x * u_n_l,
+            u_n_l + nx * (u_l_x + dp_dru_l),
+            u_l_x * ny + dp_drv_l * nx,
+            dp_dre_l * nx,
         ],
         [
-            Expr::binary(
-                Expr::binary(dp_drho_l.clone(), BinaryOp::Mul, ny.clone()),
-                BinaryOp::Sub,
-                Expr::binary(u_l_y.clone(), BinaryOp::Mul, u_n_l.clone()),
-            ),
-            Expr::binary(
-                Expr::binary(u_l_y.clone(), BinaryOp::Mul, nx.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_dru_l.clone(), BinaryOp::Mul, ny.clone()),
-            ),
-            Expr::binary(
-                u_n_l.clone(),
-                BinaryOp::Add,
-                Expr::binary(
-                    ny.clone(),
-                    BinaryOp::Mul,
-                    Expr::binary(u_l_y.clone(), BinaryOp::Add, dp_drv_l.clone()),
-                ),
-            ),
-            Expr::binary(dp_dre_l.clone(), BinaryOp::Mul, ny.clone()),
+            dp_drho_l * ny - u_l_y * u_n_l,
+            u_l_y * nx + dp_dru_l * ny,
+            u_n_l + ny * (u_l_y + dp_drv_l),
+            dp_dre_l * ny,
         ],
         [
-            Expr::binary(
-                u_n_l.clone(),
-                BinaryOp::Mul,
-                Expr::binary(dp_drho_l.clone(), BinaryOp::Sub, h_l.clone()),
-            ),
-            Expr::binary(
-                Expr::binary(h_l.clone(), BinaryOp::Mul, nx.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_dru_l.clone(), BinaryOp::Mul, u_n_l.clone()),
-            ),
-            Expr::binary(
-                Expr::binary(h_l.clone(), BinaryOp::Mul, ny.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_drv_l.clone(), BinaryOp::Mul, u_n_l.clone()),
-            ),
-            Expr::binary(gamma.clone(), BinaryOp::Mul, u_n_l.clone()),
+            u_n_l * (dp_drho_l - h_l),
+            h_l * nx + dp_dru_l * u_n_l,
+            h_l * ny + dp_drv_l * u_n_l,
+            gamma * u_n_l,
         ],
     ]);
 
     let a_r_mat = typed::MatExpr::<4, 4>::from_entries([
-        [zero.clone(), nx.clone(), ny.clone(), zero.clone()],
+        [zero, nx, ny, zero],
         [
-            Expr::binary(
-                Expr::binary(dp_drho_r.clone(), BinaryOp::Mul, nx.clone()),
-                BinaryOp::Sub,
-                Expr::binary(u_r_x.clone(), BinaryOp::Mul, u_n_r.clone()),
-            ),
-            Expr::binary(
-                u_n_r.clone(),
-                BinaryOp::Add,
-                Expr::binary(
-                    nx.clone(),
-                    BinaryOp::Mul,
-                    Expr::binary(u_r_x.clone(), BinaryOp::Add, dp_dru_r.clone()),
-                ),
-            ),
-            Expr::binary(
-                Expr::binary(u_r_x.clone(), BinaryOp::Mul, ny.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_drv_r.clone(), BinaryOp::Mul, nx.clone()),
-            ),
-            Expr::binary(dp_dre_r.clone(), BinaryOp::Mul, nx.clone()),
+            dp_drho_r * nx - u_r_x * u_n_r,
+            u_n_r + nx * (u_r_x + dp_dru_r),
+            u_r_x * ny + dp_drv_r * nx,
+            dp_dre_r * nx,
         ],
         [
-            Expr::binary(
-                Expr::binary(dp_drho_r.clone(), BinaryOp::Mul, ny.clone()),
-                BinaryOp::Sub,
-                Expr::binary(u_r_y.clone(), BinaryOp::Mul, u_n_r.clone()),
-            ),
-            Expr::binary(
-                Expr::binary(u_r_y.clone(), BinaryOp::Mul, nx.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_dru_r.clone(), BinaryOp::Mul, ny.clone()),
-            ),
-            Expr::binary(
-                u_n_r.clone(),
-                BinaryOp::Add,
-                Expr::binary(
-                    ny.clone(),
-                    BinaryOp::Mul,
-                    Expr::binary(u_r_y.clone(), BinaryOp::Add, dp_drv_r.clone()),
-                ),
-            ),
-            Expr::binary(dp_dre_r.clone(), BinaryOp::Mul, ny.clone()),
+            dp_drho_r * ny - u_r_y * u_n_r,
+            u_r_y * nx + dp_dru_r * ny,
+            u_n_r + ny * (u_r_y + dp_drv_r),
+            dp_dre_r * ny,
         ],
         [
-            Expr::binary(
-                u_n_r.clone(),
-                BinaryOp::Mul,
-                Expr::binary(dp_drho_r.clone(), BinaryOp::Sub, h_r.clone()),
-            ),
-            Expr::binary(
-                Expr::binary(h_r.clone(), BinaryOp::Mul, nx.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_dru_r.clone(), BinaryOp::Mul, u_n_r.clone()),
-            ),
-            Expr::binary(
-                Expr::binary(h_r.clone(), BinaryOp::Mul, ny.clone()),
-                BinaryOp::Add,
-                Expr::binary(dp_drv_r.clone(), BinaryOp::Mul, u_n_r.clone()),
-            ),
-            Expr::binary(gamma, BinaryOp::Mul, u_n_r.clone()),
+            u_n_r * (dp_drho_r - h_r),
+            h_r * nx + dp_dru_r * u_n_r,
+            h_r * ny + dp_drv_r * u_n_r,
+            gamma * u_n_r,
         ],
     ]);
 
     let velocity_jacobian = |u_x: Expr, u_y: Expr, inv_rho: Expr| {
         typed::NamedMatExpr::<2, 4, typed::AxisXY, typed::AxisCons>::from_entries([
             [
-                Expr::binary(
-                    Expr::unary(UnaryOp::Negate, u_x),
-                    BinaryOp::Mul,
-                    inv_rho.clone(),
-                ),
-                inv_rho.clone(),
-                zero.clone(),
-                zero.clone(),
+                (-u_x) * inv_rho,
+                inv_rho,
+                zero,
+                zero,
             ],
             [
-                Expr::binary(
-                    Expr::unary(UnaryOp::Negate, u_y),
-                    BinaryOp::Mul,
-                    inv_rho.clone(),
-                ),
-                zero.clone(),
+                (-u_y) * inv_rho,
+                zero,
                 inv_rho,
-                zero.clone(),
+                zero,
             ],
         ])
     };
 
-    let du_l_d_cons =
-        velocity_jacobian(u_l_x.clone(), u_l_y.clone(), Expr::ident("inv_rho_l"));
-    let du_r_d_cons =
-        velocity_jacobian(u_r_x.clone(), u_r_y.clone(), Expr::ident("inv_rho_r"));
+    let du_l_d_cons = velocity_jacobian(u_l_x, u_l_y, Expr::ident("inv_rho_l"));
+    let du_r_d_cons = velocity_jacobian(u_r_x, u_r_y, Expr::ident("inv_rho_r"));
 
-    let d_diff_l = du_l_d_cons.mul_scalar(mu_over_dist.clone());
-    let d_diff_r = du_r_d_cons.mul_scalar(Expr::unary(UnaryOp::Negate, mu_over_dist.clone()));
+    let d_diff_l = du_l_d_cons.mul_scalar(mu_over_dist);
+    let d_diff_r = du_r_d_cons.mul_scalar(-mu_over_dist);
 
     let du_face_l = du_l_d_cons.mul_scalar(Expr::lit_f32(0.5));
     let du_face_r = du_r_d_cons.mul_scalar(Expr::lit_f32(0.5));
@@ -2022,40 +1874,24 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             let normal = Expr::ident("normal");
             let nx = normal.clone().field("x");
             let ny = normal.clone().field("y");
-            let nx_sq = Expr::binary(nx.clone(), BinaryOp::Mul, nx.clone());
-            let ny_sq = Expr::binary(ny.clone(), BinaryOp::Mul, ny.clone());
+            let nx_sq = nx.clone() * nx.clone();
+            let ny_sq = ny.clone() * ny.clone();
             wall.extend([
                 dsl::let_expr(
                     "r11",
-                    Expr::binary(
-                        Expr::lit_f32(1.0),
-                        BinaryOp::Sub,
-                        Expr::binary(Expr::lit_f32(2.0), BinaryOp::Mul, nx_sq),
-                    ),
+                    Expr::lit_f32(1.0) - Expr::lit_f32(2.0) * nx_sq,
                 ),
                 dsl::let_expr(
                     "r12",
-                    Expr::binary(
-                        Expr::lit_f32(-2.0),
-                        BinaryOp::Mul,
-                        Expr::binary(nx.clone(), BinaryOp::Mul, ny.clone()),
-                    ),
+                    Expr::lit_f32(-2.0) * (nx.clone() * ny.clone()),
                 ),
                 dsl::let_expr(
                     "r21",
-                    Expr::binary(
-                        Expr::lit_f32(-2.0),
-                        BinaryOp::Mul,
-                        Expr::binary(ny.clone(), BinaryOp::Mul, nx.clone()),
-                    ),
+                    Expr::lit_f32(-2.0) * (ny.clone() * nx.clone()),
                 ),
                 dsl::let_expr(
                     "r22",
-                    Expr::binary(
-                        Expr::lit_f32(1.0),
-                        BinaryOp::Sub,
-                        Expr::binary(Expr::lit_f32(2.0), BinaryOp::Mul, ny_sq),
-                    ),
+                    Expr::lit_f32(1.0) - Expr::lit_f32(2.0) * ny_sq,
                 ),
             ]);
 
@@ -2095,18 +1931,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         };
 
         let boundary_stmt = dsl::if_block_expr(
-            Expr::binary(
-                Expr::ident("boundary_type"),
-                BinaryOp::Equal,
-                Expr::lit_u32(1),
-            ),
+            Expr::ident("boundary_type").eq(Expr::lit_u32(1)),
             inlet_block,
             Some(dsl::block(vec![dsl::if_block_expr(
-                Expr::binary(
-                    Expr::ident("boundary_type"),
-                    BinaryOp::Equal,
-                    Expr::lit_u32(3),
-                ),
+                Expr::ident("boundary_type").eq(Expr::lit_u32(3)),
                 wall_block,
                 Some(default_block),
             )])),
@@ -2116,18 +1944,14 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     };
 
     loop_body.push(dsl::if_block_expr(
-        Expr::unary(UnaryOp::Not, Expr::ident("is_boundary")),
+        !Expr::ident("is_boundary"),
         interior_matrix,
         Some(boundary_matrix),
     ));
 
     stmts.push(dsl::for_loop_expr(
         dsl::for_init_var_expr("face_offset", Expr::ident("start")),
-        Expr::binary(
-            Expr::ident("face_offset"),
-            BinaryOp::Less,
-            Expr::ident("end"),
-        ),
+        Expr::ident("face_offset").lt(Expr::ident("end")),
         dsl::for_step_increment_expr(Expr::ident("face_offset")),
         dsl::block(loop_body),
     ));
@@ -2184,11 +2008,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "diag_rank",
-        Expr::binary(
-            Expr::ident("scalar_diag_idx"),
-            BinaryOp::Sub,
-            Expr::ident("scalar_offset"),
-        ),
+        Expr::ident("scalar_diag_idx") - Expr::ident("scalar_offset"),
     ));
     let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
     stmts.extend(diag_mat.scatter_assign_to_block_entry_scaled(&diag_entry, None));

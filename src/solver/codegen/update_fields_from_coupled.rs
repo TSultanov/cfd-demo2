@@ -2,8 +2,8 @@ use super::state_access::{state_component, state_scalar, state_vec2};
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
-    AccessMode, Attribute, BinaryOp, Block, Expr, Function, GlobalVar, Item, Module, Param,
-    StorageClass, StructDef, StructField, Type, UnaryOp,
+    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, StorageClass,
+    StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 
@@ -218,7 +218,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
         "num_cells",
         Expr::call_named(
             "arrayLength",
-            vec![Expr::unary(UnaryOp::AddressOf, Expr::ident("state"))],
+            vec![Expr::ident("state").addr_of()],
         ) / Expr::lit_u32(stride),
     ));
 
@@ -227,7 +227,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     let p_target = state_component(layout, "state", "idx", p_field, 0);
 
     stmts.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("idx"), BinaryOp::Less, Expr::ident("num_cells")),
+        Expr::ident("idx").lt(Expr::ident("num_cells")),
         dsl::block(vec![
             dsl::let_expr(
                 "u_new",
@@ -264,34 +264,16 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
             dsl::let_expr("alpha_p", Expr::ident("constants").field("alpha_p")),
             dsl::let_expr(
                 "u_updated",
-                Expr::binary(
-                    Expr::ident("u_old_val"),
-                    BinaryOp::Add,
-                    Expr::binary(
-                        Expr::ident("alpha_u"),
-                        BinaryOp::Mul,
-                        Expr::binary(Expr::ident("u_new"), BinaryOp::Sub, Expr::ident("u_old_val")),
-                    ),
-                ),
+                Expr::ident("u_old_val")
+                    + Expr::ident("alpha_u") * (Expr::ident("u_new") - Expr::ident("u_old_val")),
             ),
             dsl::let_expr(
                 "p_updated",
-                Expr::binary(
-                    Expr::ident("p_old_val"),
-                    BinaryOp::Add,
-                    Expr::binary(
-                        Expr::ident("alpha_p"),
-                        BinaryOp::Mul,
-                        Expr::binary(
-                            Expr::ident("p_new_val"),
-                            BinaryOp::Sub,
-                            Expr::ident("p_old_val"),
-                        ),
-                    ),
-                ),
+                Expr::ident("p_old_val")
+                    + Expr::ident("alpha_p") * (Expr::ident("p_new_val") - Expr::ident("p_old_val")),
             ),
-            dsl::assign_expr(u_x_target.clone(), Expr::ident("u_updated").field("x")),
-            dsl::assign_expr(u_y_target.clone(), Expr::ident("u_updated").field("y")),
+            dsl::assign_expr(u_x_target, Expr::ident("u_updated").field("x")),
+            dsl::assign_expr(u_y_target, Expr::ident("u_updated").field("y")),
             dsl::assign_expr(p_target, Expr::ident("p_updated")),
             dsl::assign_expr(
                 Expr::ident("diff_u"),
@@ -300,19 +282,13 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                     vec![
                         Expr::call_named(
                             "abs",
-                            vec![Expr::binary(
-                                Expr::ident("u_updated").field("x"),
-                                BinaryOp::Sub,
-                                Expr::ident("u_old_val").field("x"),
-                            )],
+                            vec![Expr::ident("u_updated").field("x")
+                                - Expr::ident("u_old_val").field("x")],
                         ),
                         Expr::call_named(
                             "abs",
-                            vec![Expr::binary(
-                                Expr::ident("u_updated").field("y"),
-                                BinaryOp::Sub,
-                                Expr::ident("u_old_val").field("y"),
-                            )],
+                            vec![Expr::ident("u_updated").field("y")
+                                - Expr::ident("u_old_val").field("y")],
                         ),
                     ],
                 ),
@@ -321,11 +297,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                 Expr::ident("diff_p"),
                 Expr::call_named(
                     "abs",
-                    vec![Expr::binary(
-                        Expr::ident("p_updated"),
-                        BinaryOp::Sub,
-                        Expr::ident("p_old_val"),
-                    )],
+                    vec![Expr::ident("p_updated") - Expr::ident("p_old_val")],
                 ),
             ),
         ]),
@@ -346,11 +318,11 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
 
     stmts.push(dsl::for_loop_expr(
         dsl::for_init_var_expr("stride", Expr::lit_u32(32)),
-        Expr::binary(Expr::ident("stride"), BinaryOp::Greater, Expr::lit_u32(0)),
+        Expr::ident("stride").gt(Expr::lit_u32(0)),
         dsl::for_step_assign_expr(Expr::ident("stride"), Expr::ident("stride") / Expr::lit_u32(2)),
         dsl::block(vec![
             dsl::if_block_expr(
-                Expr::binary(Expr::ident("lid"), BinaryOp::Less, Expr::ident("stride")),
+                Expr::ident("lid").lt(Expr::ident("stride")),
                 dsl::block(vec![
                     dsl::assign_expr(
                         dsl::array_access("shared_max_u", Expr::ident("lid")),
@@ -360,11 +332,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                                 dsl::array_access("shared_max_u", Expr::ident("lid")),
                                 dsl::array_access(
                                     "shared_max_u",
-                                    Expr::binary(
-                                        Expr::ident("lid"),
-                                        BinaryOp::Add,
-                                        Expr::ident("stride"),
-                                    ),
+                                    Expr::ident("lid") + Expr::ident("stride"),
                                 ),
                             ],
                         ),
@@ -377,11 +345,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                                 dsl::array_access("shared_max_p", Expr::ident("lid")),
                                 dsl::array_access(
                                     "shared_max_p",
-                                    Expr::binary(
-                                        Expr::ident("lid"),
-                                        BinaryOp::Add,
-                                        Expr::ident("stride"),
-                                    ),
+                                    Expr::ident("lid") + Expr::ident("stride"),
                                 ),
                             ],
                         ),
@@ -394,15 +358,12 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     ));
 
     stmts.push(dsl::if_block_expr(
-        Expr::binary(Expr::ident("lid"), BinaryOp::Equal, Expr::lit_u32(0)),
+        Expr::ident("lid").eq(Expr::lit_u32(0)),
         dsl::block(vec![
             dsl::call_stmt_expr(Expr::call_named(
                 "atomicMax",
                 vec![
-                    Expr::unary(
-                        UnaryOp::AddressOf,
-                        dsl::array_access("max_diff_result", Expr::lit_u32(0)),
-                    ),
+                    dsl::array_access("max_diff_result", Expr::lit_u32(0)).addr_of(),
                     Expr::call_named(
                         "bitcast<u32>",
                         vec![dsl::array_access("shared_max_u", Expr::lit_u32(0))],
@@ -412,10 +373,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
             dsl::call_stmt_expr(Expr::call_named(
                 "atomicMax",
                 vec![
-                    Expr::unary(
-                        UnaryOp::AddressOf,
-                        dsl::array_access("max_diff_result", Expr::lit_u32(1)),
-                    ),
+                    dsl::array_access("max_diff_result", Expr::lit_u32(1)).addr_of(),
                     Expr::call_named(
                         "bitcast<u32>",
                         vec![dsl::array_access("shared_max_p", Expr::lit_u32(0))],

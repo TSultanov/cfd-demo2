@@ -1,4 +1,4 @@
-use crate::solver::codegen::wgsl_ast::{AssignOp, BinaryOp, Expr, Literal, Stmt};
+use crate::solver::codegen::wgsl_ast::{AssignOp, Expr, Stmt};
 
 use super::matrix::BlockCsrSoaEntry;
 
@@ -72,7 +72,7 @@ impl<const N: usize> VecExpr<N> {
     }
 
     pub fn expr(&self) -> Expr {
-        self.expr.clone()
+        self.expr
     }
 
     pub fn component(&self, index: usize) -> Expr {
@@ -86,11 +86,9 @@ impl<const N: usize> VecExpr<N> {
             _ => None,
         };
         if let Some(ctor_name) = ctor_name {
-            if let Expr::Call { callee, args } = &self.expr {
-                if let Expr::Ident(name) = callee.as_ref() {
-                    if name == ctor_name && args.len() == N {
-                        return args[index].clone();
-                    }
+            if let Some(args) = self.expr.try_call_named(ctor_name) {
+                if args.len() == N {
+                    return args[index];
                 }
             }
         }
@@ -106,23 +104,23 @@ impl<const N: usize> VecExpr<N> {
     }
 
     pub fn add(&self, rhs: &Self) -> Self {
-        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Add, rhs.expr()))
+        Self::from_expr(self.expr() + rhs.expr())
     }
 
     pub fn sub(&self, rhs: &Self) -> Self {
-        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Sub, rhs.expr()))
+        Self::from_expr(self.expr() - rhs.expr())
     }
 
     pub fn neg(&self) -> Self {
-        Self::from_expr(Expr::unary(crate::solver::codegen::wgsl_ast::UnaryOp::Negate, self.expr()))
+        Self::from_expr(-self.expr())
     }
 
     pub fn mul_scalar(&self, scalar: Expr) -> Self {
-        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Mul, scalar))
+        Self::from_expr(self.expr() * scalar)
     }
 
     pub fn div_scalar(&self, scalar: Expr) -> Self {
-        Self::from_expr(Expr::binary(self.expr(), BinaryOp::Div, scalar))
+        Self::from_expr(self.expr() / scalar)
     }
 
     pub fn dot(&self, rhs: &Self) -> Expr {
@@ -132,7 +130,7 @@ impl<const N: usize> VecExpr<N> {
 
 impl VecExpr<2> {
     pub fn from_xy_fields(value: Expr) -> Self {
-        Self::from_components([value.clone().field("x"), value.field("y")])
+        Self::from_components([value.field("x"), value.field("y")])
     }
 
     pub fn to_vector2_struct(&self) -> Expr {
@@ -233,7 +231,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 out.push(Stmt::Var {
                     name: format!("{prefix}_{row}{col}"),
                     ty: None,
-                    expr: Some(init.clone()),
+                    expr: Some(init),
                 });
             }
         }
@@ -241,7 +239,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
     }
 
     pub fn entry(&self, row: usize, col: usize) -> Expr {
-        self.entries[row][col].clone()
+        self.entries[row][col]
     }
 
     pub fn add(&self, rhs: &Self) -> Self {
@@ -254,7 +252,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             if expr_is_zero(&rhs) {
                 return lhs;
             }
-            Expr::binary(lhs, BinaryOp::Add, rhs)
+            lhs + rhs
         })
     }
 
@@ -265,7 +263,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             if expr_is_zero(&rhs) {
                 return lhs;
             }
-            Expr::binary(lhs, BinaryOp::Sub, rhs)
+            lhs - rhs
         })
     }
 
@@ -282,9 +280,9 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 return Expr::lit_f32(0.0);
             }
             if expr_is_one(&entry) {
-                return scalar.clone();
+                return scalar;
             }
-            Expr::binary(entry, BinaryOp::Mul, scalar.clone())
+            entry * scalar
         })
     }
 
@@ -302,11 +300,11 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 } else if expr_is_one(&rhs_entry) {
                     lhs
                 } else {
-                    Expr::binary(lhs, BinaryOp::Mul, rhs_entry)
+                    lhs * rhs_entry
                 };
                 acc = Some(match acc {
                     None => term,
-                    Some(prev) => Expr::binary(prev, BinaryOp::Add, term),
+                    Some(prev) => prev + term,
                 });
             }
             acc.unwrap_or_else(|| Expr::lit_f32(0.0))
@@ -332,8 +330,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             for col in 0..C {
                 let target = Expr::ident(format!("{prefix}_{row}{col}"));
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale.clone() {
-                    value = Expr::binary(value, BinaryOp::Mul, scale);
+                if let Some(scale) = scale {
+                    value = value * scale;
                 }
                 out.push(Stmt::Assign { target, value });
             }
@@ -352,8 +350,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             for col in 0..C {
                 let target = Expr::ident(format!("{prefix}_{row}{col}"));
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale.clone() {
-                    value = Expr::binary(value, BinaryOp::Mul, scale);
+                if let Some(scale) = scale {
+                    value = value * scale;
                 }
                 out.push(Stmt::AssignOp { target, op, value });
             }
@@ -373,8 +371,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 let col_u8 = col as u8;
                 let target = entry.access_expr(row_u8, col_u8);
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale.clone() {
-                    value = Expr::binary(value, BinaryOp::Mul, scale);
+                if let Some(scale) = scale {
+                    value = value * scale;
                 }
                 out.push(Stmt::Assign { target, value });
             }
@@ -441,7 +439,7 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
             if expr_is_one(&scale) {
                 return entry;
             }
-            Expr::binary(entry, BinaryOp::Mul, scale)
+            entry * scale
         }))
     }
 
@@ -455,7 +453,7 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
             if expr_is_one(&scale) {
                 return entry;
             }
-            Expr::binary(entry, BinaryOp::Mul, scale)
+            entry * scale
         }))
     }
 
@@ -473,11 +471,11 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
                 } else if expr_is_one(&rhs) {
                     lhs
                 } else {
-                    Expr::binary(lhs, BinaryOp::Mul, rhs)
+                    lhs * rhs
                 };
                 acc = Some(match acc {
                     None => term,
-                    Some(prev) => Expr::binary(prev, BinaryOp::Add, term),
+                    Some(prev) => prev + term,
                 });
             }
             acc.unwrap_or_else(|| Expr::lit_f32(0.0))
@@ -512,23 +510,11 @@ fn vec_field_name(index: usize) -> &'static str {
 }
 
 fn expr_is_zero(expr: &Expr) -> bool {
-    match expr {
-        Expr::Literal(Literal::Float(value)) => match value.parse::<f32>() {
-            Ok(v) => v == 0.0,
-            Err(_) => false,
-        },
-        _ => false,
-    }
+    matches!(expr.try_f32_literal(), Some(value) if value == 0.0)
 }
 
 fn expr_is_one(expr: &Expr) -> bool {
-    match expr {
-        Expr::Literal(Literal::Float(value)) => match value.parse::<f32>() {
-            Ok(v) => v == 1.0,
-            Err(_) => false,
-        },
-        _ => false,
-    }
+    matches!(expr.try_f32_literal(), Some(value) if value == 1.0)
 }
 
 #[cfg(test)]

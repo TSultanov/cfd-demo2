@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::solver::codegen::wgsl_ast::{BinaryOp, Expr, UnaryOp};
+use crate::solver::codegen::wgsl_ast::Expr;
 
 use super::{DslType, ScalarType, Shape, UnitDim};
 
@@ -59,7 +59,7 @@ impl TypedExpr {
     }
 
     pub fn to_wgsl(&self) -> Expr {
-        self.expr.clone()
+        self.expr
     }
 
     pub fn add(&self, rhs: &Self) -> Result<Self, DslError> {
@@ -78,7 +78,7 @@ impl TypedExpr {
             });
         }
         Ok(Self::new(
-            Expr::binary(self.to_wgsl(), BinaryOp::Add, rhs.to_wgsl()),
+            self.to_wgsl() + rhs.to_wgsl(),
             self.ty,
             self.unit,
         ))
@@ -100,7 +100,7 @@ impl TypedExpr {
             });
         }
         Ok(Self::new(
-            Expr::binary(self.to_wgsl(), BinaryOp::Sub, rhs.to_wgsl()),
+            self.to_wgsl() - rhs.to_wgsl(),
             self.ty,
             self.unit,
         ))
@@ -109,12 +109,12 @@ impl TypedExpr {
     pub fn mul(&self, rhs: &Self) -> Result<Self, DslError> {
         match (self.ty.shape, rhs.ty.shape) {
             (Shape::Scalar, _) => Ok(Self::new(
-                Expr::binary(self.to_wgsl(), BinaryOp::Mul, rhs.to_wgsl()),
+                self.to_wgsl() * rhs.to_wgsl(),
                 rhs.ty,
                 self.unit * rhs.unit,
             )),
             (_, Shape::Scalar) => Ok(Self::new(
-                Expr::binary(self.to_wgsl(), BinaryOp::Mul, rhs.to_wgsl()),
+                self.to_wgsl() * rhs.to_wgsl(),
                 self.ty,
                 self.unit * rhs.unit,
             )),
@@ -128,7 +128,7 @@ impl TypedExpr {
     pub fn div(&self, rhs: &Self) -> Result<Self, DslError> {
         match rhs.ty.shape {
             Shape::Scalar => Ok(Self::new(
-                Expr::binary(self.to_wgsl(), BinaryOp::Div, rhs.to_wgsl()),
+                self.to_wgsl() / rhs.to_wgsl(),
                 self.ty,
                 self.unit / rhs.unit,
             )),
@@ -142,7 +142,7 @@ impl TypedExpr {
     pub fn neg(&self) -> Result<Self, DslError> {
         match self.ty.shape {
             Shape::Scalar | Shape::Vec(_) => Ok(Self::new(
-                Expr::unary(UnaryOp::Negate, self.to_wgsl()),
+                -self.to_wgsl(),
                 self.ty,
                 self.unit,
             )),

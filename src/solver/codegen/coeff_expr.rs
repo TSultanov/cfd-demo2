@@ -1,5 +1,5 @@
 use crate::solver::codegen::state_access::state_scalar;
-use crate::solver::codegen::wgsl_ast::{Expr, Literal};
+use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::model::backend::{Coefficient, FieldKind, StateLayout};
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ enum CoeffSample<'a> {
 }
 
 fn f32_literal(value: f64) -> Expr {
-    Expr::Literal(Literal::Float(format!("{value:.8}")))
+    Expr::lit_f32(value as f32)
 }
 
 fn coeff_named_expr(name: &str) -> Option<Expr> {
@@ -47,7 +47,7 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                     } => {
                         let own = state_scalar(layout, "state", owner_idx, field.name());
                         let neigh = state_scalar(layout, "state", neighbor_idx, field.name());
-                        interp.clone() * own + (Expr::lit_f32(1.0) - interp) * neigh
+                        interp * own + (Expr::lit_f32(1.0) - interp) * neigh
                     }
                 }
             } else {

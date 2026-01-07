@@ -269,7 +269,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let flux_rho_u_r: vec2<f32> = rho_u_r * u_n_r + normal_vec * p_r;
     let rho_u_jump: vec2<f32> = rho_u_r - rho_u_l;
     var flux_rho_u: vec2<f32> = flux_rho_u_l * a_pos + flux_rho_u_r * a_neg + rho_u_jump * a_prod_scaled;
-    let visc_scale = -1.0 * mu / dist;
+    let visc_scale = -mu / dist;
     let diff_u: vec2<f32> = (u_r - u_l) * visc_scale;
     flux_rho_u = flux_rho_u + diff_u;
     let flux_rho_e_l = (rho_e_l + p_l) * u_n_l;

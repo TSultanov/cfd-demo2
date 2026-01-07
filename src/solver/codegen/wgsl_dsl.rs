@@ -1,4 +1,4 @@
-use super::wgsl_ast::{AssignOp, BinaryOp, Block, Expr, ForInit, ForStep, Stmt, Type};
+use super::wgsl_ast::{AssignOp, Block, Expr, ForInit, ForStep, Stmt, Type};
 
 pub fn vec2_f32(x: Expr, y: Expr) -> Expr {
     Expr::call_named("vec2<f32>", vec![x, y])
@@ -30,11 +30,7 @@ pub fn array_access(array: &str, index: Expr) -> Expr {
 }
 
 pub fn linear_index(idx: Expr, stride: u32, offset: u32) -> Expr {
-    Expr::binary(
-        Expr::binary(idx, BinaryOp::Mul, Expr::lit_u32(stride)),
-        BinaryOp::Add,
-        Expr::lit_u32(offset),
-    )
+    idx * Expr::lit_u32(stride) + Expr::lit_u32(offset)
 }
 
 pub fn array_access_linear(array: &str, idx: Expr, stride: u32, offset: u32) -> Expr {
@@ -213,8 +209,8 @@ pub fn assign_op_matrix_from_prefix_scaled_expr(
     for_each_mat_entry(n, |row, col| {
         let target = Expr::ident(format!("{dest_prefix}_{row}{col}"));
         let mut value = Expr::ident(format!("{src_prefix}_{row}{col}"));
-        if let Some(scale) = scale.clone() {
-            value = Expr::binary(value, BinaryOp::Mul, scale);
+        if let Some(scale) = scale {
+            value = value * scale;
         }
         assign_op_expr(op, target, value)
     })
@@ -229,11 +225,11 @@ pub fn assign_matrix_array_from_prefix_scaled_expr(
 ) -> Vec<Stmt> {
     for_each_mat_entry(n, |row, col| {
         let base = Expr::ident(format!("{base_prefix}_{row}"));
-        let index = Expr::binary(base, BinaryOp::Add, Expr::lit_u32(col as u32));
+        let index = base + Expr::lit_u32(col as u32);
         let target = Expr::ident(matrix_array).index(index);
         let mut value = Expr::ident(format!("{src_prefix}_{row}{col}"));
-        if let Some(scale) = scale.clone() {
-            value = Expr::binary(value, BinaryOp::Mul, scale);
+        if let Some(scale) = scale {
+            value = value * scale;
         }
         assign_expr(target, value)
     })

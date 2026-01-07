@@ -6,6 +6,7 @@ use crate::solver::gpu::bindings::generated::{
 use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::compressible_fgmres::CompressibleFgmresResources;
+use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
 use crate::solver::gpu::init::compressible_fields::{
     create_compressible_field_bind_groups, init_compressible_field_buffers, PackedStateConfig,
 };
@@ -173,8 +174,44 @@ pub struct GpuCompressibleSolver {
 }
 
 impl GpuCompressibleSolver {
+    fn context_ref(&self) -> &GpuContext {
+        &self.context
+    }
+
     fn state_size_bytes(&self) -> u64 {
         self.num_cells as u64 * self.offsets.stride as u64 * 4
+    }
+
+    fn explicit_plan_pre_step_graph(solver: &GpuCompressibleSolver) -> &KernelGraph<GpuCompressibleSolver> {
+        &solver.pre_step_graph
+    }
+
+    fn explicit_plan_explicit_graph(solver: &GpuCompressibleSolver) -> &KernelGraph<GpuCompressibleSolver> {
+        &solver.explicit_graph
+    }
+
+    fn build_explicit_plan() -> ExecutionPlan<GpuCompressibleSolver> {
+        ExecutionPlan::new(
+            GpuCompressibleSolver::context_ref,
+            vec![
+                PlanNode::Graph(GraphNode {
+                    label: "compressible:pre_step",
+                    graph: GpuCompressibleSolver::explicit_plan_pre_step_graph,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "compressible:explicit_graph",
+                    graph: GpuCompressibleSolver::explicit_plan_explicit_graph,
+                    mode: GraphExecMode::SplitTimed,
+                }),
+            ],
+        )
+    }
+
+    fn explicit_plan() -> &'static ExecutionPlan<GpuCompressibleSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuCompressibleSolver>> =
+            std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuCompressibleSolver::build_explicit_plan)
     }
 
     fn build_pre_step_graph() -> KernelGraph<GpuCompressibleSolver> {
@@ -643,19 +680,19 @@ impl GpuCompressibleSolver {
         self.constants.time += self.constants.dt;
         self.update_constants();
 
-        self.pre_step_graph.execute(&self.context, &*self);
-
         // Explicit KT update (rhoCentralFoam-like) for transient Euler timestepping.
         // The implicit FGMRES path is retained for BDF2/pseudo-time (dtau) workflows.
         let use_explicit = self.constants.time_scheme == 0 && self.constants.dtau <= 0.0;
         if use_explicit {
-            let timings = self.explicit_graph.execute_split_timed(&self.context, &*self);
-            let grad_secs = timings.seconds_for("compressible:gradients");
-            let flux_secs = timings.seconds_for("compressible:flux_kt");
-            let explicit_update_secs = timings.seconds_for("compressible:explicit_update");
-            let primitive_update_secs = timings.seconds_for("compressible:primitive_update");
-
             let total_secs = step_start.elapsed().as_secs_f64();
+            let plan_timings = GpuCompressibleSolver::explicit_plan().execute(self);
+            let detail = plan_timings
+                .graph_detail("compressible:explicit_graph")
+                .expect("explicit_graph timings missing");
+            let grad_secs = detail.seconds_for("compressible:gradients");
+            let flux_secs = detail.seconds_for("compressible:flux_kt");
+            let explicit_update_secs = detail.seconds_for("compressible:explicit_update");
+            let primitive_update_secs = detail.seconds_for("compressible:primitive_update");
             self.profile.record(
                 total_secs,
                 grad_secs,
@@ -669,6 +706,8 @@ impl GpuCompressibleSolver {
             self.update_constants();
             return Vec::new();
         }
+
+        self.pre_step_graph.execute(&self.context, &*self);
 
         let base_alpha_u = self.constants.alpha_u;
         let mut stats = Vec::with_capacity(self.outer_iters);

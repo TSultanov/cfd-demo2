@@ -15,7 +15,7 @@ impl UnitExp {
         Self { num: value, den: 1 }
     }
 
-    pub fn new(num: i32, den: i32) -> Self {
+    pub const fn new(num: i32, den: i32) -> Self {
         assert!(den != 0, "unit exponent denominator must be non-zero");
         if num == 0 {
             return Self::zero();
@@ -27,15 +27,53 @@ impl UnitExp {
             den = -den;
         }
 
-        let gcd = gcd_i32(num.abs(), den);
+        let gcd = gcd_i32(abs_i32(num), den);
         Self {
             num: num / gcd,
             den: den / gcd,
         }
     }
 
-    pub fn is_zero(self) -> bool {
+    pub const fn is_zero(self) -> bool {
         self.num == 0
+    }
+
+    pub const fn add_exp(self, rhs: Self) -> Self {
+        if self.num == 0 {
+            return rhs;
+        }
+        if rhs.num == 0 {
+            return self;
+        }
+
+        let num =
+            (self.num as i64) * (rhs.den as i64) + (rhs.num as i64) * (self.den as i64);
+        let den = (self.den as i64) * (rhs.den as i64);
+        Self::new(i64_to_i32_checked(num), i64_to_i32_checked(den))
+    }
+
+    pub const fn sub_exp(self, rhs: Self) -> Self {
+        if rhs.num == 0 {
+            return self;
+        }
+        let num =
+            (self.num as i64) * (rhs.den as i64) - (rhs.num as i64) * (self.den as i64);
+        let den = (self.den as i64) * (rhs.den as i64);
+        Self::new(i64_to_i32_checked(num), i64_to_i32_checked(den))
+    }
+
+    pub const fn mul_exp(self, rhs: Self) -> Self {
+        if self.num == 0 || rhs.num == 0 {
+            return Self::zero();
+        }
+        let num = (self.num as i64) * (rhs.num as i64);
+        let den = (self.den as i64) * (rhs.den as i64);
+        Self::new(i64_to_i32_checked(num), i64_to_i32_checked(den))
+    }
+
+    pub const fn div_exp(self, rhs: Self) -> Self {
+        assert!(rhs.num != 0, "unit exponent division by zero");
+        self.mul_exp(Self::new(rhs.den, rhs.num))
     }
 }
 
@@ -53,19 +91,7 @@ impl std::ops::Add for UnitExp {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        if self.is_zero() {
-            return rhs;
-        }
-        if rhs.is_zero() {
-            return self;
-        }
-        let num =
-            i64::from(self.num) * i64::from(rhs.den) + i64::from(rhs.num) * i64::from(self.den);
-        let den = i64::from(self.den) * i64::from(rhs.den);
-        Self::new(
-            i32::try_from(num).expect("unit exponent overflow"),
-            i32::try_from(den).expect("unit exponent overflow"),
-        )
+        self.add_exp(rhs)
     }
 }
 
@@ -73,16 +99,7 @@ impl std::ops::Sub for UnitExp {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        if rhs.is_zero() {
-            return self;
-        }
-        let num =
-            i64::from(self.num) * i64::from(rhs.den) - i64::from(rhs.num) * i64::from(self.den);
-        let den = i64::from(self.den) * i64::from(rhs.den);
-        Self::new(
-            i32::try_from(num).expect("unit exponent overflow"),
-            i32::try_from(den).expect("unit exponent overflow"),
-        )
+        self.sub_exp(rhs)
     }
 }
 
@@ -90,15 +107,7 @@ impl std::ops::Mul for UnitExp {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        if self.is_zero() || rhs.is_zero() {
-            return Self::zero();
-        }
-        let num = i64::from(self.num) * i64::from(rhs.num);
-        let den = i64::from(self.den) * i64::from(rhs.den);
-        Self::new(
-            i32::try_from(num).expect("unit exponent overflow"),
-            i32::try_from(den).expect("unit exponent overflow"),
-        )
+        self.mul_exp(rhs)
     }
 }
 
@@ -106,18 +115,33 @@ impl std::ops::Div for UnitExp {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        assert!(rhs.num != 0, "unit exponent division by zero");
-        self * Self::new(rhs.den, rhs.num)
+        self.div_exp(rhs)
     }
 }
 
-fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
+const fn i64_to_i32_checked(value: i64) -> i32 {
+    if value < i32::MIN as i64 || value > i32::MAX as i64 {
+        panic!("unit exponent overflow");
+    }
+    value as i32
+}
+
+const fn abs_i32(value: i32) -> i32 {
+    if value < 0 {
+        -value
+    } else {
+        value
+    }
+}
+
+const fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
     while b != 0 {
         let r = a % b;
         a = b;
         b = r;
     }
-    a.abs().max(1)
+    let a = abs_i32(a);
+    if a == 0 { 1 } else { a }
 }
 
 /// Physical dimension exponents in **SI base units** with rational powers.
@@ -151,20 +175,36 @@ impl UnitDim {
         }
     }
 
-    pub fn pow_ratio(self, num: i32, den: i32) -> Self {
-        let exp = UnitExp::new(num, den);
+    pub const fn mul_dim(self, rhs: Self) -> Self {
         Self {
-            m: self.m * exp,
-            l: self.l * exp,
-            t: self.t * exp,
+            m: self.m.add_exp(rhs.m),
+            l: self.l.add_exp(rhs.l),
+            t: self.t.add_exp(rhs.t),
         }
     }
 
-    pub fn powi(self, exp: i32) -> Self {
+    pub const fn div_dim(self, rhs: Self) -> Self {
+        Self {
+            m: self.m.sub_exp(rhs.m),
+            l: self.l.sub_exp(rhs.l),
+            t: self.t.sub_exp(rhs.t),
+        }
+    }
+
+    pub const fn pow_ratio(self, num: i32, den: i32) -> Self {
+        let exp = UnitExp::new(num, den);
+        Self {
+            m: self.m.mul_exp(exp),
+            l: self.l.mul_exp(exp),
+            t: self.t.mul_exp(exp),
+        }
+    }
+
+    pub const fn powi(self, exp: i32) -> Self {
         self.pow_ratio(exp, 1)
     }
 
-    pub fn sqrt(self) -> Self {
+    pub const fn sqrt(self) -> Self {
         self.pow_ratio(1, 2)
     }
 }
@@ -179,11 +219,7 @@ impl std::ops::Mul for UnitDim {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        Self {
-            m: self.m + rhs.m,
-            l: self.l + rhs.l,
-            t: self.t + rhs.t,
-        }
+        self.mul_dim(rhs)
     }
 }
 
@@ -191,11 +227,7 @@ impl std::ops::Div for UnitDim {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        Self {
-            m: self.m - rhs.m,
-            l: self.l - rhs.l,
-            t: self.t - rhs.t,
-        }
+        self.div_dim(rhs)
     }
 }
 
@@ -233,24 +265,25 @@ pub mod si {
     pub const LENGTH: UnitDim = UnitDim::new(0, 1, 0);
     pub const TIME: UnitDim = UnitDim::new(0, 0, 1);
 
-    pub const AREA: UnitDim = UnitDim::new(0, 2, 0);
-    pub const VOLUME: UnitDim = UnitDim::new(0, 3, 0);
+    pub const AREA: UnitDim = LENGTH.powi(2);
+    pub const VOLUME: UnitDim = AREA.mul_dim(LENGTH);
 
-    pub const DENSITY: UnitDim = UnitDim::new(1, -3, 0);
-    pub const VELOCITY: UnitDim = UnitDim::new(0, 1, -1);
-    pub const PRESSURE: UnitDim = UnitDim::new(1, -1, -2);
-    pub const DYNAMIC_VISCOSITY: UnitDim = UnitDim::new(1, -1, -1);
+    pub const INV_TIME: UnitDim = TIME.powi(-1);
 
-    pub const MASS_FLUX: UnitDim = UnitDim::new(1, 0, -1); // kg/s (integrated over face)
-    pub const MOMENTUM_DENSITY: UnitDim = UnitDim::new(1, -2, -1); // rho * U
-    pub const ENERGY_DENSITY: UnitDim = UnitDim::new(1, -1, -2); // rhoE ~ Pa
-    pub const PRESSURE_GRADIENT: UnitDim = UnitDim::new(1, -2, -2); // grad(p)
+    pub const DENSITY: UnitDim = MASS.div_dim(VOLUME);
+    pub const VELOCITY: UnitDim = LENGTH.div_dim(TIME);
 
-    pub const FORCE: UnitDim = UnitDim::new(1, 1, -2); // N = kg·m/s^2
-    pub const POWER: UnitDim = UnitDim::new(1, 2, -3); // W = kg·m^2/s^3
+    pub const FORCE: UnitDim = MASS.mul_dim(LENGTH).div_dim(TIME.powi(2)); // N = kg·m/s^2
+    pub const PRESSURE: UnitDim = FORCE.div_dim(AREA);
+    pub const DYNAMIC_VISCOSITY: UnitDim = PRESSURE.mul_dim(TIME);
+    pub const POWER: UnitDim = FORCE.mul_dim(VELOCITY); // W = kg·m^2/s^3
 
-    pub const INV_TIME: UnitDim = UnitDim::new(0, 0, -1);
-    pub const D_P: UnitDim = UnitDim::new(-1, 3, 1); // pressure-correction mobility-like coefficient
+    pub const MASS_FLUX: UnitDim = MASS.mul_dim(INV_TIME); // kg/s (integrated over face)
+    pub const MOMENTUM_DENSITY: UnitDim = DENSITY.mul_dim(VELOCITY); // rho * U
+    pub const ENERGY_DENSITY: UnitDim = PRESSURE; // rhoE ~ Pa
+    pub const PRESSURE_GRADIENT: UnitDim = PRESSURE.div_dim(LENGTH); // grad(p)
+
+    pub const D_P: UnitDim = VOLUME.mul_dim(TIME).div_dim(MASS); // pressure-correction mobility-like coefficient
 }
 
 #[cfg(test)]
@@ -267,4 +300,3 @@ mod tests {
         assert_eq!(sqrt_length * sqrt_length, length);
     }
 }
-

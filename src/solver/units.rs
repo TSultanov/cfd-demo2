@@ -299,4 +299,27 @@ mod tests {
         let sqrt_length = length.sqrt();
         assert_eq!(sqrt_length * sqrt_length, length);
     }
+
+    #[test]
+    fn si_derived_units_match_expected_dimensions() {
+        assert_eq!(si::AREA, UnitDim::new(0, 2, 0));
+        assert_eq!(si::VOLUME, UnitDim::new(0, 3, 0));
+
+        assert_eq!(si::INV_TIME, UnitDim::new(0, 0, -1));
+
+        assert_eq!(si::DENSITY, UnitDim::new(1, -3, 0));
+        assert_eq!(si::VELOCITY, UnitDim::new(0, 1, -1));
+
+        assert_eq!(si::FORCE, UnitDim::new(1, 1, -2));
+        assert_eq!(si::PRESSURE, UnitDim::new(1, -1, -2));
+        assert_eq!(si::DYNAMIC_VISCOSITY, UnitDim::new(1, -1, -1));
+        assert_eq!(si::POWER, UnitDim::new(1, 2, -3));
+
+        assert_eq!(si::MASS_FLUX, UnitDim::new(1, 0, -1));
+        assert_eq!(si::MOMENTUM_DENSITY, UnitDim::new(1, -2, -1));
+        assert_eq!(si::ENERGY_DENSITY, UnitDim::new(1, -1, -2));
+        assert_eq!(si::PRESSURE_GRADIENT, UnitDim::new(1, -2, -2));
+
+        assert_eq!(si::D_P, UnitDim::new(-1, 3, 1));
+    }
 }

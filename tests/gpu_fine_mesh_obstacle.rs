@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
 #[test]
@@ -26,7 +30,19 @@ fn test_gpu_fine_mesh_obstacle() {
 
     pollster::block_on(async {
         println!("Initializing GPU Solver...");
-        let mut solver = GpuSolver::new(&mesh, None, None).await;
+        let mut solver = GpuUnifiedSolver::new(
+            &mesh,
+            incompressible_momentum_model(),
+            SolverConfig {
+                advection_scheme: Scheme::Upwind,
+                time_scheme: TimeScheme::Euler,
+                preconditioner: PreconditionerType::Jacobi,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("solver init");
 
         let dt = 0.0001;
         let density = 1.0;
@@ -52,8 +68,8 @@ fn test_gpu_fine_mesh_obstacle() {
         for i in 0..10 {
             solver.step();
 
-            if solver.should_stop {
-                if solver.degenerate_count > 10 {
+            if solver.incompressible_should_stop() {
+                if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
                     panic!("Solver stopped due to degenerate solution!");
                 }
                 println!("Solver stopped early (steady state).");

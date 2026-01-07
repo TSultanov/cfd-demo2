@@ -138,7 +138,7 @@ impl Default for PreconditionerParams {
     }
 }
 
-pub struct GpuSolver {
+pub(crate) struct GpuSolver {
     pub context: GpuContext,
 
     // Mesh buffers

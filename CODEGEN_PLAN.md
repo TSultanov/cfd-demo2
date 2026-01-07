@@ -38,6 +38,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added a first **generic boundary-condition** representation (`BoundarySpec` on `ModelSpec`) plus a helper to build GPU BC tables and a generic BC path in the generic coupled assembly kernel (Dirichlet + Neumann/zeroGradient for diffusion) (`src/solver/model/definitions.rs`, `src/solver/codegen/generic_coupled_kernels.rs`).
 - Added `ModelSpec.id` and emit generic coupled kernels under id-suffixed WGSL names (so multiple generated-per-model variants can coexist) and a first runtime backend for `ModelFields::GenericCoupled` in `GpuUnifiedSolver` (`src/solver/codegen/emit.rs`, `src/solver/gpu/generic_coupled_solver.rs`, `src/solver/gpu/unified_solver.rs`).
 - `GpuGenericCoupledSolver` now dispatches generic coupled kernels by `ModelSpec.id` (no single-id hardcode); added a second demo model variant (homogeneous Neumann) and a regression test to ensure both codegen+runtime paths work.
+- All integration tests and the UI now run through `GpuUnifiedSolver` only; legacy solver modules/types are crate-internal (no longer exported from `cfd2::solver::gpu`).
 
 ## Current Focus: Unified Solver Loop (Planned)
 Goal: a single GPU solver loop that can run *any* coupled model described by `ModelSpec` (`src/solver/model/definitions.rs`), including:
@@ -89,10 +90,14 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 8. **Test/validation automation**
    - Run all 1D cases across all combinations of temporal (Euler/BDF2) × spatial (Upwind/SOU/QUICK) schemes.
    - Store plots under `target/test_plots/*` with a consistent naming scheme; add a small summary index (text/HTML) to spot regressions quickly.
+9. **Eliminate legacy public solvers** (DONE: public API)
+   - Make `GpuUnifiedSolver` the only public GPU solver entrypoint.
+   - Keep legacy implementations crate-internal until the generic runtime fully replaces them.
 
 ### Gap Check (Are We Approaching The Goal?)
 - The common *runtime sequencing* layer now exists (`KernelGraph` + `ExecutionPlan`) and both incompressible and compressible paths are progressively being expressed in it.
 - The solver still relies on model-family-specific kernels and host-side control flow for convergence + linear solves; the next material step is to derive plans from `ModelSpec`/`DiscreteSystem` rather than hardcoding per-solver pipelines.
+- Even though the public API is unified, the runtime still uses legacy per-family backends internally (`GpuSolver`/`GpuCompressibleSolver`). The remaining work to truly delete them is to (a) move their resources into a generic runtime context, and (b) derive all kernel graphs/host plugins from `ModelSpec` + scheme expansion + closure plugins.
 
 ### Decisions (Chosen)
 - **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).

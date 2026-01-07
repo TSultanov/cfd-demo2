@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::Vector2;
 use std::time::Instant;
 
@@ -17,7 +21,19 @@ fn test_gpu_profile() {
     mesh.smooth(&geo, 0.3, 50);
 
     pollster::block_on(async {
-        let mut solver = GpuSolver::new(&mesh, None, None).await;
+        let mut solver = GpuUnifiedSolver::new(
+            &mesh,
+            incompressible_momentum_model(),
+            SolverConfig {
+                advection_scheme: Scheme::Upwind,
+                time_scheme: TimeScheme::Euler,
+                preconditioner: PreconditionerType::Jacobi,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("solver init");
         solver.set_dt(0.01);
         solver.set_viscosity(0.001);
         solver.set_density(1000.0);
@@ -35,8 +51,8 @@ fn test_gpu_profile() {
         solver.set_u(&u_init);
 
         // Use the detailed ProfilingStats as the single source of truth
-        solver.enable_detailed_profiling(true);
-        solver.start_profiling_session();
+        solver.enable_detailed_profiling(true).expect("profiling enable");
+        solver.start_profiling_session().expect("profiling start");
 
         println!("Starting profiling...");
         let start_total = Instant::now();
@@ -47,8 +63,8 @@ fn test_gpu_profile() {
             solver.step();
             let duration = start_step.elapsed();
 
-            if solver.should_stop {
-                if solver.degenerate_count > 10 {
+            if solver.incompressible_should_stop() {
+                if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
                     panic!("Solver stopped due to degenerate solution!");
                 }
                 println!("Solver stopped early (steady state).");
@@ -61,13 +77,13 @@ fn test_gpu_profile() {
         }
 
         let total_duration = start_total.elapsed();
-        solver.end_profiling_session();
+        solver.end_profiling_session().expect("profiling end");
 
         println!("Total time for {} steps: {:?}", steps, total_duration);
         println!("Average time per step: {:?}", total_duration / steps);
 
         // Print detailed profiling report from ProfilingStats
-        let stats = solver.get_profiling_stats();
+        let stats = solver.get_profiling_stats().expect("profiling stats");
         let session_total = stats.get_session_total();
         println!("\nProfiling Summary (ProfilingStats):");
         println!("  Session total: {:?}", session_total);

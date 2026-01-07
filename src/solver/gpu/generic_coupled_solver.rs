@@ -32,7 +32,7 @@ fn ping_pong_indices(i: usize) -> (usize, usize, usize) {
     }
 }
 
-pub struct GpuGenericCoupledSolver {
+pub(crate) struct GpuGenericCoupledSolver {
     pub linear: GpuSolver,
     model: ModelSpec,
 

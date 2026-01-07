@@ -1,6 +1,10 @@
-use cfd2::solver::gpu::GpuCompressibleSolver;
+use cfd2::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
+use cfd2::solver::model::compressible_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 use std::env;
 use std::fs;
@@ -83,7 +87,11 @@ fn low_mach_debug_fast() {
     let dtau = env_f64("CFD2_FAST_DTAU", 5e-5);
     let alpha_u = env_f64("CFD2_FAST_ALPHA_U", 0.3);
     let nonconv_relax = env_f64("CFD2_FAST_NONCONV_RELAX", 0.5);
-    let precond_model = env_usize("CFD2_FAST_PRECOND_MODEL", 1) as u32;
+    let precond_model = match env_usize("CFD2_FAST_PRECOND_MODEL", 1) as u32 {
+        0 => GpuLowMachPrecondModel::Legacy,
+        1 => GpuLowMachPrecondModel::WeissSmith,
+        _ => GpuLowMachPrecondModel::Off,
+    };
     let precond_theta_floor = env_f64("CFD2_FAST_PRECOND_THETA_FLOOR", 1e-6);
     let comp_iters = env_usize("CFD2_FAST_COMP_ITERS", 8);
     let cell = env_f64("CFD2_FAST_CELL", 0.1);
@@ -97,17 +105,28 @@ fn low_mach_debug_fast() {
 
     let mesh = build_mesh(cell);
 
-    let mut comp = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let mut comp = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        SolverConfig {
+            advection_scheme: Scheme::QUICK,
+            time_scheme: TimeScheme::BDF2,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32);
-    comp.set_time_scheme(1);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
-    comp.set_scheme(2);
     comp.set_alpha_u(alpha_u as f32);
-    comp.set_precond_model(precond_model);
-    comp.set_precond_theta_floor(precond_theta_floor as f32);
-    comp.set_nonconverged_relax(nonconv_relax as f32);
+    comp.set_precond_model(precond_model).expect("precond model");
+    comp.set_precond_theta_floor(precond_theta_floor as f32)
+        .expect("theta floor");
+    comp.set_nonconverged_relax(nonconv_relax as f32)
+        .expect("nonconverged relax");
     comp.set_outer_iters(comp_iters);
 
     let rho_init = vec![density; mesh.num_cells()];
@@ -133,7 +152,7 @@ fn low_mach_debug_fast() {
         .unwrap_or(0);
 
     for _ in 0..steps {
-        let stats = comp.step_with_stats();
+        let stats = comp.step_with_stats().expect("step stats");
         for stat in &stats {
             conv_total += 1;
             if stat.converged {

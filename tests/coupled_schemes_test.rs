@@ -1,10 +1,14 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::Vector2;
 
 async fn run_coupled_solver(
-    scheme: u32,
-    time_scheme: u32,
+    scheme: Scheme,
+    time_scheme: TimeScheme,
     name: &str,
 ) -> (Vec<(f64, f64)>, Vec<f64>) {
     println!("Running Coupled Solver Test: {}", name);
@@ -25,7 +29,19 @@ async fn run_coupled_solver(
     mesh.smooth(&geo, 0.3, 50);
 
     // Initialize Solver
-    let mut solver = GpuSolver::new(&mesh, None, None).await;
+    let mut solver = GpuUnifiedSolver::new(
+        &mesh,
+        incompressible_momentum_model(),
+        SolverConfig {
+            advection_scheme: scheme,
+            time_scheme,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    )
+    .await
+    .expect("solver init");
 
     // Initial Conditions
     let init_u: Vec<(f64, f64)> = (0..mesh.num_cells()).map(|_| (0.1, 0.0)).collect();
@@ -34,25 +50,21 @@ async fn run_coupled_solver(
     solver.set_p(&init_p);
 
     // Constants
-    solver.constants.dt = 0.001;
+    solver.set_dt(0.001);
     solver.set_density(1.0);
     solver.set_viscosity(0.01);
     solver.set_alpha_u(0.9);
     solver.set_alpha_p(0.9);
-
-    // Set Schemes
-    solver.set_scheme(scheme);
+    solver.set_advection_scheme(scheme);
     solver.set_time_scheme(time_scheme);
-
-    solver.update_constants();
 
     // Run Steps
     const NUM_STEPS: usize = 2;
     for i in 0..NUM_STEPS {
         solver.step();
 
-        if solver.should_stop {
-            if solver.degenerate_count > 10 {
+        if solver.incompressible_should_stop() {
+            if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
                 panic!("Solver stopped due to degenerate solution!");
             }
             println!("Solver stopped early (steady state).");
@@ -79,26 +91,30 @@ async fn run_coupled_solver(
 fn test_coupled_schemes() {
     pollster::block_on(async {
         // 1. Upwind + Euler (Baseline)
-        // scheme: 0 (Upwind), time_scheme: 0 (Euler)
-        let (u_upwind, p_upwind) = run_coupled_solver(0, 0, "Upwind + Euler").await;
+        let (u_upwind, p_upwind) =
+            run_coupled_solver(Scheme::Upwind, TimeScheme::Euler, "Upwind + Euler").await;
         assert!(u_upwind.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_upwind.iter().all(|x| x.is_finite()));
 
         // 2. SOU + Euler
-        // scheme: 1 (SOU), time_scheme: 0 (Euler)
-        let (u_sou, p_sou) = run_coupled_solver(1, 0, "SOU + Euler").await;
+        let (u_sou, p_sou) = run_coupled_solver(
+            Scheme::SecondOrderUpwind,
+            TimeScheme::Euler,
+            "SOU + Euler",
+        )
+        .await;
         assert!(u_sou.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_sou.iter().all(|x| x.is_finite()));
 
         // 3. QUICK + Euler
-        // scheme: 2 (QUICK), time_scheme: 0 (Euler)
-        let (u_quick, p_quick) = run_coupled_solver(2, 0, "QUICK + Euler").await;
+        let (u_quick, p_quick) =
+            run_coupled_solver(Scheme::QUICK, TimeScheme::Euler, "QUICK + Euler").await;
         assert!(u_quick.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_quick.iter().all(|x| x.is_finite()));
 
         // 4. Upwind + BDF2
-        // scheme: 0 (Upwind), time_scheme: 1 (BDF2)
-        let (u_bdf2, p_bdf2) = run_coupled_solver(0, 1, "Upwind + BDF2").await;
+        let (u_bdf2, p_bdf2) =
+            run_coupled_solver(Scheme::Upwind, TimeScheme::BDF2, "Upwind + BDF2").await;
         assert!(u_bdf2.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_bdf2.iter().all(|x| x.is_finite()));
 

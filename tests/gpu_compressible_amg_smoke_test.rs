@@ -1,6 +1,10 @@
-use cfd2::solver::gpu::GpuCompressibleSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::generate_cut_cell_mesh;
+use cfd2::solver::model::compressible_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
 #[test]
@@ -16,15 +20,23 @@ fn gpu_compressible_amg_smoke() {
     };
     let mesh = generate_cut_cell_mesh(&geo, 0.2, 0.2, 1.0, domain_size);
 
-    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        SolverConfig {
+            advection_scheme: Scheme::QUICK,
+            time_scheme: TimeScheme::BDF2,
+            preconditioner: PreconditionerType::Amg,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     solver.set_dt(0.01);
     solver.set_dtau(0.0);
-    solver.set_time_scheme(1);
     solver.set_viscosity(0.01);
     solver.set_inlet_velocity(0.5);
-    solver.set_scheme(2);
     solver.set_alpha_u(0.5);
-    solver.set_precond_type(1);
     solver.set_outer_iters(2);
 
     let rho_init = vec![1.0f32; mesh.num_cells()];

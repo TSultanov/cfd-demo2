@@ -1,10 +1,12 @@
 use crate::solver::gpu::compressible_solver::GpuCompressibleSolver;
 use crate::solver::gpu::generic_coupled_solver::GpuGenericCoupledSolver;
-use crate::solver::gpu::enums::TimeScheme;
+use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
+use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
 use crate::solver::scheme::Scheme;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SolverConfig {
@@ -23,7 +25,13 @@ impl Default for SolverConfig {
     }
 }
 
-pub enum UnifiedSolverBackend {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FgmresSizing {
+    pub num_unknowns: u32,
+    pub num_dot_groups: u32,
+}
+
+pub(crate) enum UnifiedSolverBackend {
     Incompressible(GpuSolver),
     Compressible(GpuCompressibleSolver),
     GenericCoupled(GpuGenericCoupledSolver),
@@ -223,6 +231,19 @@ impl GpuUnifiedSolver {
         }
     }
 
+    pub fn set_incompressible_outer_correctors(&mut self, iters: u32) -> Result<(), String> {
+        match &mut self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                solver.n_outer_correctors = iters;
+                Ok(())
+            }
+            _ => Err(
+                "set_incompressible_outer_correctors is supported for Incompressible models only"
+                    .to_string(),
+            ),
+        }
+    }
+
     pub fn incompressible_set_should_stop(&mut self, value: bool) {
         if let UnifiedSolverBackend::Incompressible(solver) = &mut self.backend {
             solver.should_stop = value;
@@ -257,6 +278,13 @@ impl GpuUnifiedSolver {
             *solver.stats_uy.lock().unwrap(),
             *solver.stats_p.lock().unwrap(),
         ))
+    }
+
+    pub fn incompressible_degenerate_count(&self) -> Option<u32> {
+        let UnifiedSolverBackend::Incompressible(solver) = &self.backend else {
+            return None;
+        };
+        Some(solver.degenerate_count)
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {
@@ -301,11 +329,124 @@ impl GpuUnifiedSolver {
         }
     }
 
+    pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        match &mut self.backend {
+            UnifiedSolverBackend::Compressible(solver) => Ok(solver.step_with_stats()),
+            _ => Err("step_with_stats is supported for Compressible models only".to_string()),
+        }
+    }
+
     pub fn initialize_history(&self) {
         match &self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.initialize_history(),
             UnifiedSolverBackend::Compressible(solver) => solver.initialize_history(),
             UnifiedSolverBackend::GenericCoupled(_) => {}
+        }
+    }
+
+    pub fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
+        match &mut self.backend {
+            UnifiedSolverBackend::Compressible(solver) => {
+                solver.set_precond_model(model as u32);
+                Ok(())
+            }
+            _ => Err("set_precond_model is supported for Compressible models only".to_string()),
+        }
+    }
+
+    pub fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
+        match &mut self.backend {
+            UnifiedSolverBackend::Compressible(solver) => {
+                solver.set_precond_theta_floor(theta);
+                Ok(())
+            }
+            _ => Err(
+                "set_precond_theta_floor is supported for Compressible models only".to_string(),
+            ),
+        }
+    }
+
+    pub fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
+        match &mut self.backend {
+            UnifiedSolverBackend::Compressible(solver) => {
+                solver.set_nonconverged_relax(alpha);
+                Ok(())
+            }
+            _ => Err("set_nonconverged_relax is supported for Compressible models only".to_string()),
+        }
+    }
+
+    pub fn enable_detailed_profiling(&self, enable: bool) -> Result<(), String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                solver.enable_detailed_profiling(enable);
+                Ok(())
+            }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                solver.linear.enable_detailed_profiling(enable);
+                Ok(())
+            }
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "enable_detailed_profiling is supported for Incompressible models only".to_string(),
+            ),
+        }
+    }
+
+    pub fn start_profiling_session(&self) -> Result<(), String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                solver.start_profiling_session();
+                Ok(())
+            }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                solver.linear.start_profiling_session();
+                Ok(())
+            }
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "start_profiling_session is supported for Incompressible models only".to_string(),
+            ),
+        }
+    }
+
+    pub fn end_profiling_session(&self) -> Result<(), String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                solver.end_profiling_session();
+                Ok(())
+            }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                solver.linear.end_profiling_session();
+                Ok(())
+            }
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "end_profiling_session is supported for Incompressible models only".to_string(),
+            ),
+        }
+    }
+
+    pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.get_profiling_stats()),
+            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.get_profiling_stats()),
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "get_profiling_stats is supported for Incompressible models only".to_string(),
+            ),
+        }
+    }
+
+    pub fn print_profiling_report(&self) -> Result<(), String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                solver.print_profiling_report();
+                Ok(())
+            }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                solver.linear.print_profiling_report();
+                Ok(())
+            }
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "print_profiling_report is supported for Incompressible models only".to_string(),
+            ),
         }
     }
 
@@ -375,6 +516,84 @@ impl GpuUnifiedSolver {
         (0..self.num_cells() as usize)
             .map(|i| data[i * stride + offset] as f64)
             .collect()
+    }
+
+    pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                solver.set_linear_system(matrix_values, rhs);
+                Ok(())
+            }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                solver.linear.set_linear_system(matrix_values, rhs);
+                Ok(())
+            }
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "set_linear_system is supported for Incompressible and GenericCoupled backends only"
+                    .to_string(),
+            ),
+        }
+    }
+
+    pub fn solve_linear_system_cg_with_size(
+        &self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.solve_linear_system_cg_with_size(n, max_iters, tol)),
+            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.solve_linear_system_cg_with_size(n, max_iters, tol)),
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "solve_linear_system_cg_with_size is supported for Incompressible and GenericCoupled backends only"
+                    .to_string(),
+            ),
+        }
+    }
+
+    pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.get_linear_solution().await),
+            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.get_linear_solution().await),
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "get_linear_solution is supported for Incompressible and GenericCoupled backends only"
+                    .to_string(),
+            ),
+        }
+    }
+
+    pub fn coupled_unknowns(&self) -> Result<u32, String> {
+        match &self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.coupled_unknowns()),
+            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.coupled_unknowns()),
+            UnifiedSolverBackend::Compressible(_) => Err(
+                "coupled_unknowns is supported for Incompressible and GenericCoupled backends only"
+                    .to_string(),
+            ),
+        }
+    }
+
+    pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
+        let (num_unknowns, num_dot_groups) = match &mut self.backend {
+            UnifiedSolverBackend::Incompressible(solver) => {
+                let resources = solver.init_fgmres_resources(max_restart);
+                (resources.num_unknowns, resources.num_dot_groups)
+            }
+            UnifiedSolverBackend::GenericCoupled(solver) => {
+                let resources = solver.linear.init_fgmres_resources(max_restart);
+                (resources.num_unknowns, resources.num_dot_groups)
+            }
+            UnifiedSolverBackend::Compressible(_) => {
+                return Err(
+                    "fgmres_sizing is supported for Incompressible and GenericCoupled backends only"
+                        .to_string(),
+                );
+            }
+        };
+        Ok(FgmresSizing {
+            num_unknowns,
+            num_dot_groups,
+        })
     }
 }
 

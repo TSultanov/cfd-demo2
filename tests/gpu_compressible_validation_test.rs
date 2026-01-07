@@ -1,6 +1,10 @@
-use cfd2::solver::gpu::GpuCompressibleSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::geometry::RectangularChannel;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
+use cfd2::solver::model::compressible_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::Vector2;
 use std::env;
 
@@ -41,10 +45,20 @@ fn compressible_shock_tube_relaxes_discontinuity() {
         initial_energy += (p[i] as f64 / (gamma - 1.0)) * vol;
     }
 
-    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        SolverConfig {
+            advection_scheme: Scheme::Upwind,
+            time_scheme: TimeScheme::Euler,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     solver.set_outer_iters(3);
     solver.set_dt(0.002);
-    solver.set_time_scheme(0);
     solver.set_viscosity(0.0);
     solver.set_inlet_velocity(0.0);
     solver.set_state_fields(&rho, &u, &p);
@@ -111,13 +125,22 @@ fn compressible_acoustic_pulse_propagates() {
     }
 
     let p_initial = p.clone();
-    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        SolverConfig {
+            advection_scheme: Scheme::QUICK,
+            time_scheme: TimeScheme::Euler,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     solver.set_outer_iters(3);
     solver.set_dt(0.005);
-    solver.set_time_scheme(0);
     solver.set_viscosity(0.0);
     solver.set_inlet_velocity(0.0);
-    solver.set_scheme(2);
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 
@@ -137,7 +160,7 @@ fn compressible_acoustic_pulse_propagates() {
 
     assert!(mean_abs_diff > 5e-4, "acoustic pulse did not evolve");
 
-    let t = solver.constants.dt as f64 * 40.0;
+    let t = solver.dt() as f64 * 40.0;
     let expected = c0 * t;
     let mut weight = 0.0;
     let mut weighted_x = 0.0;

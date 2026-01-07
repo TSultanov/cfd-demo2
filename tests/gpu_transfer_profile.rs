@@ -8,8 +8,12 @@
 /// - CPU-side computation that could be offloaded to GPU
 ///
 /// The goal is to identify bottlenecks and opportunities for GPU offloading.
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::Vector2;
 use std::time::Instant;
 
@@ -41,13 +45,24 @@ fn test_gpu_transfer_profile() {
     println!();
 
     pollster::block_on(async {
-        let mut solver = GpuSolver::new(&mesh, None, None).await;
+        let mut solver = GpuUnifiedSolver::new(
+            &mesh,
+            incompressible_momentum_model(),
+            SolverConfig {
+                advection_scheme: Scheme::Upwind,
+                time_scheme: TimeScheme::Euler,
+                preconditioner: PreconditionerType::Jacobi,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("solver init");
         solver.set_dt(0.001);
         solver.set_viscosity(0.001);
         solver.set_density(1.0);
         solver.set_alpha_p(0.3);
         solver.set_alpha_u(0.7);
-        solver.set_scheme(0); // Upwind for stability
 
         // Set initial conditions - inlet velocity
         let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
@@ -62,8 +77,8 @@ fn test_gpu_transfer_profile() {
         solver.initialize_history();
 
         // Enable detailed profiling
-        solver.enable_detailed_profiling(true);
-        solver.start_profiling_session();
+        solver.enable_detailed_profiling(true).expect("profiling enable");
+        solver.start_profiling_session().expect("profiling start");
 
         println!("Starting profiled solver run...\n");
 
@@ -75,8 +90,8 @@ fn test_gpu_transfer_profile() {
             solver.step();
             let step_duration = step_start.elapsed();
 
-            if solver.should_stop {
-                if solver.degenerate_count > 10 {
+            if solver.incompressible_should_stop() {
+                if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
                     panic!("Solver stopped due to degenerate solution!");
                 }
                 println!("Solver stopped early (steady state).");
@@ -87,7 +102,7 @@ fn test_gpu_transfer_profile() {
             println!("Step {} completed in {:?}", step + 1, step_duration);
         }
 
-        solver.end_profiling_session();
+        solver.end_profiling_session().expect("profiling end");
 
         // Print step timing summary
         println!("\n");
@@ -102,7 +117,9 @@ fn test_gpu_transfer_profile() {
         println!("  Average time per step: {:?}", avg_step_time);
 
         // Print detailed profiling report
-        solver.print_profiling_report();
+        solver
+            .print_profiling_report()
+            .expect("profiling report");
 
         // Additional analysis
         println!("\n");
@@ -110,7 +127,7 @@ fn test_gpu_transfer_profile() {
         println!("Analysis and Recommendations");
         println!("{}", "=".repeat(80));
 
-        let stats = solver.get_profiling_stats();
+        let stats = solver.get_profiling_stats().expect("profiling stats");
         let location_stats = stats.get_location_stats();
 
         // Find top GPU read operations
@@ -297,13 +314,24 @@ fn test_gpu_transfer_profile_scaling() {
         println!("{}", "-".repeat(60));
 
         pollster::block_on(async {
-            let mut solver = GpuSolver::new(&mesh, None, None).await;
+            let mut solver = GpuUnifiedSolver::new(
+                &mesh,
+                incompressible_momentum_model(),
+                SolverConfig {
+                    advection_scheme: Scheme::Upwind,
+                    time_scheme: TimeScheme::Euler,
+                    preconditioner: PreconditionerType::Jacobi,
+                },
+                None,
+                None,
+            )
+            .await
+            .expect("solver init");
             solver.set_dt(0.001);
             solver.set_viscosity(0.001);
             solver.set_density(1.0);
             solver.set_alpha_p(0.3);
             solver.set_alpha_u(0.7);
-            solver.set_scheme(0);
 
             let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
             for i in 0..mesh.num_cells() {
@@ -316,17 +344,17 @@ fn test_gpu_transfer_profile_scaling() {
             solver.set_u(&u_init);
             solver.initialize_history();
 
-            solver.enable_detailed_profiling(true);
-            solver.start_profiling_session();
+            solver.enable_detailed_profiling(true).expect("profiling enable");
+            solver.start_profiling_session().expect("profiling start");
 
             let num_steps = 3;
             for _ in 0..num_steps {
                 solver.step();
             }
 
-            solver.end_profiling_session();
+            solver.end_profiling_session().expect("profiling end");
 
-            let stats = solver.get_profiling_stats();
+            let stats = solver.get_profiling_stats().expect("profiling stats");
             let all_stats = stats.get_all_stats();
 
             println!("\nTiming Breakdown:");

@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {
@@ -98,7 +102,7 @@ fn diag_indices(row_offsets: &[u32], col_indices: &[u32]) -> Vec<usize> {
     diag
 }
 
-fn solve_identity_system(solver: &GpuSolver, mesh: &Mesh) {
+fn solve_identity_system(solver: &GpuUnifiedSolver, mesh: &Mesh) {
     let (row_offsets, col_indices) = build_csr(mesh);
     let diag = diag_indices(&row_offsets, &col_indices);
     let mut matrix = vec![0.0_f32; col_indices.len()];
@@ -112,8 +116,12 @@ fn solve_identity_system(solver: &GpuSolver, mesh: &Mesh) {
         .map(|(&x, &y)| 1.0 + 0.5 * x as f32 + 0.25 * y as f32)
         .collect();
 
-    solver.set_linear_system(&matrix, &rhs);
-    let stats = solver.solve_linear_system_cg_with_size(mesh.num_cells() as u32, 200, 1e-6);
+    solver
+        .set_linear_system(&matrix, &rhs)
+        .expect("set linear system");
+    let stats = solver
+        .solve_linear_system_cg_with_size(mesh.num_cells() as u32, 200, 1e-6)
+        .expect("cg solve");
     assert!(
         stats.converged,
         "CG did not converge (iters {}, residual {:.3e})",
@@ -121,16 +129,16 @@ fn solve_identity_system(solver: &GpuSolver, mesh: &Mesh) {
         stats.residual
     );
 
-    let solution = pollster::block_on(solver.get_linear_solution());
+    let solution = pollster::block_on(solver.get_linear_solution()).expect("get solution");
     for (value, target) in solution.iter().zip(rhs.iter()) {
         let diff = (value - target).abs();
         assert!(diff < 1e-4, "identity solve diff {:.3e}", diff);
     }
 }
 
-fn assert_fgmres_sizing(solver: &GpuSolver) {
-    let fgmres = solver.init_fgmres_resources(10);
-    let expected_unknowns = solver.coupled_unknowns();
+fn assert_fgmres_sizing(solver: &mut GpuUnifiedSolver) {
+    let fgmres = solver.fgmres_sizing(10).expect("fgmres sizing");
+    let expected_unknowns = solver.coupled_unknowns().expect("coupled unknowns");
     let expected_groups = (expected_unknowns + 63) / 64;
     assert_eq!(fgmres.num_unknowns, expected_unknowns);
     assert_eq!(fgmres.num_dot_groups, expected_groups);
@@ -140,8 +148,20 @@ fn assert_fgmres_sizing(solver: &GpuSolver) {
 fn gpu_solvers_scale_with_mesh_size() {
     for cell_size in [0.1, 0.05] {
         let mesh = build_mesh(cell_size);
-        let solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
+        let config = SolverConfig {
+            advection_scheme: Scheme::Upwind,
+            time_scheme: TimeScheme::Euler,
+            preconditioner: PreconditionerType::Jacobi,
+        };
+        let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+            &mesh,
+            incompressible_momentum_model(),
+            config,
+            None,
+            None,
+        ))
+        .expect("solver init");
         solve_identity_system(&solver, &mesh);
-        assert_fgmres_sizing(&solver);
+        assert_fgmres_sizing(&mut solver);
     }
 }

@@ -1,6 +1,7 @@
 use cfd2::solver::gpu::enums::TimeScheme;
 use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuCompressibleSolver, GpuSolver, GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::gpu::enums::GpuLowMachPrecondModel;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{
     generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh,
@@ -774,32 +775,53 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     let dt = 0.01f32;
     let steps = 6usize;
 
-    let mut incomp = pollster::block_on(GpuSolver::new(&mesh, None, None));
+    let mut incomp = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        incompressible_momentum_model(),
+        SolverConfig {
+            advection_scheme: Scheme::Upwind,
+            time_scheme: TimeScheme::BDF2,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     incomp.set_dt(dt);
     incomp.set_viscosity(nu);
     incomp.set_density(density);
-    incomp.set_scheme(0);
     incomp.set_alpha_u(0.7);
     incomp.set_alpha_p(0.3);
-    incomp.set_time_scheme(1);
     incomp.set_inlet_velocity(u_in);
     incomp.set_ramp_time(0.2);
-    incomp.n_outer_correctors = 2;
+    incomp
+        .set_incompressible_outer_correctors(2)
+        .expect("outer correctors");
     incomp.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     incomp.set_p(&vec![0.0; mesh.num_cells()]);
     incomp.initialize_history();
 
     let base_pressure = 25.0f32;
-    let mut comp = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let mut comp = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        SolverConfig {
+            advection_scheme: Scheme::Upwind,
+            time_scheme: TimeScheme::BDF2,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     comp.set_dt(dt);
     comp.set_dtau(5e-5);
-    comp.set_time_scheme(1);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
-    comp.set_scheme(0);
     comp.set_alpha_u(0.3);
-    comp.set_precond_model(1);
-    comp.set_precond_theta_floor(1e-6);
+    comp.set_precond_model(GpuLowMachPrecondModel::WeissSmith)
+        .expect("precond model");
+    comp.set_precond_theta_floor(1e-6).expect("theta floor");
     comp.set_outer_iters(6);
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure; mesh.num_cells()];

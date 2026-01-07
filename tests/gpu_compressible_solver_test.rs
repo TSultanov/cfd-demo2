@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuCompressibleSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
+use cfd2::solver::model::compressible_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
 fn build_mesh() -> Mesh {
@@ -19,12 +23,18 @@ fn build_mesh() -> Mesh {
 #[test]
 fn gpu_compressible_solver_preserves_uniform_state() {
     let mesh = build_mesh();
-    let mut solver = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let config = SolverConfig {
+        advection_scheme: Scheme::SecondOrderUpwind,
+        time_scheme: TimeScheme::Euler,
+        preconditioner: PreconditionerType::Jacobi,
+    };
+    let mut solver =
+        pollster::block_on(GpuUnifiedSolver::new(&mesh, compressible_model(), config, None, None))
+            .expect("solver init");
 
     solver.set_dt(0.01);
     solver.set_inlet_velocity(0.0);
-    solver.set_scheme(1);
-    solver.set_uniform_state(1.0, [0.0, 0.0], 1.0);
+    solver.set_uniform_state(1.0f32, [0.0f32, 0.0f32], 1.0f32);
     solver.initialize_history();
 
     for _ in 0..3 {

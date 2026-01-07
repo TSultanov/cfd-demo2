@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
 #[test]
@@ -28,11 +32,22 @@ fn test_gpu_divergence_channel_obstacle() {
 
     // GPU Init
     println!("Initializing GPU solver...");
-    let mut gpu_solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::Euler,
+        preconditioner: PreconditionerType::Jacobi,
+    };
+    let mut gpu_solver = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        incompressible_momentum_model(),
+        config,
+        None,
+        None,
+    ))
+    .expect("solver init");
     gpu_solver.set_dt(timestep as f32);
     gpu_solver.set_viscosity(viscosity as f32);
     gpu_solver.set_density(density as f32);
-    gpu_solver.set_scheme(0); // Upwind
 
     // Initial Conditions
     let mut u_init = Vec::new();
@@ -69,8 +84,8 @@ fn test_gpu_divergence_channel_obstacle() {
 
         gpu_solver.step();
 
-        if gpu_solver.should_stop {
-            if gpu_solver.degenerate_count > 10 {
+        if gpu_solver.incompressible_should_stop() {
+            if gpu_solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
                 panic!("Solver stopped due to degenerate solution!");
             }
             println!("Solver stopped early (steady state).");
@@ -80,7 +95,7 @@ fn test_gpu_divergence_channel_obstacle() {
         if step % 10 == 0 {
             println!(
                 "Step {}: Max Vel = {:.4}, dt = {:.6}",
-                step, max_vel, gpu_solver.constants.dt
+                step, max_vel, gpu_solver.dt()
             );
 
             if max_vel > 20.0 || max_vel.is_nan() {

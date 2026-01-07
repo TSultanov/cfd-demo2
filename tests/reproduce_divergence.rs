@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::Vector2;
 
 #[test]
@@ -24,14 +28,25 @@ fn test_reproduce_divergence() {
     println!("Mesh generated with {} cells", mesh.num_cells());
 
     // Solver Setup
-    let mut solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        incompressible_momentum_model(),
+        SolverConfig {
+            advection_scheme: Scheme::Upwind,
+            time_scheme: TimeScheme::Euler,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
 
     // Fluid: Water
     solver.set_density(1000.0);
     solver.set_viscosity(0.001);
 
     // Scheme: Upwind (ID 0)
-    solver.set_scheme(0);
+    solver.set_advection_scheme(Scheme::Upwind);
 
     // Under-relaxation
     solver.set_alpha_u(0.7);
@@ -45,7 +60,7 @@ fn test_reproduce_divergence() {
     solver.set_p(&p);
 
     // Time Stepping
-    let mut dt = 0.001; // Reduced initial dt
+    let mut dt: f32 = 0.001; // Reduced initial dt
     solver.set_dt(dt);
 
     let _target_cfl = 0.9;
@@ -62,8 +77,8 @@ fn test_reproduce_divergence() {
     for step in 0..max_steps {
         solver.step();
 
-        if solver.should_stop {
-            if solver.degenerate_count > 10 {
+        if solver.incompressible_should_stop() {
+            if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
                 panic!("Solver stopped due to degenerate solution!");
             }
             println!("Solver stopped early (steady state).");
@@ -72,14 +87,23 @@ fn test_reproduce_divergence() {
 
         {
             // Check for divergence
-            let stats_u = solver.stats_ux.lock().unwrap();
-            let stats_p = solver.stats_p.lock().unwrap();
-            let outer_res_u = *solver.outer_residual_u.lock().unwrap();
-            let outer_res_p = *solver.outer_residual_p.lock().unwrap();
+            let (outer_iters, outer_res_u, outer_res_p) =
+                solver.incompressible_outer_stats().unwrap_or((0, 0.0, 0.0));
+            let (stats_ux, _stats_uy, stats_p) = solver
+                .incompressible_linear_stats()
+                .unwrap_or((Default::default(), Default::default(), Default::default()));
 
             println!(
                 "Step {}: dt={:.2e}, ResU={:.2e}, ResP={:.2e}, LinU={} (res {:.2e}), LinP={} (res {:.2e}), OuterIters={}",
-                step, dt, outer_res_u, outer_res_p, stats_u.iterations, stats_u.residual, stats_p.iterations, stats_p.residual, *solver.outer_iterations.lock().unwrap()
+                step,
+                dt,
+                outer_res_u,
+                outer_res_p,
+                stats_ux.iterations,
+                stats_ux.residual,
+                stats_p.iterations,
+                stats_p.residual,
+                outer_iters
             );
 
             if outer_res_u.is_nan()

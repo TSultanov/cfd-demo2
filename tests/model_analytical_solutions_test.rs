@@ -1,6 +1,10 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use cfd2::solver::units::{si, UnitDim};
 use nalgebra::{Point2, Vector2};
 
@@ -252,16 +256,32 @@ where
 }
 
 fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
-    let solver = pollster::block_on(GpuSolver::new(mesh, None, None));
-    solver.set_linear_system(matrix, rhs);
-    let stats = solver.solve_linear_system_cg(400, 1e-6);
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::Euler,
+        preconditioner: PreconditionerType::Jacobi,
+    };
+    let solver = pollster::block_on(GpuUnifiedSolver::new(
+        mesh,
+        incompressible_momentum_model(),
+        config,
+        None,
+        None,
+    ))
+    .expect("solver init");
+    solver
+        .set_linear_system(matrix, rhs)
+        .expect("set linear system");
+    let stats = solver
+        .solve_linear_system_cg_with_size(mesh.num_cells() as u32, 400, 1e-6)
+        .expect("cg solve");
     assert!(
         stats.converged,
         "CG did not converge (iters {}, residual {:.3e})",
         stats.iterations,
         stats.residual
     );
-    let solution = pollster::block_on(solver.get_linear_solution());
+    let solution = pollster::block_on(solver.get_linear_solution()).expect("solution read");
     let solution = solution.iter().map(|v| *v as f64).collect();
     (solution, stats.residual)
 }

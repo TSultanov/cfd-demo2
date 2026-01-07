@@ -1,6 +1,10 @@
-use cfd2::solver::gpu::{GpuCompressibleSolver, GpuSolver};
+use cfd2::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
+use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
+use cfd2::solver::scheme::Scheme;
 use image::{Rgb, RgbImage};
 use nalgebra::{Point2, Vector2};
 use std::env;
@@ -307,7 +311,11 @@ fn low_mach_equivalence_vortex_street() {
     let dt = env_f64("CFD2_LOW_MACH_DT", 0.001);
     let dtau = env_f64("CFD2_LOW_MACH_DTAU", 0.0);
     let alpha_u = env_f64("CFD2_LOW_MACH_ALPHA_U", 1.0);
-    let precond_model = env_usize("CFD2_LOW_MACH_PRECOND_MODEL", 1) as u32;
+    let precond_model = match env_usize("CFD2_LOW_MACH_PRECOND_MODEL", 1) as u32 {
+        0 => GpuLowMachPrecondModel::Legacy,
+        1 => GpuLowMachPrecondModel::WeissSmith,
+        _ => GpuLowMachPrecondModel::Off,
+    };
     let precond_theta_floor = env_f64("CFD2_LOW_MACH_PRECOND_THETA_FLOOR", 1e-6);
     let nonconv_relax = env_f64("CFD2_LOW_MACH_NONCONV_RELAX", 0.5);
     let checker_max = env_f64("CFD2_LOW_MACH_CB_MAX", 2.0);
@@ -332,14 +340,27 @@ fn low_mach_equivalence_vortex_street() {
     let density = 1.0f32;
     let nu = 0.001f32;
 
-    let mut incomp = pollster::block_on(GpuSolver::new(&mesh, None, None));
+    let mut incomp = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        incompressible_momentum_model(),
+        SolverConfig {
+            advection_scheme: Scheme::QUICK,
+            time_scheme: TimeScheme::Euler,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     incomp.set_dt(dt as f32);
     incomp.set_viscosity(nu);
     incomp.set_density(density);
-    incomp.set_scheme(2);
+    incomp.set_advection_scheme(Scheme::QUICK);
     incomp.set_inlet_velocity(u_in);
     incomp.set_ramp_time(0.1);
-    incomp.n_outer_correctors = incomp_iters as u32;
+    incomp
+        .set_incompressible_outer_correctors(incomp_iters as u32)
+        .expect("set outer correctors");
     let mut u_seed = vec![(0.0f64, 0.0f64); mesh.num_cells()];
     let length = 3.0;
     for i in 0..mesh.num_cells() {
@@ -379,17 +400,28 @@ fn low_mach_equivalence_vortex_street() {
         return;
     }
 
-    let mut comp = pollster::block_on(GpuCompressibleSolver::new(&mesh, None, None));
+    let mut comp = pollster::block_on(GpuUnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        SolverConfig {
+            advection_scheme: Scheme::QUICK,
+            time_scheme: TimeScheme::BDF2,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32);
-    comp.set_time_scheme(1);
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
-    comp.set_scheme(2);
     comp.set_alpha_u(alpha_u as f32);
-    comp.set_precond_model(precond_model);
-    comp.set_precond_theta_floor(precond_theta_floor as f32);
-    comp.set_nonconverged_relax(nonconv_relax as f32);
+    comp.set_precond_model(precond_model).expect("precond model");
+    comp.set_precond_theta_floor(precond_theta_floor as f32)
+        .expect("theta floor");
+    comp.set_nonconverged_relax(nonconv_relax as f32)
+        .expect("nonconverged relax");
     comp.set_outer_iters(comp_iters);
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure as f32; mesh.num_cells()];
@@ -539,7 +571,7 @@ fn low_mach_equivalence_vortex_street() {
             }
             let mach = speed / c;
             let mach2 = mach * mach;
-            let theta = if precond_model == 1 {
+            let theta = if matches!(precond_model, GpuLowMachPrecondModel::WeissSmith) {
                 mach2.max(precond_theta_floor).min(1.0)
             } else {
                 mach2

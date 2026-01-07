@@ -121,7 +121,7 @@ impl CompressibleProfile {
     }
 }
 
-pub struct GpuCompressibleSolver {
+pub(crate) struct GpuCompressibleSolver {
     pub context: GpuContext,
     pub num_cells: u32,
     pub num_faces: u32,

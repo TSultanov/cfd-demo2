@@ -1,5 +1,9 @@
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::gpu::structs::PreconditionerType;
+use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
 use nalgebra::{Point2, Vector2};
 
 fn build_mesh() -> Mesh {
@@ -17,14 +21,23 @@ fn build_mesh() -> Mesh {
 }
 
 fn run_solver(mesh: &Mesh, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
-    let mut solver = pollster::block_on(GpuSolver::new(mesh, None, None));
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        mesh,
+        incompressible_momentum_model(),
+        SolverConfig {
+            advection_scheme: Scheme::Upwind,
+            time_scheme: TimeScheme::Euler,
+            preconditioner: PreconditionerType::Jacobi,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init");
     solver.set_dt(0.01);
     solver.set_viscosity(0.01);
     solver.set_density(1.0);
-    solver.set_scheme(0);
     solver.set_inlet_velocity(1.0);
     solver.set_ramp_time(0.001);
-    solver.n_outer_correctors = 2;
 
     let u_init = vec![(0.0, 0.0); mesh.num_cells()];
     solver.set_u(&u_init);

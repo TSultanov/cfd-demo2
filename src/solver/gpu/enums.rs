@@ -22,3 +22,11 @@ pub enum GpuBcKind {
     /// Value represents `dphi/dn` (outward normal gradient).
     Neumann = 2,
 }
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GpuLowMachPrecondModel {
+    Legacy = 0,
+    WeissSmith = 1,
+    Off = 2,
+}

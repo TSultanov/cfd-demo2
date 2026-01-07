@@ -1,6 +1,6 @@
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
-use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
+use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::scheme::Scheme;
 use super::dsl as typed;
 use super::state_access::{state_scalar, state_vec2};
@@ -999,17 +999,16 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             ),
         ),
     ]);
+    let precond_model = typed::EnumExpr::<GpuLowMachPrecondModel>::from_expr(
+        Expr::ident("constants").field("precond_model"),
+    );
     let precond_else_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::ident("constants")
-            .field("precond_model")
-            .eq(1u32),
+        precond_model.eq(GpuLowMachPrecondModel::WeissSmith),
         precond_weiss_smith_block,
         None,
     )]);
     loop_body.push(dsl::if_block_expr(
-        Expr::ident("constants")
-            .field("precond_model")
-            .eq(0u32),
+        precond_model.eq(GpuLowMachPrecondModel::Legacy),
         precond_legacy_block,
         Some(precond_else_block),
     ));
@@ -1470,9 +1469,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
     loop_body.push(dsl::if_block_expr(
         (!Expr::ident("is_boundary"))
-            & Expr::ident("constants")
-                .field("precond_model")
-                .ne(2u32)
+            & precond_model.ne(GpuLowMachPrecondModel::Off)
             & Expr::ident("constants")
                 .field("pressure_coupling_alpha")
                 .gt(0.0),

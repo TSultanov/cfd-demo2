@@ -3,7 +3,7 @@ use super::reconstruction::limited_linear_reconstruct_face;
 use super::dsl as typed;
 use crate::solver::model::CompressibleFields;
 use crate::solver::model::backend::StateLayout;
-use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use crate::solver::scheme::Scheme;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
@@ -748,17 +748,16 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             ),
         ),
     ]);
+    let precond_model = typed::EnumExpr::<GpuLowMachPrecondModel>::from_expr(
+        Expr::ident("constants").field("precond_model"),
+    );
     let precond_else_block = dsl::block(vec![dsl::if_block_expr(
-        Expr::ident("constants")
-            .field("precond_model")
-            .eq(1u32),
+        precond_model.eq(GpuLowMachPrecondModel::WeissSmith),
         precond_weiss_smith_block,
         None,
     )]);
     stmts.push(dsl::if_block_expr(
-        Expr::ident("constants")
-            .field("precond_model")
-            .eq(0u32),
+        precond_model.eq(GpuLowMachPrecondModel::Legacy),
         precond_legacy_block,
         Some(precond_else_block),
     ));
@@ -1213,9 +1212,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ]);
     stmts.push(dsl::if_block_expr(
         (!Expr::ident("is_boundary"))
-            & Expr::ident("constants")
-                .field("precond_model")
-                .ne(2u32)
+            & precond_model.ne(GpuLowMachPrecondModel::Off)
             & Expr::ident("constants")
                 .field("pressure_coupling_alpha")
                 .gt(0.0),

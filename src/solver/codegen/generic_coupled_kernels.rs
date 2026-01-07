@@ -8,6 +8,7 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::GpuBcKind;
+use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::model::backend::ast::{Coefficient, Discretization};
 use crate::solver::model::backend::StateLayout;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
@@ -418,7 +419,8 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
 
         let dt = Expr::ident("constants").field("dt");
         let dt_old = Expr::ident("constants").field("dt_old");
-        let time_scheme = Expr::ident("constants").field("time_scheme");
+        let time_scheme =
+            typed::EnumExpr::<TimeScheme>::from_expr(Expr::ident("constants").field("time_scheme"));
 
         for component in 0..equation.target.kind().component_count() as u32 {
             let u_idx = base_offset + component;
@@ -440,7 +442,7 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
 
             // Optional BDF2.
             stmts.push(dsl::if_block_expr(
-                time_scheme.eq(1u32), // TimeScheme::BDF2 == 1
+                time_scheme.eq(TimeScheme::BDF2),
                 dsl::block(vec![
                     dsl::let_expr("r", dt.clone() / dt_old.clone()),
                     dsl::let_expr(

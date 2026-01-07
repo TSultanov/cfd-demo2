@@ -73,3 +73,9 @@ impl WgslEnum for crate::solver::gpu::enums::GpuBcKind {
         self as u32
     }
 }
+
+impl WgslEnum for crate::solver::gpu::enums::GpuLowMachPrecondModel {
+    fn wgsl_id(self) -> u32 {
+        self as u32
+    }
+}

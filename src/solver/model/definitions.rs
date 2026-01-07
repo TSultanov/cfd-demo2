@@ -11,13 +11,33 @@ pub struct ModelSpec {
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub fields: ModelFields,
-    pub kernel_plan: KernelPlan,
 }
 
 #[derive(Debug, Clone)]
 pub enum ModelFields {
     Incompressible(IncompressibleMomentumFields),
     Compressible(CompressibleFields),
+}
+
+impl ModelSpec {
+    pub fn kernel_plan(&self) -> KernelPlan {
+        match self.fields {
+            ModelFields::Incompressible(_) => KernelPlan::new(vec![
+                KernelKind::PrepareCoupled,
+                KernelKind::CoupledAssembly,
+                KernelKind::PressureAssembly,
+                KernelKind::UpdateFieldsFromCoupled,
+                KernelKind::FluxRhieChow,
+            ]),
+            ModelFields::Compressible(_) => KernelPlan::new(vec![
+                KernelKind::CompressibleFluxKt,
+                KernelKind::CompressibleGradients,
+                KernelKind::CompressibleAssembly,
+                KernelKind::CompressibleApply,
+                KernelKind::CompressibleUpdate,
+            ]),
+        }
+    }
 }
 
 impl ModelFields {
@@ -160,18 +180,10 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_p,
         fields.grad_component,
     ]);
-    let kernel_plan = KernelPlan::new(vec![
-        KernelKind::PrepareCoupled,
-        KernelKind::CoupledAssembly,
-        KernelKind::PressureAssembly,
-        KernelKind::UpdateFieldsFromCoupled,
-        KernelKind::FluxRhieChow,
-    ]);
     ModelSpec {
         system,
         state_layout: layout,
         fields: ModelFields::Incompressible(fields),
-        kernel_plan,
     }
 }
 
@@ -179,18 +191,10 @@ pub fn compressible_model() -> ModelSpec {
     let fields = CompressibleFields::new();
     let system = build_compressible_system(&fields);
     let layout = StateLayout::new(vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.u]);
-    let kernel_plan = KernelPlan::new(vec![
-        KernelKind::CompressibleFluxKt,
-        KernelKind::CompressibleGradients,
-        KernelKind::CompressibleAssembly,
-        KernelKind::CompressibleApply,
-        KernelKind::CompressibleUpdate,
-    ]);
     ModelSpec {
         system,
         state_layout: layout,
         fields: ModelFields::Compressible(fields),
-        kernel_plan,
     }
 }
 
@@ -235,7 +239,7 @@ mod tests {
         assert_eq!(model.state_layout.offset_for("p"), Some(2));
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
-        assert!(model.kernel_plan.contains(KernelKind::CoupledAssembly));
+        assert!(model.kernel_plan().contains(KernelKind::CoupledAssembly));
         assert!(matches!(model.fields, ModelFields::Incompressible(_)));
     }
 
@@ -245,7 +249,7 @@ mod tests {
         assert_eq!(model.system.equations().len(), 3);
         assert_eq!(model.system.equations()[1].terms().len(), 2);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
-        assert!(model.kernel_plan.contains(KernelKind::CompressibleFluxKt));
+        assert!(model.kernel_plan().contains(KernelKind::CompressibleFluxKt));
         assert!(matches!(model.fields, ModelFields::Compressible(_)));
     }
 }

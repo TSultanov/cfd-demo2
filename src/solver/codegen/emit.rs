@@ -196,7 +196,8 @@ pub fn emit_model_kernels_wgsl(
     schemes: &SchemeRegistry,
 ) -> std::io::Result<Vec<PathBuf>> {
     let mut outputs = Vec::new();
-    for kind in model.kernel_plan.kernels() {
+    let plan = model.kernel_plan();
+    for kind in plan.kernels() {
         outputs.push(emit_model_kernel_wgsl_with_schemes(
             &base_dir, model, schemes, *kind,
         )?);
@@ -299,8 +300,9 @@ mod tests {
         let schemes = SchemeRegistry::new(Scheme::Upwind);
         let outputs = emit_model_kernels_wgsl(&base_dir, &model, &schemes).unwrap();
 
-        assert_eq!(outputs.len(), model.kernel_plan.kernels().len());
-        for kind in model.kernel_plan.kernels() {
+        let plan = model.kernel_plan();
+        assert_eq!(outputs.len(), plan.kernels().len());
+        for kind in plan.kernels() {
             let expected = generated_dir_for(&base_dir).join(kernel_output_name(*kind));
             assert!(expected.exists());
             assert!(outputs.contains(&expected));
@@ -314,8 +316,9 @@ mod tests {
         let schemes = SchemeRegistry::new(Scheme::Upwind);
         let outputs = emit_model_kernels_wgsl(&base_dir, &model, &schemes).unwrap();
 
-        assert_eq!(outputs.len(), model.kernel_plan.kernels().len());
-        for kind in model.kernel_plan.kernels() {
+        let plan = model.kernel_plan();
+        assert_eq!(outputs.len(), plan.kernels().len());
+        for kind in plan.kernels() {
             let expected = generated_dir_for(&base_dir).join(kernel_output_name(*kind));
             assert!(expected.exists());
             assert!(outputs.contains(&expected));

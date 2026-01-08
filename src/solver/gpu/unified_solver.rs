@@ -5,7 +5,7 @@ use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::mesh::Mesh;
-use crate::solver::model::{ModelFields, ModelSpec};
+use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
@@ -35,6 +35,13 @@ pub struct GpuUnifiedSolver {
 }
 
 impl GpuUnifiedSolver {
+    fn offset_for_any(&self, fields: &[&str]) -> Option<usize> {
+        fields
+            .iter()
+            .find_map(|name| self.model.state_layout.offset_for(name))
+            .map(|v| v as usize)
+    }
+
     pub async fn new(
         mesh: &Mesh,
         model: ModelSpec,
@@ -182,7 +189,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {
-        let _ = self.set_field_vec2("U", u);
+        let _ = self.set_field_vec2_any(&["U", "u"], u);
     }
 
     pub fn set_p(&mut self, p: &[f64]) {
@@ -190,16 +197,22 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        if !matches!(self.model.fields, ModelFields::Compressible(_)) {
-            return;
-        }
-
         let stride = self.model.state_layout.stride() as usize;
-        let offset_rho = self.model.state_layout.offset_for("rho").unwrap_or(0) as usize;
-        let offset_rho_u = self.model.state_layout.offset_for("rho_u").unwrap_or(0) as usize;
-        let offset_rho_e = self.model.state_layout.offset_for("rho_e").unwrap_or(0) as usize;
-        let offset_p = self.model.state_layout.offset_for("p").unwrap_or(0) as usize;
-        let offset_u = self.model.state_layout.offset_for("u").unwrap_or(0) as usize;
+        let Some(offset_rho) = self.offset_for_any(&["rho"]) else {
+            return;
+        };
+        let Some(offset_rho_u) = self.offset_for_any(&["rho_u"]) else {
+            return;
+        };
+        let Some(offset_rho_e) = self.offset_for_any(&["rho_e"]) else {
+            return;
+        };
+        let Some(offset_p) = self.offset_for_any(&["p"]) else {
+            return;
+        };
+        let Some(offset_u) = self.offset_for_any(&["u", "U"]) else {
+            return;
+        };
 
         let gamma = 1.4f32;
         let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
@@ -220,19 +233,26 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]) {
-        if !matches!(self.model.fields, ModelFields::Compressible(_)) {
-            return;
-        }
         if rho.len() != self.num_cells() as usize || u.len() != self.num_cells() as usize || p.len() != self.num_cells() as usize {
             return;
         }
 
         let stride = self.model.state_layout.stride() as usize;
-        let offset_rho = self.model.state_layout.offset_for("rho").unwrap_or(0) as usize;
-        let offset_rho_u = self.model.state_layout.offset_for("rho_u").unwrap_or(0) as usize;
-        let offset_rho_e = self.model.state_layout.offset_for("rho_e").unwrap_or(0) as usize;
-        let offset_p = self.model.state_layout.offset_for("p").unwrap_or(0) as usize;
-        let offset_u = self.model.state_layout.offset_for("u").unwrap_or(0) as usize;
+        let Some(offset_rho) = self.offset_for_any(&["rho"]) else {
+            return;
+        };
+        let Some(offset_rho_u) = self.offset_for_any(&["rho_u"]) else {
+            return;
+        };
+        let Some(offset_rho_e) = self.offset_for_any(&["rho_e"]) else {
+            return;
+        };
+        let Some(offset_p) = self.offset_for_any(&["p"]) else {
+            return;
+        };
+        let Some(offset_u) = self.offset_for_any(&["u", "U"]) else {
+            return;
+        };
 
         let gamma = 1.4f32;
         let mut state = vec![0.0f32; self.num_cells() as usize * stride];
@@ -418,13 +438,11 @@ impl GpuUnifiedSolver {
         self.plan.fgmres_sizing(max_restart)
     }
 
-    fn set_field_vec2(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
+    fn set_field_vec2_any(&mut self, fields: &[&str], values: &[(f64, f64)]) -> Result<(), String> {
         let stride = self.model.state_layout.stride() as usize;
         let offset = self
-            .model
-            .state_layout
-            .offset_for(field)
-            .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
+            .offset_for_any(fields)
+            .ok_or_else(|| format!("field '{}' not found in layout", fields.join("'/'")))?;
         if values.len() != self.num_cells() as usize {
             return Err(format!(
                 "value length {} does not match num_cells {}",

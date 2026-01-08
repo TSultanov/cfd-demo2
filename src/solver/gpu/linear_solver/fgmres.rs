@@ -1035,6 +1035,56 @@ impl FgmresWorkspace {
         );
     }
 
+    pub fn compute_residual_norm_into<'a>(
+        &'a self,
+        core: &FgmresCore<'a>,
+        system: LinearSystemView<'a>,
+        target: wgpu::BindingResource<'a>,
+        label_prefix: &str,
+    ) -> f32 {
+        debug_assert_eq!(core.n, self.n, "FGMRES residual expects n == self.n");
+
+        let workgroups = workgroups_for_size(self.n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+
+        // w = A * x
+        let spmv_bg = self.create_vector_bind_group(
+            core.device,
+            system.x().as_entire_binding(),
+            self.w_buffer().as_entire_binding(),
+            self.temp_buffer().as_entire_binding(),
+            &format!("{label_prefix} residual spmv BG"),
+        );
+        dispatch_vector_pipeline(
+            core,
+            self.pipeline_spmv(),
+            &spmv_bg,
+            dispatch_x,
+            dispatch_y,
+            &format!("{label_prefix} residual spmv"),
+        );
+
+        // target = rhs - w
+        write_scalars(core, &[1.0, -1.0]);
+        let residual_bg = self.create_vector_bind_group(
+            core.device,
+            system.rhs().as_entire_binding(),
+            self.w_buffer().as_entire_binding(),
+            target.clone(),
+            &format!("{label_prefix} residual axpby BG"),
+        );
+        dispatch_vector_pipeline(
+            core,
+            self.pipeline_axpby(),
+            &residual_bg,
+            dispatch_x,
+            dispatch_y,
+            &format!("{label_prefix} residual axpby"),
+        );
+
+        self.gpu_norm(core.device, core.queue, target, self.n)
+    }
+
     pub fn max_restart(&self) -> usize {
         self.max_restart
     }

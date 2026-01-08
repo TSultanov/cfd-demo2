@@ -28,7 +28,7 @@ use crate::solver::gpu::linear_solver::fgmres::{
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{
-    CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
+    GpuSolver, LinearSolverStats, PreconditionerParams,
 };
 use std::time::Instant;
 
@@ -175,77 +175,6 @@ impl GpuSolver {
         );
     }
 
-    /// Compute norm of a vector using GPU reduction and async read
-    ///
-    /// This uses a batched approach: all GPU work (partial reduction, final reduction,
-    /// and buffer copy) is submitted in a single command buffer, then we do an async
-    /// map and wait. This avoids multiple sync points.
-    fn gpu_norm<'a>(
-        &self,
-        fgmres: &'a FgmresResources,
-        x: wgpu::BindingResource<'a>,
-        n: u32,
-    ) -> f32 {
-        let start = Instant::now();
-        let norm = fgmres
-            .fgmres
-            .gpu_norm(&self.common.context.device, &self.common.context.queue, x, n);
-        self.common.profiling_stats.record_location(
-            "gpu_norm",
-            ProfileCategory::GpuDispatch,
-            start.elapsed(),
-            0,
-        );
-        norm
-    }
-
-    fn compute_residual_into<'a>(
-        &self,
-        fgmres: &'a FgmresResources,
-        res: &'a CoupledSolverResources,
-        target: wgpu::BindingResource<'a>,
-        dispatch: (u32, u32),
-        n: u32,
-    ) -> f32 {
-        let system = LinearSystemView {
-            ports: res.linear_ports,
-            space: &res.linear_port_space,
-        };
-
-        let spmv_bg = self.create_vector_bind_group(
-            fgmres,
-            system.x().as_entire_binding(),
-            fgmres.fgmres.w_buffer().as_entire_binding(),
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            "FGMRES Residual SpMV BG",
-        );
-        self.dispatch_vector_pipeline_profiled(
-            fgmres.fgmres.pipeline_spmv(),
-            fgmres,
-            &spmv_bg,
-            dispatch,
-            "FGMRES Residual SpMV",
-        );
-
-        self.write_scalars(fgmres, &[1.0, -1.0]);
-        let residual_bg = self.create_vector_bind_group(
-            fgmres,
-            system.rhs().as_entire_binding(),
-            fgmres.fgmres.w_buffer().as_entire_binding(),
-            target.clone(),
-            "FGMRES Residual Axpby BG",
-        );
-        self.dispatch_vector_pipeline_profiled(
-            fgmres.fgmres.pipeline_axpby(),
-            fgmres,
-            &residual_bg,
-            dispatch,
-            "FGMRES Residual Axpby",
-        );
-
-        self.gpu_norm(fgmres, target, n)
-    }
-
     fn scale_vector_in_place<'a>(
         &self,
         fgmres: &'a FgmresResources,
@@ -326,10 +255,6 @@ impl GpuSolver {
                     .ensure_amg_resources(&self.common.context.device, matrix);
             }
 
-            let core = fgmres
-                .fgmres
-                .core(&self.common.context.device, &self.common.context.queue);
-
             let KrylovDispatch {
                 grids,
                 dofs_dispatch_x_threads,
@@ -344,7 +269,12 @@ impl GpuSolver {
             _pad2: 0,
         };
         let init_write_start = Instant::now();
-        write_iter_params(&core, &iter_params);
+        {
+            let core = fgmres
+                .fgmres
+                .core(&self.common.context.device, &self.common.context.queue);
+            write_iter_params(&core, &iter_params);
+        }
         self.common.profiling_stats.record_location(
             "fgmres:write_iter_params_init",
             ProfileCategory::GpuWrite,
@@ -389,13 +319,29 @@ impl GpuSolver {
         }
 
         // Initial residual r = b - A x stored in V_0
-        let mut residual_norm = self.compute_residual_into(
-            &fgmres,
-            res,
-            self.basis_binding(&fgmres, 0),
-            grids.dofs,
-            n,
-        );
+        let mut residual_norm = {
+            let start = Instant::now();
+            let core = fgmres
+                .fgmres
+                .core(&self.common.context.device, &self.common.context.queue);
+            let system = LinearSystemView {
+                ports: res.linear_ports,
+                space: &res.linear_port_space,
+            };
+            let norm = fgmres.fgmres.compute_residual_norm_into(
+                &core,
+                system,
+                self.basis_binding(&fgmres, 0),
+                "FGMRES Residual",
+            );
+            self.common.profiling_stats.record_location(
+                "fgmres:residual_norm_into",
+                ProfileCategory::GpuDispatch,
+                start.elapsed(),
+                0,
+            );
+            norm
+        };
 
         let target_resid = (tol * rhs_norm).max(abstol);
 
@@ -496,13 +442,29 @@ impl GpuSolver {
             }
 
             // Compute true residual (only when not already converged)
-            residual_norm = self.compute_residual_into(
-                &fgmres,
-                res,
-                self.basis_binding(&fgmres, 0),
-                grids.dofs,
-                n,
-            );
+            residual_norm = {
+                let start = Instant::now();
+                let core = fgmres
+                    .fgmres
+                    .core(&self.common.context.device, &self.common.context.queue);
+                let system = LinearSystemView {
+                    ports: res.linear_ports,
+                    space: &res.linear_port_space,
+                };
+                let norm = fgmres.fgmres.compute_residual_norm_into(
+                    &core,
+                    system,
+                    self.basis_binding(&fgmres, 0),
+                    "FGMRES Residual",
+                );
+                self.common.profiling_stats.record_location(
+                    "fgmres:residual_norm_into",
+                    ProfileCategory::GpuDispatch,
+                    start.elapsed(),
+                    0,
+                );
+                norm
+            };
             final_resid = residual_norm;
 
             if residual_norm < tol * rhs_norm {

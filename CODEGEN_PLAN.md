@@ -22,6 +22,7 @@ One **model-driven** GPU solver pipeline with:
 - Krylov/FGMRES dispatch grid sizing is centralized (`DispatchGrids::for_sizes`), reducing per-plan workgroup math.
 - `GpuPlanInstance` is universal and configured via typed `PlanParam`/`PlanParamValue` and queried via `PlanCapability` (no downcasts).
 - Linear debug path is supported across current plans (`set_linear_system`, `solve_linear_system_with_size`, `get_linear_solution`) with plan-appropriate Krylov under the hood (CG for scalar systems, FGMRES for compressible coupled).
+- `step_with_stats` now returns meaningful per-step linear solve stats for all plans (default uses `PlanStepStats.linear_stats`; generic-coupled returns its CG stats).
 
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.

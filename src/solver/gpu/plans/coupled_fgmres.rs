@@ -92,13 +92,16 @@ impl GpuSolver {
             },
             "Coupled",
         );
+        let scalar_row_offsets = self.linear_port_space.buffer(self.linear_ports.row_offsets);
+        let scalar_col_indices = self.linear_port_space.buffer(self.linear_ports.col_indices);
+        let scalar_matrix_values = self.linear_port_space.buffer(self.linear_ports.values);
         let schur = CoupledSchurModule::new(
             device,
             &fgmres,
             self.num_cells,
-            &self.b_row_offsets,
-            &self.b_col_indices,
-            &self.b_matrix_values,
+            scalar_row_offsets,
+            scalar_col_indices,
+            scalar_matrix_values,
             CoupledPressureSolveKind::Chebyshev,
         );
 

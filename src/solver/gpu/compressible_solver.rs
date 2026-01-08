@@ -850,113 +850,11 @@ impl GpuCompressibleSolver {
     }
 
     pub fn step(&mut self) {
-        let _ = self.step_with_stats();
+        plan::step(self);
     }
 
     pub fn step_with_stats(&mut self) -> Vec<LinearSolverStats> {
-        let step_start = std::time::Instant::now();
-
-        self.state_step_index = (self.state_step_index + 1) % 3;
-        self.bg_fields = self.bg_fields_ping_pong[self.state_step_index].clone();
-        self.bg_apply_fields = self.bg_apply_fields_ping_pong[self.state_step_index].clone();
-
-        let (idx_state, idx_old, idx_old_old) = ping_pong_indices(self.state_step_index);
-        self.b_state = self.state_buffers[idx_state].clone();
-        self.b_state_old = self.state_buffers[idx_old].clone();
-        self.b_state_old_old = self.state_buffers[idx_old_old].clone();
-
-        self.constants.time += self.constants.dt;
-        self.update_constants();
-
-        // Explicit KT update (rhoCentralFoam-like) for transient Euler timestepping.
-        // The implicit FGMRES path is retained for BDF2/pseudo-time (dtau) workflows.
-        let use_explicit = self.constants.time_scheme == 0 && self.constants.dtau <= 0.0;
-        if use_explicit {
-            let total_secs = step_start.elapsed().as_secs_f64();
-            let plan_timings = GpuCompressibleSolver::explicit_plan().execute(self);
-            let detail = plan_timings
-                .graph_detail("compressible:explicit_graph")
-                .expect("explicit_graph timings missing");
-            let grad_secs = detail.seconds_for("compressible:gradients");
-            let flux_secs = detail.seconds_for("compressible:flux_kt");
-            let explicit_update_secs = detail.seconds_for("compressible:explicit_update");
-            let primitive_update_secs = detail.seconds_for("compressible:primitive_update");
-            self.profile.record(
-                total_secs,
-                grad_secs,
-                flux_secs,
-                0.0,
-                0.0,
-                explicit_update_secs + primitive_update_secs,
-                0,
-            );
-            self.constants.dt_old = self.constants.dt;
-            self.update_constants();
-            return Vec::new();
-        }
-
-        self.pre_step_graph.execute(&self.context, &*self);
-
-        let base_alpha_u = self.constants.alpha_u;
-        let mut stats = Vec::with_capacity(self.outer_iters);
-        let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
-        let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
-        let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
-        let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5).clamp(0.0, 1.0);
-        let max_restart = env_usize("CFD2_COMP_FGMRES_MAX_RESTART", 80).max(1);
-        let retry_restart = env_usize("CFD2_COMP_FGMRES_RETRY_RESTART", 160).max(1);
-        let mut grad_secs = 0.0f64;
-        let mut assembly_secs = 0.0f64;
-        let mut fgmres_secs = 0.0f64;
-        let mut apply_secs = 0.0f64;
-        let mut update_secs = 0.0f64;
-        let mut fgmres_iters = 0u64;
-        self.implicit_base_alpha_u = base_alpha_u;
-        for outer_idx in 0..self.outer_iters {
-            let tol = if outer_idx < warm_iters {
-                tol_base * warm_scale
-            } else {
-                tol_base
-            };
-            let retry_tol = (tol * retry_scale).min(tol_base);
-            self.implicit_tol = tol;
-            self.implicit_retry_tol = retry_tol;
-            self.implicit_max_restart = max_restart;
-            self.implicit_retry_restart = retry_restart;
-
-            let iter_timings = GpuCompressibleSolver::implicit_iter_plan().execute(self);
-            let detail = iter_timings
-                .graph_detail("compressible:implicit_grad_assembly")
-                .expect("implicit_grad_assembly timings missing");
-            grad_secs += detail.seconds_for("compressible:gradients");
-            assembly_secs += detail.seconds_for("compressible:assembly");
-
-            fgmres_secs += self.implicit_last_stats.time.as_secs_f64();
-            fgmres_iters += self.implicit_last_stats.iterations as u64;
-            stats.push(self.implicit_last_stats);
-
-            apply_secs += iter_timings.seconds_for("compressible:implicit_snapshot")
-                + iter_timings.seconds_for("compressible:implicit_set_alpha")
-                + iter_timings.seconds_for("compressible:implicit_apply")
-                + iter_timings.seconds_for("compressible:implicit_restore_alpha");
-        }
-
-        let stage_start = std::time::Instant::now();
-        self.primitive_update_graph.execute(&self.context, &*self);
-        update_secs += stage_start.elapsed().as_secs_f64();
-        let total_secs = step_start.elapsed().as_secs_f64();
-        self.profile.record(
-            total_secs,
-            grad_secs,
-            assembly_secs,
-            fgmres_secs,
-            apply_secs,
-            update_secs,
-            fgmres_iters,
-        );
-        self.constants.dt_old = self.constants.dt;
-        self.update_constants();
-        stats
+        plan::step_with_stats(self)
     }
 
     pub async fn get_rho(&self) -> Vec<f64> {
@@ -1051,6 +949,122 @@ impl GpuCompressibleSolver {
         for buffer in &self.state_buffers {
             self.context.queue.write_buffer(buffer, 0, bytes);
         }
+    }
+}
+
+pub(crate) mod plan {
+    use super::*;
+
+    pub(crate) fn step(solver: &mut GpuCompressibleSolver) {
+        let _ = step_with_stats(solver);
+    }
+
+    pub(crate) fn step_with_stats(solver: &mut GpuCompressibleSolver) -> Vec<LinearSolverStats> {
+        let step_start = std::time::Instant::now();
+
+        solver.state_step_index = (solver.state_step_index + 1) % 3;
+        solver.bg_fields = solver.bg_fields_ping_pong[solver.state_step_index].clone();
+        solver.bg_apply_fields = solver.bg_apply_fields_ping_pong[solver.state_step_index].clone();
+
+        let (idx_state, idx_old, idx_old_old) = ping_pong_indices(solver.state_step_index);
+        solver.b_state = solver.state_buffers[idx_state].clone();
+        solver.b_state_old = solver.state_buffers[idx_old].clone();
+        solver.b_state_old_old = solver.state_buffers[idx_old_old].clone();
+
+        solver.constants.time += solver.constants.dt;
+        solver.update_constants();
+
+        // Explicit KT update (rhoCentralFoam-like) for transient Euler timestepping.
+        // The implicit FGMRES path is retained for BDF2/pseudo-time (dtau) workflows.
+        let use_explicit = solver.constants.time_scheme == 0 && solver.constants.dtau <= 0.0;
+        if use_explicit {
+            let total_secs = step_start.elapsed().as_secs_f64();
+            let plan_timings = GpuCompressibleSolver::explicit_plan().execute(solver);
+            let detail = plan_timings
+                .graph_detail("compressible:explicit_graph")
+                .expect("explicit_graph timings missing");
+            let grad_secs = detail.seconds_for("compressible:gradients");
+            let flux_secs = detail.seconds_for("compressible:flux_kt");
+            let explicit_update_secs = detail.seconds_for("compressible:explicit_update");
+            let primitive_update_secs = detail.seconds_for("compressible:primitive_update");
+            solver.profile.record(
+                total_secs,
+                grad_secs,
+                flux_secs,
+                0.0,
+                0.0,
+                explicit_update_secs + primitive_update_secs,
+                0,
+            );
+            solver.constants.dt_old = solver.constants.dt;
+            solver.update_constants();
+            return Vec::new();
+        }
+
+        solver.pre_step_graph.execute(&solver.context, &*solver);
+
+        let base_alpha_u = solver.constants.alpha_u;
+        let mut stats = Vec::with_capacity(solver.outer_iters);
+        let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
+        let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
+        let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
+        let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5).clamp(0.0, 1.0);
+        let max_restart = env_usize("CFD2_COMP_FGMRES_MAX_RESTART", 80).max(1);
+        let retry_restart = env_usize("CFD2_COMP_FGMRES_RETRY_RESTART", 160).max(1);
+        let mut grad_secs = 0.0f64;
+        let mut assembly_secs = 0.0f64;
+        let mut fgmres_secs = 0.0f64;
+        let mut apply_secs = 0.0f64;
+        let mut update_secs = 0.0f64;
+        let mut fgmres_iters = 0u64;
+        solver.implicit_base_alpha_u = base_alpha_u;
+        for outer_idx in 0..solver.outer_iters {
+            let tol = if outer_idx < warm_iters {
+                tol_base * warm_scale
+            } else {
+                tol_base
+            };
+            let retry_tol = (tol * retry_scale).min(tol_base);
+            solver.implicit_tol = tol;
+            solver.implicit_retry_tol = retry_tol;
+            solver.implicit_max_restart = max_restart;
+            solver.implicit_retry_restart = retry_restart;
+
+            let iter_timings = GpuCompressibleSolver::implicit_iter_plan().execute(solver);
+            let detail = iter_timings
+                .graph_detail("compressible:implicit_grad_assembly")
+                .expect("implicit_grad_assembly timings missing");
+            grad_secs += detail.seconds_for("compressible:gradients");
+            assembly_secs += detail.seconds_for("compressible:assembly");
+
+            fgmres_secs += solver.implicit_last_stats.time.as_secs_f64();
+            fgmres_iters += solver.implicit_last_stats.iterations as u64;
+            stats.push(solver.implicit_last_stats);
+
+            apply_secs += iter_timings.seconds_for("compressible:implicit_snapshot")
+                + iter_timings.seconds_for("compressible:implicit_set_alpha")
+                + iter_timings.seconds_for("compressible:implicit_apply")
+                + iter_timings.seconds_for("compressible:implicit_restore_alpha");
+        }
+
+        let stage_start = std::time::Instant::now();
+        solver
+            .primitive_update_graph
+            .execute(&solver.context, &*solver);
+        update_secs += stage_start.elapsed().as_secs_f64();
+        let total_secs = step_start.elapsed().as_secs_f64();
+        solver.profile.record(
+            total_secs,
+            grad_secs,
+            assembly_secs,
+            fgmres_secs,
+            apply_secs,
+            update_secs,
+            fgmres_iters,
+        );
+        solver.constants.dt_old = solver.constants.dt;
+        solver.update_constants();
+        stats
     }
 }
 

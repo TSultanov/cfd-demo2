@@ -321,8 +321,8 @@ impl GpuUnifiedSolver {
 
     pub fn step(&mut self) {
         match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.step(),
-            UnifiedSolverBackend::Compressible(solver) => solver.step(),
+            UnifiedSolverBackend::Incompressible(solver) => super::coupled_solver::plan::step_coupled(solver),
+            UnifiedSolverBackend::Compressible(solver) => super::compressible_solver::plan::step(solver),
             UnifiedSolverBackend::GenericCoupled(solver) => {
                 let _ = solver.step();
             }
@@ -331,7 +331,7 @@ impl GpuUnifiedSolver {
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
         match &mut self.backend {
-            UnifiedSolverBackend::Compressible(solver) => Ok(solver.step_with_stats()),
+            UnifiedSolverBackend::Compressible(solver) => Ok(super::compressible_solver::plan::step_with_stats(solver)),
             _ => Err("step_with_stats is supported for Compressible models only".to_string()),
         }
     }

@@ -233,6 +233,10 @@ impl GpuSolver {
     /// the coupled solver assembles and solves the full block system in one go,
     /// with outer iterations for non-linearity.
     pub fn step_coupled(&mut self) {
+        plan::step_coupled(self);
+    }
+
+    pub(crate) fn step_coupled_impl(&mut self) {
         let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
 
         // We need to access coupled resources. If not available, return.
@@ -756,5 +760,13 @@ impl GpuSolver {
         // Use the FGMRES-based coupled solver implementation from
         // `coupled_solver_fgmres.rs` to solve the coupled block system.
         self.solve_coupled_fgmres()
+    }
+}
+
+pub(crate) mod plan {
+    use super::*;
+
+    pub(crate) fn step_coupled(solver: &mut GpuSolver) {
+        solver.step_coupled_impl();
     }
 }

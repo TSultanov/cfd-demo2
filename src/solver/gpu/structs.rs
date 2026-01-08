@@ -180,15 +180,9 @@ pub(crate) struct GpuSolver {
 
     pub b_fluxes: wgpu::Buffer, // Face-based mass fluxes (per face)
 
-    // Matrix Structure (CSR)
-    pub b_row_offsets: wgpu::Buffer,
-    pub b_col_indices: wgpu::Buffer,
     pub num_nonzeros: u32,
 
     // Linear Solver Buffers
-    pub b_matrix_values: wgpu::Buffer,
-    pub b_rhs: wgpu::Buffer,
-    pub b_x: wgpu::Buffer,
     pub b_r: wgpu::Buffer,
     pub b_r0: wgpu::Buffer,
     pub b_p_solver: wgpu::Buffer,

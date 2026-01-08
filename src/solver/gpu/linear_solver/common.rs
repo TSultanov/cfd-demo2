@@ -12,17 +12,20 @@ impl GpuSolver {
             self.num_cells as usize,
             "rhs length mismatch"
         );
+        let values = self.linear_port_space.buffer(self.linear_ports.values);
+        let b_rhs = self.linear_port_space.buffer(self.linear_ports.rhs);
         self.context
             .queue
-            .write_buffer(&self.b_matrix_values, 0, bytemuck::cast_slice(matrix_values));
+            .write_buffer(values, 0, bytemuck::cast_slice(matrix_values));
         self.context
             .queue
-            .write_buffer(&self.b_rhs, 0, bytemuck::cast_slice(rhs));
+            .write_buffer(b_rhs, 0, bytemuck::cast_slice(rhs));
     }
 
     pub async fn get_linear_solution(&self) -> Vec<f32> {
+        let b_x = self.linear_port_space.buffer(self.linear_ports.x);
         let data = self
-            .read_buffer(&self.b_x, (self.num_cells as u64) * 4)
+            .read_buffer(b_x, (self.num_cells as u64) * 4)
             .await;
         bytemuck::cast_slice(&data).to_vec()
     }

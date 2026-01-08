@@ -127,12 +127,7 @@ impl GpuSolver {
             incompressible_kernels,
 
             // Linear Solver
-            b_row_offsets: linear_res.b_row_offsets,
-            b_col_indices: linear_res.b_col_indices,
             num_nonzeros: linear_res.num_nonzeros,
-            b_matrix_values: linear_res.b_matrix_values,
-            b_rhs: linear_res.b_rhs,
-            b_x: linear_res.b_x,
             b_r: linear_res.b_r,
             b_r0: linear_res.b_r0,
             b_p_solver: linear_res.b_p_solver,

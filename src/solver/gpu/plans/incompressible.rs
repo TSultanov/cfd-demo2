@@ -339,11 +339,31 @@ impl GpuSolver {
         record(self, "fields:constants", &self.b_constants);
 
         // Matrix / linear solver
-        record(self, "linear:row_offsets", &self.b_row_offsets);
-        record(self, "linear:col_indices", &self.b_col_indices);
-        record(self, "linear:matrix_values", &self.b_matrix_values);
-        record(self, "linear:rhs", &self.b_rhs);
-        record(self, "linear:x", &self.b_x);
+        record(
+            self,
+            "linear:row_offsets",
+            self.linear_port_space.buffer(self.linear_ports.row_offsets),
+        );
+        record(
+            self,
+            "linear:col_indices",
+            self.linear_port_space.buffer(self.linear_ports.col_indices),
+        );
+        record(
+            self,
+            "linear:matrix_values",
+            self.linear_port_space.buffer(self.linear_ports.values),
+        );
+        record(
+            self,
+            "linear:rhs",
+            self.linear_port_space.buffer(self.linear_ports.rhs),
+        );
+        record(
+            self,
+            "linear:x",
+            self.linear_port_space.buffer(self.linear_ports.x),
+        );
         record(self, "linear:r", &self.b_r);
         record(self, "linear:r0", &self.b_r0);
         record(self, "linear:p_solver", &self.b_p_solver);

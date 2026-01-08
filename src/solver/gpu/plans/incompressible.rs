@@ -409,8 +409,8 @@ impl GpuSolver {
         record(self, "fgmres:temp", fgmres.fgmres.temp_buffer());
         record(self, "fgmres:dot_partial", fgmres.fgmres.dot_partial_buffer());
         record(self, "fgmres:scalars", fgmres.fgmres.scalars_buffer());
-        record(self, "fgmres:temp_p", fgmres.schur.b_temp_p());
-        record(self, "fgmres:p_sol", fgmres.schur.b_p_sol());
+        record(self, "fgmres:temp_p", fgmres.precond.b_temp_p());
+        record(self, "fgmres:p_sol", fgmres.precond.b_p_sol());
         record(self, "fgmres:params", fgmres.fgmres.params_buffer());
         record(self, "fgmres:hessenberg", fgmres.fgmres.hessenberg_buffer());
         record(self, "fgmres:givens", fgmres.fgmres.givens_buffer());

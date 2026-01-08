@@ -1,21 +1,19 @@
 use super::compressible::CompressiblePlanResources;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{
-    dispatch_2d, dispatch_vector_pipeline, dispatch_x_threads, fgmres_solve_once_with_preconditioner,
+    dispatch_2d, dispatch_vector_pipeline, dispatch_x_threads,
     workgroups_for_size, write_params, write_scalars, write_zeros, FgmresPrecondBindings,
     FgmresSolveOnceConfig, FgmresWorkspace, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::modules::compressible_krylov::{
     CompressibleKrylovModule, CompressibleKrylovPreconditionerKind,
 };
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
+use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::collections::HashMap;
 
-pub struct CompressibleFgmresResources {
-    pub fgmres: FgmresWorkspace,
-    pub precond: CompressibleKrylovModule,
-}
+pub type CompressibleFgmresResources = KrylovSolveModule<CompressibleKrylovModule>;
 
 impl CompressiblePlanResources {
     pub(crate) fn ensure_fgmres_resources(&mut self, max_restart: usize) {
@@ -126,10 +124,7 @@ impl CompressiblePlanResources {
             b_diag_p,
         );
 
-        CompressibleFgmresResources {
-            fgmres,
-            precond,
-        }
+        KrylovSolveModule::new(fgmres, precond)
     }
 
     pub(crate) fn solve_compressible_fgmres(
@@ -265,8 +260,8 @@ impl CompressiblePlanResources {
             );
 
             // Solve (single restart) using the shared GPU FGMRES core.
-            let solve = fgmres_solve_once_with_preconditioner(
-                &core,
+            let solve = fgmres.solve_once(
+                &self.context,
                 b_x,
                 rhs_norm,
                 params,
@@ -276,23 +271,8 @@ impl CompressiblePlanResources {
                     tol_abs,
                     reset_x_before_update: true,
                 },
-                |_j, vj, z_buf| {
-                    let mut encoder =
-                        self.context
-                            .device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("Compressible FGMRES Preconditioner"),
-                            });
-                    fgmres.precond.encode_apply(
-                        &self.context.device,
-                        &mut encoder,
-                        &fgmres.fgmres,
-                        vj,
-                        z_buf,
-                        dispatch,
-                    );
-                    self.context.queue.submit(Some(encoder.finish()));
-                },
+                dispatch,
+                "Compressible FGMRES Preconditioner",
             );
             let basis_size = solve.basis_size;
             let final_residual = solve.residual_est;

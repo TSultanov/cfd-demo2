@@ -18,10 +18,11 @@
 // - Preconditioner sweep
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
+use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::linear_solver::fgmres::{
-    fgmres_solve_once_with_preconditioner, write_iter_params, FgmresSolveOnceConfig,
-    FgmresPrecondBindings, FgmresWorkspace, IterParams, RawFgmresParams,
+    write_iter_params, FgmresSolveOnceConfig, FgmresPrecondBindings, FgmresWorkspace, IterParams,
+    RawFgmresParams,
 };
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::profiling::ProfileCategory;
@@ -32,10 +33,7 @@ use bytemuck::cast_slice;
 use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
-pub struct FgmresResources {
-    pub fgmres: FgmresWorkspace,
-    pub schur: CoupledSchurModule,
-}
+pub type FgmresResources = KrylovSolveModule<CoupledSchurModule>;
 
 impl GpuSolver {
     pub fn coupled_unknowns(&self) -> u32 {
@@ -95,7 +93,7 @@ impl GpuSolver {
         let scalar_row_offsets = self.linear_port_space.buffer(self.linear_ports.row_offsets);
         let scalar_col_indices = self.linear_port_space.buffer(self.linear_ports.col_indices);
         let scalar_matrix_values = self.linear_port_space.buffer(self.linear_ports.values);
-        let schur = CoupledSchurModule::new(
+        let precond = CoupledSchurModule::new(
             device,
             &fgmres,
             self.num_cells,
@@ -105,10 +103,7 @@ impl GpuSolver {
             CoupledPressureSolveKind::Chebyshev,
         );
 
-        let resources = FgmresResources {
-            fgmres,
-            schur,
-        };
+        let resources = KrylovSolveModule::new(fgmres, precond);
 
         self.record_fgmres_allocations(&resources);
 
@@ -363,7 +358,7 @@ impl GpuSolver {
 
         let stats = 'stats: {
             let pressure_kind = CoupledPressureSolveKind::from_config(self.preconditioner);
-            fgmres.schur.set_pressure_kind(pressure_kind);
+            fgmres.precond.set_pressure_kind(pressure_kind);
             if pressure_kind == CoupledPressureSolveKind::Amg {
                 let row_offsets =
                     pollster::block_on(self.read_buffer_u32(&self.b_row_offsets, self.num_cells + 1));
@@ -378,7 +373,7 @@ impl GpuSolver {
                     num_rows: self.num_cells as usize,
                     num_cols: self.num_cells as usize,
                 };
-                fgmres.schur.ensure_amg_resources(&self.context.device, matrix);
+                fgmres.precond.ensure_amg_resources(&self.context.device, matrix);
             }
 
             let core = fgmres
@@ -519,8 +514,8 @@ impl GpuSolver {
 
             // Shared GPU FGMRES core (inner loop + triangular solve + solution update).
             let b_x = res.linear_port_space.buffer(res.linear_ports.x);
-            let solve = fgmres_solve_once_with_preconditioner(
-                &core,
+            let solve = fgmres.solve_once(
+                &self.context,
                 b_x,
                 rhs_norm,
                 params,
@@ -530,32 +525,11 @@ impl GpuSolver {
                     tol_abs: abstol,
                     reset_x_before_update: false,
                 },
-                |_, vj, z_buf| {
-                    let dispatch_start = Instant::now();
-                    let mut encoder = self.context.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("FGMRES Preconditioner Step"),
-                        },
-                    );
-                    fgmres.schur.encode_apply(
-                        &self.context.device,
-                        &mut encoder,
-                        &fgmres.fgmres,
-                        vj,
-                        z_buf,
-                        DispatchGrids {
-                            dofs: (dofs_dispatch_x, dofs_dispatch_y),
-                            cells: (dispatch_x, dispatch_y),
-                        },
-                    );
-                    self.context.queue.submit(Some(encoder.finish()));
-                    self.profiling_stats.record_location(
-                        "FGMRES Preconditioner Step",
-                        ProfileCategory::GpuDispatch,
-                        dispatch_start.elapsed(),
-                        0,
-                    );
+                DispatchGrids {
+                    dofs: (dofs_dispatch_x, dofs_dispatch_y),
+                    cells: (dispatch_x, dispatch_y),
                 },
+                "FGMRES Preconditioner Step",
             );
 
             total_iters += solve.basis_size as u32;

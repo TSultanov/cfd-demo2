@@ -97,7 +97,8 @@ pub(crate) trait GpuPlanInstance: Any + Send {
     }
 
     fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        Err("step_with_stats is not supported by this plan".into())
+        self.step();
+        Ok(Vec::new())
     }
 
     fn set_linear_system(&self, _matrix_values: &[f32], _rhs: &[f32]) -> Result<(), String> {
@@ -105,7 +106,7 @@ pub(crate) trait GpuPlanInstance: Any + Send {
     }
 
     fn solve_linear_system_cg_with_size(
-        &self,
+        &mut self,
         _n: u32,
         _max_iters: u32,
         _tol: f32,
@@ -264,7 +265,7 @@ impl GpuPlanInstance for GpuSolver {
     }
 
     fn solve_linear_system_cg_with_size(
-        &self,
+        &mut self,
         n: u32,
         max_iters: u32,
         tol: f32,
@@ -389,6 +390,77 @@ impl GpuPlanInstance for CompressiblePlanResources {
         Ok(self.step_with_stats())
     }
 
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        if matrix_values.len() != self.block_col_indices.len() {
+            return Err(format!(
+                "matrix_values length {} does not match num_nonzeros {}",
+                matrix_values.len(),
+                self.block_col_indices.len()
+            ));
+        }
+        if rhs.len() != self.num_unknowns as usize {
+            return Err(format!(
+                "rhs length {} does not match num_unknowns {}",
+                rhs.len(),
+                self.num_unknowns
+            ));
+        }
+        self.context.queue.write_buffer(
+            self.port_space.buffer(self.system_ports.values),
+            0,
+            bytemuck::cast_slice(matrix_values),
+        );
+        self.context.queue.write_buffer(
+            self.port_space.buffer(self.system_ports.rhs),
+            0,
+            bytemuck::cast_slice(rhs),
+        );
+        Ok(())
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        if n != self.num_unknowns {
+            return Err(format!(
+                "requested solve size {} does not match num_unknowns {}",
+                n, self.num_unknowns
+            ));
+        }
+        // Compressible uses FGMRES for coupled systems; keep the unified-plan API surface
+        // but use the plan-appropriate Krylov solve under the hood.
+        let max_restart = max_iters.min(64) as usize;
+        let stats = self.solve_compressible_fgmres(max_restart, tol);
+        Ok(stats)
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move {
+            let raw = self
+                .read_buffer(
+                    self.port_space.buffer(self.system_ports.x),
+                    (self.num_unknowns as u64) * 4,
+                )
+                .await;
+            Ok(bytemuck::cast_slice(&raw).to_vec())
+        })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(self.num_unknowns)
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        let n = self.num_unknowns;
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: (n + 63) / 64,
+        })
+    }
+
     fn step(&mut self) {
         crate::solver::gpu::plans::compressible::plan::step(self);
     }
@@ -460,6 +532,43 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
 
     fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
         Box::pin(async move { self.runtime.read_buffer(self.state_buffer(), bytes).await })
+    }
+
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        self.runtime.set_linear_system(matrix_values, rhs)
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        if n != self.runtime.num_cells {
+            return Err(format!(
+                "requested solve size {} does not match num_cells {}",
+                n, self.runtime.num_cells
+            ));
+        }
+        Ok(self
+            .runtime
+            .solve_linear_system_cg_with_size(n, max_iters, tol))
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move { self.runtime.get_linear_solution(self.runtime.num_cells).await })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(self.runtime.num_cells)
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        let n = self.runtime.num_cells;
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: (n + 63) / 64,
+        })
     }
 }
 

@@ -101,7 +101,7 @@ fn diag_indices(row_offsets: &[u32], col_indices: &[u32]) -> Vec<usize> {
     diag
 }
 
-fn solve_identity_system(solver: &UnifiedSolver, mesh: &Mesh) {
+fn solve_identity_system(solver: &mut UnifiedSolver, mesh: &Mesh) {
     let (row_offsets, col_indices) = build_csr(mesh);
     let diag = diag_indices(&row_offsets, &col_indices);
     let mut matrix = vec![0.0_f32; col_indices.len()];
@@ -160,7 +160,7 @@ fn gpu_solvers_scale_with_mesh_size() {
             None,
         ))
         .expect("solver init");
-        solve_identity_system(&solver, &mesh);
+        solve_identity_system(&mut solver, &mesh);
         assert_fgmres_sizing(&mut solver);
     }
 }

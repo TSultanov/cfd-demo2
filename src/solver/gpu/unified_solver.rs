@@ -418,7 +418,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn solve_linear_system_cg_with_size(
-        &self,
+        &mut self,
         n: u32,
         max_iters: u32,
         tol: f32,

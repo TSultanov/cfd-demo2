@@ -11,6 +11,7 @@ pub(crate) struct GpuScalarRuntime {
     pub mesh: mesh_init::MeshResources,
     pub num_cells: u32,
     pub num_faces: u32,
+    pub num_nonzeros: u32,
 
     pub b_constants: wgpu::Buffer,
     pub constants: GpuConstants,
@@ -91,6 +92,7 @@ impl GpuScalarRuntime {
             mesh: mesh_res,
             num_cells,
             num_faces,
+            num_nonzeros: linear_res.num_nonzeros,
             b_constants,
             constants,
             b_row_offsets: linear_res.b_row_offsets,
@@ -136,6 +138,43 @@ impl GpuScalarRuntime {
 
     pub fn solve_linear_system_cg(&self, max_iters: u32, tol: f32) -> LinearSolverStats {
         self.solve_linear_system_cg_with_size(self.num_cells, max_iters, tol)
+    }
+
+    pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        if matrix_values.len() != self.num_nonzeros as usize {
+            return Err(format!(
+                "matrix_values length {} does not match num_nonzeros {}",
+                matrix_values.len(),
+                self.num_nonzeros
+            ));
+        }
+        if rhs.len() != self.num_cells as usize {
+            return Err(format!(
+                "rhs length {} does not match num_cells {}",
+                rhs.len(),
+                self.num_cells
+            ));
+        }
+        self.context.queue.write_buffer(
+            self.scalar_cg.matrix_values(),
+            0,
+            bytemuck::cast_slice(matrix_values),
+        );
+        self.context
+            .queue
+            .write_buffer(self.scalar_cg.rhs(), 0, bytemuck::cast_slice(rhs));
+        Ok(())
+    }
+
+    pub async fn get_linear_solution(&self, n: u32) -> Result<Vec<f32>, String> {
+        if n != self.num_cells {
+            return Err(format!(
+                "requested solution size {} does not match num_cells {}",
+                n, self.num_cells
+            ));
+        }
+        let raw = self.read_buffer(self.scalar_cg.x(), (n as u64) * 4).await;
+        Ok(bytemuck::cast_slice(&raw).to_vec())
     }
 
     pub async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
@@ -186,4 +225,3 @@ fn default_constants() -> GpuConstants {
         ramp_time: 0.1,
     }
 }
-

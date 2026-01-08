@@ -260,7 +260,7 @@ fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
     };
-    let solver = pollster::block_on(UnifiedSolver::new(
+    let mut solver = pollster::block_on(UnifiedSolver::new(
         mesh,
         incompressible_momentum_model(),
         config,

@@ -2,8 +2,8 @@ use super::async_buffer::AsyncScalarReader;
 use super::context::GpuContext;
 use super::modules::incompressible_kernels::IncompressibleKernelsModule;
 use super::plans::coupled_fgmres::FgmresResources;
-use super::kernel_graph::KernelGraph;
 use super::profiling::ProfilingStats;
+use super::modules::graph::ModuleGraph;
 use bytemuck::{Pod, Zeroable};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -271,11 +271,11 @@ pub(crate) struct GpuSolver {
     // Cache of persistent staging buffers for GPU->CPU reads, keyed by exact size in bytes
     pub staging_buffers: Mutex<HashMap<u64, wgpu::Buffer>>,
 
-    // Prebuilt compute graphs for coupled solver dispatch.
-    pub coupled_init_prepare_graph: KernelGraph<GpuSolver>,
-    pub coupled_prepare_assembly_graph: KernelGraph<GpuSolver>,
-    pub coupled_assembly_graph: KernelGraph<GpuSolver>,
-    pub coupled_update_graph: KernelGraph<GpuSolver>,
+    // Prebuilt compute graphs for coupled solver dispatch (module-based).
+    pub coupled_init_prepare_graph: ModuleGraph<IncompressibleKernelsModule>,
+    pub coupled_prepare_assembly_graph: ModuleGraph<IncompressibleKernelsModule>,
+    pub coupled_assembly_graph: ModuleGraph<IncompressibleKernelsModule>,
+    pub coupled_update_graph: ModuleGraph<IncompressibleKernelsModule>,
 
     pub linear_ports: crate::solver::gpu::modules::linear_system::LinearSystemPorts,
     pub linear_port_space: crate::solver::gpu::modules::ports::PortSpace,

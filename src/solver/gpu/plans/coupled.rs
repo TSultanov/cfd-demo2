@@ -16,10 +16,9 @@
 // - b_u is the momentum source term
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
-use crate::solver::gpu::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
+use crate::solver::gpu::execution_plan::{ExecutionPlan, HostNode, PlanNode};
 use crate::solver::gpu::model_defaults::default_incompressible_model;
-use crate::solver::gpu::modules::graph::GpuComputeModule;
+use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::incompressible_kernels::{IncompressibleBindGroups, IncompressiblePipeline};
 use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
@@ -30,86 +29,104 @@ use std::time::Instant;
 /// WARNING: This adds significant GPU-CPU synchronization overhead (~65ms per step).
 const DEBUG_READS_ENABLED: bool = false;
 
-fn coupled_workgroups_cells(solver: &GpuSolver) -> (u32, u32, u32) {
-    let workgroup_size = 64;
-    (solver.num_cells.div_ceil(workgroup_size), 1, 1)
-}
-
-fn coupled_bind_mesh_fields_solver(solver: &GpuSolver, cpass: &mut wgpu::ComputePass) {
-    solver
-        .incompressible_kernels
-        .bind(IncompressibleBindGroups::MeshFieldsSolver, cpass);
-}
-
-fn coupled_bind_fields_coupled_solution(solver: &GpuSolver, cpass: &mut wgpu::ComputePass) {
-    solver
-        .incompressible_kernels
-        .bind(IncompressibleBindGroups::UpdateFieldsSolution, cpass);
-}
-
 fn coupled_context(solver: &GpuSolver) -> &GpuContext {
     &solver.context
 }
 
-fn coupled_graph_init_prepare(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+fn coupled_graph_init_prepare(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule> {
     &solver.coupled_init_prepare_graph
 }
 
-fn coupled_graph_prepare_assembly(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+fn coupled_graph_prepare_assembly(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule> {
     &solver.coupled_prepare_assembly_graph
 }
 
-fn coupled_graph_assembly(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+fn coupled_graph_assembly(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule> {
     &solver.coupled_assembly_graph
 }
 
-fn coupled_graph_update(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
+fn coupled_graph_update(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule> {
     &solver.coupled_update_graph
 }
 
 impl GpuSolver {
-    pub(crate) fn build_coupled_init_prepare_graph() -> KernelGraph<GpuSolver> {
-        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+    pub(crate) fn build_coupled_init_prepare_graph(
+    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
+    {
+        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:init_prepare",
-            pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::PrepareCoupled),
-            bind_groups: coupled_bind_mesh_fields_solver,
-            workgroups: coupled_workgroups_cells,
+            pipeline: IncompressiblePipeline::PrepareCoupled,
+            bind: IncompressibleBindGroups::MeshFieldsSolver,
+            dispatch: DispatchKind::Cells,
         })])
     }
 
-    pub(crate) fn build_coupled_prepare_assembly_graph() -> KernelGraph<GpuSolver> {
-        KernelGraph::new(vec![
-            KernelNode::Compute(ComputeNode {
+    pub(crate) fn build_coupled_prepare_assembly_graph(
+    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
+    {
+        ModuleGraph::new(vec![
+            ModuleNode::Compute(ComputeSpec {
                 label: "coupled:prepare",
-                pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::PrepareCoupled),
-                bind_groups: coupled_bind_mesh_fields_solver,
-                workgroups: coupled_workgroups_cells,
+                pipeline: IncompressiblePipeline::PrepareCoupled,
+                bind: IncompressibleBindGroups::MeshFieldsSolver,
+                dispatch: DispatchKind::Cells,
             }),
-            KernelNode::Compute(ComputeNode {
+            ModuleNode::Compute(ComputeSpec {
                 label: "coupled:assembly_merged",
-                pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::CoupledAssemblyMerged),
-                bind_groups: coupled_bind_mesh_fields_solver,
-                workgroups: coupled_workgroups_cells,
+                pipeline: IncompressiblePipeline::CoupledAssemblyMerged,
+                bind: IncompressibleBindGroups::MeshFieldsSolver,
+                dispatch: DispatchKind::Cells,
             }),
         ])
     }
 
-    pub(crate) fn build_coupled_assembly_graph() -> KernelGraph<GpuSolver> {
-        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+    pub(crate) fn build_coupled_assembly_graph(
+    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
+    {
+        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:assembly_merged",
-            pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::CoupledAssemblyMerged),
-            bind_groups: coupled_bind_mesh_fields_solver,
-            workgroups: coupled_workgroups_cells,
+            pipeline: IncompressiblePipeline::CoupledAssemblyMerged,
+            bind: IncompressibleBindGroups::MeshFieldsSolver,
+            dispatch: DispatchKind::Cells,
         })])
     }
 
-    pub(crate) fn build_coupled_update_graph() -> KernelGraph<GpuSolver> {
-        KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
+    pub(crate) fn build_coupled_update_graph(
+    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
+    {
+        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:update_fields_max_diff",
-            pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::UpdateFieldsFromCoupled),
-            bind_groups: coupled_bind_fields_coupled_solution,
-            workgroups: coupled_workgroups_cells,
+            pipeline: IncompressiblePipeline::UpdateFieldsFromCoupled,
+            bind: IncompressibleBindGroups::UpdateFieldsSolution,
+            dispatch: DispatchKind::Cells,
         })])
+    }
+
+    fn coupled_runtime(&self) -> RuntimeDims {
+        RuntimeDims {
+            num_cells: self.num_cells,
+            num_faces: self.num_faces,
+        }
+    }
+
+    fn coupled_host_exec_init_prepare_graph(solver: &mut GpuSolver) {
+        let runtime = solver.coupled_runtime();
+        coupled_graph_init_prepare(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
+    }
+
+    fn coupled_host_exec_prepare_assembly_graph(solver: &mut GpuSolver) {
+        let runtime = solver.coupled_runtime();
+        coupled_graph_prepare_assembly(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
+    }
+
+    fn coupled_host_exec_assembly_graph(solver: &mut GpuSolver) {
+        let runtime = solver.coupled_runtime();
+        coupled_graph_assembly(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
+    }
+
+    fn coupled_host_exec_update_graph(solver: &mut GpuSolver) {
+        let runtime = solver.coupled_runtime();
+        coupled_graph_update(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
     }
 
     fn coupled_host_solve(solver: &mut GpuSolver) {
@@ -138,10 +155,9 @@ impl GpuSolver {
         ExecutionPlan::new(
             coupled_context,
             vec![
-                PlanNode::Graph(GraphNode {
-                    label: "coupled:gradient_assembly_merged",
-                    graph: coupled_graph_prepare_assembly,
-                    mode: GraphExecMode::SingleSubmit,
+                PlanNode::Host(HostNode {
+                    label: "coupled:prepare_assembly_merged",
+                    run: GpuSolver::coupled_host_exec_prepare_assembly_graph,
                 }),
                 PlanNode::Host(HostNode {
                     label: "coupled:solve_coupled_system",
@@ -159,10 +175,9 @@ impl GpuSolver {
                     label: "coupled:set_component_0",
                     run: GpuSolver::coupled_host_set_component_0,
                 }),
-                PlanNode::Graph(GraphNode {
+                PlanNode::Host(HostNode {
                     label: "coupled:init_prepare",
-                    graph: coupled_graph_init_prepare,
-                    mode: GraphExecMode::SingleSubmit,
+                    run: GpuSolver::coupled_host_exec_init_prepare_graph,
                 }),
             ],
         )
@@ -172,10 +187,9 @@ impl GpuSolver {
         ExecutionPlan::new(
             coupled_context,
             vec![
-                PlanNode::Graph(GraphNode {
-                    label: "coupled:gradient_assembly_merged",
-                    graph: coupled_graph_assembly,
-                    mode: GraphExecMode::SingleSubmit,
+                PlanNode::Host(HostNode {
+                    label: "coupled:assembly_merged",
+                    run: GpuSolver::coupled_host_exec_assembly_graph,
                 }),
                 PlanNode::Host(HostNode {
                     label: "coupled:solve_coupled_system",
@@ -193,10 +207,9 @@ impl GpuSolver {
                     label: "coupled:clear_max_diff",
                     run: GpuSolver::coupled_host_clear_max_diff,
                 }),
-                PlanNode::Graph(GraphNode {
+                PlanNode::Host(HostNode {
                     label: "coupled:update_fields_max_diff",
-                    graph: coupled_graph_update,
-                    mode: GraphExecMode::SingleSubmit,
+                    run: GpuSolver::coupled_host_exec_update_graph,
                 }),
             ],
         )

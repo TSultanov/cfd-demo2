@@ -100,14 +100,24 @@ impl CompressiblePlanResources {
 
         let (b_diag_u, b_diag_v, b_diag_p) = CompressibleKrylovModule::create_diag_buffers(device, n);
 
+        let matrix = LinearSystemView {
+            ports: LinearSystemPorts {
+                row_offsets: self.matrix_ports.row_offsets,
+                col_indices: self.matrix_ports.col_indices,
+                values: self.matrix_ports.values,
+                rhs: self.linear_ports.rhs,
+                x: self.linear_ports.x,
+            },
+            space: &self.port_space,
+        };
         let fgmres = FgmresWorkspace::new(
             device,
             n,
             num_cells,
             max_restart,
-            self.port_space.buffer(self.matrix_ports.row_offsets),
-            self.port_space.buffer(self.matrix_ports.col_indices),
-            self.port_space.buffer(self.matrix_ports.values),
+            matrix.row_offsets(),
+            matrix.col_indices(),
+            matrix.values(),
             FgmresPrecondBindings::Diag {
                 diag_u: &b_diag_u,
                 diag_v: &b_diag_v,
@@ -162,8 +172,6 @@ impl CompressiblePlanResources {
                 cells: (block_dispatch_x, block_dispatch_y),
             };
 
-            let b_x = self.port_space.buffer(self.linear_ports.x);
-            let b_rhs = self.port_space.buffer(self.linear_ports.rhs);
             let system = LinearSystemView {
                 ports: LinearSystemPorts {
                     row_offsets: self.matrix_ports.row_offsets,
@@ -174,15 +182,10 @@ impl CompressiblePlanResources {
                 },
                 space: &self.port_space,
             };
-            self.zero_buffer(b_x, n);
+            self.zero_buffer(system.x(), n);
 
             let tol_abs = 1e-6f32;
-            let rhs_norm = fgmres.fgmres.gpu_norm(
-                &self.context.device,
-                &self.context.queue,
-                b_rhs.as_entire_binding(),
-                n,
-            );
+            let rhs_norm = fgmres.rhs_norm(&self.context, system, n);
             if rhs_norm <= tol_abs {
                 let stats = LinearSolverStats {
                     iterations: 0,
@@ -216,7 +219,7 @@ impl CompressiblePlanResources {
                 &self.context.device,
                 &self.context.queue,
                 &fgmres.fgmres,
-                b_rhs.as_entire_binding(),
+                system.rhs().as_entire_binding(),
                 dispatch.cells,
             );
 
@@ -239,7 +242,7 @@ impl CompressiblePlanResources {
             let basis0 = fgmres.fgmres.basis_binding(0);
             let copy_bg = fgmres.fgmres.create_vector_bind_group(
                 &self.context.device,
-                b_rhs.as_entire_binding(),
+                system.rhs().as_entire_binding(),
                 basis0,
                 fgmres.fgmres.temp_buffer().as_entire_binding(),
                 "Compressible FGMRES copy BG",

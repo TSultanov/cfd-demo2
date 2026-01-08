@@ -65,24 +65,19 @@ impl GpuSolver {
             .as_ref()
             .expect("Coupled resources must be initialized before FGMRES");
         let n = coupled.num_unknowns;
-        let b_row_offsets = coupled
-            .linear_port_space
-            .buffer(coupled.linear_ports.row_offsets);
-        let b_col_indices = coupled
-            .linear_port_space
-            .buffer(coupled.linear_ports.col_indices);
-        let b_matrix_values = coupled
-            .linear_port_space
-            .buffer(coupled.linear_ports.values);
+        let block_system = LinearSystemView {
+            ports: coupled.linear_ports,
+            space: &coupled.linear_port_space,
+        };
 
         let fgmres = FgmresWorkspace::new(
             device,
             n,
             self.num_cells,
             max_restart,
-            b_row_offsets,
-            b_col_indices,
-            b_matrix_values,
+            block_system.row_offsets(),
+            block_system.col_indices(),
+            block_system.values(),
             FgmresPrecondBindings::DiagWithParams {
                 diag_u: &coupled.b_diag_u,
                 diag_v: &coupled.b_diag_v,
@@ -423,8 +418,11 @@ impl GpuSolver {
 
         // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
 
-        let b_rhs = res.linear_port_space.buffer(res.linear_ports.rhs);
-        let rhs_norm = self.gpu_norm(&fgmres, b_rhs.as_entire_binding(), n);
+        let system = LinearSystemView {
+            ports: res.linear_ports,
+            space: &res.linear_port_space,
+        };
+        let rhs_norm = fgmres.rhs_norm(&self.context, system, n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
             break 'stats LinearSolverStats {
                 iterations: 0,
@@ -513,13 +511,9 @@ impl GpuSolver {
                 _pad3: 0,
             };
 
-            // Shared GPU FGMRES core (inner loop + triangular solve + solution update).
             let solve = fgmres.solve_once(
                 &self.context,
-                LinearSystemView {
-                    ports: res.linear_ports,
-                    space: &res.linear_port_space,
-                },
+                system,
                 rhs_norm,
                 params,
                 iter_params,

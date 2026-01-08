@@ -15,6 +15,20 @@ impl<P> KrylovSolveModule<P> {
     pub fn new(fgmres: FgmresWorkspace, precond: P) -> Self {
         Self { fgmres, precond }
     }
+
+    pub fn rhs_norm(
+        &self,
+        context: &GpuContext,
+        system: LinearSystemView<'_>,
+        n: u32,
+    ) -> f32 {
+        self.fgmres.gpu_norm(
+            &context.device,
+            &context.queue,
+            system.rhs().as_entire_binding(),
+            n,
+        )
+    }
 }
 
 impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {

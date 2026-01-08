@@ -94,6 +94,35 @@ pub(crate) trait GpuPlanInstance: Any + Send {
         None
     }
 
+    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        Err("step_with_stats is not supported by this plan".into())
+    }
+
+    fn set_linear_system(&self, _matrix_values: &[f32], _rhs: &[f32]) -> Result<(), String> {
+        Err("set_linear_system is not supported by this plan".into())
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &self,
+        _n: u32,
+        _max_iters: u32,
+        _tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        Err("solve_linear_system_cg_with_size is not supported by this plan".into())
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async { Err("get_linear_solution is not supported by this plan".into()) })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Err("coupled_unknowns is not supported by this plan".into())
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        Err("fgmres_sizing is not supported by this plan".into())
+    }
+
     fn step(&mut self);
 
     fn initialize_history(&self);
@@ -225,6 +254,36 @@ impl GpuPlanInstance for GpuSolver {
         Some(self.get_profiling_stats())
     }
 
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        GpuSolver::set_linear_system(self, matrix_values, rhs);
+        Ok(())
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        Ok(GpuSolver::solve_linear_system_cg_with_size(self, n, max_iters, tol))
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move { Ok(GpuSolver::get_linear_solution(self).await) })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(GpuSolver::coupled_unknowns(self))
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        let n = GpuSolver::coupled_unknowns(self);
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: crate::solver::gpu::linear_solver::fgmres::workgroups_for_size(n),
+        })
+    }
+
     fn step(&mut self) {
         crate::solver::gpu::plans::coupled::plan::step_coupled(self);
     }
@@ -318,8 +377,12 @@ impl GpuPlanInstance for CompressiblePlanResources {
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        self.context.queue.write_buffer(&self.b_state, 0, bytes);
+        CompressiblePlanResources::write_state_bytes(self, bytes);
         Ok(())
+    }
+
+    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        Ok(self.step_with_stats())
     }
 
     fn step(&mut self) {

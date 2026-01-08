@@ -773,6 +773,12 @@ impl CompressiblePlanResources {
             self.context.queue.write_buffer(buffer, 0, bytes);
         }
     }
+
+    pub(crate) fn write_state_bytes(&self, bytes: &[u8]) {
+        for buffer in &self.state_buffers {
+            self.context.queue.write_buffer(buffer, 0, bytes);
+        }
+    }
 }
 
 pub(crate) mod plan {

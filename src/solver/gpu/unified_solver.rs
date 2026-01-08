@@ -1,8 +1,9 @@
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
-use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanAction, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::{
+    GpuPlanInstance, PlanAction, PlanParam, PlanParamValue,
+};
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
-use crate::solver::gpu::linear_solver::fgmres::workgroups_for_size;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::mesh::Mesh;
@@ -36,14 +37,6 @@ pub struct GpuUnifiedSolver {
 }
 
 impl GpuUnifiedSolver {
-    fn plan_ref<T: 'static>(&self) -> Option<&T> {
-        self.plan.as_any().downcast_ref::<T>()
-    }
-
-    fn plan_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.plan.as_any_mut().downcast_mut::<T>()
-    }
-
     pub async fn new(
         mesh: &Mesh,
         model: ModelSpec,
@@ -202,27 +195,77 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            plan.set_u(u);
-        }
+        let _ = self.set_field_vec2("U", u);
     }
 
     pub fn set_p(&mut self, p: &[f64]) {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            plan.set_p(p);
-        }
+        let _ = self.set_field_scalar("p", p);
     }
 
     pub fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        if let Some(plan) = self.plan_ref::<CompressiblePlanResources>() {
-            plan.set_uniform_state(rho, u, p);
+        if !matches!(self.model.fields, ModelFields::Compressible(_)) {
+            return;
         }
+
+        let stride = self.model.state_layout.stride() as usize;
+        let offset_rho = self.model.state_layout.offset_for("rho").unwrap_or(0) as usize;
+        let offset_rho_u = self.model.state_layout.offset_for("rho_u").unwrap_or(0) as usize;
+        let offset_rho_e = self.model.state_layout.offset_for("rho_e").unwrap_or(0) as usize;
+        let offset_p = self.model.state_layout.offset_for("p").unwrap_or(0) as usize;
+        let offset_u = self.model.state_layout.offset_for("u").unwrap_or(0) as usize;
+
+        let gamma = 1.4f32;
+        let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
+        let rho_e = p / (gamma - 1.0) + ke;
+
+        let mut state = vec![0.0f32; self.num_cells() as usize * stride];
+        for cell in 0..self.num_cells() as usize {
+            let base = cell * stride;
+            state[base + offset_rho] = rho;
+            state[base + offset_rho_u] = rho * u[0];
+            state[base + offset_rho_u + 1] = rho * u[1];
+            state[base + offset_rho_e] = rho_e;
+            state[base + offset_p] = p;
+            state[base + offset_u] = u[0];
+            state[base + offset_u + 1] = u[1];
+        }
+        let _ = self.plan.write_state_bytes(bytemuck::cast_slice(&state));
     }
 
     pub fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]) {
-        if let Some(plan) = self.plan_ref::<CompressiblePlanResources>() {
-            plan.set_state_fields(rho, u, p);
+        if !matches!(self.model.fields, ModelFields::Compressible(_)) {
+            return;
         }
+        if rho.len() != self.num_cells() as usize || u.len() != self.num_cells() as usize || p.len() != self.num_cells() as usize {
+            return;
+        }
+
+        let stride = self.model.state_layout.stride() as usize;
+        let offset_rho = self.model.state_layout.offset_for("rho").unwrap_or(0) as usize;
+        let offset_rho_u = self.model.state_layout.offset_for("rho_u").unwrap_or(0) as usize;
+        let offset_rho_e = self.model.state_layout.offset_for("rho_e").unwrap_or(0) as usize;
+        let offset_p = self.model.state_layout.offset_for("p").unwrap_or(0) as usize;
+        let offset_u = self.model.state_layout.offset_for("u").unwrap_or(0) as usize;
+
+        let gamma = 1.4f32;
+        let mut state = vec![0.0f32; self.num_cells() as usize * stride];
+        for cell in 0..self.num_cells() as usize {
+            let base = cell * stride;
+            let rho_val = rho[cell];
+            let u_val = u[cell];
+            let p_val = p[cell];
+            let ke = 0.5 * rho_val * (u_val[0] * u_val[0] + u_val[1] * u_val[1]);
+            let rho_e = p_val / (gamma - 1.0) + ke;
+
+            state[base + offset_rho] = rho_val;
+            state[base + offset_rho_u] = rho_val * u_val[0];
+            state[base + offset_rho_u + 1] = rho_val * u_val[1];
+            state[base + offset_rho_e] = rho_e;
+            state[base + offset_p] = p_val;
+            state[base + offset_u] = u_val[0];
+            state[base + offset_u + 1] = u_val[1];
+        }
+        let _ = self.plan.write_state_bytes(bytemuck::cast_slice(&state));
     }
 
     pub fn step(&mut self) {
@@ -230,11 +273,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
-            Ok(plan.step_with_stats())
-        } else {
-            Err("step_with_stats is only supported for compressible plans".into())
-        }
+        self.plan.step_with_stats()
     }
 
     pub fn initialize_history(&self) {
@@ -316,8 +355,7 @@ impl GpuUnifiedSolver {
         for (i, &v) in values.iter().enumerate() {
             state[i * stride + offset] = v as f32;
         }
-        self.plan
-            .write_state_bytes(bytemuck::cast_slice(&state))
+        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
     }
 
     pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
@@ -369,12 +407,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            plan.set_linear_system(matrix_values, rhs);
-            Ok(())
-        } else {
-            Err("set_linear_system is only supported for incompressible plans".into())
-        }
+        self.plan.set_linear_system(matrix_values, rhs)
     }
 
     pub fn solve_linear_system_cg_with_size(
@@ -383,39 +416,41 @@ impl GpuUnifiedSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            Ok(plan.solve_linear_system_cg_with_size(n, max_iters, tol))
-        } else {
-            Err("CG solve is only supported for incompressible plans".into())
-        }
+        self.plan.solve_linear_system_cg_with_size(n, max_iters, tol)
     }
 
     pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            Ok(plan.get_linear_solution().await)
-        } else {
-            Err("get_linear_solution is only supported for incompressible plans".into())
-        }
+        self.plan.get_linear_solution().await
     }
 
     pub fn coupled_unknowns(&self) -> Result<u32, String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            Ok(plan.coupled_unknowns())
-        } else {
-            Err("coupled_unknowns is only supported for incompressible plans".into())
-        }
+        self.plan.coupled_unknowns()
     }
 
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
-        let _ = max_restart;
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            let n = plan.coupled_unknowns();
-            Ok(FgmresSizing {
-                num_unknowns: n,
-                num_dot_groups: workgroups_for_size(n),
-            })
-        } else {
-            Err("fgmres_sizing is only supported for incompressible plans".into())
+        self.plan.fgmres_sizing(max_restart)
+    }
+
+    fn set_field_vec2(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
+        let stride = self.model.state_layout.stride() as usize;
+        let offset = self
+            .model
+            .state_layout
+            .offset_for(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
+        if values.len() != self.num_cells() as usize {
+            return Err(format!(
+                "value length {} does not match num_cells {}",
+                values.len(),
+                self.num_cells()
+            ));
         }
+        let mut state = pollster::block_on(async { self.read_state_f32().await });
+        for (i, &(x, y)) in values.iter().enumerate() {
+            let base = i * stride + offset;
+            state[base] = x as f32;
+            state[base + 1] = y as f32;
+        }
+        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
     }
 }

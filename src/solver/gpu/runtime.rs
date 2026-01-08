@@ -1,4 +1,4 @@
-use crate::solver::gpu::init::{linear_solver, scalars};
+use crate::solver::gpu::init::linear_solver;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
@@ -24,53 +24,11 @@ impl GpuScalarRuntime {
     pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
         let common = GpuRuntimeCommon::new(mesh, device, queue).await;
 
-        let linear_res = linear_solver::init_scalar_linear_solver(
+        let cg = linear_solver::init_scalar_cg(
             &common.context.device,
             common.num_cells,
             &common.mesh.row_offsets,
             &common.mesh.col_indices,
-        );
-
-        let scalar_res = scalars::init_scalars(
-            &common.context.device,
-            &linear_res.b_scalars,
-            &linear_res.b_dot_result,
-            &linear_res.b_dot_result_2,
-            &linear_res.b_solver_params,
-        );
-
-        let scalar_cg = ScalarCgModule::new(
-            common.num_cells,
-            &linear_res.b_rhs,
-            &linear_res.b_x,
-            &linear_res.b_matrix_values,
-            &linear_res.b_r,
-            &linear_res.b_r0,
-            &linear_res.b_p_solver,
-            &linear_res.b_v,
-            &linear_res.b_s,
-            &linear_res.b_t,
-            &linear_res.b_dot_result,
-            &linear_res.b_dot_result_2,
-            &linear_res.b_scalars,
-            &linear_res.b_solver_params,
-            &linear_res.b_staging_scalar,
-            &linear_res.bg_linear_matrix,
-            &linear_res.bg_linear_state,
-            &linear_res.bg_dot_params,
-            &linear_res.bg_dot_p_v,
-            &linear_res.bg_dot_r_r,
-            &scalar_res.bg_scalars,
-            &linear_res.bgl_dot_pair_inputs,
-            &linear_res.pipeline_spmv_p_v,
-            &linear_res.pipeline_dot,
-            &linear_res.pipeline_dot_pair,
-            &linear_res.pipeline_cg_update_x_r,
-            &linear_res.pipeline_cg_update_p,
-            &scalar_res.pipeline_init_cg_scalars,
-            &scalar_res.pipeline_reduce_r0_v,
-            &scalar_res.pipeline_reduce_rho_new_r_r,
-            &common.context.device,
         );
 
         let constants = default_constants();
@@ -83,17 +41,14 @@ impl GpuScalarRuntime {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let linear_ports = linear_res.ports;
-        let linear_port_space = linear_res.port_space;
-
         Self {
             common,
-            num_nonzeros: linear_res.num_nonzeros,
+            num_nonzeros: cg.num_nonzeros,
             b_constants,
             constants,
-            linear_ports,
-            linear_port_space,
-            scalar_cg,
+            linear_ports: cg.ports,
+            linear_port_space: cg.port_space,
+            scalar_cg: cg.scalar_cg,
         }
     }
 

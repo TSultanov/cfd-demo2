@@ -6,58 +6,18 @@ use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::csr::build_block_csr;
+use crate::solver::gpu::init::scalars;
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
+use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use wgpu::util::DeviceExt;
 
 pub struct LinearSolverResources {
-    pub b_row_offsets: wgpu::Buffer,
-    pub b_col_indices: wgpu::Buffer,
     pub num_nonzeros: u32,
-    pub b_matrix_values: wgpu::Buffer,
-    pub b_rhs: wgpu::Buffer,
-    pub b_x: wgpu::Buffer,
-    pub b_r: wgpu::Buffer,
-    pub b_r0: wgpu::Buffer,
-    pub b_p_solver: wgpu::Buffer,
-    pub b_v: wgpu::Buffer,
-    pub b_s: wgpu::Buffer,
-    pub b_t: wgpu::Buffer,
-    pub b_dot_result: wgpu::Buffer,
-    pub b_dot_result_2: wgpu::Buffer,
-    pub b_scalars: wgpu::Buffer,
-    pub b_staging_scalar: wgpu::Buffer,
-    pub b_solver_params: wgpu::Buffer,
-    pub bg_solver: wgpu::BindGroup,
-    pub bg_linear_matrix: wgpu::BindGroup,
-    pub bg_linear_state: wgpu::BindGroup,
-    pub bg_linear_state_ro: wgpu::BindGroup,
-    pub bg_dot_params: wgpu::BindGroup,
-    pub bg_dot_r0_v: wgpu::BindGroup,
-    pub bg_dot_p_v: wgpu::BindGroup,
-    pub bg_dot_r_r: wgpu::BindGroup,
-    pub bg_dot_pair_r0r_rr: wgpu::BindGroup,
-    pub bg_dot_pair_tstt: wgpu::BindGroup,
-    pub bgl_solver: wgpu::BindGroupLayout,
-    pub bgl_linear_matrix: wgpu::BindGroupLayout,
-    pub bgl_linear_state: wgpu::BindGroupLayout,
-    pub bgl_linear_state_ro: wgpu::BindGroupLayout,
-    pub bgl_dot_inputs: wgpu::BindGroupLayout,
-    pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
-    pub pipeline_spmv_p_v: wgpu::ComputePipeline,
-    pub pipeline_spmv_s_t: wgpu::ComputePipeline,
-    pub pipeline_dot: wgpu::ComputePipeline,
-    pub pipeline_dot_pair: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_x_r: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_p: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_s: wgpu::ComputePipeline,
-    pub pipeline_cg_update_x_r: wgpu::ComputePipeline,
-    pub pipeline_cg_update_p: wgpu::ComputePipeline,
-    pub row_offsets: Vec<u32>,
-    pub col_indices: Vec<u32>,
-    pub num_groups: u32,
+
+    pub scalar_cg: ScalarCgModule,
     pub coupled_resources: CoupledSolverResources,
     pub ports: LinearSystemPorts,
     pub port_space: PortSpace,
@@ -96,6 +56,13 @@ pub struct ScalarLinearSolverResources {
     pub ports: LinearSystemPorts,
     pub port_space: PortSpace,
     pipeline_res: pipelines::PipelineResources,
+}
+
+pub struct ScalarCgInit {
+    pub num_nonzeros: u32,
+    pub ports: LinearSystemPorts,
+    pub port_space: PortSpace,
+    pub scalar_cg: ScalarCgModule,
 }
 
 pub fn init_scalar_linear_solver(
@@ -171,6 +138,71 @@ pub fn init_scalar_linear_solver(
     }
 }
 
+pub fn init_scalar_cg(
+    device: &wgpu::Device,
+    num_cells: u32,
+    scalar_row_offsets: &[u32],
+    scalar_col_indices: &[u32],
+) -> ScalarCgInit {
+    let linear_res = init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
+    let scalar_cg = build_scalar_cg(device, num_cells, &linear_res);
+
+    ScalarCgInit {
+        num_nonzeros: linear_res.num_nonzeros,
+        ports: linear_res.ports,
+        port_space: linear_res.port_space,
+        scalar_cg,
+    }
+}
+
+fn build_scalar_cg(
+    device: &wgpu::Device,
+    num_cells: u32,
+    linear_res: &ScalarLinearSolverResources,
+) -> ScalarCgModule {
+    let scalar_res = scalars::init_scalars(
+        device,
+        &linear_res.b_scalars,
+        &linear_res.b_dot_result,
+        &linear_res.b_dot_result_2,
+        &linear_res.b_solver_params,
+    );
+
+    ScalarCgModule::new(
+        num_cells,
+        &linear_res.b_rhs,
+        &linear_res.b_x,
+        &linear_res.b_matrix_values,
+        &linear_res.b_r,
+        &linear_res.b_r0,
+        &linear_res.b_p_solver,
+        &linear_res.b_v,
+        &linear_res.b_s,
+        &linear_res.b_t,
+        &linear_res.b_dot_result,
+        &linear_res.b_dot_result_2,
+        &linear_res.b_scalars,
+        &linear_res.b_solver_params,
+        &linear_res.b_staging_scalar,
+        &linear_res.bg_linear_matrix,
+        &linear_res.bg_linear_state,
+        &linear_res.bg_dot_params,
+        &linear_res.bg_dot_p_v,
+        &linear_res.bg_dot_r_r,
+        &scalar_res.bg_scalars,
+        &linear_res.bgl_dot_pair_inputs,
+        &linear_res.pipeline_spmv_p_v,
+        &linear_res.pipeline_dot,
+        &linear_res.pipeline_dot_pair,
+        &linear_res.pipeline_cg_update_x_r,
+        &linear_res.pipeline_cg_update_p,
+        &scalar_res.pipeline_init_cg_scalars,
+        &scalar_res.pipeline_reduce_r0_v,
+        &scalar_res.pipeline_reduce_rho_new_r_r,
+        device,
+    )
+}
+
 pub fn init_linear_solver(
     device: &wgpu::Device,
     num_cells: u32,
@@ -191,85 +223,15 @@ pub fn init_linear_solver(
         &col_indices,
     );
 
-    let ScalarLinearSolverResources {
-        b_row_offsets,
-        b_col_indices,
-        num_nonzeros,
-        b_matrix_values,
-        b_rhs,
-        b_x,
-        b_r,
-        b_r0,
-        b_p_solver,
-        b_v,
-        b_s,
-        b_t,
-        b_dot_result,
-        b_dot_result_2,
-        b_scalars,
-        b_staging_scalar,
-        b_solver_params,
-        num_groups,
-        ports,
-        port_space,
-        pipeline_res,
-        ..
-    } = scalar;
+    let scalar_cg = build_scalar_cg(device, num_cells, &scalar);
+    let num_nonzeros = scalar.num_nonzeros;
 
     LinearSolverResources {
-        b_row_offsets,
-        b_col_indices,
         num_nonzeros,
-        b_matrix_values,
-
-        b_rhs,
-        b_x,
-        b_r,
-        b_r0,
-        b_p_solver,
-        b_v,
-        b_s,
-        b_t,
-        b_dot_result,
-        b_dot_result_2,
-        b_scalars,
-        b_staging_scalar,
-        b_solver_params,
-
-        bg_solver: pipeline_res.bg_solver,
-        bg_linear_matrix: pipeline_res.bg_linear_matrix,
-        bg_linear_state: pipeline_res.bg_linear_state,
-        bg_linear_state_ro: pipeline_res.bg_linear_state_ro,
-        bg_dot_params: pipeline_res.bg_dot_params,
-        bg_dot_r0_v: pipeline_res.bg_dot_r0_v,
-        bg_dot_p_v: pipeline_res.bg_dot_p_v,
-        bg_dot_r_r: pipeline_res.bg_dot_r_r,
-        bg_dot_pair_r0r_rr: pipeline_res.bg_dot_pair_r0r_rr,
-        bg_dot_pair_tstt: pipeline_res.bg_dot_pair_tstt,
-
-        bgl_solver: pipeline_res.bgl_solver,
-        bgl_linear_matrix: pipeline_res.bgl_linear_matrix,
-        bgl_linear_state: pipeline_res.bgl_linear_state,
-        bgl_linear_state_ro: pipeline_res.bgl_linear_state_ro,
-        bgl_dot_inputs: pipeline_res.bgl_dot_inputs,
-        bgl_dot_pair_inputs: pipeline_res.bgl_dot_pair_inputs,
-
-        pipeline_spmv_p_v: pipeline_res.pipeline_spmv_p_v,
-        pipeline_spmv_s_t: pipeline_res.pipeline_spmv_s_t,
-        pipeline_dot: pipeline_res.pipeline_dot,
-        pipeline_dot_pair: pipeline_res.pipeline_dot_pair,
-        pipeline_bicgstab_update_x_r: pipeline_res.pipeline_bicgstab_update_x_r,
-        pipeline_bicgstab_update_p: pipeline_res.pipeline_bicgstab_update_p,
-        pipeline_bicgstab_update_s: pipeline_res.pipeline_bicgstab_update_s,
-        pipeline_cg_update_x_r: pipeline_res.pipeline_cg_update_x_r,
-        pipeline_cg_update_p: pipeline_res.pipeline_cg_update_p,
-
-        row_offsets,
-        col_indices,
-        num_groups,
+        scalar_cg,
         coupled_resources,
-        ports,
-        port_space,
+        ports: scalar.ports,
+        port_space: scalar.port_space,
     }
 }
 

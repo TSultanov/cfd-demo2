@@ -88,12 +88,12 @@ impl CompressiblePlanResources {
         if let Some(fgmres) = &mut self.fgmres_resources {
             fgmres
                 .precond
-                .ensure_amg_resources(&self.context.device, matrix, 20);
+                .ensure_amg_resources(&self.common.context.device, matrix, 20);
         }
     }
 
     fn init_fgmres_resources(&self, max_restart: usize) -> CompressibleFgmresResources {
-        let device = &self.context.device;
+        let device = &self.common.context.device;
         let n = self.num_unknowns;
         let num_cells = self.num_cells;
 
@@ -170,7 +170,7 @@ impl CompressiblePlanResources {
             self.zero_buffer(system.x(), n);
 
             let tol_abs = 1e-6f32;
-            let rhs_norm = fgmres.rhs_norm(&self.context, system, n);
+            let rhs_norm = fgmres.rhs_norm(&self.common.context, system, n);
             if rhs_norm <= tol_abs {
                 let stats = LinearSolverStats {
                     iterations: 0,
@@ -198,11 +198,13 @@ impl CompressiblePlanResources {
                 column_offset: 0,
                 _pad3: 0,
             };
-            let core = fgmres.fgmres.core(&self.context.device, &self.context.queue);
+            let core = fgmres
+                .fgmres
+                .core(&self.common.context.device, &self.common.context.queue);
             write_params(&core, &params);
             fgmres.precond.prepare(
-                &self.context.device,
-                &self.context.queue,
+                &self.common.context.device,
+                &self.common.context.queue,
                 &fgmres.fgmres,
                 system.rhs().as_entire_binding(),
                 dispatch.cells,
@@ -220,13 +222,14 @@ impl CompressiblePlanResources {
             write_zeros(&core, fgmres.fgmres.y_buffer());
             let mut g_init = vec![0.0f32; fgmres.fgmres.max_restart() + 1];
             g_init[0] = rhs_norm;
-            self.context
+            self.common
+                .context
                 .queue
                 .write_buffer(fgmres.fgmres.g_buffer(), 0, bytemuck::cast_slice(&g_init));
 
             let basis0 = fgmres.fgmres.basis_binding(0);
             let copy_bg = fgmres.fgmres.create_vector_bind_group(
-                &self.context.device,
+                &self.common.context.device,
                 system.rhs().as_entire_binding(),
                 basis0,
                 fgmres.fgmres.temp_buffer().as_entire_binding(),
@@ -244,7 +247,7 @@ impl CompressiblePlanResources {
             write_scalars(&core, &[1.0 / rhs_norm]);
             let basis0_y = fgmres.fgmres.basis_binding(0);
             let scale_bg = fgmres.fgmres.create_vector_bind_group(
-                &self.context.device,
+                &self.common.context.device,
                 fgmres.fgmres.w_buffer().as_entire_binding(),
                 basis0_y,
                 fgmres.fgmres.temp_buffer().as_entire_binding(),
@@ -261,7 +264,7 @@ impl CompressiblePlanResources {
 
             // Solve (single restart) using the shared GPU FGMRES core.
             let solve = fgmres.solve_once(
-                &self.context,
+                &self.common.context,
                 system,
                 rhs_norm,
                 params,
@@ -300,7 +303,8 @@ impl CompressiblePlanResources {
 
     fn zero_buffer(&self, buffer: &wgpu::Buffer, n: u32) {
         let zeros = vec![0.0f32; n as usize];
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
     }

@@ -13,7 +13,7 @@ use crate::solver::gpu::plans::plan_instance::{
     FgmresSizing, GpuPlanInstance, PlanCapability, PlanFuture, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
-use crate::solver::gpu::readback::StagingBufferCache;
+use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -121,9 +121,7 @@ impl CompressibleProfile {
 }
 
 pub(crate) struct CompressiblePlanResources {
-    pub context: GpuContext,
-    pub(crate) readback_cache: StagingBufferCache,
-    pub(crate) profiling_stats: Arc<ProfilingStats>,
+    pub common: GpuRuntimeCommon,
     pub num_cells: u32,
     pub num_faces: u32,
     pub num_unknowns: u32,
@@ -173,7 +171,7 @@ pub(crate) struct CompressiblePlanResources {
 
 impl CompressiblePlanResources {
     fn context_ref(&self) -> &GpuContext {
-        &self.context
+        &self.common.context
     }
 
     fn state_size_bytes(&self) -> u64 {
@@ -183,6 +181,7 @@ impl CompressiblePlanResources {
     fn pre_step_copy(&self) {
         let size = self.state_size_bytes();
         let mut encoder = self
+            .common
             .context
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -190,7 +189,7 @@ impl CompressiblePlanResources {
             });
         encoder.copy_buffer_to_buffer(&self.b_state_old, 0, &self.b_state, 0, size);
         encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
+        self.common.context.queue.submit(Some(encoder.finish()));
     }
 
     fn build_explicit_module_graph(include_gradients: bool) -> ModuleGraph<CompressibleKernelsModule> {
@@ -450,9 +449,8 @@ impl CompressiblePlanResources {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Self {
-        let context = GpuContext::new(device, queue).await;
+        let common = GpuRuntimeCommon::new(mesh, device, queue).await;
         let profile = CompressibleProfile::new();
-        let profiling_stats = Arc::new(ProfilingStats::new());
 
         let model = default_compressible_model();
         let unknowns_per_cell = model.system.unknowns_per_cell();
@@ -467,42 +465,43 @@ impl CompressiblePlanResources {
         };
 
         let lowered = CompressibleLowered::lower(
-            &context.device,
-            mesh,
+            &common.context.device,
+            &common.mesh,
+            common.num_cells,
+            common.num_faces,
             &model.state_layout,
             unknowns_per_cell,
             4,
         );
-        let num_cells = lowered.common.num_cells;
-        let num_faces = lowered.common.num_faces;
+        let num_cells = common.num_cells;
+        let num_faces = common.num_faces;
         let num_unknowns = num_cells * unknowns_per_cell;
 
-        let fields_layout = context
+        let fields_layout = common
+            .context
             .device
             .create_bind_group_layout(
                 &crate::solver::gpu::bindings::generated::compressible_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
             );
         let fields_res = create_compressible_field_bind_groups(
-            &context.device,
+            &common.context.device,
             lowered.fields,
             &fields_layout,
         );
 
         let kernels = CompressibleKernelsModule::new(
-            &context.device,
-            &lowered.common.mesh,
+            &common.context.device,
+            &common.mesh,
             &fields_res,
-            &lowered.common.ports,
+            &lowered.ports,
             lowered.system_ports,
             lowered.scalar_row_offsets_port,
         );
 
-        let port_space = lowered.common.ports;
+        let port_space = lowered.ports;
 
         let mut solver = Self {
-            context,
-            readback_cache: Default::default(),
-            profiling_stats,
+            common,
             num_cells,
             num_faces,
             num_unknowns,
@@ -560,7 +559,8 @@ impl CompressiblePlanResources {
 
     pub fn initialize_history(&self) {
         let mut encoder =
-            self.context
+            self.common
+                .context
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Compressible Initialize History Encoder"),
@@ -568,7 +568,7 @@ impl CompressiblePlanResources {
         let state_size = self.num_cells as u64 * self.offsets.stride as u64 * 4;
         encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old, 0, state_size);
         encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old_old, 0, state_size);
-        self.context.queue.submit(Some(encoder.finish()));
+        self.common.context.queue.submit(Some(encoder.finish()));
     }
 
     pub fn set_dt(&mut self, dt: f32) {
@@ -721,13 +721,14 @@ impl CompressiblePlanResources {
     }
 
     fn update_constants(&self) {
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
     }
 
     fn update_low_mach_params(&self) {
-        self.context.queue.write_buffer(
+        self.common.context.queue.write_buffer(
             &self.b_low_mach_params,
             0,
             bytemuck::bytes_of(&self.low_mach_params),
@@ -741,15 +742,9 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        crate::solver::gpu::readback::read_buffer_cached(
-            &self.context,
-            &self.readback_cache,
-            &self.profiling_stats,
-            buffer,
-            size,
-            "Compressible Staging Buffer (cached)",
-        )
-        .await
+        self.common
+            .read_buffer(buffer, size, "Compressible Staging Buffer (cached)")
+            .await
     }
 
     pub(crate) async fn read_buffer_f32(&self, buffer: &wgpu::Buffer, count: usize) -> Vec<f32> {
@@ -760,13 +755,13 @@ impl CompressiblePlanResources {
     fn write_state_all(&self, state: &[f32]) {
         let bytes = cast_slice(state);
         for buffer in &self.state_buffers {
-            self.context.queue.write_buffer(buffer, 0, bytes);
+            self.common.context.queue.write_buffer(buffer, 0, bytes);
         }
     }
 
     pub(crate) fn write_state_bytes(&self, bytes: &[u8]) {
         for buffer in &self.state_buffers {
-            self.context.queue.write_buffer(buffer, 0, bytes);
+            self.common.context.queue.write_buffer(buffer, 0, bytes);
         }
     }
 }
@@ -807,7 +802,7 @@ pub(crate) mod plan {
             } else {
                 &solver.explicit_module_graph_first_order
             };
-            let timings = graph.execute_split_timed(&solver.context, &solver.kernels, runtime);
+            let timings = graph.execute_split_timed(&solver.common.context, &solver.kernels, runtime);
 
             let total_secs = step_start.elapsed().as_secs_f64();
             let grad_secs = timings.seconds_for("compressible:gradients");
@@ -876,7 +871,7 @@ pub(crate) mod plan {
 
         let stage_start = std::time::Instant::now();
         solver.primitive_update_module_graph.execute(
-            &solver.context,
+            &solver.common.context,
             &solver.kernels,
             RuntimeDims {
                 num_cells: solver.num_cells,
@@ -959,7 +954,7 @@ impl GpuPlanInstance for CompressiblePlanResources {
     }
 
     fn profiling_stats(&self) -> Arc<ProfilingStats> {
-        Arc::clone(&self.profiling_stats)
+        Arc::clone(&self.common.profiling_stats)
     }
 
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
@@ -1014,9 +1009,9 @@ impl GpuPlanInstance for CompressiblePlanResources {
             }
             (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
                 if enable {
-                    self.profiling_stats.enable();
+                    self.common.profiling_stats.enable();
                 } else {
-                    self.profiling_stats.disable();
+                    self.common.profiling_stats.disable();
                 }
                 Ok(())
             }
@@ -1048,12 +1043,12 @@ impl GpuPlanInstance for CompressiblePlanResources {
                 self.num_unknowns
             ));
         }
-        self.context.queue.write_buffer(
+        self.common.context.queue.write_buffer(
             self.port_space.buffer(self.system_ports.values),
             0,
             bytemuck::cast_slice(matrix_values),
         );
-        self.context.queue.write_buffer(
+        self.common.context.queue.write_buffer(
             self.port_space.buffer(self.system_ports.rhs),
             0,
             bytemuck::cast_slice(rhs),

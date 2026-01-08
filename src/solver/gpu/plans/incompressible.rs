@@ -149,91 +149,15 @@ impl GpuSolver {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        use crate::solver::gpu::profiling::ProfileCategory;
-        use std::time::Instant;
-
-        // 1. Obtain a cached staging buffer or create one if absent
-        let t0 = Instant::now();
-        let staging_buffer = self
-            .readback_cache
-            .take_or_create(&self.context.device, size, "Staging Buffer (cached)");
-        self.profiling_stats
-            .record_gpu_alloc("read_buffer:staging", size);
-        self.profiling_stats.record_location(
-            "read_buffer:create_staging",
-            ProfileCategory::GpuResourceCreation,
-            t0.elapsed(),
-            0,
-        );
-
-        // 2. Encode and submit copy command
-        let t1 = Instant::now();
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
-        self.profiling_stats.record_location(
-            "read_buffer:submit_copy",
-            ProfileCategory::GpuDispatch,
-            t1.elapsed(),
-            0,
-        );
-
-        // 3. Request async map
-        let t2 = Instant::now();
-        let slice = staging_buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-        self.profiling_stats.record_location(
-            "read_buffer:map_async_request",
-            ProfileCategory::Other,
-            t2.elapsed(),
-            0,
-        );
-
-        // 4. Poll/wait for GPU - THIS IS THE BLOCKING CALL
-        let t3 = Instant::now();
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
-        self.profiling_stats.record_location(
-            "read_buffer:device_poll_wait",
-            ProfileCategory::GpuSync,
-            t3.elapsed(),
-            0,
-        );
-
-        // 5. Wait for channel (should be instant after poll)
-        let t4 = Instant::now();
-        rx.recv().unwrap().unwrap();
-        self.profiling_stats.record_location(
-            "read_buffer:channel_recv",
-            ProfileCategory::Other,
-            t4.elapsed(),
-            0,
-        );
-
-        // 6. Read mapped data
-        let t5 = Instant::now();
-        let data = slice.get_mapped_range();
-        let result = data.to_vec();
-        drop(data);
-        staging_buffer.unmap();
-        self.profiling_stats
-            .record_cpu_alloc("read_buffer:cpu_copy", size);
-        self.profiling_stats.record_location(
-            "read_buffer:memcpy",
-            ProfileCategory::Other,
-            t5.elapsed(),
+        crate::solver::gpu::readback::read_buffer_cached(
+            &self.context,
+            &self.readback_cache,
+            &self.profiling_stats,
+            buffer,
             size,
-        );
-        // 7. Return staging buffer to cache for reuse
-        self.readback_cache.put(size, staging_buffer);
-
-        result
+            "Staging Buffer (cached)",
+        )
+        .await
     }
 
     pub(crate) async fn read_buffer_f32(&self, buffer: &wgpu::Buffer, count: u32) -> Vec<f32> {

@@ -3,7 +3,7 @@ use crate::solver::gpu::init::{linear_solver, mesh as mesh_init, scalars};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
-use crate::solver::gpu::profiling::{ProfileCategory, ProfilingStats};
+use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::StagingBufferCache;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
@@ -198,55 +198,15 @@ impl GpuScalarRuntime {
     }
 
     pub async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        use std::time::Instant;
-
-        let staging_buffer = self
-            .readback_cache
-            .take_or_create(&self.context.device, size, "Staging Buffer (cached)");
-
-        let t_copy = Instant::now();
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
-        self.profiling_stats.record_location(
-            "scalar_runtime:read_buffer:submit_copy",
-            ProfileCategory::GpuDispatch,
-            t_copy.elapsed(),
-            0,
-        );
-
-        let t_map = Instant::now();
-        let slice = staging_buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().unwrap().unwrap();
-        self.profiling_stats.record_location(
-            "scalar_runtime:read_buffer:map_wait",
-            ProfileCategory::GpuSync,
-            t_map.elapsed(),
-            0,
-        );
-
-        let t_copy_cpu = Instant::now();
-        let data = slice.get_mapped_range();
-        let result = data.to_vec();
-        drop(data);
-        staging_buffer.unmap();
-        self.profiling_stats.record_location(
-            "scalar_runtime:read_buffer:cpu_copy",
-            ProfileCategory::Other,
-            t_copy_cpu.elapsed(),
+        crate::solver::gpu::readback::read_buffer_cached(
+            &self.context,
+            &self.readback_cache,
+            &self.profiling_stats,
+            buffer,
             size,
-        );
-        self.readback_cache.put(size, staging_buffer);
-        result
+            "Scalar Runtime Staging Buffer (cached)",
+        )
+        .await
     }
 }
 

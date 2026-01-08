@@ -738,33 +738,15 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        let staging = self
-            .readback_cache
-            .take_or_create(&self.context.device, size, "Compressible Staging Buffer (cached)");
-
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Compressible Readback Encoder"),
-                });
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
-
-        let slice = staging.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| {
-            let _ = tx.send(v);
-        });
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().ok().and_then(|v| v.ok()).unwrap();
-        let data = slice.get_mapped_range().to_vec();
-        staging.unmap();
-        self.readback_cache.put(size, staging);
-        data
+        crate::solver::gpu::readback::read_buffer_cached(
+            &self.context,
+            &self.readback_cache,
+            &self.profiling_stats,
+            buffer,
+            size,
+            "Compressible Staging Buffer (cached)",
+        )
+        .await
     }
 
     pub(crate) async fn read_buffer_f32(&self, buffer: &wgpu::Buffer, count: usize) -> Vec<f32> {

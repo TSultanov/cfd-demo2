@@ -1,4 +1,3 @@
-use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::mesh::{BoundaryType, Mesh};
 use wgpu::util::DeviceExt;
 
@@ -15,8 +14,6 @@ pub struct MeshResources {
     pub b_cell_faces: wgpu::Buffer,
     pub b_cell_face_matrix_indices: wgpu::Buffer,
     pub b_diagonal_indices: wgpu::Buffer,
-    pub bg_mesh: wgpu::BindGroup,
-    pub bgl_mesh: wgpu::BindGroupLayout,
     pub row_offsets: Vec<u32>,
     pub col_indices: Vec<u32>,
 }
@@ -220,33 +217,6 @@ pub fn init_mesh(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
-    // Group 0: Mesh (Read Only)
-    let layout = device.create_bind_group_layout(
-        &generated_coupled_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-    );
-    let bg_mesh = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Mesh Bind Group"),
-        layout: &layout,
-        entries: &generated_coupled_assembly::WgpuBindGroup0Entries::new(
-            generated_coupled_assembly::WgpuBindGroup0EntriesParams {
-                face_owner: b_face_owner.as_entire_buffer_binding(),
-                face_neighbor: b_face_neighbor.as_entire_buffer_binding(),
-                face_areas: b_face_areas.as_entire_buffer_binding(),
-                face_normals: b_face_normals.as_entire_buffer_binding(),
-                cell_centers: b_cell_centers.as_entire_buffer_binding(),
-                cell_vols: b_cell_vols.as_entire_buffer_binding(),
-                cell_face_offsets: b_cell_face_offsets.as_entire_buffer_binding(),
-                cell_faces: b_cell_faces.as_entire_buffer_binding(),
-                cell_face_matrix_indices: b_cell_face_matrix_indices.as_entire_buffer_binding(),
-                diagonal_indices: b_diagonal_indices.as_entire_buffer_binding(),
-                face_boundary: b_face_boundary.as_entire_buffer_binding(),
-                face_centers: b_face_centers.as_entire_buffer_binding(),
-            },
-        )
-        .into_array(),
-    });
-    let bgl_mesh = layout;
-
     MeshResources {
         b_face_owner,
         b_face_neighbor,
@@ -260,31 +230,7 @@ pub fn init_mesh(
         b_cell_faces,
         b_cell_face_matrix_indices,
         b_diagonal_indices,
-        bg_mesh,
-        bgl_mesh,
         row_offsets,
         col_indices,
-    }
-}
-
-impl MeshResources {
-    #[allow(dead_code)]
-    pub fn as_bind_group_0_entries(
-        &self,
-    ) -> generated_coupled_assembly::WgpuBindGroup0EntriesParams<'_> {
-        generated_coupled_assembly::WgpuBindGroup0EntriesParams {
-            face_owner: self.b_face_owner.as_entire_buffer_binding(),
-            face_neighbor: self.b_face_neighbor.as_entire_buffer_binding(),
-            face_areas: self.b_face_areas.as_entire_buffer_binding(),
-            face_normals: self.b_face_normals.as_entire_buffer_binding(),
-            cell_centers: self.b_cell_centers.as_entire_buffer_binding(),
-            cell_vols: self.b_cell_vols.as_entire_buffer_binding(),
-            cell_face_offsets: self.b_cell_face_offsets.as_entire_buffer_binding(),
-            cell_faces: self.b_cell_faces.as_entire_buffer_binding(),
-            cell_face_matrix_indices: self.b_cell_face_matrix_indices.as_entire_buffer_binding(),
-            diagonal_indices: self.b_diagonal_indices.as_entire_buffer_binding(),
-            face_boundary: self.b_face_boundary.as_entire_buffer_binding(),
-            face_centers: self.b_face_centers.as_entire_buffer_binding(),
-        }
     }
 }

@@ -8,6 +8,8 @@ use crate::solver::mesh::Mesh;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
+
 use super::profiling::ProfilingStats;
 use super::structs::{GpuSolver, PreconditionerType};
 
@@ -24,6 +26,32 @@ impl GpuSolver {
 
         // 1. Initialize Mesh
         let mesh_res = mesh::init_mesh(&context.device, mesh);
+        let mesh_layout = context
+            .device
+            .create_bind_group_layout(&generated_coupled_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+        let bg_mesh = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Mesh Bind Group"),
+            layout: &mesh_layout,
+            entries: &generated_coupled_assembly::WgpuBindGroup0Entries::new(
+                generated_coupled_assembly::WgpuBindGroup0EntriesParams {
+                    face_owner: mesh_res.b_face_owner.as_entire_buffer_binding(),
+                    face_neighbor: mesh_res.b_face_neighbor.as_entire_buffer_binding(),
+                    face_areas: mesh_res.b_face_areas.as_entire_buffer_binding(),
+                    face_normals: mesh_res.b_face_normals.as_entire_buffer_binding(),
+                    cell_centers: mesh_res.b_cell_centers.as_entire_buffer_binding(),
+                    cell_vols: mesh_res.b_cell_vols.as_entire_buffer_binding(),
+                    cell_face_offsets: mesh_res.b_cell_face_offsets.as_entire_buffer_binding(),
+                    cell_faces: mesh_res.b_cell_faces.as_entire_buffer_binding(),
+                    cell_face_matrix_indices: mesh_res
+                        .b_cell_face_matrix_indices
+                        .as_entire_buffer_binding(),
+                    diagonal_indices: mesh_res.b_diagonal_indices.as_entire_buffer_binding(),
+                    face_boundary: mesh_res.b_face_boundary.as_entire_buffer_binding(),
+                    face_centers: mesh_res.b_face_centers.as_entire_buffer_binding(),
+                },
+            )
+            .into_array(),
+        });
 
         // 2. Initialize Field Buffers (phase 1 - before pipelines)
         let field_buffers = fields::init_field_buffers(&context.device, num_cells, num_faces);
@@ -71,7 +99,7 @@ impl GpuSolver {
             b_cell_faces: mesh_res.b_cell_faces,
             b_cell_face_matrix_indices: mesh_res.b_cell_face_matrix_indices,
             b_diagonal_indices: mesh_res.b_diagonal_indices,
-            bg_mesh: mesh_res.bg_mesh,
+            bg_mesh,
 
             // Fields (consolidated FluidState buffers)
             b_state: fields_res.b_state,

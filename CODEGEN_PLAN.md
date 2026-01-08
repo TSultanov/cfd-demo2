@@ -33,6 +33,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Planized the incompressible coupled solver’s init/prepare stage (host constant update + init prepare kernel) using `ExecutionPlan` as well (`src/solver/gpu/coupled_solver.rs`).
 - Expanded `GpuUnifiedSolver` to provide a real shared surface (common setters + `get_u/get_p/get_rho`) and migrated the 1D regression test harness to run compressible/incompressible cases through it (`tests/gpu_1d_structured_regression_test.rs`).
 - Migrated the UI app to `GpuUnifiedSolver` and switched plotting to use `StateLayout`-derived offsets instead of hardcoded packing (`src/ui/app.rs`).
+- Replaced `GpuUnifiedSolver`’s internal backend branching enum with a boxed `GpuPlanInstance` trait object implemented by each plan, reducing per-family orchestration code and preparing for a single model-driven program path (`src/solver/gpu/unified_solver.rs`).
 - Removed `FluidState` struct dependence from the public incompressible GPU read/write helpers by using `StateLayout` offsets instead (`src/solver/gpu/solver.rs`).
 - Switched incompressible state buffer initialization to use `StateLayout` stride (so the host no longer needs a matching `FluidState` struct) (`src/solver/gpu/init/fields.rs`).
 - Added cached default `ModelSpec`s for GPU codepaths that need access to layout/unknown metadata without threading a `ModelSpec` everywhere (`src/solver/gpu/model_defaults.rs`).

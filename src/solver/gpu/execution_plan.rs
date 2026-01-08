@@ -1,5 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::kernel_graph::KernelGraphTimings;
+use crate::solver::gpu::modules::graph::ModuleGraphTimings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphExecMode {
@@ -11,9 +11,9 @@ pub struct GraphNode<S> {
     pub label: &'static str,
     /// Executes a graph-like node and returns `(seconds, optional detail)`.
     ///
-    /// `detail` is currently only used for `KernelGraph` split timings; other graph
-    /// executors can return `None`.
-    pub run: fn(&S, &GpuContext, GraphExecMode) -> (f64, Option<KernelGraphTimings>),
+    /// `detail` is optional (e.g. split timings for a module graph); graph
+    /// executors can return `None` when detailed breakdown isn't needed.
+    pub run: fn(&S, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>),
     pub mode: GraphExecMode,
 }
 
@@ -77,9 +77,11 @@ impl PlanTimings {
         self.nodes.push(timing);
     }
 
-    pub fn graph_detail(&self, label: &'static str) -> Option<&KernelGraphTimings> {
+    pub fn module_graph_detail(&self, label: &'static str) -> Option<&ModuleGraphTimings> {
         self.nodes.iter().find_map(|node| match node {
-            PlanNodeTiming::Graph(graph) if graph.label == label => graph.detail.as_ref(),
+            PlanNodeTiming::Graph(graph) if graph.label == label => match graph.detail.as_ref()? {
+                GraphDetail::Module(detail) => Some(detail),
+            },
             _ => None,
         })
     }
@@ -119,11 +121,16 @@ impl PlanNodeTiming {
 pub struct GraphTiming {
     pub label: &'static str,
     pub seconds: f64,
-    pub detail: Option<KernelGraphTimings>,
+    pub detail: Option<GraphDetail>,
 }
 
 #[derive(Debug, Clone)]
 pub struct HostTiming {
     pub label: &'static str,
     pub seconds: f64,
+}
+
+#[derive(Debug, Clone)]
+pub enum GraphDetail {
+    Module(ModuleGraphTimings),
 }

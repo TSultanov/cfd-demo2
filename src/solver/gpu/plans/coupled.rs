@@ -60,7 +60,7 @@ fn coupled_run_graph_init_prepare(
     solver: &GpuSolver,
     context: &GpuContext,
     mode: GraphExecMode,
-) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
     let runtime = coupled_runtime(solver);
     let graph = coupled_graph_init_prepare(solver);
     match mode {
@@ -80,7 +80,7 @@ fn coupled_run_graph_prepare_assembly(
     solver: &GpuSolver,
     context: &GpuContext,
     mode: GraphExecMode,
-) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
     let runtime = coupled_runtime(solver);
     let graph = coupled_graph_prepare_assembly(solver);
     match mode {
@@ -100,7 +100,7 @@ fn coupled_run_graph_assembly(
     solver: &GpuSolver,
     context: &GpuContext,
     mode: GraphExecMode,
-) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
     let runtime = coupled_runtime(solver);
     let graph = coupled_graph_assembly(solver);
     match mode {
@@ -120,7 +120,7 @@ fn coupled_run_graph_update(
     solver: &GpuSolver,
     context: &GpuContext,
     mode: GraphExecMode,
-) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
     let runtime = coupled_runtime(solver);
     let graph = coupled_graph_update(solver);
     match mode {

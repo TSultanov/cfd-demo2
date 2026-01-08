@@ -6,7 +6,6 @@ pub mod csr;
 pub mod enums;
 pub mod execution_plan;
 pub mod init;
-pub mod kernel_graph;
 pub mod linear_solver;
 pub mod model_defaults;
 pub mod modules;

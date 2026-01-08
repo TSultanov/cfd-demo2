@@ -26,12 +26,10 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Removed `ModelSpec.kernel_plan` storage; kernel plans are derived via `ModelSpec::kernel_plan()` (still model-family specific for now).
 - Shared block-CSR expansion (`src/solver/gpu/csr.rs`) and derived compressible unknown count from `EquationSystem::unknowns_per_cell()`.
 - Derived incompressible coupled block size from `EquationSystem::unknowns_per_cell()` as well (removing a runtime magic `3` from the coupled linear-solver init path).
-- Introduced a small runtime `KernelGraph` executor (`src/solver/gpu/kernel_graph.rs`) and migrated the compressible explicit KT timestep path to it.
-- Migrated the compressible implicit path’s GPU dispatch blocks (grad/assembly/apply/update) to `KernelGraph` as well (FGMRES remains a host-controlled plugin step for now).
-- Migrated the incompressible coupled solver’s GPU dispatch blocks (prepare/assembly/update) to prebuilt `KernelGraph`s; the coupled FGMRES solve + convergence logic remains host-controlled for now.
-- Added an `ExecutionPlan` layer that can sequence GPU `KernelGraph` nodes and host/plugin steps uniformly (`src/solver/gpu/execution_plan.rs`); compressible explicit stepping uses it as the first integration point.
+- Added an `ExecutionPlan` layer that sequences GPU graph nodes and host/plugin steps uniformly (`src/solver/gpu/execution_plan.rs`).
+- Added a compute-only `ModuleGraph` executor and migrated both compressible and incompressible coupled dispatch to it; removed the legacy `KernelGraph` executor.
 - Planized the compressible implicit outer-iteration body (grad+assembly → host FGMRES → snapshot/apply) using `ExecutionPlan`, keeping behavior but moving sequencing into the common plan layer.
-- Planized the incompressible coupled iteration’s assembly+solve stage and update stage using `ExecutionPlan` (assembly via `KernelGraph`, host FGMRES solve as a plugin node, update kernel as `KernelGraph`).
+- Planized the incompressible coupled iteration’s assembly+solve stage and update stage using `ExecutionPlan` (assembly via `ModuleGraph`, host FGMRES solve as a plugin node, update via `ModuleGraph`).
 - Planized the incompressible coupled solver’s init/prepare stage (host constant update + init prepare kernel) using `ExecutionPlan` as well (`src/solver/gpu/coupled_solver.rs`).
 - Expanded `GpuUnifiedSolver` to provide a real shared surface (common setters + `get_u/get_p/get_rho`) and migrated the 1D regression test harness to run compressible/incompressible cases through it (`tests/gpu_1d_structured_regression_test.rs`).
 - Migrated the UI app to `GpuUnifiedSolver` and switched plotting to use `StateLayout`-derived offsets instead of hardcoded packing (`src/ui/app.rs`).
@@ -55,6 +53,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Encapsulated incompressible coupled kernels (prepare/assembly/update) into `IncompressibleKernelsModule` (module-owned bind groups + pipelines) and deleted the now-unused `init/physics.rs` pipeline plumbing (`src/solver/gpu/modules/incompressible_kernels.rs`, `src/solver/gpu/plans/coupled.rs`, `src/solver/gpu/init/mod.rs`).
 - Migrated the coupled solver’s compute graphs to `ModuleGraph<IncompressibleKernelsModule>` and removed its remaining `KernelGraph` usage (execution is driven via `ExecutionPlan` host nodes as a bridge) (`src/solver/gpu/plans/coupled.rs`, `src/solver/gpu/structs.rs`).
 - Refactored `ExecutionPlan` to be graph-type agnostic by changing `GraphNode` from `fn(&S)->&KernelGraph<S>` to an explicit `run(&S, &GpuContext, GraphExecMode)` function pointer (so plans can execute `ModuleGraph` nodes without host-wrapper steps) (`src/solver/gpu/execution_plan.rs`, `src/solver/gpu/plans/coupled.rs`, `src/solver/gpu/plans/compressible.rs`).
+- Migrated compressible implicit iteration graphs (grad+assembly/apply/update) to `ModuleGraph<CompressibleKernelsModule>` and replaced copy-style graph nodes with explicit buffer copies; removed `src/solver/gpu/kernel_graph.rs` and its module export (`src/solver/gpu/plans/compressible.rs`, `src/solver/gpu/mod.rs`).
 - Began separating “plans” from “resource containers”: `GpuUnifiedSolver::step()` now dispatches through plan modules (`src/solver/gpu/compressible_solver.rs` `plan::*`, `src/solver/gpu/coupled_solver.rs` `plan::*`) instead of calling backend `.step()` methods directly; coupled currently delegates to `step_coupled_impl` as an intermediate step.
 - Moved legacy per-family GPU implementations under `src/solver/gpu/plans/*` and renamed the unified dispatch enum from a “backend” to `PlanInstance` (`src/solver/gpu/unified_solver.rs`), so internal code is expressed as plan resources + plan functions rather than separate solver modules.
 - Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
@@ -79,9 +78,9 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 ### Architecture Sketch
 1. **Model lowering**: `EquationSystem` + `SchemeRegistry` → `DiscreteSystem` (already exists: `src/solver/codegen/ir.rs`).
 2. **Scheme expansion**: inspect `DiscreteSystem` and add required auxiliary computations (e.g. gradients for SOU/QUICK, extra history buffers for BDF2, limiter/reconstruction inputs).
-3. **Execution plan derivation**: `ModelSpec` + `SolverConfig` → `KernelGraph` (DAG) + resource plan (state/flux/aux/matrix buffers).
-4. **Codegen**: `KernelGraph` → WGSL kernels + Rust bindings (build-time via `build.rs` + `wgsl_bindgen`).
-5. **Runtime**: a generic dispatcher runs the `KernelGraph` for each timestep/nonlinear iteration and calls a generic linear solver with the chosen preconditioner chain.
+3. **Execution plan derivation**: `ModelSpec` + `SolverConfig` → `ExecutionPlan` + graph nodes + resource plan (state/flux/aux/matrix buffers).
+4. **Codegen**: program spec → WGSL kernels + Rust bindings (build-time via `build.rs` + `wgsl_bindgen`).
+5. **Runtime**: a generic dispatcher runs the `ExecutionPlan` for each timestep/nonlinear iteration and calls a generic linear solver with the chosen preconditioner chain.
 
 ### Milestones (Iterative)
 1. **Unify the runtime interface (no behavior change)** (DONE: wrapper + config)
@@ -164,7 +163,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
      - update tests + UI to ensure no direct references remain (already routed through `GpuUnifiedSolver`).
 
 ### Gap Check (Are We Approaching The Goal?)
-- The common *runtime sequencing* layer now exists (`KernelGraph` + `ExecutionPlan`) and both incompressible and compressible paths are progressively being expressed in it.
+- The common *runtime sequencing* layer now exists (`ModuleGraph` + `ExecutionPlan`) and both incompressible and compressible paths are progressively being expressed in it.
 - The solver still relies on model-family-specific resource containers and some host-side control flow for convergence + linear solves; the next material step is to make **plans + plan resources** the only backend variants and to remove “solver” structs for each family.
 - Even though the public API is unified, the runtime still uses legacy per-family structs internally. The remaining work to truly delete them is to (a) introduce `GpuRuntimeCommon` + `GpuPlanInstance`, (b) migrate compressible/coupled resources into plan resources, and (c) remove `UnifiedSolverBackend` + legacy step methods.
 
@@ -177,7 +176,7 @@ Goal: remove solver-owned pipelines/bind-groups and move *all GPU dispatch* behi
    - Delete unused physics pipeline plumbing (`init/physics.rs`, `pipeline_pressure_assembly`, `pipeline_flux_rhie_chow`).
 2. **Graph unification**
    - Standardize on `ModuleGraph` for compute dispatch (keep `ExecutionPlan` host/plugin steps).
-   - Either (a) extend `ExecutionPlan` to support `ModuleGraph`, or (b) wrap module-graph execution in host nodes as a bridge, then delete `KernelGraph`.
+   - Status: `ExecutionPlan` supports module graphs directly and `KernelGraph` has been deleted.
 3. **Ports everywhere**
    - Move coupled block-CSR + RHS/X into `PortSpace` like compressible (currently coupled has module preconditioners, but core coupled buffers are still embedded in `CoupledSolverResources`).
    - Migrate `GpuGenericCoupledSolver` to use the same port+module pattern (no bespoke bind group wiring).
@@ -189,7 +188,7 @@ Goal: remove solver-owned pipelines/bind-groups and move *all GPU dispatch* behi
 
 ### Decisions (Chosen)
 - **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).
-- **Flux closures**: represent as plugin nodes in the `KernelGraph` (declared inputs/outputs), not as inline AST expressions.
+- **Flux closures**: represent as plugin nodes in the plan graph (declared inputs/outputs), not as inline AST expressions.
 - **Preconditioning**: selection is host-side (typed enums); compressible low-Mach parameters live in a dedicated uniform buffer, and linear-solver preconditioning is expressed via small pluggable modules.
 - **Nonlinear iteration**: configurable (e.g. Picard/Newton); `SolverConfig` selects the strategy.
 

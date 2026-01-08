@@ -42,23 +42,21 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
-        let plan: Box<dyn GpuPlanInstance> = match &model.fields {
+        let mut plan: Box<dyn GpuPlanInstance> = match &model.fields {
             ModelFields::Incompressible(_) => {
-                let mut solver = GpuSolver::new(mesh, device, queue).await;
-                apply_config_incompressible(&mut solver, config);
-                Box::new(solver)
+                Box::new(GpuSolver::new(mesh, device, queue).await)
             }
             ModelFields::Compressible(_) => {
-                let mut solver = CompressiblePlanResources::new(mesh, device, queue).await;
-                apply_config_compressible(&mut solver, config);
-                Box::new(solver)
+                Box::new(CompressiblePlanResources::new(mesh, device, queue).await)
             }
             ModelFields::GenericCoupled(_) => {
-                let mut solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
-                apply_config_incompressible(&mut solver.linear, config);
+                let solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
                 Box::new(solver)
             }
         };
+        plan.set_advection_scheme(config.advection_scheme);
+        plan.set_time_scheme(config.time_scheme);
+        plan.set_preconditioner(config.preconditioner);
 
         Ok(Self {
             model,
@@ -300,16 +298,4 @@ impl GpuUnifiedSolver {
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
         self.plan.fgmres_sizing(max_restart)
     }
-}
-
-fn apply_config_incompressible(solver: &mut GpuSolver, config: SolverConfig) {
-    solver.set_scheme(config.advection_scheme.gpu_id());
-    solver.set_time_scheme(config.time_scheme as u32);
-    solver.set_precond_type(config.preconditioner);
-}
-
-fn apply_config_compressible(solver: &mut CompressiblePlanResources, config: SolverConfig) {
-    solver.set_scheme(config.advection_scheme.gpu_id());
-    solver.set_time_scheme(config.time_scheme as u32);
-    solver.set_precond_type(config.preconditioner);
 }

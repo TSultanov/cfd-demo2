@@ -75,7 +75,18 @@ pub(crate) trait GpuPlanInstance: Send {
     fn set_preconditioner(&mut self, preconditioner: PreconditionerType);
 
     fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
-        Err("parameter is not supported by this plan".into())
+        match (_param, _value) {
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                let stats = self.profiling_stats();
+                if enable {
+                    stats.enable();
+                } else {
+                    stats.disable();
+                }
+                Ok(())
+            }
+            _ => Err("parameter is not supported by this plan".into()),
+        }
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String>;
@@ -335,23 +346,6 @@ impl GpuPlanInstance for CompressiblePlanResources {
         CompressiblePlanResources::set_precond_type(self, preconditioner);
     }
 
-    fn perform(&self, action: PlanAction) -> Result<(), String> {
-        match action {
-            PlanAction::StartProfilingSession => {
-                self.profiling_stats.start_session();
-                Ok(())
-            }
-            PlanAction::EndProfilingSession => {
-                self.profiling_stats.end_session();
-                Ok(())
-            }
-            PlanAction::PrintProfilingReport => {
-                self.profiling_stats.print_report();
-                Ok(())
-            }
-        }
-    }
-
     fn profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.profiling_stats)
     }
@@ -528,39 +522,8 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
         let _ = preconditioner;
     }
 
-    fn perform(&self, action: PlanAction) -> Result<(), String> {
-        match action {
-            PlanAction::StartProfilingSession => {
-                self.runtime.profiling_stats.start_session();
-                Ok(())
-            }
-            PlanAction::EndProfilingSession => {
-                self.runtime.profiling_stats.end_session();
-                Ok(())
-            }
-            PlanAction::PrintProfilingReport => {
-                self.runtime.profiling_stats.print_report();
-                Ok(())
-            }
-        }
-    }
-
     fn profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.runtime.profiling_stats)
-    }
-
-    fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
-        match (_param, _value) {
-            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
-                if enable {
-                    self.runtime.profiling_stats.enable();
-                } else {
-                    self.runtime.profiling_stats.disable();
-                }
-                Ok(())
-            }
-            _ => Err("parameter is not supported by this plan".into()),
-        }
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {

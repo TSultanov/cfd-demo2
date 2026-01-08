@@ -463,7 +463,7 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
 
 pub(crate) async fn build_plan_instance(
     mesh: &Mesh,
-    model: ModelSpec,
+    model: &ModelSpec,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<Box<dyn GpuPlanInstance>, String> {

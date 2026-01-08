@@ -42,8 +42,7 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
-        let mut plan: Box<dyn GpuPlanInstance> =
-            build_plan_instance(mesh, model.clone(), device, queue).await?;
+        let mut plan: Box<dyn GpuPlanInstance> = build_plan_instance(mesh, &model, device, queue).await?;
         plan.set_advection_scheme(config.advection_scheme);
         plan.set_time_scheme(config.time_scheme);
         plan.set_preconditioner(config.preconditioner);

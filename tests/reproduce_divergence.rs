@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -28,7 +27,7 @@ fn test_reproduce_divergence() {
     println!("Mesh generated with {} cells", mesh.num_cells());
 
     // Solver Setup
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+    let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
         incompressible_momentum_model(),
         SolverConfig {

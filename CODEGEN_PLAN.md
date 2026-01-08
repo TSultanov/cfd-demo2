@@ -13,6 +13,13 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
   - typed/unit-carrying expressions (`TypedExpr`) with SI `UnitDim` (units erased when emitting WGSL).
 - Typed WGSL enums exist in the DSL and on the GPU side (e.g. boundary/time schemes), and kernels use them for branching.
 - 1D regression tests that save plots exist (acoustic pulse + Sod shock tube) and are the main safety net for refactors.
+- Public module layout is now separated so most users don’t touch backend internals:
+  - `solver::model` (physics/spec)
+  - `solver::compiler` (typed AST + WGSL emission)
+  - `solver::kernels` (kernel sources/artifacts; currently still stored under `src/solver/gpu/shaders`)
+  - `solver::backend` (runtime backend implementations)
+  - `solver::options` (solver config enums/types)
+  - `solver::UnifiedSolver` (single user-facing entrypoint)
 
 ## Unified Solver Progress (So Far)
 - Added `GpuUnifiedSolver` + `SolverConfig` as a single entrypoint wrapper over the existing incompressible/compressible GPU solvers (`src/solver/gpu/unified_solver.rs`).

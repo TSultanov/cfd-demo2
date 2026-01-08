@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -21,7 +20,7 @@ fn test_gpu_profile() {
     mesh.smooth(&geo, 0.3, 50);
 
     pollster::block_on(async {
-        let mut solver = GpuUnifiedSolver::new(
+        let mut solver = UnifiedSolver::new(
             &mesh,
             incompressible_momentum_model(),
             SolverConfig {

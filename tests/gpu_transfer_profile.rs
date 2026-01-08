@@ -8,9 +8,9 @@
 /// - CPU-side computation that could be offloaded to GPU
 ///
 /// The goal is to identify bottlenecks and opportunities for GPU offloading.
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::profiling::ProfileCategory;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -45,7 +45,7 @@ fn test_gpu_transfer_profile() {
     println!();
 
     pollster::block_on(async {
-        let mut solver = GpuUnifiedSolver::new(
+        let mut solver = UnifiedSolver::new(
             &mesh,
             incompressible_momentum_model(),
             SolverConfig {
@@ -233,10 +233,10 @@ fn test_gpu_transfer_profile() {
         let all_stats = stats.get_all_stats();
         let gpu_read_stats = all_stats
             .iter()
-            .find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::GpuRead);
+            .find(|(c, _)| *c == ProfileCategory::GpuRead);
         let cpu_compute_stats = all_stats
             .iter()
-            .find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::CpuCompute);
+            .find(|(c, _)| *c == ProfileCategory::CpuCompute);
 
         if let Some((_, read_stats)) = gpu_read_stats {
             println!(
@@ -314,7 +314,7 @@ fn test_gpu_transfer_profile_scaling() {
         println!("{}", "-".repeat(60));
 
         pollster::block_on(async {
-            let mut solver = GpuUnifiedSolver::new(
+            let mut solver = UnifiedSolver::new(
                 &mesh,
                 incompressible_momentum_model(),
                 SolverConfig {
@@ -379,7 +379,7 @@ fn test_gpu_transfer_profile_scaling() {
             // Calculate time per cell for GPU reads
             let gpu_read_stats = all_stats
                 .iter()
-                .find(|(c, _)| *c == cfd2::solver::gpu::profiling::ProfileCategory::GpuRead);
+                .find(|(c, _)| *c == ProfileCategory::GpuRead);
             if let Some((_, read_stats)) = gpu_read_stats {
                 if read_stats.call_count > 0 {
                     let time_per_byte =

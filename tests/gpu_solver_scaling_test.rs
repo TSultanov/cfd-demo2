@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -102,7 +101,7 @@ fn diag_indices(row_offsets: &[u32], col_indices: &[u32]) -> Vec<usize> {
     diag
 }
 
-fn solve_identity_system(solver: &GpuUnifiedSolver, mesh: &Mesh) {
+fn solve_identity_system(solver: &UnifiedSolver, mesh: &Mesh) {
     let (row_offsets, col_indices) = build_csr(mesh);
     let diag = diag_indices(&row_offsets, &col_indices);
     let mut matrix = vec![0.0_f32; col_indices.len()];
@@ -136,7 +135,7 @@ fn solve_identity_system(solver: &GpuUnifiedSolver, mesh: &Mesh) {
     }
 }
 
-fn assert_fgmres_sizing(solver: &mut GpuUnifiedSolver) {
+fn assert_fgmres_sizing(solver: &mut UnifiedSolver) {
     let fgmres = solver.fgmres_sizing(10).expect("fgmres sizing");
     let expected_unknowns = solver.coupled_unknowns().expect("coupled unknowns");
     let expected_groups = (expected_unknowns + 63) / 64;
@@ -153,7 +152,7 @@ fn gpu_solvers_scale_with_mesh_size() {
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
         };
-        let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+        let mut solver = pollster::block_on(UnifiedSolver::new(
             &mesh,
             incompressible_momentum_model(),
             config,

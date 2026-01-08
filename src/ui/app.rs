@@ -1,6 +1,5 @@
-use crate::solver::gpu::enums::TimeScheme as GpuTimeScheme;
-use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
-use crate::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
+use crate::solver::{SolverConfig, UnifiedSolver};
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
@@ -175,7 +174,7 @@ struct CachedGpuStats {
 }
 
 pub struct CFDApp {
-    gpu_unified_solver: Option<Arc<Mutex<GpuUnifiedSolver>>>,
+    gpu_unified_solver: Option<Arc<Mutex<UnifiedSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
     shared_results: SharedResults,
     shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
@@ -330,7 +329,7 @@ impl CFDApp {
 
     fn with_unified_solver<F>(&self, f: F)
     where
-        F: FnOnce(&mut GpuUnifiedSolver),
+        F: FnOnce(&mut UnifiedSolver),
     {
         if let Some(solver) = &self.gpu_unified_solver {
             if let Ok(mut guard) = solver.lock() {
@@ -382,7 +381,7 @@ impl CFDApp {
             preconditioner: self.selected_preconditioner,
         };
 
-        let mut gpu_solver = pollster::block_on(GpuUnifiedSolver::new(
+        let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
             &mesh,
             model,
             config,

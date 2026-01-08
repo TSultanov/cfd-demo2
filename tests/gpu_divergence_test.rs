@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -37,7 +36,7 @@ fn test_gpu_divergence_channel_obstacle() {
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
     };
-    let mut gpu_solver = pollster::block_on(GpuUnifiedSolver::new(
+    let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
         incompressible_momentum_model(),
         config,

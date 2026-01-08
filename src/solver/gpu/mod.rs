@@ -19,6 +19,4 @@ mod coupled_solver_fgmres;
 mod generic_coupled_solver;
 mod solver;
 
-pub use async_buffer::{AsyncScalarReader, AsyncStagingBuffer};
-pub use profiling::{ProfileCategory, ProfilingStats};
 pub use unified_solver::{FgmresSizing, GpuUnifiedSolver, SolverConfig};

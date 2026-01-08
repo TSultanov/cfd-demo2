@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
 use cfd2::solver::model::incompressible_momentum_model;
@@ -261,7 +260,7 @@ fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
     };
-    let solver = pollster::block_on(GpuUnifiedSolver::new(
+    let solver = pollster::block_on(UnifiedSolver::new(
         mesh,
         incompressible_momentum_model(),
         config,

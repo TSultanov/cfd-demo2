@@ -1,5 +1,5 @@
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
-use cfd2::solver::gpu::enums::TimeScheme;
+use cfd2::solver::options::TimeScheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};
 use cfd2::solver::scheme::Scheme;
@@ -63,10 +63,10 @@ fn gpu_unified_solver_runs_generic_heat_step() {
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
-        preconditioner: cfd2::solver::gpu::structs::PreconditionerType::Jacobi,
+        preconditioner: cfd2::solver::options::PreconditionerType::Jacobi,
     };
 
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
+    let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))
         .expect("solver init");
     solver.set_dt(dt as f32);
 
@@ -117,10 +117,10 @@ fn gpu_unified_solver_runs_generic_heat_step_neumann() {
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
-        preconditioner: cfd2::solver::gpu::structs::PreconditionerType::Jacobi,
+        preconditioner: cfd2::solver::options::PreconditionerType::Jacobi,
     };
 
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
+    let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))
         .expect("solver init");
     solver.set_dt(dt as f32);
 

@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
@@ -340,7 +339,7 @@ fn low_mach_equivalence_vortex_street() {
     let density = 1.0f32;
     let nu = 0.001f32;
 
-    let mut incomp = pollster::block_on(GpuUnifiedSolver::new(
+    let mut incomp = pollster::block_on(UnifiedSolver::new(
         &mesh,
         incompressible_momentum_model(),
         SolverConfig {
@@ -400,7 +399,7 @@ fn low_mach_equivalence_vortex_street() {
         return;
     }
 
-    let mut comp = pollster::block_on(GpuUnifiedSolver::new(
+    let mut comp = pollster::block_on(UnifiedSolver::new(
         &mesh,
         compressible_model(),
         SolverConfig {

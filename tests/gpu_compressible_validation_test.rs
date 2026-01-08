@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::RectangularChannel;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
 use cfd2::solver::model::compressible_model;
@@ -45,7 +44,7 @@ fn compressible_shock_tube_relaxes_discontinuity() {
         initial_energy += (p[i] as f64 / (gamma - 1.0)) * vol;
     }
 
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+    let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
         compressible_model(),
         SolverConfig {
@@ -125,7 +124,7 @@ fn compressible_acoustic_pulse_propagates() {
     }
 
     let p_initial = p.clone();
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+    let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
         compressible_model(),
         SolverConfig {

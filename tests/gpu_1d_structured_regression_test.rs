@@ -1,7 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::enums::GpuLowMachPrecondModel;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{
     generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh,
@@ -467,7 +465,7 @@ fn incompressible_structured_mesh_preserves_rest_state() {
         time_scheme: TimeScheme::BDF2,
         preconditioner: PreconditionerType::Jacobi,
     };
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+    let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
         incompressible_momentum_model(),
         config,
@@ -575,7 +573,7 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
             };
-            let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+            let mut solver = pollster::block_on(UnifiedSolver::new(
                 &mesh,
                 compressible_model(),
                 config,
@@ -775,7 +773,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     let dt = 0.01f32;
     let steps = 6usize;
 
-    let mut incomp = pollster::block_on(GpuUnifiedSolver::new(
+    let mut incomp = pollster::block_on(UnifiedSolver::new(
         &mesh,
         incompressible_momentum_model(),
         SolverConfig {
@@ -802,7 +800,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     incomp.initialize_history();
 
     let base_pressure = 25.0f32;
-    let mut comp = pollster::block_on(GpuUnifiedSolver::new(
+    let mut comp = pollster::block_on(UnifiedSolver::new(
         &mesh,
         compressible_model(),
         SolverConfig {
@@ -1043,7 +1041,7 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
             };
-            let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+            let mut solver = pollster::block_on(UnifiedSolver::new(
                 &mesh,
                 compressible_model(),
                 config,

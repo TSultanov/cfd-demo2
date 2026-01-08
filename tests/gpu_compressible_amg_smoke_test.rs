@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::generate_cut_cell_mesh;
 use cfd2::solver::model::compressible_model;
@@ -20,7 +19,7 @@ fn gpu_compressible_amg_smoke() {
     };
     let mesh = generate_cut_cell_mesh(&geo, 0.2, 0.2, 1.0, domain_size);
 
-    let mut solver = pollster::block_on(GpuUnifiedSolver::new(
+    let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
         compressible_model(),
         SolverConfig {

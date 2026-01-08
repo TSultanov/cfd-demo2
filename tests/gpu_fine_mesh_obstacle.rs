@@ -1,6 +1,5 @@
-use cfd2::solver::gpu::enums::TimeScheme;
-use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::{GpuUnifiedSolver, SolverConfig};
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -30,7 +29,7 @@ fn test_gpu_fine_mesh_obstacle() {
 
     pollster::block_on(async {
         println!("Initializing GPU Solver...");
-        let mut solver = GpuUnifiedSolver::new(
+        let mut solver = UnifiedSolver::new(
             &mesh,
             incompressible_momentum_model(),
             SolverConfig {

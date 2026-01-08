@@ -1,4 +1,4 @@
-use cfd2::solver::codegen::emit_incompressible_momentum_wgsl;
+use cfd2::solver::compiler::emit_incompressible_momentum_wgsl;
 
 fn main() {
     let base_dir = env!("CARGO_MANIFEST_DIR");

@@ -45,7 +45,10 @@ impl CompressiblePlanResources {
         }
 
         let values = self
-            .read_buffer_f32(&self.b_matrix_values, self.block_col_indices.len())
+            .read_buffer_f32(
+                self.port_space.buffer(self.matrix_ports.values),
+                self.block_col_indices.len(),
+            )
             .await;
 
         let num_cells = self.num_cells as usize;
@@ -105,9 +108,9 @@ impl CompressiblePlanResources {
             n,
             num_cells,
             max_restart,
-            &self.b_row_offsets,
-            &self.b_col_indices,
-            &self.b_matrix_values,
+            self.port_space.buffer(self.matrix_ports.row_offsets),
+            self.port_space.buffer(self.matrix_ports.col_indices),
+            self.port_space.buffer(self.matrix_ports.values),
             FgmresPrecondBindings::Diag {
                 diag_u: &b_diag_u,
                 diag_v: &b_diag_v,
@@ -165,8 +168,8 @@ impl CompressiblePlanResources {
                 cells: (block_dispatch_x, block_dispatch_y),
             };
 
-            let b_x = self.linear_port_space.buffer(self.linear_ports.x);
-            let b_rhs = self.linear_port_space.buffer(self.linear_ports.rhs);
+            let b_x = self.port_space.buffer(self.linear_ports.x);
+            let b_rhs = self.port_space.buffer(self.linear_ports.rhs);
             self.zero_buffer(b_x, n);
 
             let tol_abs = 1e-6f32;

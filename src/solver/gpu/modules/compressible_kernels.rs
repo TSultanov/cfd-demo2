@@ -6,7 +6,6 @@ use crate::solver::gpu::bindings::generated::{
 };
 use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
-use crate::solver::gpu::init::linear_solver::matrix::MatrixResources;
 
 use super::compressible_lowering::CompressibleLinearPorts;
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
@@ -52,7 +51,7 @@ impl CompressibleKernelsModule {
         device: &wgpu::Device,
         mesh: &MeshResources,
         fields: &CompressibleFieldResources,
-        matrix: &MatrixResources,
+        matrix_values: &wgpu::Buffer,
         port_space: &PortSpace,
         ports: CompressibleLinearPorts,
         _scalar_row_offsets: &[u32],
@@ -104,7 +103,7 @@ impl CompressibleKernelsModule {
             layout: &solver_layout,
             entries: &generated_assembly::WgpuBindGroup2Entries::new(
                 generated_assembly::WgpuBindGroup2EntriesParams {
-                    matrix_values: matrix.b_matrix_values.as_entire_buffer_binding(),
+                    matrix_values: matrix_values.as_entire_buffer_binding(),
                     rhs: b_rhs.as_entire_buffer_binding(),
                     scalar_row_offsets: b_scalar_row_offsets.as_entire_buffer_binding(),
                 },

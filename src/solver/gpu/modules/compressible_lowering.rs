@@ -2,7 +2,6 @@ use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::init::compressible_fields::{
     init_compressible_field_buffers, CompressibleFieldBuffers, PackedStateConfig,
 };
-use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::StateLayout;
 
@@ -16,6 +15,13 @@ pub struct CompressibleLinearPorts {
     pub scalar_row_offsets: Port<BufU32>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CompressibleMatrixPorts {
+    pub row_offsets: Port<BufU32>,
+    pub col_indices: Port<BufU32>,
+    pub values: Port<BufF32>,
+}
+
 pub struct CompressibleLowered {
     pub common: LoweredCommon,
     pub unknowns_per_cell: u32,
@@ -23,14 +29,13 @@ pub struct CompressibleLowered {
     pub state_stride: u32,
 
     pub ports: CompressibleLinearPorts,
+    pub matrix_ports: CompressibleMatrixPorts,
     pub fields: CompressibleFieldBuffers,
 
     pub scalar_row_offsets: Vec<u32>,
     pub scalar_col_indices: Vec<u32>,
     pub block_row_offsets: Vec<u32>,
     pub block_col_indices: Vec<u32>,
-
-    pub matrix: matrix::MatrixResources,
 }
 
 impl CompressibleLowered {
@@ -62,9 +67,16 @@ impl CompressibleLowered {
         let block_row_offsets = row_offsets.clone();
         let block_col_indices = col_indices.clone();
 
-        let matrix = matrix::init_matrix(device, &row_offsets, &col_indices);
+        let num_nonzeros = row_offsets.last().cloned().unwrap_or(0) as u64;
 
-        let (scalar_row_offsets_port, rhs_port, x_port) = {
+        let (
+            scalar_row_offsets_port,
+            rhs_port,
+            x_port,
+            block_row_offsets_port,
+            block_col_indices_port,
+            block_matrix_values_port,
+        ) = {
             let mut lowerer = common.lowerer(device);
             let scalar_row_offsets_port = lowerer.buffer_u32_init(
                 "compressible:scalar_row_offsets",
@@ -88,12 +100,44 @@ impl CompressibleLowered {
                     | wgpu::BufferUsages::COPY_SRC,
                 "Compressible Solution",
             );
-            (scalar_row_offsets_port, rhs_port, x_port)
+            let block_row_offsets_port = lowerer.buffer_u32_init(
+                "compressible:block_row_offsets",
+                &block_row_offsets,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                "Compressible Block Row Offsets",
+            );
+            let block_col_indices_port = lowerer.buffer_u32_init(
+                "compressible:block_col_indices",
+                &block_col_indices,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                "Compressible Block Col Indices",
+            );
+            let block_matrix_values_port = lowerer.buffer_f32(
+                "compressible:block_matrix_values",
+                num_nonzeros * 4,
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                "Compressible Block Matrix Values",
+            );
+            (
+                scalar_row_offsets_port,
+                rhs_port,
+                x_port,
+                block_row_offsets_port,
+                block_col_indices_port,
+                block_matrix_values_port,
+            )
         };
         let ports = CompressibleLinearPorts {
             rhs: rhs_port,
             x: x_port,
             scalar_row_offsets: scalar_row_offsets_port,
+        };
+        let matrix_ports = CompressibleMatrixPorts {
+            row_offsets: block_row_offsets_port,
+            col_indices: block_col_indices_port,
+            values: block_matrix_values_port,
         };
 
         Self {
@@ -102,12 +146,12 @@ impl CompressibleLowered {
             num_unknowns,
             state_stride,
             ports,
+            matrix_ports,
             fields,
             scalar_row_offsets,
             scalar_col_indices,
             block_row_offsets,
             block_col_indices,
-            matrix,
         }
     }
 }

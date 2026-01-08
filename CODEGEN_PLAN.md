@@ -19,6 +19,7 @@ One **model-driven** GPU solver pipeline with:
 - Scalar CG runtime wiring is centralized in `init_scalar_cg` to avoid per-plan buffer/pipeline plumbing.
 - Coupled FGMRES now reuses shared `fgmres` dispatch helpers (less plan-specific boilerplate).
 - FGMRES restart/init steps (g init, aux clears, basis0 normalization) are centralized on `FgmresWorkspace`.
+- Krylov/FGMRES dispatch grid sizing is centralized (`DispatchGrids::for_sizes`), reducing per-plan workgroup math.
 - `GpuPlanInstance` is universal and configured via typed `PlanParam`/`PlanParamValue` and queried via `PlanCapability` (no downcasts).
 - Linear debug path is supported across current plans (`set_linear_system`, `solve_linear_system_with_size`, `get_linear_solution`) with plan-appropriate Krylov under the hood (CG for scalar systems, FGMRES for compressible coupled).
 

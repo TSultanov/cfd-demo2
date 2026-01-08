@@ -84,16 +84,15 @@ impl GpuSolver {
             },
             "Coupled",
         );
-        let scalar_row_offsets = self.linear_port_space.buffer(self.linear_ports.row_offsets);
-        let scalar_col_indices = self.linear_port_space.buffer(self.linear_ports.col_indices);
-        let scalar_matrix_values = self.linear_port_space.buffer(self.linear_ports.values);
+        let pressure_system = LinearSystemView {
+            ports: self.linear_ports,
+            space: &self.linear_port_space,
+        };
         let precond = CoupledSchurModule::new(
             device,
             &fgmres,
             self.num_cells,
-            scalar_row_offsets,
-            scalar_col_indices,
-            scalar_matrix_values,
+            pressure_system,
             CoupledPressureSolveKind::Chebyshev,
         );
 
@@ -261,12 +260,14 @@ impl GpuSolver {
         workgroups: u32,
         n: u32,
     ) -> f32 {
-        let b_x = res.linear_port_space.buffer(res.linear_ports.x);
-        let b_rhs = res.linear_port_space.buffer(res.linear_ports.rhs);
+        let system = LinearSystemView {
+            ports: res.linear_ports,
+            space: &res.linear_port_space,
+        };
 
         let spmv_bg = self.create_vector_bind_group(
             fgmres,
-            b_x.as_entire_binding(),
+            system.x().as_entire_binding(),
             fgmres.fgmres.w_buffer().as_entire_binding(),
             fgmres.fgmres.temp_buffer().as_entire_binding(),
             "FGMRES Residual SpMV BG",
@@ -283,7 +284,7 @@ impl GpuSolver {
         self.write_scalars(fgmres, &[1.0, -1.0]);
         let residual_bg = self.create_vector_bind_group(
             fgmres,
-            b_rhs.as_entire_binding(),
+            system.rhs().as_entire_binding(),
             fgmres.fgmres.w_buffer().as_entire_binding(),
             target.clone(),
             "FGMRES Residual Axpby BG",

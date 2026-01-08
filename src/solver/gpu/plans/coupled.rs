@@ -472,8 +472,11 @@ impl GpuSolver {
 
                 // Read diagonal entries (sample first few) - DEBUG READS
                 let read_start = Instant::now();
+                let b_matrix_values = res
+                    .linear_port_space
+                    .buffer(res.linear_ports.values);
                 let matrix_vals = pollster::block_on(
-                    self.read_buffer_f32(&res.b_matrix_values, res.num_nonzeros),
+                    self.read_buffer_f32(b_matrix_values, res.num_nonzeros),
                 );
                 self.profiling_stats.record_location(
                     "coupled:debug_read_matrix",
@@ -483,8 +486,10 @@ impl GpuSolver {
                 );
 
                 let read_start = Instant::now();
-                let rhs_vals =
-                    pollster::block_on(self.read_buffer_f32(&res.b_rhs, self.num_cells * unknowns_per_cell));
+                let b_rhs = res.linear_port_space.buffer(res.linear_ports.rhs);
+                let rhs_vals = pollster::block_on(
+                    self.read_buffer_f32(b_rhs, self.num_cells * unknowns_per_cell),
+                );
                 self.profiling_stats.record_location(
                     "coupled:debug_read_rhs",
                     ProfileCategory::GpuRead,
@@ -493,8 +498,11 @@ impl GpuSolver {
                 );
 
                 let read_start = Instant::now();
+                let b_col_indices = res
+                    .linear_port_space
+                    .buffer(res.linear_ports.col_indices);
                 let col_indices =
-                    pollster::block_on(self.read_buffer_u32(&res.b_col_indices, res.num_nonzeros));
+                    pollster::block_on(self.read_buffer_u32(b_col_indices, res.num_nonzeros));
                 self.profiling_stats.record_location(
                     "coupled:debug_read_col_indices",
                     ProfileCategory::GpuRead,
@@ -505,8 +513,11 @@ impl GpuSolver {
                 // Find diagonal statistics
                 let num_cells = self.num_cells as usize;
                 let read_start = Instant::now();
+                let b_row_offsets = res
+                    .linear_port_space
+                    .buffer(res.linear_ports.row_offsets);
                 let row_offsets = pollster::block_on(
-                    self.read_buffer_u32(&res.b_row_offsets, self.num_cells * unknowns_per_cell + 1),
+                    self.read_buffer_u32(b_row_offsets, self.num_cells * unknowns_per_cell + 1),
                 );
                 self.profiling_stats.record_location(
                     "coupled:debug_read_row_offsets",

@@ -451,9 +451,12 @@ impl GpuSolver {
         workgroups: u32,
         n: u32,
     ) -> f32 {
+        let b_x = res.linear_port_space.buffer(res.linear_ports.x);
+        let b_rhs = res.linear_port_space.buffer(res.linear_ports.rhs);
+
         let spmv_bg = self.create_vector_bind_group(
             fgmres,
-            res.b_x.as_entire_binding(),
+            b_x.as_entire_binding(),
             fgmres.fgmres.w_buffer().as_entire_binding(),
             fgmres.fgmres.temp_buffer().as_entire_binding(),
             "FGMRES Residual SpMV BG",
@@ -470,7 +473,7 @@ impl GpuSolver {
         self.write_scalars(fgmres, &[1.0, -1.0]);
         let residual_bg = self.create_vector_bind_group(
             fgmres,
-            res.b_rhs.as_entire_binding(),
+            b_rhs.as_entire_binding(),
             fgmres.fgmres.w_buffer().as_entire_binding(),
             target.clone(),
             "FGMRES Residual Axpby BG",
@@ -603,7 +606,8 @@ impl GpuSolver {
 
         // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
 
-        let rhs_norm = self.gpu_norm(&fgmres, res.b_rhs.as_entire_binding(), n);
+        let b_rhs = res.linear_port_space.buffer(res.linear_ports.rhs);
+        let rhs_norm = self.gpu_norm(&fgmres, b_rhs.as_entire_binding(), n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
             break 'stats LinearSolverStats {
                 iterations: 0,
@@ -693,9 +697,10 @@ impl GpuSolver {
             };
 
             // Shared GPU FGMRES core (inner loop + triangular solve + solution update).
+            let b_x = res.linear_port_space.buffer(res.linear_ports.x);
             let solve = fgmres_solve_once_with_preconditioner(
                 &core,
-                &res.b_x,
+                b_x,
                 rhs_norm,
                 params,
                 iter_params,

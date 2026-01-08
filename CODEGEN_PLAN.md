@@ -47,7 +47,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added a typed buffer “port” system for lowered GPU resources (`PortSpace`) and migrated compressible linear RHS/X/scalar-row-offsets to it (`src/solver/gpu/modules/ports.rs`, `src/solver/gpu/modules/compressible_lowering.rs`).
 - Migrated compressible block-CSR buffers (row/col/value) into `PortSpace` and removed `MatrixResources` dependency from `CompressibleKernelsModule` (`src/solver/gpu/modules/compressible_lowering.rs`, `src/solver/gpu/modules/compressible_kernels.rs`).
 - Added typed ports for the legacy scalar linear system (CSR + RHS + X) and plumbed them through `GpuSolver` initialization as a no-behavior-change step toward module-owned resources (`src/solver/gpu/modules/linear_system.rs`, `src/solver/gpu/init/linear_solver/mod.rs`, `src/solver/gpu/structs.rs`).
-- Added typed ports for the coupled block linear system (block-CSR + RHS + X) and started consuming them from coupled FGMRES initialization (`src/solver/gpu/init/linear_solver/mod.rs`, `src/solver/gpu/structs.rs`, `src/solver/gpu/plans/coupled_fgmres.rs`).
+- Added typed ports for the coupled block linear system (block-CSR + RHS + X), migrated coupled FGMRES + coupled debug reads to consume them, and removed duplicate matrix/RHS/X buffer fields from `CoupledSolverResources` (`src/solver/gpu/init/linear_solver/mod.rs`, `src/solver/gpu/structs.rs`, `src/solver/gpu/plans/coupled_fgmres.rs`, `src/solver/gpu/plans/coupled.rs`).
 - Encapsulated the scalar CG solve sequence into a `ScalarCgModule` (owning its bindgroups/pipelines and using shared linear buffers) and migrated `GpuSolver::solve_linear_system_cg*` to delegate to it (`src/solver/gpu/modules/scalar_cg.rs`, `src/solver/gpu/linear_solver/common.rs`).
 - Added a compute-only `ModuleGraph` executor and migrated the compressible explicit KT step’s compute dispatches to it (`src/solver/gpu/modules/graph.rs`, `src/solver/gpu/plans/compressible.rs`).
 - Encapsulated incompressible coupled kernels (prepare/assembly/update) into `IncompressibleKernelsModule` (module-owned bind groups + pipelines) and deleted the now-unused `init/physics.rs` pipeline plumbing (`src/solver/gpu/modules/incompressible_kernels.rs`, `src/solver/gpu/plans/coupled.rs`, `src/solver/gpu/init/mod.rs`).
@@ -179,8 +179,8 @@ Goal: remove solver-owned pipelines/bind-groups and move *all GPU dispatch* behi
    - Standardize on `ModuleGraph` for compute dispatch (keep `ExecutionPlan` host/plugin steps).
    - Status: `ExecutionPlan` supports module graphs directly and `KernelGraph` has been deleted.
 3. **Ports everywhere**
-   - Move coupled block-CSR + RHS/X into `PortSpace` like compressible (currently coupled has module preconditioners, but core coupled buffers are still embedded in `CoupledSolverResources`).
-   - Migrate `GpuGenericCoupledSolver` to use the same port+module pattern (no bespoke bind group wiring).
+   - Status: coupled block-CSR + RHS/X are in `PortSpace` and are consumed via `LinearSystemPorts` (remaining coupled-only preconditioner/work buffers still live in `CoupledSolverResources`).
+   - Continue migrating `GpuGenericCoupledSolver` and remaining kernels to use ports (and eventually eliminate bespoke bind-group wiring by moving bind-group creation into modules/lowerers).
 4. **Single Krylov module**
    - Replace per-family FGMRES/GMRES glue with one `KrylovSolveModule` that owns its work buffers and bind groups and consumes a `LinearSystemPorts` + preconditioner module.
 5. **Collapse backend variants**

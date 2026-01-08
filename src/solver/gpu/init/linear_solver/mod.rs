@@ -741,11 +741,6 @@ fn init_coupled_resources(
 
     CoupledSolverResources {
         num_unknowns: num_coupled_cells,
-        b_row_offsets: matrix_res.b_row_offsets,
-        b_col_indices: matrix_res.b_col_indices,
-        b_matrix_values: matrix_res.b_matrix_values,
-        b_rhs: state_res.b_rhs,
-        b_x: state_res.b_x,
         b_r: state_res.b_r,
         b_r0: state_res.b_r0,
         b_p_solver: state_res.b_p_solver,

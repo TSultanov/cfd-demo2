@@ -6,9 +6,8 @@ use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::StateLayout;
-use wgpu::util::DeviceExt;
 
-use super::ports::{BufF32, BufU32, LoweredBuffers, Port, PortRegistry};
+use super::ports::{BufF32, BufU32, LoweredBuffers, Lowerer, Port};
 
 #[derive(Clone, Copy, Debug)]
 pub struct CompressibleLinearPorts {
@@ -71,44 +70,35 @@ impl CompressibleLowered {
 
         let matrix = matrix::init_matrix(device, &row_offsets, &col_indices);
 
-        let mut registry = PortRegistry::new();
+        let mut lowerer = Lowerer::new(device);
+        let scalar_row_offsets_port = lowerer.buffer_u32_init(
+            "compressible:scalar_row_offsets",
+            &mesh_res.row_offsets,
+            wgpu::BufferUsages::STORAGE,
+            "Compressible Scalar Row Offsets",
+        );
+        let rhs_port = lowerer.buffer_f32(
+            "compressible:rhs",
+            num_unknowns as u64 * 4,
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            "Compressible RHS",
+        );
+        let x_port = lowerer.buffer_f32(
+            "compressible:x",
+            num_unknowns as u64 * 4,
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            "Compressible Solution",
+        );
         let ports = CompressibleLinearPorts {
-            rhs: registry.port("compressible:rhs"),
-            x: registry.port("compressible:x"),
-            scalar_row_offsets: registry.port("compressible:scalar_row_offsets"),
+            rhs: rhs_port,
+            x: x_port,
+            scalar_row_offsets: scalar_row_offsets_port,
         };
-
-        let mut buffers = LoweredBuffers::new();
-        buffers.insert(
-            ports.scalar_row_offsets,
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Compressible Scalar Row Offsets"),
-                contents: bytemuck::cast_slice(&mesh_res.row_offsets),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
-        );
-        buffers.insert(
-            ports.rhs,
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Compressible RHS"),
-                size: num_unknowns as u64 * 4,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }),
-        );
-        buffers.insert(
-            ports.x,
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Compressible Solution"),
-                size: num_unknowns as u64 * 4,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }),
-        );
+        let buffers: LoweredBuffers = lowerer.finish();
 
         Self {
             num_cells,

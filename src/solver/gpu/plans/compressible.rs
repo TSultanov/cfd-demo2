@@ -9,6 +9,7 @@ use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, 
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::readback::StagingBufferCache;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -116,6 +117,7 @@ impl CompressibleProfile {
 
 pub(crate) struct CompressiblePlanResources {
     pub context: GpuContext,
+    pub(crate) readback_cache: StagingBufferCache,
     pub num_cells: u32,
     pub num_faces: u32,
     pub num_unknowns: u32,
@@ -492,6 +494,7 @@ impl CompressiblePlanResources {
 
         let mut solver = Self {
             context,
+            readback_cache: Default::default(),
             num_cells,
             num_faces,
             num_unknowns,
@@ -730,12 +733,9 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        let staging = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Compressible Staging Buffer"),
-            size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = self
+            .readback_cache
+            .take_or_create(&self.context.device, size, "Compressible Staging Buffer (cached)");
 
         let mut encoder =
             self.context
@@ -758,6 +758,7 @@ impl CompressiblePlanResources {
         rx.recv().ok().and_then(|v| v.ok()).unwrap();
         let data = slice.get_mapped_range().to_vec();
         staging.unmap();
+        self.readback_cache.put(size, staging);
         data
     }
 

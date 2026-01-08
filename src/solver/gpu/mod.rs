@@ -11,6 +11,7 @@ pub mod model_defaults;
 pub mod modules;
 pub(crate) mod plans;
 pub mod profiling;
+pub mod readback;
 pub mod structs;
 pub mod unified_solver;
 

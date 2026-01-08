@@ -153,28 +153,18 @@ impl GpuSolver {
         use std::time::Instant;
 
         // 1. Obtain a cached staging buffer or create one if absent
-        let staging_buffer = {
-            if let Some(buf) = self.staging_buffers.lock().unwrap().remove(&size) {
-                buf
-            } else {
-                let t0 = Instant::now();
-                let buf = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Staging Buffer (cached)"),
-                    size,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                self.profiling_stats
-                    .record_gpu_alloc("read_buffer:staging", size);
-                self.profiling_stats.record_location(
-                    "read_buffer:create_staging",
-                    ProfileCategory::GpuResourceCreation,
-                    t0.elapsed(),
-                    0,
-                );
-                buf
-            }
-        };
+        let t0 = Instant::now();
+        let staging_buffer = self
+            .readback_cache
+            .take_or_create(&self.context.device, size, "Staging Buffer (cached)");
+        self.profiling_stats
+            .record_gpu_alloc("read_buffer:staging", size);
+        self.profiling_stats.record_location(
+            "read_buffer:create_staging",
+            ProfileCategory::GpuResourceCreation,
+            t0.elapsed(),
+            0,
+        );
 
         // 2. Encode and submit copy command
         let t1 = Instant::now();
@@ -241,10 +231,7 @@ impl GpuSolver {
             size,
         );
         // 7. Return staging buffer to cache for reuse
-        {
-            let mut cache = self.staging_buffers.lock().unwrap();
-            cache.insert(size, staging_buffer);
-        }
+        self.readback_cache.put(size, staging_buffer);
 
         result
     }

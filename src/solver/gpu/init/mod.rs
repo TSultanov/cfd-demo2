@@ -188,7 +188,7 @@ impl GpuSolver {
             steady_state_count: 0,
             should_stop: false,
             profiling_stats: Arc::new(ProfilingStats::new()),
-            staging_buffers: Mutex::new(std::collections::HashMap::new()),
+            readback_cache: Default::default(),
             coupled_init_prepare_graph: GpuSolver::build_coupled_init_prepare_graph(),
             coupled_prepare_assembly_graph: GpuSolver::build_coupled_prepare_assembly_graph(),
             coupled_assembly_graph: GpuSolver::build_coupled_assembly_graph(),

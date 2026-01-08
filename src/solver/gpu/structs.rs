@@ -5,10 +5,10 @@ use super::modules::linear_system::LinearSystemPorts;
 use super::modules::ports::PortSpace;
 use super::plans::coupled_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
+use super::readback::StagingBufferCache;
 use super::modules::graph::ModuleGraph;
 use bytemuck::{Pod, Zeroable};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -269,7 +269,7 @@ pub(crate) struct GpuSolver {
     pub profiling_stats: Arc<ProfilingStats>,
 
     // Cache of persistent staging buffers for GPU->CPU reads, keyed by exact size in bytes
-    pub staging_buffers: Mutex<HashMap<u64, wgpu::Buffer>>,
+    pub readback_cache: StagingBufferCache,
 
     // Prebuilt compute graphs for coupled solver dispatch (module-based).
     pub coupled_init_prepare_graph: ModuleGraph<IncompressibleKernelsModule>,

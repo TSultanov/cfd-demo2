@@ -3,6 +3,7 @@ pub mod compressible_krylov;
 pub mod compressible_kernels;
 pub mod compressible_lowering;
 pub mod incompressible_kernels;
+pub mod generic_coupled_kernels;
 pub mod krylov_precond;
 pub mod graph;
 pub mod ports;

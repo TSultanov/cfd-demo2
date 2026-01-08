@@ -1,6 +1,10 @@
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::model::ModelSpec;
 use bytemuck::cast_slice;
+use crate::solver::gpu::modules::generic_coupled_kernels::{
+    GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
+};
+use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use wgpu::util::DeviceExt;
 
 macro_rules! with_generic_coupled_kernels {
@@ -36,24 +40,34 @@ pub(crate) struct GpuGenericCoupledSolver {
     pub linear: GpuSolver,
     model: ModelSpec,
 
-    state_step_index: usize,
     state_buffers: Vec<wgpu::Buffer>,
-
-    bg_mesh: wgpu::BindGroup,
-    bg_fields_ping_pong: Vec<wgpu::BindGroup>,
-    bg_solver: wgpu::BindGroup,
-    bg_bc: wgpu::BindGroup,
-    bg_update_state_ping_pong: Vec<wgpu::BindGroup>,
-    bg_update_solution: wgpu::BindGroup,
-
-    pipeline_assembly: wgpu::ComputePipeline,
-    pipeline_update: wgpu::ComputePipeline,
+    kernels: GenericCoupledKernelsModule,
+    assembly_graph: ModuleGraph<GenericCoupledKernelsModule>,
+    update_graph: ModuleGraph<GenericCoupledKernelsModule>,
 
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
 }
 
 impl GpuGenericCoupledSolver {
+    fn build_assembly_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
+        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
+            label: "generic_coupled:assembly",
+            pipeline: GenericCoupledPipeline::Assembly,
+            bind: GenericCoupledBindGroups::Assembly,
+            dispatch: DispatchKind::Cells,
+        })])
+    }
+
+    fn build_update_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
+        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
+            label: "generic_coupled:update",
+            pipeline: GenericCoupledPipeline::Update,
+            bind: GenericCoupledBindGroups::Update,
+            dispatch: DispatchKind::Cells,
+        })])
+    }
+
     pub async fn new(
         mesh: &crate::solver::mesh::Mesh,
         model: ModelSpec,
@@ -233,16 +247,19 @@ impl GpuGenericCoupledSolver {
             Ok(Self {
                 linear,
                 model,
-                state_step_index: 0,
                 state_buffers,
-                bg_mesh,
-                bg_fields_ping_pong,
-                bg_solver,
-                bg_bc,
-                bg_update_state_ping_pong,
-                bg_update_solution,
-                pipeline_assembly,
-                pipeline_update,
+                kernels: GenericCoupledKernelsModule::new(
+                    bg_mesh,
+                    bg_fields_ping_pong,
+                    bg_solver,
+                    bg_bc,
+                    bg_update_state_ping_pong,
+                    bg_update_solution,
+                    pipeline_assembly,
+                    pipeline_update,
+                ),
+                assembly_graph: GpuGenericCoupledSolver::build_assembly_graph(),
+                update_graph: GpuGenericCoupledSolver::build_update_graph(),
                 _b_bc_kind: b_bc_kind,
                 _b_bc_value: b_bc_value,
             })
@@ -254,67 +271,28 @@ impl GpuGenericCoupledSolver {
     }
 
     pub fn state_buffer(&self) -> &wgpu::Buffer {
-        let (idx_state, _, _) = ping_pong_indices(self.state_step_index);
+        let (idx_state, _, _) = ping_pong_indices(self.kernels.step_index());
         &self.state_buffers[idx_state]
     }
 
     pub fn step(&mut self) -> LinearSolverStats {
-        let workgroup = 64u32;
         let num_cells = self.linear.num_cells;
-        let dispatch = (num_cells + workgroup - 1) / workgroup;
+        let runtime = RuntimeDims {
+            num_cells,
+            num_faces: 0,
+        };
 
-        self.state_step_index = (self.state_step_index + 1) % 3;
+        self.kernels.set_step_index(self.kernels.step_index() + 1);
         self.linear.constants.time += self.linear.constants.dt;
         self.linear.update_constants();
 
-        let bg_fields = &self.bg_fields_ping_pong[self.state_step_index];
-        let bg_update_state = &self.bg_update_state_ping_pong[self.state_step_index];
-
-        let mut encoder = self
-            .linear
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GenericCoupled assembly+update"),
-            });
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("GenericCoupled assembly"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline_assembly);
-            pass.set_bind_group(0, &self.bg_mesh, &[]);
-            pass.set_bind_group(1, bg_fields, &[]);
-            pass.set_bind_group(2, &self.bg_solver, &[]);
-            pass.set_bind_group(3, &self.bg_bc, &[]);
-            pass.dispatch_workgroups(dispatch, 1, 1);
-        }
-
-        self.linear.context.queue.submit(Some(encoder.finish()));
+        self.assembly_graph
+            .execute(&self.linear.context, &self.kernels, runtime);
 
         let stats = self.linear.solve_linear_system_cg(400, 1e-6);
 
-        let mut encoder = self
-            .linear
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GenericCoupled update"),
-            });
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("GenericCoupled update"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline_update);
-            pass.set_bind_group(0, bg_update_state, &[]);
-            pass.set_bind_group(1, &self.bg_update_solution, &[]);
-            pass.dispatch_workgroups(dispatch, 1, 1);
-        }
-
-        self.linear.context.queue.submit(Some(encoder.finish()));
+        self.update_graph
+            .execute(&self.linear.context, &self.kernels, runtime);
         stats
     }
 
@@ -351,7 +329,7 @@ impl GpuGenericCoupledSolver {
             .offset_for(field)
             .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
 
-        let (idx_state, _, _) = ping_pong_indices(self.state_step_index);
+        let (idx_state, _, _) = ping_pong_indices(self.kernels.step_index());
         let buf = &self.state_buffers[idx_state];
         let bytes = (self.linear.num_cells as u64) * stride as u64 * 4;
         let raw = self.linear.read_buffer(buf, bytes).await;

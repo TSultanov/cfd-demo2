@@ -9,6 +9,9 @@ use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, 
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::plans::plan_instance::{
+    FgmresSizing, GpuPlanInstance, PlanFuture, PlanParam, PlanParamValue,
+};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::StagingBufferCache;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
@@ -927,5 +930,181 @@ fn ping_pong_indices(step_index: usize) -> (usize, usize, usize) {
         1 => (2, 0, 1),
         2 => (1, 2, 0),
         _ => (0, 1, 2),
+    }
+}
+
+impl GpuPlanInstance for CompressiblePlanResources {
+    fn num_cells(&self) -> u32 {
+        self.num_cells
+    }
+
+    fn time(&self) -> f32 {
+        self.constants.time
+    }
+
+    fn dt(&self) -> f32 {
+        self.constants.dt
+    }
+
+    fn state_buffer(&self) -> &wgpu::Buffer {
+        &self.b_state
+    }
+
+    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+        Arc::clone(&self.profiling_stats)
+    }
+
+    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
+        match (param, value) {
+            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+                self.set_dt(dt);
+                Ok(())
+            }
+            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+                self.set_scheme(scheme.gpu_id());
+                Ok(())
+            }
+            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+                self.set_time_scheme(scheme as u32);
+                Ok(())
+            }
+            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+                self.set_precond_type(preconditioner);
+                Ok(())
+            }
+            (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
+                self.set_viscosity(mu);
+                Ok(())
+            }
+            (PlanParam::AlphaU, PlanParamValue::F32(alpha)) => {
+                self.set_alpha_u(alpha);
+                Ok(())
+            }
+            (PlanParam::InletVelocity, PlanParamValue::F32(velocity)) => {
+                self.set_inlet_velocity(velocity);
+                Ok(())
+            }
+            (PlanParam::Dtau, PlanParamValue::F32(dtau)) => {
+                self.set_dtau(dtau);
+                Ok(())
+            }
+            (PlanParam::OuterIters, PlanParamValue::Usize(iters)) => {
+                self.set_outer_iters(iters);
+                Ok(())
+            }
+            (PlanParam::LowMachModel, PlanParamValue::LowMachModel(model)) => {
+                self.set_precond_model(model as u32);
+                Ok(())
+            }
+            (PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta)) => {
+                self.set_precond_theta_floor(theta);
+                Ok(())
+            }
+            (PlanParam::NonconvergedRelax, PlanParamValue::F32(relax)) => {
+                self.set_nonconverged_relax(relax);
+                Ok(())
+            }
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                if enable {
+                    self.profiling_stats.enable();
+                } else {
+                    self.profiling_stats.disable();
+                }
+                Ok(())
+            }
+            _ => Err("parameter is not supported by this plan".into()),
+        }
+    }
+
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        CompressiblePlanResources::write_state_bytes(self, bytes);
+        Ok(())
+    }
+
+    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        Ok(self.step_with_stats())
+    }
+
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        if matrix_values.len() != self.block_col_indices.len() {
+            return Err(format!(
+                "matrix_values length {} does not match num_nonzeros {}",
+                matrix_values.len(),
+                self.block_col_indices.len()
+            ));
+        }
+        if rhs.len() != self.num_unknowns as usize {
+            return Err(format!(
+                "rhs length {} does not match num_unknowns {}",
+                rhs.len(),
+                self.num_unknowns
+            ));
+        }
+        self.context.queue.write_buffer(
+            self.port_space.buffer(self.system_ports.values),
+            0,
+            bytemuck::cast_slice(matrix_values),
+        );
+        self.context.queue.write_buffer(
+            self.port_space.buffer(self.system_ports.rhs),
+            0,
+            bytemuck::cast_slice(rhs),
+        );
+        Ok(())
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        if n != self.num_unknowns {
+            return Err(format!(
+                "requested solve size {} does not match num_unknowns {}",
+                n, self.num_unknowns
+            ));
+        }
+        // Compressible uses FGMRES for coupled systems; keep the unified-plan API surface
+        // but use the plan-appropriate Krylov solve under the hood.
+        let max_restart = max_iters.min(64) as usize;
+        let stats = self.solve_compressible_fgmres(max_restart, tol);
+        Ok(stats)
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move {
+            let raw = self
+                .read_buffer(
+                    self.port_space.buffer(self.system_ports.x),
+                    (self.num_unknowns as u64) * 4,
+                )
+                .await;
+            Ok(bytemuck::cast_slice(&raw).to_vec())
+        })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(self.num_unknowns)
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        let n = self.num_unknowns;
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: (n + 63) / 64,
+        })
+    }
+
+    fn step(&mut self) {
+        crate::solver::gpu::plans::compressible::plan::step(self);
+    }
+
+    fn initialize_history(&self) {
+        CompressiblePlanResources::initialize_history(self);
+    }
+
+    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
+        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
     }
 }

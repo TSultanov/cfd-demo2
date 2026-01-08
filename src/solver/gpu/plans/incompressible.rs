@@ -3,8 +3,11 @@ use std::sync::Arc;
 
 use super::coupled_fgmres::FgmresResources;
 use crate::solver::gpu::model_defaults::default_incompressible_model;
+use crate::solver::gpu::plans::plan_instance::{
+    FgmresSizing, GpuPlanInstance, PlanAction, PlanFuture, PlanParam, PlanParamValue, PlanStepStats,
+};
 use crate::solver::gpu::profiling::ProfilingStats;
-use crate::solver::gpu::structs::GpuSolver;
+use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
 
@@ -349,5 +352,166 @@ impl GpuSolver {
         record(self, "fgmres:y", fgmres.fgmres.y_buffer());
         record(self, "fgmres:iter_params", fgmres.fgmres.iter_params_buffer());
         record(self, "fgmres:staging_scalar", fgmres.fgmres.staging_scalar_buffer());
+    }
+}
+
+impl GpuPlanInstance for GpuSolver {
+    fn num_cells(&self) -> u32 {
+        self.num_cells
+    }
+
+    fn time(&self) -> f32 {
+        self.constants.time
+    }
+
+    fn dt(&self) -> f32 {
+        self.constants.dt
+    }
+
+    fn state_buffer(&self) -> &wgpu::Buffer {
+        &self.b_state
+    }
+
+    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
+        match (param, value) {
+            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+                self.set_dt(dt);
+                Ok(())
+            }
+            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+                self.set_scheme(scheme.gpu_id());
+                Ok(())
+            }
+            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+                self.set_time_scheme(scheme as u32);
+                Ok(())
+            }
+            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+                self.set_precond_type(preconditioner);
+                Ok(())
+            }
+            (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
+                self.set_viscosity(mu);
+                Ok(())
+            }
+            (PlanParam::Density, PlanParamValue::F32(rho)) => {
+                self.set_density(rho);
+                Ok(())
+            }
+            (PlanParam::AlphaU, PlanParamValue::F32(alpha)) => {
+                self.set_alpha_u(alpha);
+                Ok(())
+            }
+            (PlanParam::AlphaP, PlanParamValue::F32(alpha)) => {
+                self.set_alpha_p(alpha);
+                Ok(())
+            }
+            (PlanParam::InletVelocity, PlanParamValue::F32(velocity)) => {
+                self.set_inlet_velocity(velocity);
+                Ok(())
+            }
+            (PlanParam::RampTime, PlanParamValue::F32(time)) => {
+                self.set_ramp_time(time);
+                Ok(())
+            }
+            (PlanParam::IncompressibleOuterCorrectors, PlanParamValue::U32(iters)) => {
+                self.n_outer_correctors = iters.max(1);
+                Ok(())
+            }
+            (PlanParam::IncompressibleShouldStop, PlanParamValue::Bool(value)) => {
+                self.should_stop = value;
+                Ok(())
+            }
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                self.enable_detailed_profiling(enable);
+                Ok(())
+            }
+            _ => Err("parameter is not supported by this plan".into()),
+        }
+    }
+
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        for buffer in &self.state_buffers {
+            self.context.queue.write_buffer(buffer, 0, bytes);
+        }
+        Ok(())
+    }
+
+    fn step_stats(&self) -> PlanStepStats {
+        PlanStepStats {
+            should_stop: Some(self.should_stop),
+            degenerate_count: Some(self.degenerate_count),
+            outer_iterations: Some(*self.outer_iterations.lock().unwrap()),
+            outer_residual_u: Some(*self.outer_residual_u.lock().unwrap()),
+            outer_residual_p: Some(*self.outer_residual_p.lock().unwrap()),
+            linear_stats: Some((
+                *self.stats_ux.lock().unwrap(),
+                *self.stats_uy.lock().unwrap(),
+                *self.stats_p.lock().unwrap(),
+            )),
+        }
+    }
+
+    fn perform(&self, action: PlanAction) -> Result<(), String> {
+        match action {
+            PlanAction::StartProfilingSession => {
+                self.start_profiling_session();
+                Ok(())
+            }
+            PlanAction::EndProfilingSession => {
+                self.end_profiling_session();
+                Ok(())
+            }
+            PlanAction::PrintProfilingReport => {
+                self.print_profiling_report();
+                Ok(())
+            }
+        }
+    }
+
+    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+        self.get_profiling_stats()
+    }
+
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        GpuSolver::set_linear_system(self, matrix_values, rhs);
+        Ok(())
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        Ok(GpuSolver::solve_linear_system_cg_with_size(self, n, max_iters, tol))
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move { Ok(GpuSolver::get_linear_solution(self).await) })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(GpuSolver::coupled_unknowns(self))
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        let n = GpuSolver::coupled_unknowns(self);
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: crate::solver::gpu::linear_solver::fgmres::workgroups_for_size(n),
+        })
+    }
+
+    fn step(&mut self) {
+        crate::solver::gpu::plans::coupled::plan::step_coupled(self);
+    }
+
+    fn initialize_history(&self) {
+        GpuSolver::initialize_history(self);
+    }
+
+    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
+        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
     }
 }

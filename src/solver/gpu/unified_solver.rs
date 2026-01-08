@@ -1,6 +1,5 @@
-use crate::solver::gpu::plans::plan_instance::{
-    build_plan_instance, GpuPlanInstance, PlanAction, PlanParam, PlanParamValue,
-};
+use crate::solver::gpu::plans::build_plan_instance;
+use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanAction, PlanParam, PlanParamValue};
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::profiling::ProfilingStats;

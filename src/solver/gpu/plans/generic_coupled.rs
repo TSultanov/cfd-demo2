@@ -1,4 +1,8 @@
 use crate::solver::gpu::runtime::GpuScalarRuntime;
+use crate::solver::gpu::plans::plan_instance::{
+    FgmresSizing, GpuPlanInstance, PlanFuture, PlanParam, PlanParamValue,
+};
+use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
 use bytemuck::cast_slice;
@@ -6,6 +10,7 @@ use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
 };
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 macro_rules! with_generic_coupled_kernels {
@@ -359,5 +364,109 @@ impl GpuGenericCoupledSolver {
         Ok((0..self.runtime.num_cells as usize)
             .map(|i| data[i * stride + offset] as f64)
             .collect())
+    }
+}
+
+impl GpuPlanInstance for GpuGenericCoupledSolver {
+    fn num_cells(&self) -> u32 {
+        self.runtime.num_cells
+    }
+
+    fn time(&self) -> f32 {
+        self.runtime.constants.time
+    }
+
+    fn dt(&self) -> f32 {
+        self.runtime.constants.dt
+    }
+
+    fn state_buffer(&self) -> &wgpu::Buffer {
+        GpuGenericCoupledSolver::state_buffer(self)
+    }
+
+    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+        Arc::clone(&self.runtime.profiling_stats)
+    }
+
+    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
+        match (param, value) {
+            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+                self.runtime.set_dt(dt);
+                Ok(())
+            }
+            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+                self.runtime.set_scheme(scheme.gpu_id());
+                Ok(())
+            }
+            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+                self.runtime.set_time_scheme(scheme as u32);
+                Ok(())
+            }
+            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(_preconditioner)) => {
+                // Generic coupled currently doesn't implement preconditioners.
+                Ok(())
+            }
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                if enable {
+                    self.runtime.profiling_stats.enable();
+                } else {
+                    self.runtime.profiling_stats.disable();
+                }
+                Ok(())
+            }
+            _ => Err("parameter is not supported by this plan".into()),
+        }
+    }
+
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        GpuGenericCoupledSolver::write_state_bytes(self, bytes);
+        Ok(())
+    }
+
+    fn step(&mut self) {
+        let _ = GpuGenericCoupledSolver::step(self);
+    }
+
+    fn initialize_history(&self) {}
+
+    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
+        Box::pin(async move { self.runtime.read_buffer(self.state_buffer(), bytes).await })
+    }
+
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        self.runtime.set_linear_system(matrix_values, rhs)
+    }
+
+    fn solve_linear_system_cg_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        if n != self.runtime.num_cells {
+            return Err(format!(
+                "requested solve size {} does not match num_cells {}",
+                n, self.runtime.num_cells
+            ));
+        }
+        Ok(self
+            .runtime
+            .solve_linear_system_cg_with_size(n, max_iters, tol))
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move { self.runtime.get_linear_solution(self.runtime.num_cells).await })
+    }
+
+    fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(self.runtime.num_cells)
+    }
+
+    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
+        let n = self.runtime.num_cells;
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: (n + 63) / 64,
+        })
     }
 }

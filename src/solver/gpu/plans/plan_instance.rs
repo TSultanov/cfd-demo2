@@ -115,7 +115,12 @@ pub(crate) trait GpuPlanInstance: Send {
 
     fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
         self.step();
-        Ok(Vec::new())
+        let stats = self.step_stats();
+        if let Some((a, b, c)) = stats.linear_stats {
+            Ok(vec![a, b, c])
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     fn set_linear_system(&self, _matrix_values: &[f32], _rhs: &[f32]) -> Result<(), String> {

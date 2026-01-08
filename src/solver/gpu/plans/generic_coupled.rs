@@ -433,6 +433,10 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
         Ok(())
     }
 
+    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        Ok(vec![GpuGenericCoupledSolver::step(self)])
+    }
+
     fn step(&mut self) {
         let _ = GpuGenericCoupledSolver::step(self);
     }

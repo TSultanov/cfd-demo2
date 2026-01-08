@@ -1,10 +1,8 @@
-use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
-use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanAction, PlanParam, PlanParamValue,
+    build_plan_instance, GpuPlanInstance, PlanAction, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
-use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
@@ -44,18 +42,8 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
-        let mut plan: Box<dyn GpuPlanInstance> = match &model.fields {
-            ModelFields::Incompressible(_) => {
-                Box::new(GpuSolver::new(mesh, device, queue).await)
-            }
-            ModelFields::Compressible(_) => {
-                Box::new(CompressiblePlanResources::new(mesh, device, queue).await)
-            }
-            ModelFields::GenericCoupled(_) => {
-                let solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
-                Box::new(solver)
-            }
-        };
+        let mut plan: Box<dyn GpuPlanInstance> =
+            build_plan_instance(mesh, model.clone(), device, queue).await?;
         plan.set_advection_scheme(config.advection_scheme);
         plan.set_time_scheme(config.time_scheme);
         plan.set_preconditioner(config.preconditioner);

@@ -17,6 +17,7 @@ One **model-driven** GPU solver pipeline with:
 - Linear system resources are increasingly passed as typed ports/views (`LinearSystemPorts`, `LinearSystemView`) instead of raw buffers.
 - Readback staging buffers are shared via `StagingBufferCache`.
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
+- Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/plan_instance.rs`), keeping `UnifiedSolver` orchestration generic.
 
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering is not unified.

@@ -3,6 +3,8 @@ use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
+use crate::solver::mesh::Mesh;
+use crate::solver::model::{ModelFields, ModelSpec};
 use crate::solver::scheme::Scheme;
 use std::any::Any;
 use std::future::Future;
@@ -457,4 +459,23 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
     fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
         Box::pin(async move { self.linear.read_buffer(self.state_buffer(), bytes).await })
     }
+}
+
+pub(crate) async fn build_plan_instance(
+    mesh: &Mesh,
+    model: ModelSpec,
+    device: Option<wgpu::Device>,
+    queue: Option<wgpu::Queue>,
+) -> Result<Box<dyn GpuPlanInstance>, String> {
+    let plan: Box<dyn GpuPlanInstance> = match &model.fields {
+        ModelFields::Incompressible(_) => Box::new(GpuSolver::new(mesh, device, queue).await),
+        ModelFields::Compressible(_) => {
+            Box::new(CompressiblePlanResources::new(mesh, device, queue).await)
+        }
+        ModelFields::GenericCoupled(_) => {
+            let solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
+            Box::new(solver)
+        }
+    };
+    Ok(plan)
 }

@@ -1,6 +1,10 @@
 use crate::solver::gpu::bindings;
 use super::compressible::CompressiblePlanResources;
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
+use crate::solver::gpu::linear_solver::fgmres::{
+    fgmres_solve_once_with_preconditioner, write_params, write_scalars, write_zeros, FgmresCore,
+    FgmresSolveOnceConfig, IterParams, RawFgmresParams,
+};
 use crate::solver::gpu::preconditioners::CompressibleKrylovPreconditioner;
 use crate::solver::gpu::structs::LinearSolverStats;
 use bytemuck::{bytes_of, Pod, Zeroable};
@@ -69,28 +73,6 @@ pub struct CompressibleFgmresResources {
     pub pipeline_pack_component: wgpu::ComputePipeline,
     pub pipeline_unpack_component: wgpu::ComputePipeline,
     pub amg_resources: Option<AmgResources>,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct RawFgmresParams {
-    n: u32,
-    num_cells: u32,
-    num_iters: u32,
-    omega: f32,
-    dispatch_x: u32,
-    max_restart: u32,
-    column_offset: u32,
-    _pad3: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct IterParams {
-    current_idx: u32,
-    max_restart: u32,
-    _pad1: u32,
-    _pad2: u32,
 }
 
 #[repr(C)]
@@ -1094,7 +1076,7 @@ impl CompressiblePlanResources {
             return stats;
         }
 
-        let mut params = RawFgmresParams {
+        let params = RawFgmresParams {
             n,
             num_cells: self.num_cells,
             num_iters: 0,
@@ -1104,21 +1086,54 @@ impl CompressiblePlanResources {
             column_offset: 0,
             _pad3: 0,
         };
-        self.context
-            .queue
-            .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+        let core = FgmresCore {
+            device: &self.context.device,
+            queue: &self.context.queue,
+            n,
+            num_cells: self.num_cells,
+            max_restart: fgmres.max_restart,
+            num_dot_groups: fgmres.num_dot_groups,
+            basis_stride: fgmres.basis_stride,
+            b_basis: &fgmres.b_basis,
+            z_vectors: &fgmres.z_vectors,
+            b_w: &fgmres.b_w,
+            b_temp: &fgmres.b_temp,
+            b_dot_partial: &fgmres.b_dot_partial,
+            b_scalars: &fgmres.b_scalars,
+            b_params: &fgmres.b_params,
+            b_iter_params: &fgmres.b_iter_params,
+            b_staging_scalar: &fgmres.b_staging_scalar,
+            bg_matrix: &fgmres.bg_matrix,
+            bg_precond: &fgmres.bg_precond,
+            bg_params: &fgmres.bg_params,
+            bg_logic: &fgmres.bg_logic,
+            bg_logic_params: &fgmres.bg_logic_params,
+            bg_cgs: &fgmres.bg_cgs,
+            bgl_vectors: &fgmres.bgl_vectors,
+            pipeline_spmv: &fgmres.pipeline_spmv,
+            pipeline_scale: &fgmres.pipeline_scale,
+            pipeline_norm_sq: &fgmres.pipeline_norm_sq,
+            pipeline_reduce_final_and_finish_norm: &fgmres.pipeline_reduce_final_and_finish_norm,
+            pipeline_update_hessenberg: &fgmres.pipeline_update_hessenberg,
+            pipeline_solve_triangular: &fgmres.pipeline_solve_triangular,
+            pipeline_axpy_from_y: &fgmres.pipeline_axpy_from_y,
+            pipeline_calc_dots_cgs: &fgmres.pipeline_calc_dots_cgs,
+            pipeline_reduce_dots_cgs: &fgmres.pipeline_reduce_dots_cgs,
+            pipeline_update_w_cgs: &fgmres.pipeline_update_w_cgs,
+        };
+        write_params(&core, &params);
         precond.prepare(self, fgmres, block_workgroups);
 
-        let mut iter_params = IterParams {
+        let iter_params = IterParams {
             current_idx: 0,
             max_restart: fgmres.max_restart as u32,
             _pad1: 0,
             _pad2: 0,
         };
 
-        self.write_zeros(&fgmres.b_hessenberg);
-        self.write_zeros(&fgmres.b_givens);
-        self.write_zeros(&fgmres.b_y);
+        write_zeros(&core, &fgmres.b_hessenberg);
+        write_zeros(&core, &fgmres.b_givens);
+        write_zeros(&core, &fgmres.b_y);
         let mut g_init = vec![0.0f32; fgmres.max_restart + 1];
         g_init[0] = rhs_norm;
         self.context
@@ -1138,9 +1153,9 @@ impl CompressiblePlanResources {
             &fgmres.bg_params,
             dispatch_x,
             dispatch_y,
-        );
+            );
 
-        self.write_scalars(fgmres, &[1.0 / rhs_norm]);
+        write_scalars(&core, &[1.0 / rhs_norm]);
         let basis0_y = self.basis_binding(fgmres, 0);
         self.dispatch_vector_pipeline(
             &fgmres.pipeline_scale_in_place,
@@ -1156,191 +1171,34 @@ impl CompressiblePlanResources {
             dispatch_y,
         );
 
-        let mut converged = false;
-        let mut final_residual = rhs_norm;
-        let mut basis_size = 0usize;
-
-        for j in 0..fgmres.max_restart {
-            basis_size = j + 1;
-
-            let z_buf = &fgmres.z_vectors[j];
-            let vj = self.basis_binding(fgmres, j);
-            precond.apply(
-                self,
-                fgmres,
-                vj,
-                z_buf,
-                dispatch_x,
-                dispatch_y,
-                block_dispatch_x,
-                block_dispatch_y,
-            );
-
-            self.dispatch_vector_pipeline(
-                &fgmres.pipeline_spmv,
-                fgmres,
-                &self.create_vector_bind_group(
+        // Solve (single restart) using the shared GPU FGMRES core.
+        let solve = fgmres_solve_once_with_preconditioner(
+            &core,
+            &self.b_x,
+            rhs_norm,
+            params,
+            iter_params,
+            FgmresSolveOnceConfig {
+                tol_rel: tol,
+                tol_abs,
+                reset_x_before_update: true,
+            },
+            |_j, vj, z_buf| {
+                precond.apply(
+                    self,
                     fgmres,
-                    z_buf.as_entire_binding(),
-                    fgmres.b_w.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                ),
-                &fgmres.bg_params,
-                dispatch_x,
-                dispatch_y,
-            );
-
-            params.num_iters = j as u32;
-            params.dispatch_x = fgmres.num_dot_groups;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
-
-            {
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Compressible FGMRES CGS"),
-                        });
-                {
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Compressible FGMRES CGS Calc"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(&fgmres.pipeline_calc_dots_cgs);
-                    pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                    pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
-                }
-                {
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Compressible FGMRES CGS Reduce"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(&fgmres.pipeline_reduce_dots_cgs);
-                    pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                    pass.dispatch_workgroups((j + 1) as u32, 1, 1);
-                }
-                {
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Compressible FGMRES CGS Update W"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(&fgmres.pipeline_update_w_cgs);
-                    pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                    pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
-                }
-                self.context.queue.submit(Some(encoder.finish()));
-            }
-
-            params.dispatch_x = dispatch_x_threads;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
-
-            let h_idx = (j as u32) * (fgmres.max_restart as u32 + 1) + (j as u32 + 1);
-            iter_params.current_idx = h_idx;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-
-            self.dispatch_vector_pipeline(
-                &fgmres.pipeline_norm_sq,
-                fgmres,
-                &self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.b_w.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    fgmres.b_dot_partial.as_entire_binding(),
-                ),
-                &fgmres.bg_params,
-                dispatch_x,
-                dispatch_y,
-            );
-
-            params.n = fgmres.num_dot_groups;
-            params.dispatch_x = Self::WORKGROUP_SIZE;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
-            self.dispatch_vector_pipeline(
-                &fgmres.pipeline_reduce_final_and_finish_norm,
-                fgmres,
-                &self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.b_dot_partial.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                ),
-                &fgmres.bg_params,
-                1,
-                1,
-            );
-
-            params.n = n;
-            params.dispatch_x = dispatch_x_threads;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
-
-            let v_next = self.basis_binding(fgmres, j + 1);
-            self.dispatch_vector_pipeline(
-                &fgmres.pipeline_scale,
-                fgmres,
-                &self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.b_w.as_entire_binding(),
-                    v_next,
-                    fgmres.b_temp.as_entire_binding(),
-                ),
-                &fgmres.bg_params,
-                dispatch_x,
-                dispatch_y,
-            );
-
-            iter_params.current_idx = j as u32;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-            self.dispatch_logic_pipeline(
-                &fgmres.pipeline_update_hessenberg,
-                fgmres,
-                1,
-            );
-
-            final_residual = self.read_scalar(fgmres);
-            if final_residual <= tol * rhs_norm || final_residual <= tol_abs {
-                converged = true;
-                break;
-            }
-        }
-
-        iter_params.current_idx = basis_size as u32;
-        self.context
-            .queue
-            .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-        self.dispatch_logic_pipeline(&fgmres.pipeline_solve_triangular, fgmres, 1);
-
-        self.zero_buffer(&self.b_x, n);
-        for i in 0..basis_size {
-            iter_params.current_idx = i as u32;
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-            self.dispatch_vector_pipeline(
-                &fgmres.pipeline_axpy_from_y,
-                fgmres,
-                &self.create_vector_bind_group(
-                    fgmres,
-                    fgmres.z_vectors[i].as_entire_binding(),
-                    self.b_x.as_entire_binding(),
-                    fgmres.b_temp.as_entire_binding(),
-                ),
-                &fgmres.bg_params,
-                dispatch_x,
-                dispatch_y,
-            );
-        }
+                    vj,
+                    z_buf,
+                    dispatch_x,
+                    dispatch_y,
+                    block_dispatch_x,
+                    block_dispatch_y,
+                );
+            },
+        );
+        let basis_size = solve.basis_size;
+        let final_residual = solve.residual_est;
+        let converged = solve.converged;
 
         let stats = LinearSolverStats {
             iterations: basis_size as u32,
@@ -1651,12 +1509,6 @@ impl CompressiblePlanResources {
         self.context
             .queue
             .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
-    }
-
-    fn write_zeros(&self, buffer: &wgpu::Buffer) {
-        let size = buffer.size();
-        let zeros = vec![0u8; size as usize];
-        self.context.queue.write_buffer(buffer, 0, &zeros);
     }
 
     fn read_scalar(&self, fgmres: &CompressibleFgmresResources) -> f32 {

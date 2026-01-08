@@ -19,13 +19,17 @@
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
 use crate::solver::gpu::bindings;
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
+use crate::solver::gpu::linear_solver::fgmres::{
+    fgmres_solve_once_with_preconditioner, write_iter_params, FgmresCore, FgmresSolveOnceConfig,
+    IterParams, RawFgmresParams,
+};
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::preconditioners::CoupledPressurePreconditioner;
 use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{
     CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
 };
-use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
+use bytemuck::{bytes_of, cast_slice};
 use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
@@ -140,28 +144,6 @@ pub struct FgmresResources {
     pub bg_spmv_z: Vec<wgpu::BindGroup>,
     pub bg_normalize_basis: Vec<wgpu::BindGroup>,
     pub bg_axpy_sol: Vec<wgpu::BindGroup>,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct RawFgmresParams {
-    n: u32,
-    num_cells: u32,
-    num_iters: u32,
-    omega: f32,
-    dispatch_x: u32, // Width of 2D dispatch (in workgroups * 64)
-    max_restart: u32,
-    column_offset: u32,
-    _pad3: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct IterParams {
-    current_idx: u32,
-    max_restart: u32,
-    _pad1: u32,
-    _pad2: u32,
 }
 
 impl GpuSolver {
@@ -1768,6 +1750,42 @@ impl GpuSolver {
             return LinearSolverStats::default();
         };
 
+        let core = FgmresCore {
+            device: &self.context.device,
+            queue: &self.context.queue,
+            n,
+            num_cells,
+            max_restart: fgmres.max_restart,
+            num_dot_groups: fgmres.num_dot_groups,
+            basis_stride: fgmres.basis_stride,
+            b_basis: &fgmres.b_basis,
+            z_vectors: &fgmres.z_vectors,
+            b_w: &fgmres.b_w,
+            b_temp: &fgmres.b_temp,
+            b_dot_partial: &fgmres.b_dot_partial,
+            b_scalars: &fgmres.b_scalars,
+            b_params: &fgmres.b_params,
+            b_iter_params: &fgmres.b_iter_params,
+            b_staging_scalar: &fgmres.b_staging_scalar,
+            bg_matrix: &fgmres.bg_matrix,
+            bg_precond: &fgmres.bg_precond,
+            bg_params: &fgmres.bg_params,
+            bg_logic: &fgmres.bg_logic,
+            bg_logic_params: &fgmres.bg_logic_params,
+            bg_cgs: &fgmres.bg_cgs,
+            bgl_vectors: &fgmres.bgl_vectors,
+            pipeline_spmv: &fgmres.pipeline_spmv,
+            pipeline_scale: &fgmres.pipeline_scale,
+            pipeline_norm_sq: &fgmres.pipeline_norm_sq,
+            pipeline_reduce_final_and_finish_norm: &fgmres.pipeline_reduce_final_and_finish_norm,
+            pipeline_update_hessenberg: &fgmres.pipeline_update_hessenberg,
+            pipeline_solve_triangular: &fgmres.pipeline_solve_triangular,
+            pipeline_axpy_from_y: &fgmres.pipeline_axpy_from_y,
+            pipeline_calc_dots_cgs: &fgmres.pipeline_calc_dots_cgs,
+            pipeline_reduce_dots_cgs: &fgmres.pipeline_reduce_dots_cgs,
+            pipeline_update_w_cgs: &fgmres.pipeline_update_w_cgs,
+        };
+
         let workgroups_dofs = self.workgroups_for_size(n);
         let workgroups_cells = self.workgroups_for_size(num_cells);
         let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
@@ -1809,16 +1827,14 @@ impl GpuSolver {
         );
 
         // Initialize IterParams
-        let mut iter_params = IterParams {
+        let iter_params = IterParams {
             current_idx: 0,
             max_restart: max_restart as u32,
             _pad1: 0,
             _pad2: 0,
         };
         let init_write_start = Instant::now();
-        self.context
-            .queue
-            .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+        write_iter_params(&core, &iter_params);
         self.profiling_stats.record_location(
             "fgmres:write_iter_params_init",
             ProfileCategory::GpuWrite,
@@ -1857,8 +1873,6 @@ impl GpuSolver {
                 time: start_time.elapsed(),
             };
         }
-
-        let h_idx = |row: usize, col: usize| -> usize { col * (max_restart + 1) + row };
 
         // Initial residual r = b - A x stored in V_0
         let mut residual_norm = self.compute_residual_into(
@@ -1927,422 +1941,96 @@ impl GpuSolver {
         let mut prev_resid_norm = residual_norm;
 
         'outer: for outer_iter in 0..max_outer {
-            let mut basis_size = 0usize;
+            let params = RawFgmresParams {
+                n,
+                num_cells,
+                num_iters: 0,
+                omega: 1.0,
+                dispatch_x: self.dispatch_x_threads(workgroups_dofs),
+                max_restart: max_restart as u32,
+                column_offset: 0,
+                _pad3: 0,
+            };
 
-            for j in 0..max_restart {
-                basis_size = j + 1;
-                total_iters += 1;
+            // Shared GPU FGMRES core (inner loop + triangular solve + solution update).
+            let solve = fgmres_solve_once_with_preconditioner(
+                &core,
+                &res.b_x,
+                rhs_norm,
+                params,
+                iter_params,
+                FgmresSolveOnceConfig {
+                    tol_rel: tol,
+                    tol_abs: abstol,
+                    reset_x_before_update: false,
+                },
+                |j, _vj, _z_buf| {
+                    // Schur complement preconditioner writes Z_j.
+                    let current_bg = &fgmres.bg_schur[j];
+                    let swap_bg = &fgmres.bg_schur_swap[j];
 
-                // 1. Predict Velocity
-                // Clear p_sol is now handled by predict_and_form_schur (initializes with first Jacobi step)
-
-                let current_bg = &fgmres.bg_schur[j];
-                let swap_bg = &fgmres.bg_schur_swap[j];
-
-                let dispatch_start = Instant::now();
-                let mut encoder =
-                    self.context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("FGMRES Preconditioner Step"),
-                        });
-
-                self.dispatch_vector_pipeline_with_encoder(
-                    &mut encoder,
-                    &fgmres.pipeline_predict_and_form,
-                    fgmres,
-                    current_bg,
-                    &fgmres.bg_pressure_matrix,
-                    workgroups_cells,
-                    "Schur Predict & Form",
-                );
-
-                // 3. Solve/relax pressure (pluggable module)
-                let mut p_result_in_sol = true;
-                pressure_precond.encode(
-                    self,
-                    &mut encoder,
-                    fgmres,
-                    amg_level0_state_override.as_ref(),
-                    current_bg,
-                    swap_bg,
-                    workgroups_cells,
-                    dispatch_x,
-                    dispatch_y,
-                    &mut p_result_in_sol,
-                );
-
-                // 4. Correct Velocity
-                // Use the bind group where binding 3 holds the final result
-                let correct_bg = if p_result_in_sol { current_bg } else { swap_bg };
-
-                self.dispatch_vector_pipeline_with_encoder(
-                    &mut encoder,
-                    &fgmres.pipeline_correct_vel,
-                    fgmres,
-                    correct_bg,
-                    &fgmres.bg_pressure_matrix,
-                    workgroups_cells,
-                    "Schur Correct Vel",
-                );
-
-                self.context.queue.submit(Some(encoder.finish()));
-                self.profiling_stats.record_location(
-                    "FGMRES Preconditioner Step",
-                    ProfileCategory::GpuDispatch,
-                    dispatch_start.elapsed(),
-                    0,
-                );
-
-                // w = A * z_j
-                let spmv_bg = &fgmres.bg_spmv_z[j];
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_spmv,
-                    fgmres,
-                    &spmv_bg,
-                    &fgmres.bg_params,
-                    workgroups_dofs,
-                    "FGMRES SpMV",
-                );
-
-                // CGS on GPU
-                // 1. Calculate all dot products (w . V_i) for i in 0..=j
-                let cgs_params = RawFgmresParams {
-                    n,
-                    num_cells: self.num_cells,
-                    num_iters: j as u32,
-                    omega: 0.0,
-                    dispatch_x: fgmres.num_dot_groups,
-                    max_restart: max_restart as u32,
-                    column_offset: 0,
-                    _pad3: 0,
-                };
-                let cgs_write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_params, 0, bytes_of(&cgs_params));
-                self.profiling_stats.record_location(
-                    "fgmres:write_cgs_params",
-                    ProfileCategory::GpuWrite,
-                    cgs_write_start.elapsed(),
-                    std::mem::size_of::<RawFgmresParams>() as u64,
-                );
-
-                {
-                    let cgs_dispatch_start = Instant::now();
+                    let dispatch_start = Instant::now();
                     let mut encoder = self.context.device.create_command_encoder(
                         &wgpu::CommandEncoderDescriptor {
-                            label: Some("CGS Step"),
+                            label: Some("FGMRES Preconditioner Step"),
                         },
                     );
 
-                    // Pass 1: Calc Dots
-                    {
-                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("CGS Calc Dots"),
-                            timestamp_writes: None,
-                        });
-                        pass.set_pipeline(&fgmres.pipeline_calc_dots_cgs);
-                        pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                        pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
-                    }
+                    self.dispatch_vector_pipeline_with_encoder(
+                        &mut encoder,
+                        &fgmres.pipeline_predict_and_form,
+                        fgmres,
+                        current_bg,
+                        &fgmres.bg_pressure_matrix,
+                        workgroups_cells,
+                        "Schur Predict & Form",
+                    );
 
-                    // Pass 2: Reduce Dots
-                    {
-                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("CGS Reduce Dots"),
-                            timestamp_writes: None,
-                        });
-                        pass.set_pipeline(&fgmres.pipeline_reduce_dots_cgs);
-                        pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                        pass.dispatch_workgroups((j + 1) as u32, 1, 1);
-                    }
+                    let mut p_result_in_sol = true;
+                    pressure_precond.encode(
+                        self,
+                        &mut encoder,
+                        fgmres,
+                        amg_level0_state_override.as_ref(),
+                        current_bg,
+                        swap_bg,
+                        workgroups_cells,
+                        dispatch_x,
+                        dispatch_y,
+                        &mut p_result_in_sol,
+                    );
 
-                    // Pass 3: Update W
-                    {
-                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("CGS Update W"),
-                            timestamp_writes: None,
-                        });
-                        pass.set_pipeline(&fgmres.pipeline_update_w_cgs);
-                        pass.set_bind_group(0, &fgmres.bg_cgs, &[]);
-                        pass.dispatch_workgroups(fgmres.num_dot_groups, 1, 1);
-                    }
+                    let correct_bg = if p_result_in_sol { current_bg } else { swap_bg };
+                    self.dispatch_vector_pipeline_with_encoder(
+                        &mut encoder,
+                        &fgmres.pipeline_correct_vel,
+                        fgmres,
+                        correct_bg,
+                        &fgmres.bg_pressure_matrix,
+                        workgroups_cells,
+                        "Schur Correct Vel",
+                    );
 
                     self.context.queue.submit(Some(encoder.finish()));
                     self.profiling_stats.record_location(
-                        "FGMRES CGS Step",
+                        "FGMRES Preconditioner Step",
                         ProfileCategory::GpuDispatch,
-                        cgs_dispatch_start.elapsed(),
+                        dispatch_start.elapsed(),
                         0,
                     );
-                }
-
-                // Restore params.n
-                let restore_params = RawFgmresParams {
-                    n,
-                    num_cells: self.num_cells,
-                    num_iters: 2,
-                    omega: 1.0,
-                    dispatch_x: self.dispatch_x_threads(workgroups_dofs),
-                    max_restart: max_restart as u32,
-                    column_offset: 0,
-                    _pad3: 0,
-                };
-                let restore_write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params));
-                self.profiling_stats.record_location(
-                    "fgmres:write_restore_params",
-                    ProfileCategory::GpuWrite,
-                    restore_write_start.elapsed(),
-                    std::mem::size_of::<RawFgmresParams>() as u64,
-                );
-
-                // Compute norm of w (H[j+1, j])
-                iter_params.current_idx = h_idx(j + 1, j) as u32;
-                let iter_write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-                self.profiling_stats.record_location(
-                    "fgmres:write_iter_params_norm",
-                    ProfileCategory::GpuWrite,
-                    iter_write_start.elapsed(),
-                    std::mem::size_of::<IterParams>() as u64,
-                );
-
-                // Norm squared partial
-                let norm_bg = &fgmres.bg_norm_w;
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_norm_sq,
-                    fgmres,
-                    &norm_bg,
-                    &fgmres.bg_params,
-                    fgmres.num_dot_groups,
-                    "FGMRES Norm Partial",
-                );
-
-                // Reduce Final (writes to scalars[0])
-                let reduce_params = RawFgmresParams {
-                    n: fgmres.num_dot_groups,
-                    num_cells: 0,
-                    num_iters: 0,
-                    omega: 0.0,
-                    dispatch_x: Self::WORKGROUP_SIZE, // Single workgroup dispatch
-                    max_restart: 0,
-                    column_offset: 0,
-                    _pad3: 0,
-                };
-                let reduce_write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
-                self.profiling_stats.record_location(
-                    "fgmres:write_reduce_params",
-                    ProfileCategory::GpuWrite,
-                    reduce_write_start.elapsed(),
-                    std::mem::size_of::<RawFgmresParams>() as u64,
-                );
-
-                let reduce_bg = &fgmres.bg_reduce_norm;
-
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_reduce_final_and_finish_norm,
-                    fgmres,
-                    &reduce_bg,
-                    &fgmres.bg_params,
-                    1,
-                    "FGMRES Reduce Final & Finish Norm",
-                );
-
-                // Restore params.n
-                let restore_params2 = RawFgmresParams {
-                    n,
-                    num_cells: self.num_cells,
-                    num_iters: 2,
-                    omega: 1.0,
-                    dispatch_x: self.dispatch_x_threads(workgroups_dofs),
-                    max_restart: max_restart as u32,
-                    column_offset: 0,
-                    _pad3: 0,
-                };
-                let restore2_write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_params, 0, bytes_of(&restore_params2));
-                self.profiling_stats.record_location(
-                    "fgmres:write_restore_params2",
-                    ProfileCategory::GpuWrite,
-                    restore2_write_start.elapsed(),
-                    std::mem::size_of::<RawFgmresParams>() as u64,
-                );
-
-                // Normalize w directly into basis[j+1]
-                // basis[j+1] = scalars[0] * w
-                let scale_bg = &fgmres.bg_normalize_basis[j];
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_scale,
-                    fgmres,
-                    &scale_bg,
-                    &fgmres.bg_params,
-                    workgroups_dofs,
-                    "FGMRES Normalize & Copy",
-                );
-
-                // Update Hessenberg and Givens (GPU)
-                iter_params.current_idx = j as u32;
-                let write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-                self.profiling_stats.record_location(
-                    "fgmres:write_iter_params",
-                    ProfileCategory::GpuWrite,
-                    write_start.elapsed(),
-                    std::mem::size_of::<IterParams>() as u64,
-                );
-
-                self.dispatch_logic_pipeline(
-                    &fgmres.pipeline_update_hessenberg,
-                    fgmres,
-                    1,
-                    "FGMRES Update Hessenberg",
-                );
-
-                // Async convergence checking - use non-blocking poll
-                // Poll the device without waiting (allows GPU work to continue)
-                let poll_start = Instant::now();
-                let _ = self.context.device.poll(wgpu::PollType::Poll);
-                self.profiling_stats.record_location(
-                    "fgmres:device_poll_nonblocking",
-                    ProfileCategory::Other,
-                    poll_start.elapsed(),
-                    0,
-                );
-
-                // Check convergence every few iterations to balance early termination vs overhead.
-                // Lower values detect convergence earlier but have slightly more overhead.
-                // The async buffer now handles back-pressure safely, so any value >= 1 is safe.
-                let check_interval = 1;
-                let is_last_in_restart = j == max_restart - 1;
-                let should_check = (j + 1) % check_interval == 0 || is_last_in_restart;
-
-                if should_check {
-                    // Use RefCell to get mutable access to async reader
-                    let mut async_reader = fgmres.async_scalar_reader.borrow_mut();
-
-                    // Poll for completed reads from previous iterations
-                    async_reader.poll();
-
-                    // Start async read for this iteration's residual
-                    let read_start = Instant::now();
-                    async_reader.start_read(
-                        &self.context.device,
-                        &self.context.queue,
-                        &fgmres.b_scalars,
-                        0,
-                    );
-                    self.profiling_stats.record_location(
-                        "fgmres:convergence_check_start_async",
-                        ProfileCategory::Other,
-                        read_start.elapsed(),
-                        0,
-                    );
-
-                    // Check the result from PREVIOUS async read (if available)
-                    // This allows GPU work to continue while we wait
-                    if let Some(resid_est) = async_reader.get_last_value() {
-                        if (total_iters % 10 == 0 || resid_est < tol * rhs_norm) && !quiet {
-                            let io_start = Instant::now();
-                            println!(
-                                "FGMRES iter {}: residual = {:.2e} (target {:.2e})",
-                                total_iters,
-                                resid_est,
-                                tol * rhs_norm
-                            );
-                            self.profiling_stats.record_location(
-                                "fgmres:println",
-                                ProfileCategory::CpuCompute,
-                                io_start.elapsed(),
-                                0,
-                            );
-                        }
-
-                        if resid_est < tol * rhs_norm {
-                            converged = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Solve upper triangular system (GPU)
-            iter_params.current_idx = basis_size as u32;
-            let tri_write_start = Instant::now();
-            self.context
-                .queue
-                .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-            self.profiling_stats.record_location(
-                "fgmres:write_iter_params_triangular",
-                ProfileCategory::GpuWrite,
-                tri_write_start.elapsed(),
-                std::mem::size_of::<IterParams>() as u64,
+                },
             );
 
-            self.dispatch_logic_pipeline(
-                &fgmres.pipeline_solve_triangular,
-                fgmres,
-                1,
-                "FGMRES Solve Triangular",
-            );
+            total_iters += solve.basis_size as u32;
+            final_resid = solve.residual_est;
+            converged = solve.converged;
 
-            // Update solution x = x + sum_j y_j * z_j
-            for i in 0..basis_size {
-                // Set current index for y[i] access
-                iter_params.current_idx = i as u32;
-                let sol_write_start = Instant::now();
-                self.context
-                    .queue
-                    .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
-                self.profiling_stats.record_location(
-                    "fgmres:write_iter_params_sol",
-                    ProfileCategory::GpuWrite,
-                    sol_write_start.elapsed(),
-                    std::mem::size_of::<IterParams>() as u64,
-                );
-
-                let axpy_bg = &fgmres.bg_axpy_sol[i];
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_axpy_from_y,
-                    fgmres,
-                    &axpy_bg,
-                    &fgmres.bg_params,
-                    workgroups_dofs,
-                    "FGMRES Solution Update",
-                );
-            }
-
-            // If already converged from estimated residual, skip true residual computation
             if converged {
-                // Read the estimated residual for reporting
-                let flush_start = Instant::now();
-                let mut async_reader = fgmres.async_scalar_reader.borrow_mut();
-                async_reader.flush(&self.context.device);
-                self.profiling_stats.record_location(
-                    "fgmres:async_reader_flush",
-                    ProfileCategory::GpuSync,
-                    flush_start.elapsed(),
-                    0,
-                );
-                let resid_est = async_reader.get_last_value().unwrap_or(0.0);
-                final_resid = resid_est;
                 if !quiet {
                     println!(
                         "FGMRES restart {}: estimated residual = {:.2e}",
                         outer_iter + 1,
-                        resid_est
+                        final_resid
                     );
                 }
                 break 'outer;

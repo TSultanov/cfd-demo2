@@ -718,6 +718,27 @@ fn init_coupled_resources(
         cache: None,
     });
 
+    let mut coupled_port_space = PortSpace::new();
+    let coupled_ports = {
+        let row_offsets_port = coupled_port_space.port::<BufU32>("coupled:row_offsets");
+        coupled_port_space.insert(row_offsets_port, matrix_res.b_row_offsets.clone());
+        let col_indices_port = coupled_port_space.port::<BufU32>("coupled:col_indices");
+        coupled_port_space.insert(col_indices_port, matrix_res.b_col_indices.clone());
+        let values_port = coupled_port_space.port::<BufF32>("coupled:matrix_values");
+        coupled_port_space.insert(values_port, matrix_res.b_matrix_values.clone());
+        let rhs_port = coupled_port_space.port::<BufF32>("coupled:rhs");
+        coupled_port_space.insert(rhs_port, state_res.b_rhs.clone());
+        let x_port = coupled_port_space.port::<BufF32>("coupled:x");
+        coupled_port_space.insert(x_port, state_res.b_x.clone());
+        LinearSystemPorts {
+            row_offsets: row_offsets_port,
+            col_indices: col_indices_port,
+            values: values_port,
+            rhs: rhs_port,
+            x: x_port,
+        }
+    };
+
     CoupledSolverResources {
         num_unknowns: num_coupled_cells,
         b_row_offsets: matrix_res.b_row_offsets,
@@ -734,6 +755,8 @@ fn init_coupled_resources(
         b_scalars: state_res.b_scalars,
         b_staging_scalar: state_res.b_staging_scalar,
         num_nonzeros: matrix_res.num_nonzeros,
+        linear_ports: coupled_ports,
+        linear_port_space: coupled_port_space,
         b_diag_inv,
         b_diag_u,
         b_diag_v,

@@ -66,15 +66,24 @@ impl GpuSolver {
             .as_ref()
             .expect("Coupled resources must be initialized before FGMRES");
         let n = coupled.num_unknowns;
+        let b_row_offsets = coupled
+            .linear_port_space
+            .buffer(coupled.linear_ports.row_offsets);
+        let b_col_indices = coupled
+            .linear_port_space
+            .buffer(coupled.linear_ports.col_indices);
+        let b_matrix_values = coupled
+            .linear_port_space
+            .buffer(coupled.linear_ports.values);
 
         let fgmres = FgmresWorkspace::new(
             device,
             n,
             self.num_cells,
             max_restart,
-            &coupled.b_row_offsets,
-            &coupled.b_col_indices,
-            &coupled.b_matrix_values,
+            b_row_offsets,
+            b_col_indices,
+            b_matrix_values,
             FgmresPrecondBindings::DiagWithParams {
                 diag_u: &coupled.b_diag_u,
                 diag_v: &coupled.b_diag_v,

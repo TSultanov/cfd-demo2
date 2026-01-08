@@ -1,6 +1,8 @@
 use super::async_buffer::AsyncScalarReader;
 use super::context::GpuContext;
 use super::modules::incompressible_kernels::IncompressibleKernelsModule;
+use super::modules::linear_system::LinearSystemPorts;
+use super::modules::ports::PortSpace;
 use super::plans::coupled_fgmres::FgmresResources;
 use super::profiling::ProfilingStats;
 use super::modules::graph::ModuleGraph;
@@ -62,6 +64,9 @@ pub struct CoupledSolverResources {
     pub b_scalars: wgpu::Buffer,
     pub b_staging_scalar: wgpu::Buffer,
     pub num_nonzeros: u32,
+
+    pub linear_ports: LinearSystemPorts,
+    pub linear_port_space: PortSpace,
 
     // Preconditioner buffers
     pub b_diag_inv: wgpu::Buffer, // 3x3 block inverse for block-Jacobi preconditioner

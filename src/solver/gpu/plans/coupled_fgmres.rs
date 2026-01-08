@@ -22,6 +22,7 @@ use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::linear_solver::fgmres::{
+    dispatch_2d, dispatch_x_threads, workgroups_for_size,
     write_iter_params, FgmresSolveOnceConfig, FgmresPrecondBindings, FgmresWorkspace, IterParams,
     RawFgmresParams,
 };
@@ -103,38 +104,12 @@ impl GpuSolver {
         resources
     }
 
-    const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
-    const WORKGROUP_SIZE: u32 = 64;
-
-    fn workgroups_for_size(&self, n: u32) -> u32 {
-        n.div_ceil(Self::WORKGROUP_SIZE)
-    }
-
-    /// Compute 2D dispatch dimensions for large workgroup counts.
-    /// Returns (dispatch_x, dispatch_y) where total workgroups = dispatch_x * dispatch_y
-    fn dispatch_2d(&self, workgroups: u32) -> (u32, u32) {
-        if workgroups <= Self::MAX_WORKGROUPS_PER_DIMENSION {
-            (workgroups, 1)
-        } else {
-            // Split into 2D grid: use square-ish dimensions
-            let dispatch_y = workgroups.div_ceil(Self::MAX_WORKGROUPS_PER_DIMENSION);
-            let dispatch_x = workgroups.div_ceil(dispatch_y);
-            (dispatch_x, dispatch_y)
-        }
-    }
-
-    /// Compute the dispatch_x value (in threads, not workgroups) for params
-    fn dispatch_x_threads(&self, workgroups: u32) -> u32 {
-        let (dispatch_x, _) = self.dispatch_2d(workgroups);
-        dispatch_x * Self::WORKGROUP_SIZE
-    }
-
     fn write_scalars(&self, fgmres: &FgmresResources, scalars: &[f32]) {
         let start = Instant::now();
-        self.common
-            .context
-            .queue
-            .write_buffer(fgmres.fgmres.scalars_buffer(), 0, cast_slice(scalars));
+        let core = fgmres
+            .fgmres
+            .core(&self.common.context.device, &self.common.context.queue);
+        crate::solver::gpu::linear_solver::fgmres::write_scalars(&core, scalars);
         let bytes = (scalars.len() * 4) as u64;
         self.common.profiling_stats.record_location(
             "write_scalars",
@@ -173,63 +148,33 @@ impl GpuSolver {
         bg
     }
 
-    fn dispatch_vector_pipeline(
+    fn dispatch_vector_pipeline_profiled(
         &self,
         pipeline: &wgpu::ComputePipeline,
         fgmres: &FgmresResources,
         vector_bg: &wgpu::BindGroup,
-        group3_bg: &wgpu::BindGroup,
         workgroups: u32,
         label: &str,
     ) {
         let start = Instant::now();
-        let mut encoder = self
-            .common
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
-
-        self.dispatch_vector_pipeline_with_encoder(
-            &mut encoder,
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+        let core = fgmres
+            .fgmres
+            .core(&self.common.context.device, &self.common.context.queue);
+        crate::solver::gpu::linear_solver::fgmres::dispatch_vector_pipeline(
+            &core,
             pipeline,
-            fgmres,
             vector_bg,
-            group3_bg,
-            workgroups,
+            dispatch_x,
+            dispatch_y,
             label,
         );
-
-        self.common.context.queue.submit(Some(encoder.finish()));
         self.common.profiling_stats.record_location(
             label,
             ProfileCategory::GpuDispatch,
             start.elapsed(),
             0,
         );
-    }
-
-    fn dispatch_vector_pipeline_with_encoder(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        pipeline: &wgpu::ComputePipeline,
-        fgmres: &FgmresResources,
-        vector_bg: &wgpu::BindGroup,
-        group3_bg: &wgpu::BindGroup,
-        workgroups: u32,
-        label: &str,
-    ) {
-        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some(label),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, vector_bg, &[]);
-        pass.set_bind_group(1, fgmres.fgmres.matrix_bg(), &[]);
-        pass.set_bind_group(2, fgmres.fgmres.precond_bg(), &[]);
-        pass.set_bind_group(3, group3_bg, &[]);
-        pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
 
     /// Compute norm of a vector using GPU reduction and async read
@@ -276,11 +221,10 @@ impl GpuSolver {
             fgmres.fgmres.temp_buffer().as_entire_binding(),
             "FGMRES Residual SpMV BG",
         );
-        self.dispatch_vector_pipeline(
+        self.dispatch_vector_pipeline_profiled(
             fgmres.fgmres.pipeline_spmv(),
             fgmres,
             &spmv_bg,
-            fgmres.fgmres.params_bg(),
             workgroups,
             "FGMRES Residual SpMV",
         );
@@ -293,11 +237,10 @@ impl GpuSolver {
             target.clone(),
             "FGMRES Residual Axpby BG",
         );
-        self.dispatch_vector_pipeline(
+        self.dispatch_vector_pipeline_profiled(
             fgmres.fgmres.pipeline_axpby(),
             fgmres,
             &residual_bg,
-            fgmres.fgmres.params_bg(),
             workgroups,
             "FGMRES Residual Axpby",
         );
@@ -319,11 +262,10 @@ impl GpuSolver {
             fgmres.fgmres.dot_partial_buffer().as_entire_binding(),
             label,
         );
-        self.dispatch_vector_pipeline(
+        self.dispatch_vector_pipeline_profiled(
             fgmres.fgmres.pipeline_scale_in_place(),
             fgmres,
             &vector_bg,
-            fgmres.fgmres.params_bg(),
             workgroups,
             label,
         );
@@ -390,10 +332,10 @@ impl GpuSolver {
                 .fgmres
                 .core(&self.common.context.device, &self.common.context.queue);
 
-            let workgroups_dofs = self.workgroups_for_size(n);
-            let workgroups_cells = self.workgroups_for_size(num_cells);
-            let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
-            let (dofs_dispatch_x, dofs_dispatch_y) = self.dispatch_2d(workgroups_dofs);
+            let workgroups_dofs = workgroups_for_size(n);
+            let workgroups_cells = workgroups_for_size(num_cells);
+            let (dispatch_x, dispatch_y) = dispatch_2d(workgroups_cells);
+            let (dofs_dispatch_x, dofs_dispatch_y) = dispatch_2d(workgroups_dofs);
 
         // Initialize IterParams
         let iter_params = IterParams {
@@ -520,7 +462,7 @@ impl GpuSolver {
                 num_cells,
                 num_iters: 0,
                 omega: 1.0,
-                dispatch_x: self.dispatch_x_threads(workgroups_dofs),
+                dispatch_x: dispatch_x_threads(workgroups_dofs),
                 max_restart: max_restart as u32,
                 column_offset: 0,
                 _pad3: 0,

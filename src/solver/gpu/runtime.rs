@@ -37,7 +37,7 @@ impl GpuScalarRuntime {
 
         let mesh_res = mesh_init::init_mesh(&context.device, mesh);
 
-        let linear_res = linear_solver::init_linear_solver(
+        let linear_res = linear_solver::init_scalar_linear_solver(
             &context.device,
             num_cells,
             &mesh_res.row_offsets,

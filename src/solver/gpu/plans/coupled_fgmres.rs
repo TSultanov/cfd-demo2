@@ -356,11 +356,20 @@ impl GpuSolver {
             fgmres.precond.set_pressure_kind(pressure_kind);
             if pressure_kind == CoupledPressureSolveKind::Amg {
                 let row_offsets =
-                    pollster::block_on(self.read_buffer_u32(&self.b_row_offsets, self.num_cells + 1));
+                    pollster::block_on(self.read_buffer_u32(
+                        self.linear_port_space.buffer(self.linear_ports.row_offsets),
+                        self.num_cells + 1,
+                    ));
                 let col_indices =
-                    pollster::block_on(self.read_buffer_u32(&self.b_col_indices, self.num_nonzeros));
+                    pollster::block_on(self.read_buffer_u32(
+                        self.linear_port_space.buffer(self.linear_ports.col_indices),
+                        self.num_nonzeros,
+                    ));
                 let values =
-                    pollster::block_on(self.read_buffer_f32(&self.b_matrix_values, self.num_nonzeros));
+                    pollster::block_on(self.read_buffer_f32(
+                        self.linear_port_space.buffer(self.linear_ports.values),
+                        self.num_nonzeros,
+                    ));
                 let matrix = CsrMatrix {
                     row_offsets,
                     col_indices,

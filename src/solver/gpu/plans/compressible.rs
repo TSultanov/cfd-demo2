@@ -4,12 +4,11 @@ use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode
 use crate::solver::gpu::model_defaults::default_compressible_model;
 use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
-use crate::solver::gpu::modules::compressible_lowering::{
-    CompressibleLinearPorts, CompressibleLowered, CompressibleMatrixPorts,
-};
+use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
 use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, CompressiblePipeline};
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
-use crate::solver::gpu::modules::ports::PortSpace;
+use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
+use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -136,8 +135,8 @@ pub(crate) struct CompressiblePlanResources {
     pub constants: GpuConstants,
     pub low_mach_params: GpuLowMachParams,
     pub preconditioner: PreconditionerType,
-    pub linear_ports: CompressibleLinearPorts,
-    pub matrix_ports: CompressibleMatrixPorts,
+    pub system_ports: LinearSystemPorts,
+    pub scalar_row_offsets_port: Port<BufU32>,
     pub port_space: PortSpace,
     pub kernels: CompressibleKernelsModule,
     pub fgmres_resources: Option<CompressibleFgmresResources>,
@@ -480,15 +479,13 @@ impl CompressiblePlanResources {
             &fields_layout,
         );
 
-        let matrix_values = lowered.common.ports.clone_buffer(lowered.matrix_ports.values);
         let kernels = CompressibleKernelsModule::new(
             &context.device,
             &lowered.common.mesh,
             &fields_res,
-            &matrix_values,
             &lowered.common.ports,
-            lowered.ports,
-            &lowered.scalar_row_offsets,
+            lowered.system_ports,
+            lowered.scalar_row_offsets_port,
         );
 
         let port_space = lowered.common.ports;
@@ -514,8 +511,8 @@ impl CompressiblePlanResources {
             b_low_mach_params: fields_res.b_low_mach_params,
             low_mach_params: fields_res.low_mach_params,
             preconditioner: PreconditionerType::Jacobi,
-            linear_ports: lowered.ports,
-            matrix_ports: lowered.matrix_ports,
+            system_ports: lowered.system_ports,
+            scalar_row_offsets_port: lowered.scalar_row_offsets_port,
             port_space,
             kernels,
             fgmres_resources: None,

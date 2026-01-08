@@ -11,7 +11,6 @@ use crate::solver::gpu::modules::compressible_krylov::{
 use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
-use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::collections::HashMap;
 
@@ -43,7 +42,7 @@ impl CompressiblePlanResources {
 
         let values = self
             .read_buffer_f32(
-                self.port_space.buffer(self.matrix_ports.values),
+                self.port_space.buffer(self.system_ports.values),
                 self.block_col_indices.len(),
             )
             .await;
@@ -101,13 +100,7 @@ impl CompressiblePlanResources {
         let (b_diag_u, b_diag_v, b_diag_p) = CompressibleKrylovModule::create_diag_buffers(device, n);
 
         let matrix = LinearSystemView {
-            ports: LinearSystemPorts {
-                row_offsets: self.matrix_ports.row_offsets,
-                col_indices: self.matrix_ports.col_indices,
-                values: self.matrix_ports.values,
-                rhs: self.linear_ports.rhs,
-                x: self.linear_ports.x,
-            },
+            ports: self.system_ports,
             space: &self.port_space,
         };
         let fgmres = FgmresWorkspace::new_from_system(
@@ -171,13 +164,7 @@ impl CompressiblePlanResources {
             };
 
             let system = LinearSystemView {
-                ports: LinearSystemPorts {
-                    row_offsets: self.matrix_ports.row_offsets,
-                    col_indices: self.matrix_ports.col_indices,
-                    values: self.matrix_ports.values,
-                    rhs: self.linear_ports.rhs,
-                    x: self.linear_ports.x,
-                },
+                ports: self.system_ports,
                 space: &self.port_space,
             };
             self.zero_buffer(system.x(), n);

@@ -6,21 +6,8 @@ use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::StateLayout;
 
 use super::model_lowerer::LoweredCommon;
-use super::ports::{BufF32, BufU32, Port};
-
-#[derive(Clone, Copy, Debug)]
-pub struct CompressibleLinearPorts {
-    pub rhs: Port<BufF32>,
-    pub x: Port<BufF32>,
-    pub scalar_row_offsets: Port<BufU32>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct CompressibleMatrixPorts {
-    pub row_offsets: Port<BufU32>,
-    pub col_indices: Port<BufU32>,
-    pub values: Port<BufF32>,
-}
+use super::ports::{BufU32, Port};
+use super::linear_system::LinearSystemPorts;
 
 pub struct CompressibleLowered {
     pub common: LoweredCommon,
@@ -28,8 +15,8 @@ pub struct CompressibleLowered {
     pub num_unknowns: u32,
     pub state_stride: u32,
 
-    pub ports: CompressibleLinearPorts,
-    pub matrix_ports: CompressibleMatrixPorts,
+    pub system_ports: LinearSystemPorts,
+    pub scalar_row_offsets_port: Port<BufU32>,
     pub fields: CompressibleFieldBuffers,
 
     pub scalar_row_offsets: Vec<u32>,
@@ -129,15 +116,12 @@ impl CompressibleLowered {
                 block_matrix_values_port,
             )
         };
-        let ports = CompressibleLinearPorts {
-            rhs: rhs_port,
-            x: x_port,
-            scalar_row_offsets: scalar_row_offsets_port,
-        };
-        let matrix_ports = CompressibleMatrixPorts {
+        let system_ports = LinearSystemPorts {
             row_offsets: block_row_offsets_port,
             col_indices: block_col_indices_port,
             values: block_matrix_values_port,
+            rhs: rhs_port,
+            x: x_port,
         };
 
         Self {
@@ -145,8 +129,8 @@ impl CompressibleLowered {
             unknowns_per_cell,
             num_unknowns,
             state_stride,
-            ports,
-            matrix_ports,
+            system_ports,
+            scalar_row_offsets_port,
             fields,
             scalar_row_offsets,
             scalar_col_indices,

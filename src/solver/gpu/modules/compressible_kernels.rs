@@ -7,9 +7,9 @@ use crate::solver::gpu::bindings::generated::{
 use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 
-use super::compressible_lowering::CompressibleLinearPorts;
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
-use super::ports::PortSpace;
+use super::linear_system::{LinearSystemPorts, LinearSystemView};
+use super::ports::{BufU32, Port, PortSpace};
 
 #[derive(Clone, Copy, Debug)]
 pub enum CompressiblePipeline {
@@ -51,14 +51,15 @@ impl CompressibleKernelsModule {
         device: &wgpu::Device,
         mesh: &MeshResources,
         fields: &CompressibleFieldResources,
-        matrix_values: &wgpu::Buffer,
         port_space: &PortSpace,
-        ports: CompressibleLinearPorts,
-        _scalar_row_offsets: &[u32],
+        system_ports: LinearSystemPorts,
+        scalar_row_offsets: Port<BufU32>,
     ) -> Self {
-        let b_rhs = port_space.buffer(ports.rhs);
-        let b_x = port_space.buffer(ports.x);
-        let b_scalar_row_offsets = port_space.buffer(ports.scalar_row_offsets);
+        let system = LinearSystemView {
+            ports: system_ports,
+            space: port_space,
+        };
+        let b_scalar_row_offsets = port_space.buffer(scalar_row_offsets);
 
         let pipeline_assembly =
             generated_assembly::compute::create_main_pipeline_embed_source(device);
@@ -103,8 +104,8 @@ impl CompressibleKernelsModule {
             layout: &solver_layout,
             entries: &generated_assembly::WgpuBindGroup2Entries::new(
                 generated_assembly::WgpuBindGroup2EntriesParams {
-                    matrix_values: matrix_values.as_entire_buffer_binding(),
-                    rhs: b_rhs.as_entire_buffer_binding(),
+                    matrix_values: system.values().as_entire_buffer_binding(),
+                    rhs: system.rhs().as_entire_buffer_binding(),
                     scalar_row_offsets: b_scalar_row_offsets.as_entire_buffer_binding(),
                 },
             )
@@ -151,7 +152,7 @@ impl CompressibleKernelsModule {
             layout: &apply_solver_layout,
             entries: &generated_apply::WgpuBindGroup1Entries::new(
                 generated_apply::WgpuBindGroup1EntriesParams {
-                    solution: b_x.as_entire_buffer_binding(),
+                    solution: system.x().as_entire_buffer_binding(),
                 },
             )
             .into_array(),

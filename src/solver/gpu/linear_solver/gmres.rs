@@ -118,38 +118,16 @@ impl GpuSolver {
     /// Read a GPU buffer to CPU (for Hessenberg matrix construction)
     pub async fn read_buffer_f32_async(&self, buffer: &wgpu::Buffer, count: u32) -> Vec<f32> {
         let size = (count as u64) * 4;
-        let staging = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("GMRES Staging"),
+        let raw = crate::solver::gpu::readback::read_buffer_cached(
+            &self.context,
+            &self.readback_cache,
+            &*self.profiling_stats,
+            buffer,
             size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.profiling_stats
-            .record_gpu_alloc("gmres:staging", size);
-
-        let mut encoder = self
-            .context
-            .device
-            .create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
-
-        let buffer_slice = staging.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
-        receiver.recv().unwrap().unwrap();
-
-        let data = buffer_slice.get_mapped_range();
-        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
-        self.profiling_stats
-            .record_cpu_alloc("gmres:cpu_copy", size);
-        drop(data);
-        staging.unmap();
-        result
+            "GMRES Staging Buffer (cached)",
+        )
+        .await;
+        bytemuck::cast_slice(&raw).to_vec()
     }
 
 

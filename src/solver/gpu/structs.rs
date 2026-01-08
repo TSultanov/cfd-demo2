@@ -1,5 +1,6 @@
 use super::async_buffer::AsyncScalarReader;
 use super::context::GpuContext;
+use super::modules::incompressible_kernels::IncompressibleKernelsModule;
 use super::plans::coupled_fgmres::FgmresResources;
 use super::kernel_graph::KernelGraph;
 use super::profiling::ProfilingStats;
@@ -176,7 +177,6 @@ pub(crate) struct GpuSolver {
     pub b_state_old_old: wgpu::Buffer,    // Two timesteps ago FluidState (read, for BDF2)
     pub state_buffers: Vec<wgpu::Buffer>, // Pool of 3 buffers for ping-pong
     pub state_step_index: usize,          // Current step index for ping-pong
-    pub bg_fields_ping_pong: Vec<wgpu::BindGroup>, // 3 bind groups for ping-pong
 
     pub b_fluxes: wgpu::Buffer, // Face-based mass fluxes (per face)
 
@@ -206,10 +206,8 @@ pub(crate) struct GpuSolver {
     // Constants
     pub b_constants: wgpu::Buffer,
 
-    // Bind Groups & Pipelines
-    pub bg_mesh: wgpu::BindGroup,
-    pub bg_fields: wgpu::BindGroup,
-    pub bg_solver: wgpu::BindGroup,
+    // Incompressible/coupled physics compute module (pipelines + bind groups)
+    pub incompressible_kernels: IncompressibleKernelsModule,
 
     // Linear Solver Bind Groups
     pub bg_linear_matrix: wgpu::BindGroup,
@@ -235,12 +233,6 @@ pub(crate) struct GpuSolver {
     pub pipeline_init_scalars: wgpu::ComputePipeline,
     pub pipeline_reduce_rho_new_r_r: wgpu::ComputePipeline,
     pub pipeline_reduce_r0_v: wgpu::ComputePipeline,
-
-    pub pipeline_pressure_assembly: wgpu::ComputePipeline,
-    pub pipeline_flux_rhie_chow: wgpu::ComputePipeline,
-    pub pipeline_coupled_assembly_merged: wgpu::ComputePipeline,
-    pub pipeline_update_from_coupled: wgpu::ComputePipeline,
-    pub pipeline_prepare_coupled: wgpu::ComputePipeline,
     pub pipeline_init_cg_scalars: wgpu::ComputePipeline,
 
     pub num_cells: u32,

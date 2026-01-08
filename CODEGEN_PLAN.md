@@ -51,6 +51,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added typed ports for the legacy scalar linear system (CSR + RHS + X) and plumbed them through `GpuSolver` initialization as a no-behavior-change step toward module-owned resources (`src/solver/gpu/modules/linear_system.rs`, `src/solver/gpu/init/linear_solver/mod.rs`, `src/solver/gpu/structs.rs`).
 - Encapsulated the scalar CG solve sequence into a `ScalarCgModule` (owning its bindgroups/pipelines and using shared linear buffers) and migrated `GpuSolver::solve_linear_system_cg*` to delegate to it (`src/solver/gpu/modules/scalar_cg.rs`, `src/solver/gpu/linear_solver/common.rs`).
 - Added a compute-only `ModuleGraph` executor and migrated the compressible explicit KT step’s compute dispatches to it (`src/solver/gpu/modules/graph.rs`, `src/solver/gpu/plans/compressible.rs`).
+- Encapsulated incompressible coupled kernels (prepare/assembly/update) into `IncompressibleKernelsModule` (module-owned bind groups + pipelines) and deleted the now-unused `init/physics.rs` pipeline plumbing (`src/solver/gpu/modules/incompressible_kernels.rs`, `src/solver/gpu/plans/coupled.rs`, `src/solver/gpu/init/mod.rs`).
 - Began separating “plans” from “resource containers”: `GpuUnifiedSolver::step()` now dispatches through plan modules (`src/solver/gpu/compressible_solver.rs` `plan::*`, `src/solver/gpu/coupled_solver.rs` `plan::*`) instead of calling backend `.step()` methods directly; coupled currently delegates to `step_coupled_impl` as an intermediate step.
 - Moved legacy per-family GPU implementations under `src/solver/gpu/plans/*` and renamed the unified dispatch enum from a “backend” to `PlanInstance` (`src/solver/gpu/unified_solver.rs`), so internal code is expressed as plan resources + plan functions rather than separate solver modules.
 - Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
@@ -163,6 +164,25 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 - The common *runtime sequencing* layer now exists (`KernelGraph` + `ExecutionPlan`) and both incompressible and compressible paths are progressively being expressed in it.
 - The solver still relies on model-family-specific resource containers and some host-side control flow for convergence + linear solves; the next material step is to make **plans + plan resources** the only backend variants and to remove “solver” structs for each family.
 - Even though the public API is unified, the runtime still uses legacy per-family structs internally. The remaining work to truly delete them is to (a) introduce `GpuRuntimeCommon` + `GpuPlanInstance`, (b) migrate compressible/coupled resources into plan resources, and (c) remove `UnifiedSolverBackend` + legacy step methods.
+
+### Concrete Plan (Next Iteration: Module-First Runtime)
+Goal: remove solver-owned pipelines/bind-groups and move *all GPU dispatch* behind first-class modules with typed ports, so lowering is the only place that knows layouts.
+
+1. **Coupled (incompressible) kernel module**
+   - Introduce `IncompressibleKernelsModule` (pipelines + bind groups + ping-pong state indexing).
+   - Migrate `plans/coupled.rs` to use module-owned bind groups/pipelines (no `GpuSolver.bg_mesh/bg_fields`, no `GpuSolver.pipeline_*` physics fields).
+   - Delete unused physics pipeline plumbing (`init/physics.rs`, `pipeline_pressure_assembly`, `pipeline_flux_rhie_chow`).
+2. **Graph unification**
+   - Standardize on `ModuleGraph` for compute dispatch (keep `ExecutionPlan` host/plugin steps).
+   - Either (a) extend `ExecutionPlan` to support `ModuleGraph`, or (b) wrap module-graph execution in host nodes as a bridge, then delete `KernelGraph`.
+3. **Ports everywhere**
+   - Move coupled block-CSR + RHS/X into `PortSpace` like compressible (currently coupled has module preconditioners, but core coupled buffers are still embedded in `CoupledSolverResources`).
+   - Migrate `GpuGenericCoupledSolver` to use the same port+module pattern (no bespoke bind group wiring).
+4. **Single Krylov module**
+   - Replace per-family FGMRES/GMRES glue with one `KrylovSolveModule` that owns its work buffers and bind groups and consumes a `LinearSystemPorts` + preconditioner module.
+5. **Collapse backend variants**
+   - Replace `PlanInstance::{Incompressible,Compressible,GenericCoupled}` with a single `ModelGpuProgram` built from a `ModelGpuProgramSpec` (closure modules selected from the model).
+   - Remove specialized solver types/files once all tests + UI are routed through the unified program path.
 
 ### Decisions (Chosen)
 - **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).

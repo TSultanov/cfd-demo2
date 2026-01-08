@@ -1,7 +1,6 @@
 pub mod fields;
 pub mod linear_solver;
 pub mod mesh;
-pub mod physics;
 pub mod scalars;
 
 use crate::solver::mesh::Mesh;
@@ -9,6 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
+use crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 
 use super::profiling::ProfilingStats;
@@ -27,32 +27,6 @@ impl GpuSolver {
 
         // 1. Initialize Mesh
         let mesh_res = mesh::init_mesh(&context.device, mesh);
-        let mesh_layout = context
-            .device
-            .create_bind_group_layout(&generated_coupled_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-        let bg_mesh = context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Mesh Bind Group"),
-            layout: &mesh_layout,
-            entries: &generated_coupled_assembly::WgpuBindGroup0Entries::new(
-                generated_coupled_assembly::WgpuBindGroup0EntriesParams {
-                    face_owner: mesh_res.b_face_owner.as_entire_buffer_binding(),
-                    face_neighbor: mesh_res.b_face_neighbor.as_entire_buffer_binding(),
-                    face_areas: mesh_res.b_face_areas.as_entire_buffer_binding(),
-                    face_normals: mesh_res.b_face_normals.as_entire_buffer_binding(),
-                    cell_centers: mesh_res.b_cell_centers.as_entire_buffer_binding(),
-                    cell_vols: mesh_res.b_cell_vols.as_entire_buffer_binding(),
-                    cell_face_offsets: mesh_res.b_cell_face_offsets.as_entire_buffer_binding(),
-                    cell_faces: mesh_res.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: mesh_res
-                        .b_cell_face_matrix_indices
-                        .as_entire_buffer_binding(),
-                    diagonal_indices: mesh_res.b_diagonal_indices.as_entire_buffer_binding(),
-                    face_boundary: mesh_res.b_face_boundary.as_entire_buffer_binding(),
-                    face_centers: mesh_res.b_face_centers.as_entire_buffer_binding(),
-                },
-            )
-            .into_array(),
-        });
 
         // 2. Initialize Field Buffers (phase 1 - before pipelines)
         let field_buffers = fields::init_field_buffers(&context.device, num_cells, num_faces);
@@ -74,15 +48,19 @@ impl GpuSolver {
             &linear_res.b_solver_params,
         );
 
-        // 5. Initialize Physics Pipelines (creates pipelines with shader-derived layouts)
-        let physics_res = physics::init_physics_pipelines(&context.device);
-
-        // 6. Extract bind group layout from pipeline and create bind groups (phase 2)
-        let bgl_fields = physics_res
-            .pipeline_pressure_assembly
-            .get_bind_group_layout(1);
+        // 5. Create fields bind groups (phase 2)
+        let bgl_fields = context.device.create_bind_group_layout(
+            &generated_coupled_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
+        );
         let fields_res =
             fields::create_field_bind_groups(&context.device, field_buffers, &bgl_fields);
+
+        let incompressible_kernels = IncompressibleKernelsModule::new(
+            &context.device,
+            &mesh_res,
+            &fields_res,
+            &linear_res.coupled_resources,
+        );
 
         // Misc
         let scalar_cg = ScalarCgModule::new(
@@ -134,7 +112,6 @@ impl GpuSolver {
             b_cell_faces: mesh_res.b_cell_faces,
             b_cell_face_matrix_indices: mesh_res.b_cell_face_matrix_indices,
             b_diagonal_indices: mesh_res.b_diagonal_indices,
-            bg_mesh,
 
             // Fields (consolidated FluidState buffers)
             b_state: fields_res.b_state,
@@ -142,13 +119,12 @@ impl GpuSolver {
             b_state_old_old: fields_res.b_state_old_old,
             state_buffers: fields_res.state_buffers,
             state_step_index: 0,
-            bg_fields_ping_pong: fields_res.bg_fields_ping_pong,
             b_fluxes: fields_res.b_fluxes,
             b_constants: fields_res.b_constants,
-            bg_fields: fields_res.bg_fields,
             constants: fields_res.constants,
             preconditioner: PreconditionerType::Jacobi,
             scheme_needs_gradients: false,
+            incompressible_kernels,
 
             // Linear Solver
             b_row_offsets: linear_res.b_row_offsets,
@@ -168,7 +144,6 @@ impl GpuSolver {
             b_scalars: linear_res.b_scalars,
             b_staging_scalar: linear_res.b_staging_scalar,
             b_solver_params: linear_res.b_solver_params,
-            bg_solver: linear_res.bg_solver,
             bg_linear_matrix: linear_res.bg_linear_matrix,
             bg_linear_state: linear_res.bg_linear_state,
             bg_linear_state_ro: linear_res.bg_linear_state_ro,
@@ -192,13 +167,6 @@ impl GpuSolver {
             pipeline_update_cg_alpha: scalar_res.pipeline_update_cg_alpha,
             pipeline_update_cg_beta: scalar_res.pipeline_update_cg_beta,
             pipeline_update_rho_old: scalar_res.pipeline_update_rho_old,
-
-            // Physics
-            pipeline_pressure_assembly: physics_res.pipeline_pressure_assembly,
-            pipeline_flux_rhie_chow: physics_res.pipeline_flux_rhie_chow,
-            pipeline_coupled_assembly_merged: physics_res.pipeline_coupled_assembly_merged,
-            pipeline_update_from_coupled: physics_res.pipeline_update_from_coupled,
-            pipeline_prepare_coupled: physics_res.pipeline_prepare_coupled,
 
             // Misc
             num_cells,

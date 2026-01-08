@@ -19,6 +19,8 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
 use crate::solver::gpu::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
 use crate::solver::gpu::model_defaults::default_incompressible_model;
+use crate::solver::gpu::modules::graph::GpuComputeModule;
+use crate::solver::gpu::modules::incompressible_kernels::{IncompressibleBindGroups, IncompressiblePipeline};
 use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use std::time::Instant;
@@ -34,22 +36,15 @@ fn coupled_workgroups_cells(solver: &GpuSolver) -> (u32, u32, u32) {
 }
 
 fn coupled_bind_mesh_fields_solver(solver: &GpuSolver, cpass: &mut wgpu::ComputePass) {
-    let res = solver
-        .coupled_resources
-        .as_ref()
-        .expect("Coupled resources not initialized");
-    cpass.set_bind_group(0, &solver.bg_mesh, &[]);
-    cpass.set_bind_group(1, &solver.bg_fields, &[]);
-    cpass.set_bind_group(2, &res.bg_solver, &[]);
+    solver
+        .incompressible_kernels
+        .bind(IncompressibleBindGroups::MeshFieldsSolver, cpass);
 }
 
 fn coupled_bind_fields_coupled_solution(solver: &GpuSolver, cpass: &mut wgpu::ComputePass) {
-    let res = solver
-        .coupled_resources
-        .as_ref()
-        .expect("Coupled resources not initialized");
-    cpass.set_bind_group(0, &solver.bg_fields, &[]);
-    cpass.set_bind_group(1, &res.bg_coupled_solution, &[]);
+    solver
+        .incompressible_kernels
+        .bind(IncompressibleBindGroups::UpdateFieldsSolution, cpass);
 }
 
 fn coupled_context(solver: &GpuSolver) -> &GpuContext {
@@ -76,7 +71,7 @@ impl GpuSolver {
     pub(crate) fn build_coupled_init_prepare_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "coupled:init_prepare",
-            pipeline: |s| &s.pipeline_prepare_coupled,
+            pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::PrepareCoupled),
             bind_groups: coupled_bind_mesh_fields_solver,
             workgroups: coupled_workgroups_cells,
         })])
@@ -86,13 +81,13 @@ impl GpuSolver {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "coupled:prepare",
-                pipeline: |s| &s.pipeline_prepare_coupled,
+                pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::PrepareCoupled),
                 bind_groups: coupled_bind_mesh_fields_solver,
                 workgroups: coupled_workgroups_cells,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "coupled:assembly_merged",
-                pipeline: |s| &s.pipeline_coupled_assembly_merged,
+                pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::CoupledAssemblyMerged),
                 bind_groups: coupled_bind_mesh_fields_solver,
                 workgroups: coupled_workgroups_cells,
             }),
@@ -102,7 +97,7 @@ impl GpuSolver {
     pub(crate) fn build_coupled_assembly_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "coupled:assembly_merged",
-            pipeline: |s| &s.pipeline_coupled_assembly_merged,
+            pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::CoupledAssemblyMerged),
             bind_groups: coupled_bind_mesh_fields_solver,
             workgroups: coupled_workgroups_cells,
         })])
@@ -111,7 +106,7 @@ impl GpuSolver {
     pub(crate) fn build_coupled_update_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "coupled:update_fields_max_diff",
-            pipeline: |s| &s.pipeline_update_from_coupled,
+            pipeline: |s| s.incompressible_kernels.pipeline(IncompressiblePipeline::UpdateFieldsFromCoupled),
             bind_groups: coupled_bind_fields_coupled_solution,
             workgroups: coupled_workgroups_cells,
         })])
@@ -250,8 +245,9 @@ impl GpuSolver {
         // Ping-pong rotation
         self.state_step_index = (self.state_step_index + 1) % 3;
 
-        // Update bind group
-        self.bg_fields = self.bg_fields_ping_pong[self.state_step_index].clone();
+        // Update module ping-pong selection (bind groups are owned by the module)
+        self.incompressible_kernels
+            .set_step_index(self.state_step_index);
 
         // Update buffer references
         let idx_state = match self.state_step_index {

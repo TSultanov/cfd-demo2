@@ -22,10 +22,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0: f32,
 }
 
 // Group 0: Mesh
@@ -97,6 +100,9 @@ var<storage, read_write> grad_rho_e: array<Vector2>;
 
 @group(1) @binding(9) 
 var<storage, read> state_iter: array<f32>;
+
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 
 @compute
 @workgroup_size(64)
@@ -240,12 +246,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let mach2 = mach * mach;
     var c_l_eff: f32 = c_l;
     var c_r_eff: f32 = c_r;
-    if (constants.precond_model == 0u) {
+    if (low_mach.model == 0u) {
         c_l_eff = c_l * mach;
         c_r_eff = c_r * mach;
     } else {
-        if (constants.precond_model == 1u) {
-            let theta = min(1.0, max(mach2, constants.precond_theta_floor));
+        if (low_mach.model == 1u) {
+            let theta = min(1.0, max(mach2, low_mach.theta_floor));
             let one_minus_theta = 1.0 - theta;
             c_l_eff = sqrt(theta * c_l * c_l + one_minus_theta * u_n_l * u_n_l);
             c_r_eff = sqrt(theta * c_r * c_r + one_minus_theta * u_n_r * u_n_r);
@@ -307,11 +313,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rho_face = (rho_l + rho_r) * 0.5;
     let p_bar = (p_l + p_r) * 0.5;
     let dp_rel = abs(p_r - p_l) / max(p_bar, 0.000001);
-    if (!is_boundary && constants.precond_model != 2u && constants.pressure_coupling_alpha > 0.0) {
-        let pc_theta = min(1.0, max(mach2, constants.precond_theta_floor));
+    if (!is_boundary && low_mach.model != 2u && low_mach.pressure_coupling_alpha > 0.0) {
+        let pc_theta = min(1.0, max(mach2, low_mach.theta_floor));
         let pc_low_mach = 1.0 - pc_theta;
         let pc_smooth = 1.0 / (dp_rel / 0.2 * dp_rel / 0.2 + 1.0);
-        let pc_alpha = constants.pressure_coupling_alpha * pc_low_mach * pc_smooth;
+        let pc_alpha = low_mach.pressure_coupling_alpha * pc_low_mach * pc_smooth;
         let m_corr = pc_alpha * constants.dt / max(rho_face, 0.00000001) * (grad_p_face_n - grad_p_jump_n);
         let h_l = (rho_e_l + p_l) * inv_rho_l;
         let h_r = (rho_e_r + p_r) * inv_rho_r;

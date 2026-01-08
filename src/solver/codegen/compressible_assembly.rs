@@ -29,6 +29,7 @@ fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
     items.push(Item::Struct(constants_struct()));
+    items.push(Item::Struct(low_mach_params_struct()));
     items.push(Item::Comment("Group 0: Mesh".to_string()));
     items.extend(mesh_bindings());
     items.push(Item::Comment(
@@ -68,10 +69,18 @@ fn constants_struct() -> StructDef {
             StructField::new("time_scheme", Type::U32),
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
-            StructField::new("precond_type", Type::U32),
-            StructField::new("precond_model", Type::U32),
-            StructField::new("precond_theta_floor", Type::F32),
+        ],
+    )
+}
+
+fn low_mach_params_struct() -> StructDef {
+    StructDef::new(
+        "LowMachParams",
+        vec![
+            StructField::new("model", Type::U32),
+            StructField::new("theta_floor", Type::F32),
             StructField::new("pressure_coupling_alpha", Type::F32),
+            StructField::new("_pad0", Type::F32),
         ],
     )
 }
@@ -230,6 +239,12 @@ fn state_bindings() -> Vec<Item> {
             1,
             9,
             AccessMode::Read,
+        ),
+        uniform_var(
+            "low_mach",
+            Type::Custom("LowMachParams".to_string()),
+            1,
+            10,
         ),
     ]
 }
@@ -963,7 +978,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         dsl::abs("u_face_n") / dsl::max("c_bar", 1e-6),
     ));
     loop_body.push(dsl::let_expr("mach2", Expr::ident("mach") * Expr::ident("mach")));
-    // Low-Mach preconditioning (optional). Default is `precond_model=2` (off) for
+    // Low-Mach preconditioning (optional). Default is `model=2` (off) for
     // rhoCentralFoam-like transient behavior (e.g., acoustics).
     loop_body.push(dsl::var_typed_expr("c_l_eff", Type::F32, Some(Expr::ident("c_l"))));
     loop_body.push(dsl::var_typed_expr("c_r_eff", Type::F32, Some(Expr::ident("c_r"))));
@@ -977,7 +992,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "theta",
             dsl::min(
                 1.0,
-                dsl::max(Expr::ident("mach2"), Expr::ident("constants").field("precond_theta_floor")),
+                dsl::max(
+                    Expr::ident("mach2"),
+                    Expr::ident("low_mach").field("theta_floor"),
+                ),
             ),
         ),
         dsl::let_expr(
@@ -999,9 +1017,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             ),
         ),
     ]);
-    let precond_model = typed::EnumExpr::<GpuLowMachPrecondModel>::from_expr(
-        Expr::ident("constants").field("precond_model"),
-    );
+    let precond_model =
+        typed::EnumExpr::<GpuLowMachPrecondModel>::from_expr(Expr::ident("low_mach").field("model"));
     let precond_else_block = dsl::block(vec![dsl::if_block_expr(
         precond_model.eq(GpuLowMachPrecondModel::WeissSmith),
         precond_weiss_smith_block,
@@ -1416,7 +1433,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "pc_theta",
             dsl::min(
                 1.0,
-                dsl::max(Expr::ident("mach2"), Expr::ident("constants").field("precond_theta_floor")),
+                dsl::max(
+                    Expr::ident("mach2"),
+                    Expr::ident("low_mach").field("theta_floor"),
+                ),
             ),
         ),
         dsl::let_expr("pc_low_mach", Expr::from(1.0) - Expr::ident("pc_theta")),
@@ -1427,7 +1447,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         ),
         dsl::let_expr(
             "pc_alpha",
-            Expr::ident("constants").field("pressure_coupling_alpha")
+            Expr::ident("low_mach").field("pressure_coupling_alpha")
                 * Expr::ident("pc_low_mach")
                 * Expr::ident("pc_smooth"),
         ),
@@ -1470,8 +1490,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     loop_body.push(dsl::if_block_expr(
         (!Expr::ident("is_boundary"))
             & precond_model.ne(GpuLowMachPrecondModel::Off)
-            & Expr::ident("constants")
-                .field("pressure_coupling_alpha")
+            & Expr::ident("low_mach").field("pressure_coupling_alpha")
                 .gt(0.0),
         pressure_coupling_block,
         None,

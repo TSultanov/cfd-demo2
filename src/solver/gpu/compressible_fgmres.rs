@@ -1,6 +1,7 @@
 use super::bindings;
 use super::compressible_solver::GpuCompressibleSolver;
 use super::linear_solver::amg::{AmgResources, CsrMatrix};
+use super::preconditioners::CompressibleKrylovPreconditioner;
 use super::structs::LinearSolverStats;
 use bytemuck::{bytes_of, Pod, Zeroable};
 use std::collections::HashMap;
@@ -1055,10 +1056,12 @@ impl GpuCompressibleSolver {
     ) -> LinearSolverStats {
         let start = std::time::Instant::now();
         self.ensure_fgmres_resources(max_restart);
-        let use_amg = self.constants.precond_type == 1 || env_flag("CFD2_COMP_AMG", false);
-        if use_amg {
-            pollster::block_on(self.ensure_amg_resources());
-        }
+        let precond = CompressibleKrylovPreconditioner::select(
+            self.preconditioner,
+            env_flag("CFD2_COMP_AMG", false),
+            env_flag("CFD2_COMP_BLOCK_PRECOND", true),
+        );
+        precond.ensure_resources(self);
         let Some(fgmres) = &self.fgmres_resources else {
             return LinearSolverStats::default();
         };
@@ -1067,7 +1070,6 @@ impl GpuCompressibleSolver {
         let workgroups = self.workgroups_for_size(n);
         let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
         let dispatch_x_threads = self.dispatch_x_threads(workgroups);
-        let use_block_precond = !use_amg && env_flag("CFD2_COMP_BLOCK_PRECOND", true);
         let block_workgroups = self.workgroups_for_size(self.num_cells);
         let (block_dispatch_x, block_dispatch_y) = self.dispatch_2d(block_workgroups);
 
@@ -1105,15 +1107,7 @@ impl GpuCompressibleSolver {
         self.context
             .queue
             .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
-        if use_block_precond {
-            let precond_vectors = self.create_vector_bind_group(
-                fgmres,
-                self.b_rhs.as_entire_binding(),
-                fgmres.b_w.as_entire_binding(),
-                fgmres.b_temp.as_entire_binding(),
-            );
-            self.dispatch_precond_build(fgmres, &precond_vectors, block_workgroups);
-        }
+        precond.prepare(self, fgmres, block_workgroups);
 
         let mut iter_params = IterParams {
             current_idx: 0,
@@ -1171,41 +1165,16 @@ impl GpuCompressibleSolver {
 
             let z_buf = &fgmres.z_vectors[j];
             let vj = self.basis_binding(fgmres, j);
-            if use_amg {
-                self.apply_amg_precond(
-                    fgmres,
-                    vj,
-                    z_buf,
-                    block_dispatch_x,
-                    block_dispatch_y,
-                );
-            } else if use_block_precond {
-                self.dispatch_precond_apply(
-                    fgmres,
-                    &self.create_vector_bind_group(
-                        fgmres,
-                        vj,
-                        z_buf.as_entire_binding(),
-                        fgmres.b_temp.as_entire_binding(),
-                    ),
-                    block_dispatch_x,
-                    block_dispatch_y,
-                );
-            } else {
-                self.dispatch_vector_pipeline(
-                    &fgmres.pipeline_copy,
-                    fgmres,
-                    &self.create_vector_bind_group(
-                        fgmres,
-                        vj,
-                        z_buf.as_entire_binding(),
-                        fgmres.b_temp.as_entire_binding(),
-                    ),
-                    &fgmres.bg_params,
-                    dispatch_x,
-                    dispatch_y,
-                );
-            }
+            precond.apply(
+                self,
+                fgmres,
+                vj,
+                z_buf,
+                dispatch_x,
+                dispatch_y,
+                block_dispatch_x,
+                block_dispatch_y,
+            );
 
             self.dispatch_vector_pipeline(
                 &fgmres.pipeline_spmv,
@@ -1403,7 +1372,7 @@ impl GpuCompressibleSolver {
         })
     }
 
-    fn create_vector_bind_group<'a>(
+    pub(crate) fn create_vector_bind_group<'a>(
         &self,
         fgmres: &CompressibleFgmresResources,
         x: wgpu::BindingResource<'a>,
@@ -1447,7 +1416,7 @@ impl GpuCompressibleSolver {
             })
     }
 
-    fn dispatch_vector_pipeline(
+    pub(crate) fn dispatch_vector_pipeline(
         &self,
         pipeline: &wgpu::ComputePipeline,
         fgmres: &CompressibleFgmresResources,
@@ -1504,7 +1473,7 @@ impl GpuCompressibleSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
-    fn dispatch_precond_build(
+    pub(crate) fn dispatch_precond_build(
         &self,
         fgmres: &CompressibleFgmresResources,
         vector_bg: &wgpu::BindGroup,
@@ -1531,7 +1500,7 @@ impl GpuCompressibleSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
-    fn dispatch_precond_apply(
+    pub(crate) fn dispatch_precond_apply(
         &self,
         fgmres: &CompressibleFgmresResources,
         vector_bg: &wgpu::BindGroup,
@@ -1559,7 +1528,7 @@ impl GpuCompressibleSolver {
         self.context.queue.submit(Some(encoder.finish()));
     }
 
-    fn apply_amg_precond<'a>(
+    pub(crate) fn apply_amg_precond<'a>(
         &self,
         fgmres: &CompressibleFgmresResources,
         input: wgpu::BindingResource<'a>,

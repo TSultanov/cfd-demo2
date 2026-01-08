@@ -41,6 +41,8 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Added a generic (model-driven) scheme expansion pass that reports required auxiliary computations (currently: gradient needs for higher-order convection) (`src/solver/model/backend/scheme_expansion.rs`).
 - Used the scheme expansion to skip compressible gradient dispatches for first-order runs by selecting first-order vs reconstruction kernel graphs at runtime (`src/solver/gpu/compressible_solver.rs`).
 - Plumbed the same scheme expansion result into the incompressible coupled solver loop via `GpuSolver.scheme_needs_gradients` (replacing direct `scheme != 0` checks) (`src/solver/gpu/solver.rs`, `src/solver/gpu/coupled_solver.rs`).
+- Split the low-Mach “preconditioning” parameters out of the shared constants buffer into a dedicated `GpuLowMachParams` uniform bound in compressible kernels (`src/solver/gpu/structs.rs`, `src/solver/gpu/init/compressible_fields.rs`, `src/solver/codegen/compressible_*`).
+- Moved preconditioner selection out of `GpuConstants` into typed host-side selection (`PreconditionerType`) and refactored coupled/compressible FGMRES to use small pluggable modules (`src/solver/gpu/preconditioners.rs`).
 - Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
 - Added a first **generic boundary-condition** representation (`BoundarySpec` on `ModelSpec`) plus a helper to build GPU BC tables and a generic BC path in the generic coupled assembly kernel (Dirichlet + Neumann/zeroGradient for diffusion) (`src/solver/model/definitions.rs`, `src/solver/codegen/generic_coupled_kernels.rs`).
 - Added `ModelSpec.id` and emit generic coupled kernels under id-suffixed WGSL names (so multiple generated-per-model variants can coexist) and a first runtime backend for `ModelFields::GenericCoupled` in `GpuUnifiedSolver` (`src/solver/codegen/emit.rs`, `src/solver/gpu/generic_coupled_solver.rs`, `src/solver/gpu/unified_solver.rs`).
@@ -109,7 +111,7 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 ### Decisions (Chosen)
 - **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).
 - **Flux closures**: represent as plugin nodes in the `KernelGraph` (declared inputs/outputs), not as inline AST expressions.
-- **Preconditioning**: default to generic Jacobi for all models; compressible can add specialized preconditioners.
+- **Preconditioning**: selection is host-side (typed enums); compressible low-Mach parameters live in a dedicated uniform buffer, and linear-solver preconditioning is expressed via small pluggable modules.
 - **Nonlinear iteration**: configurable (e.g. Picard/Newton); `SolverConfig` selects the strategy.
 
 ## Notes / Constraints

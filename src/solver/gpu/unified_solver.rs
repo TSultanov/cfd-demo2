@@ -217,7 +217,7 @@ impl GpuUnifiedSolver {
         match &mut self.backend {
             UnifiedSolverBackend::Incompressible(solver) => solver.set_precond_type(preconditioner),
             UnifiedSolverBackend::Compressible(solver) => {
-                solver.set_precond_type(preconditioner as u32)
+                solver.set_precond_type(preconditioner)
             }
             UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_precond_type(preconditioner),
         }
@@ -606,5 +606,5 @@ fn apply_config_incompressible(solver: &mut GpuSolver, config: SolverConfig) {
 fn apply_config_compressible(solver: &mut GpuCompressibleSolver, config: SolverConfig) {
     solver.set_scheme(config.advection_scheme.gpu_id());
     solver.set_time_scheme(config.time_scheme as u32);
-    solver.set_precond_type(config.preconditioner as u32);
+    solver.set_precond_type(config.preconditioner);
 }

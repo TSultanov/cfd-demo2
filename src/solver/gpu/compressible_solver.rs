@@ -15,7 +15,7 @@ use crate::solver::gpu::init::linear_solver::matrix;
 use crate::solver::gpu::init::mesh;
 use crate::solver::gpu::kernel_graph::{ComputeNode, CopyBufferNode, KernelGraph, KernelNode};
 use crate::solver::gpu::model_defaults::default_compressible_model;
-use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
+use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
@@ -142,7 +142,10 @@ pub(crate) struct GpuCompressibleSolver {
     pub b_grad_rho_u_y: wgpu::Buffer,
     pub b_grad_rho_e: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
+    pub b_low_mach_params: wgpu::Buffer,
     pub constants: GpuConstants,
+    pub low_mach_params: GpuLowMachParams,
+    pub preconditioner: PreconditionerType,
     pub b_row_offsets: wgpu::Buffer,
     pub b_col_indices: wgpu::Buffer,
     pub b_matrix_values: wgpu::Buffer,
@@ -626,6 +629,7 @@ impl GpuCompressibleSolver {
                             grad_rho_u_x: fields_res.b_grad_rho_u_x.as_entire_buffer_binding(),
                             grad_rho_u_y: fields_res.b_grad_rho_u_y.as_entire_buffer_binding(),
                             grad_rho_e: fields_res.b_grad_rho_e.as_entire_buffer_binding(),
+                            low_mach: fields_res.b_low_mach_params.as_entire_buffer_binding(),
                         },
                     )
                     .into_array(),
@@ -671,6 +675,9 @@ impl GpuCompressibleSolver {
             b_grad_rho_e: fields_res.b_grad_rho_e,
             b_constants: fields_res.b_constants,
             constants: fields_res.constants,
+            b_low_mach_params: fields_res.b_low_mach_params,
+            low_mach_params: fields_res.low_mach_params,
+            preconditioner: PreconditionerType::Jacobi,
             b_row_offsets: matrix_res.b_row_offsets,
             b_col_indices: matrix_res.b_col_indices,
             b_matrix_values: matrix_res.b_matrix_values,
@@ -772,19 +779,18 @@ impl GpuCompressibleSolver {
         self.update_constants();
     }
 
-    pub fn set_precond_type(&mut self, precond_type: u32) {
-        self.constants.precond_type = precond_type;
-        self.update_constants();
+    pub fn set_precond_type(&mut self, precond_type: PreconditionerType) {
+        self.preconditioner = precond_type;
     }
 
     pub fn set_precond_model(&mut self, model: u32) {
-        self.constants.precond_model = model;
-        self.update_constants();
+        self.low_mach_params.model = model;
+        self.update_low_mach_params();
     }
 
     pub fn set_precond_theta_floor(&mut self, floor: f32) {
-        self.constants.precond_theta_floor = floor;
-        self.update_constants();
+        self.low_mach_params.theta_floor = floor;
+        self.update_low_mach_params();
     }
 
     pub fn set_outer_iters(&mut self, iters: usize) {
@@ -987,6 +993,14 @@ impl GpuCompressibleSolver {
         self.context
             .queue
             .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
+    }
+
+    fn update_low_mach_params(&self) {
+        self.context.queue.write_buffer(
+            &self.b_low_mach_params,
+            0,
+            bytemuck::bytes_of(&self.low_mach_params),
+        );
     }
 
     async fn read_state(&self) -> Vec<f32> {

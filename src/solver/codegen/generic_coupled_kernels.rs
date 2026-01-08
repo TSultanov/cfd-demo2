@@ -74,10 +74,6 @@ fn constants_struct() -> StructDef {
             StructField::new("time_scheme", Type::U32),
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
-            StructField::new("precond_type", Type::U32),
-            StructField::new("precond_model", Type::U32),
-            StructField::new("precond_theta_floor", Type::F32),
-            StructField::new("pressure_coupling_alpha", Type::F32),
         ],
     )
 }

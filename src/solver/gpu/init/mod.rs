@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::profiling::ProfilingStats;
-use super::structs::GpuSolver;
+use super::structs::{GpuSolver, PreconditionerType};
 
 impl GpuSolver {
     pub async fn new(
@@ -80,6 +80,7 @@ impl GpuSolver {
             b_constants: fields_res.b_constants,
             bg_fields: fields_res.bg_fields,
             constants: fields_res.constants,
+            preconditioner: PreconditionerType::Jacobi,
             scheme_needs_gradients: false,
 
             // Linear Solver

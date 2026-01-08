@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 017900691d0d59d7923f8b4736f924d26564426578d787453c4cc8c6513bf43d
+// SourceHash: e57aa4c652438a0e9967453d98f508b0b3d4ecb5b31d3378796291a883cbc595
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,19 +104,21 @@ pub mod layout_asserts {
             std::mem::offset_of!(compressible_explicit_update::Constants, inlet_velocity) == 48
         );
         assert!(std::mem::offset_of!(compressible_explicit_update::Constants, ramp_time) == 52);
-        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, precond_type) == 56);
-        assert!(std::mem::offset_of!(compressible_explicit_update::Constants, precond_model) == 60);
+        assert!(std::mem::size_of::<compressible_explicit_update::Constants>() == 56);
+    };
+    const COMPRESSIBLE_EXPLICIT_UPDATE_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(compressible_explicit_update::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(compressible_explicit_update::Constants, precond_theta_floor)
-                == 64
+            std::mem::offset_of!(compressible_explicit_update::LowMachParams, theta_floor) == 4
         );
         assert!(
             std::mem::offset_of!(
-                compressible_explicit_update::Constants,
+                compressible_explicit_update::LowMachParams,
                 pressure_coupling_alpha
-            ) == 68
+            ) == 8
         );
-        assert!(std::mem::size_of::<compressible_explicit_update::Constants>() == 72);
+        assert!(std::mem::offset_of!(compressible_explicit_update::LowMachParams, _pad0) == 12);
+        assert!(std::mem::size_of::<compressible_explicit_update::LowMachParams>() == 16);
     };
     const COMPRESSIBLE_PRECOND_GMRES_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(compressible_precond::GmresParams, n) == 0);
@@ -166,23 +168,21 @@ pub mod layout_asserts {
             std::mem::offset_of!(generated::compressible_apply::Constants, inlet_velocity) == 48
         );
         assert!(std::mem::offset_of!(generated::compressible_apply::Constants, ramp_time) == 52);
-        assert!(std::mem::offset_of!(generated::compressible_apply::Constants, precond_type) == 56);
+        assert!(std::mem::size_of::<generated::compressible_apply::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_APPLY_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_apply::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(generated::compressible_apply::Constants, precond_model) == 60
+            std::mem::offset_of!(generated::compressible_apply::LowMachParams, theta_floor) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::compressible_apply::Constants,
-                precond_theta_floor
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_apply::Constants,
+                generated::compressible_apply::LowMachParams,
                 pressure_coupling_alpha
-            ) == 68
+            ) == 8
         );
-        assert!(std::mem::size_of::<generated::compressible_apply::Constants>() == 72);
+        assert!(std::mem::offset_of!(generated::compressible_apply::LowMachParams, _pad0) == 12);
+        assert!(std::mem::size_of::<generated::compressible_apply::LowMachParams>() == 16);
     };
     const GENERATED_COMPRESSIBLE_ASSEMBLY_VECTOR2_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::compressible_assembly::Vector2, x) == 0);
@@ -208,25 +208,21 @@ pub mod layout_asserts {
             std::mem::offset_of!(generated::compressible_assembly::Constants, inlet_velocity) == 48
         );
         assert!(std::mem::offset_of!(generated::compressible_assembly::Constants, ramp_time) == 52);
+        assert!(std::mem::size_of::<generated::compressible_assembly::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_ASSEMBLY_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_assembly::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(generated::compressible_assembly::Constants, precond_type) == 56
-        );
-        assert!(
-            std::mem::offset_of!(generated::compressible_assembly::Constants, precond_model) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_assembly::Constants,
-                precond_theta_floor
-            ) == 64
+            std::mem::offset_of!(generated::compressible_assembly::LowMachParams, theta_floor) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::compressible_assembly::Constants,
+                generated::compressible_assembly::LowMachParams,
                 pressure_coupling_alpha
-            ) == 68
+            ) == 8
         );
-        assert!(std::mem::size_of::<generated::compressible_assembly::Constants>() == 72);
+        assert!(std::mem::offset_of!(generated::compressible_assembly::LowMachParams, _pad0) == 12);
+        assert!(std::mem::size_of::<generated::compressible_assembly::LowMachParams>() == 16);
     };
     const GENERATED_COMPRESSIBLE_FLUX_KT_VECTOR2_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::compressible_flux_kt::Vector2, x) == 0);
@@ -252,25 +248,21 @@ pub mod layout_asserts {
             std::mem::offset_of!(generated::compressible_flux_kt::Constants, inlet_velocity) == 48
         );
         assert!(std::mem::offset_of!(generated::compressible_flux_kt::Constants, ramp_time) == 52);
+        assert!(std::mem::size_of::<generated::compressible_flux_kt::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_FLUX_KT_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_flux_kt::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(generated::compressible_flux_kt::Constants, precond_type) == 56
-        );
-        assert!(
-            std::mem::offset_of!(generated::compressible_flux_kt::Constants, precond_model) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_flux_kt::Constants,
-                precond_theta_floor
-            ) == 64
+            std::mem::offset_of!(generated::compressible_flux_kt::LowMachParams, theta_floor) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::compressible_flux_kt::Constants,
+                generated::compressible_flux_kt::LowMachParams,
                 pressure_coupling_alpha
-            ) == 68
+            ) == 8
         );
-        assert!(std::mem::size_of::<generated::compressible_flux_kt::Constants>() == 72);
+        assert!(std::mem::offset_of!(generated::compressible_flux_kt::LowMachParams, _pad0) == 12);
+        assert!(std::mem::size_of::<generated::compressible_flux_kt::LowMachParams>() == 16);
     };
     const GENERATED_COMPRESSIBLE_GRADIENTS_VECTOR2_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::compressible_gradients::Vector2, x) == 0);
@@ -303,25 +295,26 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(generated::compressible_gradients::Constants, ramp_time) == 52
         );
+        assert!(std::mem::size_of::<generated::compressible_gradients::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_GRADIENTS_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_gradients::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(generated::compressible_gradients::Constants, precond_type) == 56
-        );
-        assert!(
-            std::mem::offset_of!(generated::compressible_gradients::Constants, precond_model) == 60
+            std::mem::offset_of!(
+                generated::compressible_gradients::LowMachParams,
+                theta_floor
+            ) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::compressible_gradients::Constants,
-                precond_theta_floor
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_gradients::Constants,
+                generated::compressible_gradients::LowMachParams,
                 pressure_coupling_alpha
-            ) == 68
+            ) == 8
         );
-        assert!(std::mem::size_of::<generated::compressible_gradients::Constants>() == 72);
+        assert!(
+            std::mem::offset_of!(generated::compressible_gradients::LowMachParams, _pad0) == 12
+        );
+        assert!(std::mem::size_of::<generated::compressible_gradients::LowMachParams>() == 16);
     };
     const GENERATED_COMPRESSIBLE_UPDATE_VECTOR2_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::compressible_update::Vector2, x) == 0);
@@ -345,25 +338,21 @@ pub mod layout_asserts {
             std::mem::offset_of!(generated::compressible_update::Constants, inlet_velocity) == 48
         );
         assert!(std::mem::offset_of!(generated::compressible_update::Constants, ramp_time) == 52);
+        assert!(std::mem::size_of::<generated::compressible_update::Constants>() == 56);
+    };
+    const GENERATED_COMPRESSIBLE_UPDATE_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::compressible_update::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(generated::compressible_update::Constants, precond_type) == 56
-        );
-        assert!(
-            std::mem::offset_of!(generated::compressible_update::Constants, precond_model) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_update::Constants,
-                precond_theta_floor
-            ) == 64
+            std::mem::offset_of!(generated::compressible_update::LowMachParams, theta_floor) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::compressible_update::Constants,
+                generated::compressible_update::LowMachParams,
                 pressure_coupling_alpha
-            ) == 68
+            ) == 8
         );
-        assert!(std::mem::size_of::<generated::compressible_update::Constants>() == 72);
+        assert!(std::mem::offset_of!(generated::compressible_update::LowMachParams, _pad0) == 12);
+        assert!(std::mem::size_of::<generated::compressible_update::LowMachParams>() == 16);
     };
     const GENERATED_COUPLED_ASSEMBLY_MERGED_VECTOR2_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::coupled_assembly_merged::Vector2, x) == 0);
@@ -528,33 +517,9 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                precond_type
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                precond_model
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                precond_theta_floor
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                pressure_coupling_alpha
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-            >() == 72
+            >() == 56
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_NEUMANN_VECTOR2_ASSERTS: () = {
@@ -662,33 +627,9 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                precond_type
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                precond_model
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                precond_theta_floor
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                pressure_coupling_alpha
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-            >() == 72
+            >() == 56
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_CONSTANTS_ASSERTS: () = {
@@ -777,32 +718,8 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                precond_type
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                precond_model
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                precond_theta_floor
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                pressure_coupling_alpha
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_update_generic_diffusion_demo::Constants>(
-            ) == 72
+            ) == 56
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_NEUMANN_CONSTANTS_ASSERTS: () = {
@@ -891,33 +808,9 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                precond_type
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                precond_model
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                precond_theta_floor
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                pressure_coupling_alpha
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-            >() == 72
+            >() == 56
         );
     };
     const GENERATED_PREPARE_COUPLED_VECTOR2_ASSERTS: () = {
@@ -1798,6 +1691,8 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for compressible_explicit_update::Vector2 {}
     unsafe impl bytemuck::Zeroable for compressible_explicit_update::Constants {}
     unsafe impl bytemuck::Pod for compressible_explicit_update::Constants {}
+    unsafe impl bytemuck::Zeroable for compressible_explicit_update::LowMachParams {}
+    unsafe impl bytemuck::Pod for compressible_explicit_update::LowMachParams {}
     unsafe impl bytemuck::Zeroable for compressible_precond::GmresParams {}
     unsafe impl bytemuck::Pod for compressible_precond::GmresParams {}
     unsafe impl bytemuck::Zeroable for compressible_precond::IterParams {}
@@ -1810,22 +1705,32 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for generated::compressible_apply::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_apply::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_apply::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_apply::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::compressible_apply::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generated::compressible_assembly::Vector2 {}
     unsafe impl bytemuck::Pod for generated::compressible_assembly::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_assembly::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_assembly::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_assembly::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::compressible_assembly::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generated::compressible_flux_kt::Vector2 {}
     unsafe impl bytemuck::Pod for generated::compressible_flux_kt::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_flux_kt::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_flux_kt::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_flux_kt::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::compressible_flux_kt::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generated::compressible_gradients::Vector2 {}
     unsafe impl bytemuck::Pod for generated::compressible_gradients::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_gradients::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_gradients::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_gradients::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::compressible_gradients::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generated::compressible_update::Vector2 {}
     unsafe impl bytemuck::Pod for generated::compressible_update::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::compressible_update::Constants {}
     unsafe impl bytemuck::Pod for generated::compressible_update::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::compressible_update::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::compressible_update::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generated::coupled_assembly_merged::Vector2 {}
     unsafe impl bytemuck::Pod for generated::coupled_assembly_merged::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::coupled_assembly_merged::Constants {}
@@ -2246,14 +2151,6 @@ pub mod compressible_explicit_update {
         pub inlet_velocity: f32,
         #[doc = "offset: 52, size: 4, type: `f32`"]
         pub ramp_time: f32,
-        #[doc = "offset: 56, size: 4, type: `u32`"]
-        pub precond_type: u32,
-        #[doc = "offset: 60, size: 4, type: `u32`"]
-        pub precond_model: u32,
-        #[doc = "offset: 64, size: 4, type: `f32`"]
-        pub precond_theta_floor: f32,
-        #[doc = "offset: 68, size: 4, type: `f32`"]
-        pub pressure_coupling_alpha: f32,
     }
     impl Constants {
         pub const fn new(
@@ -2271,10 +2168,6 @@ pub mod compressible_explicit_update {
             time_scheme: u32,
             inlet_velocity: f32,
             ramp_time: f32,
-            precond_type: u32,
-            precond_model: u32,
-            precond_theta_floor: f32,
-            pressure_coupling_alpha: f32,
         ) -> Self {
             Self {
                 dt,
@@ -2291,10 +2184,33 @@ pub mod compressible_explicit_update {
                 time_scheme,
                 inlet_velocity,
                 ramp_time,
-                precond_type,
-                precond_model,
-                precond_theta_floor,
+            }
+        }
+    }
+    #[repr(C, align(4))]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct LowMachParams {
+        #[doc = "offset: 0, size: 4, type: `u32`"]
+        pub model: u32,
+        #[doc = "offset: 4, size: 4, type: `f32`"]
+        pub theta_floor: f32,
+        #[doc = "offset: 8, size: 4, type: `f32`"]
+        pub pressure_coupling_alpha: f32,
+        #[doc = "offset: 12, size: 4, type: `f32`"]
+        pub _pad0: f32,
+    }
+    impl LowMachParams {
+        pub const fn new(
+            model: u32,
+            theta_floor: f32,
+            pressure_coupling_alpha: f32,
+            _pad0: f32,
+        ) -> Self {
+            Self {
+                model,
+                theta_floor,
                 pressure_coupling_alpha,
+                _pad0,
             }
         }
     }
@@ -2588,6 +2504,7 @@ pub mod compressible_explicit_update {
         pub grad_rho_u_y: wgpu::BufferBinding<'a>,
         pub grad_rho_e: wgpu::BufferBinding<'a>,
         pub state_iter: wgpu::BufferBinding<'a>,
+        pub low_mach: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
     pub struct WgpuBindGroup1Entries<'a> {
@@ -2601,6 +2518,7 @@ pub mod compressible_explicit_update {
         pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
         pub grad_rho_e: wgpu::BindGroupEntry<'a>,
         pub state_iter: wgpu::BindGroupEntry<'a>,
+        pub low_mach: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup1Entries<'a> {
         pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -2645,9 +2563,13 @@ pub mod compressible_explicit_update {
                     binding: 9,
                     resource: wgpu::BindingResource::Buffer(params.state_iter),
                 },
+                low_mach: wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::Buffer(params.low_mach),
+                },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
             [
                 self.state,
                 self.state_old,
@@ -2659,6 +2581,7 @@ pub mod compressible_explicit_update {
                 self.grad_rho_u_y,
                 self.grad_rho_e,
                 self.state_iter,
+                self.low_mach,
             ]
         }
         pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -2786,6 +2709,21 @@ pub mod compressible_explicit_update {
                         },
                         count: None,
                     },
+                    #[doc = " @binding(10): \"low_mach\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 10,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                _root::compressible_explicit_update::LowMachParams,
+                            >(
+                            )
+                                as _),
+                        },
+                        count: None,
+                    },
                 ],
             };
         pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -2869,10 +2807,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0_: f32,
 }
 
 @group(0) @binding(0) 
@@ -2919,6 +2860,8 @@ var<storage, read_write> grad_rho_u_y: array<Vector2_>;
 var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(1) @binding(9) 
 var<storage> state_iter: array<f32>;
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -4688,14 +4631,6 @@ pub mod generated {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -4713,10 +4648,6 @@ pub mod generated {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -4733,10 +4664,33 @@ pub mod generated {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
+                }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
                     pressure_coupling_alpha,
+                    _pad0,
                 }
             }
         }
@@ -4771,6 +4725,7 @@ pub mod generated {
             pub grad_rho_u_y: wgpu::BufferBinding<'a>,
             pub grad_rho_e: wgpu::BufferBinding<'a>,
             pub state_iter: wgpu::BufferBinding<'a>,
+            pub low_mach: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -4784,6 +4739,7 @@ pub mod generated {
             pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
             pub grad_rho_e: wgpu::BindGroupEntry<'a>,
             pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub low_mach: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -4828,9 +4784,13 @@ pub mod generated {
                         binding: 9,
                         resource: wgpu::BindingResource::Buffer(params.state_iter),
                     },
+                    low_mach: wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
                 [
                     self.state,
                     self.state_old,
@@ -4842,6 +4802,7 @@ pub mod generated {
                     self.grad_rho_u_y,
                     self.grad_rho_e,
                     self.state_iter,
+                    self.low_mach,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -4966,6 +4927,21 @@ pub mod generated {
                                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(10): \"low_mach\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 10,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::compressible_apply::LowMachParams,
+                                >(
+                                )
+                                    as _),
                             },
                             count: None,
                         },
@@ -5113,10 +5089,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0_: f32,
 }
 
 @group(0) @binding(0) 
@@ -5139,6 +5118,8 @@ var<storage, read_write> grad_rho_u_y: array<Vector2_>;
 var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(0) @binding(9) 
 var<storage> state_iter: array<f32>;
+@group(0) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 @group(1) @binding(0) 
 var<storage> solution: array<f32>;
 
@@ -5218,14 +5199,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -5243,10 +5216,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -5263,10 +5232,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
+                }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
                     pressure_coupling_alpha,
+                    _pad0,
                 }
             }
         }
@@ -5562,6 +5554,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BufferBinding<'a>,
             pub grad_rho_e: wgpu::BufferBinding<'a>,
             pub state_iter: wgpu::BufferBinding<'a>,
+            pub low_mach: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup1Entries<'a> {
@@ -5575,6 +5568,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
             pub grad_rho_e: wgpu::BindGroupEntry<'a>,
             pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub low_mach: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup1Entries<'a> {
             pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -5619,9 +5613,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 9,
                         resource: wgpu::BindingResource::Buffer(params.state_iter),
                     },
+                    low_mach: wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
                 [
                     self.state,
                     self.state_old,
@@ -5633,6 +5631,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.grad_rho_u_y,
                     self.grad_rho_e,
                     self.state_iter,
+                    self.low_mach,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -5757,6 +5756,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 has_dynamic_offset: false,
                                 min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(10): \"low_mach\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 10,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::compressible_assembly::LowMachParams,
+                                >(
+                                )
+                                    as _),
                             },
                             count: None,
                         },
@@ -5941,10 +5955,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0_: f32,
 }
 
 @group(0) @binding(0) 
@@ -5991,6 +6008,8 @@ var<storage, read_write> grad_rho_u_y: array<Vector2_>;
 var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(1) @binding(9) 
 var<storage> state_iter: array<f32>;
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 @group(2) @binding(0) 
 var<storage, read_write> matrix_values: array<f32>;
 @group(2) @binding(1) 
@@ -6324,14 +6343,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let mach2_ = (mach * mach);
             c_l_eff = c_l;
             c_r_eff = c_r;
-            let _e657 = constants.precond_model;
+            let _e657 = low_mach.model;
             if (_e657 == 0u) {
                 c_l_eff = (c_l * mach);
                 c_r_eff = (c_r * mach);
             } else {
-                let _e664 = constants.precond_model;
+                let _e664 = low_mach.model;
                 if (_e664 == 1u) {
-                    let _e669 = constants.precond_theta_floor;
+                    let _e669 = low_mach.theta_floor;
                     let theta = min(1f, max(mach2_, _e669));
                     let one_minus_theta = (1f - theta);
                     c_l_eff = sqrt((((theta * c_l) * c_l) + ((one_minus_theta * u_n_l) * u_n_l)));
@@ -6395,8 +6414,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e812 = rho_e_l;
             flux_rho_e = (((a_pos * flux_rho_e_l) + (a_neg * flux_rho_e_r)) + (a_prod_scaled * (_e811 - _e812)));
             let _e817 = is_boundary;
-            let _e821 = constants.precond_model;
-            let _e827 = constants.pressure_coupling_alpha;
+            let _e821 = low_mach.model;
+            let _e827 = low_mach.pressure_coupling_alpha;
             if ((!(_e817) && (_e821 != 2u)) && (_e827 > 0f)) {
                 let _e832 = normal.x;
                 let _e834 = normal.y;
@@ -6458,11 +6477,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let rho_face = ((_e985 + _e986) * 0.5f);
                 let p_bar = ((p_l + p_r) * 0.5f);
                 let dp_rel = (abs((p_r - p_l)) / max(p_bar, 0.000001f));
-                let _e1000 = constants.precond_theta_floor;
+                let _e1000 = low_mach.theta_floor;
                 let pc_theta = min(1f, max(mach2_, _e1000));
                 let pc_low_mach = (1f - pc_theta);
                 let pc_smooth = (1f / ((((dp_rel / 0.2f) * dp_rel) / 0.2f) + 1f));
-                let _e1017 = constants.pressure_coupling_alpha;
+                let _e1017 = low_mach.pressure_coupling_alpha;
                 let pc_alpha = ((_e1017 * pc_low_mach) * pc_smooth);
                 let _e1022 = constants.dt;
                 let m_corr = (((pc_alpha * _e1022) / max(rho_face, 0.00000001f)) * (grad_p_face_n - grad_p_jump_n));
@@ -6947,14 +6966,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -6972,10 +6983,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -6992,10 +6999,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
+                }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
                     pressure_coupling_alpha,
+                    _pad0,
                 }
             }
         }
@@ -7291,6 +7321,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BufferBinding<'a>,
             pub grad_rho_e: wgpu::BufferBinding<'a>,
             pub state_iter: wgpu::BufferBinding<'a>,
+            pub low_mach: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup1Entries<'a> {
@@ -7304,6 +7335,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
             pub grad_rho_e: wgpu::BindGroupEntry<'a>,
             pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub low_mach: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup1Entries<'a> {
             pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -7348,9 +7380,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 9,
                         resource: wgpu::BindingResource::Buffer(params.state_iter),
                     },
+                    low_mach: wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
                 [
                     self.state,
                     self.state_old,
@@ -7362,6 +7398,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.grad_rho_u_y,
                     self.grad_rho_e,
                     self.state_iter,
+                    self.low_mach,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -7489,6 +7526,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             },
                             count: None,
                         },
+                        #[doc = " @binding(10): \"low_mach\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 10,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::compressible_flux_kt::LowMachParams,
+                                >(
+                                )
+                                    as _),
+                            },
+                            count: None,
+                        },
                     ],
                 };
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -7572,10 +7624,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0_: f32,
 }
 
 @group(0) @binding(0) 
@@ -7622,6 +7677,8 @@ var<storage, read_write> grad_rho_u_y: array<Vector2_>;
 var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(1) @binding(9) 
 var<storage> state_iter: array<f32>;
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -7817,14 +7874,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let mach2_ = (mach * mach);
     c_l_eff = c_l;
     c_r_eff = c_r;
-    let _e386 = constants.precond_model;
+    let _e386 = low_mach.model;
     if (_e386 == 0u) {
         c_l_eff = (c_l * mach);
         c_r_eff = (c_r * mach);
     } else {
-        let _e393 = constants.precond_model;
+        let _e393 = low_mach.model;
         if (_e393 == 1u) {
-            let _e398 = constants.precond_theta_floor;
+            let _e398 = low_mach.theta_floor;
             let theta = min(1f, max(mach2_, _e398));
             let one_minus_theta = (1f - theta);
             c_l_eff = sqrt((((theta * c_l) * c_l) + ((one_minus_theta * u_n_l) * u_n_l)));
@@ -7936,14 +7993,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let p_bar = ((p_l + p_r) * 0.5f);
     let dp_rel = (abs((p_r - p_l)) / max(p_bar, 0.000001f));
     let _e666 = is_boundary;
-    let _e670 = constants.precond_model;
-    let _e676 = constants.pressure_coupling_alpha;
+    let _e670 = low_mach.model;
+    let _e676 = low_mach.pressure_coupling_alpha;
     if ((!(_e666) && (_e670 != 2u)) && (_e676 > 0f)) {
-        let _e682 = constants.precond_theta_floor;
+        let _e682 = low_mach.theta_floor;
         let pc_theta = min(1f, max(mach2_, _e682));
         let pc_low_mach = (1f - pc_theta);
         let pc_smooth = (1f / ((((dp_rel / 0.2f) * dp_rel) / 0.2f) + 1f));
-        let _e699 = constants.pressure_coupling_alpha;
+        let _e699 = low_mach.pressure_coupling_alpha;
         let pc_alpha = ((_e699 * pc_low_mach) * pc_smooth);
         let _e704 = constants.dt;
         let m_corr = (((pc_alpha * _e704) / max(rho_face, 0.00000001f)) * (grad_p_face_n - grad_p_jump_n));
@@ -8020,14 +8077,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -8045,10 +8094,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -8065,10 +8110,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
+                }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
                     pressure_coupling_alpha,
+                    _pad0,
                 }
             }
         }
@@ -8364,6 +8432,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BufferBinding<'a>,
             pub grad_rho_e: wgpu::BufferBinding<'a>,
             pub state_iter: wgpu::BufferBinding<'a>,
+            pub low_mach: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup1Entries<'a> {
@@ -8377,6 +8446,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
             pub grad_rho_e: wgpu::BindGroupEntry<'a>,
             pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub low_mach: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup1Entries<'a> {
             pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -8421,9 +8491,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 9,
                         resource: wgpu::BindingResource::Buffer(params.state_iter),
                     },
+                    low_mach: wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
                 [
                     self.state,
                     self.state_old,
@@ -8435,6 +8509,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.grad_rho_u_y,
                     self.grad_rho_e,
                     self.state_iter,
+                    self.low_mach,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -8562,6 +8637,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             },
                             count: None,
                         },
+                        #[doc = " @binding(10): \"low_mach\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 10,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::compressible_gradients::LowMachParams,
+                                >(
+                                )
+                                    as _),
+                            },
+                            count: None,
+                        },
                     ],
                 };
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -8645,10 +8735,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0_: f32,
 }
 
 @group(0) @binding(0) 
@@ -8695,6 +8788,8 @@ var<storage, read_write> grad_rho_u_y: array<Vector2_>;
 var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(1) @binding(9) 
 var<storage> state_iter: array<f32>;
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -8869,14 +8964,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -8894,10 +8981,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -8914,10 +8997,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
+                }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
                     pressure_coupling_alpha,
+                    _pad0,
                 }
             }
         }
@@ -8952,6 +9058,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BufferBinding<'a>,
             pub grad_rho_e: wgpu::BufferBinding<'a>,
             pub state_iter: wgpu::BufferBinding<'a>,
+            pub low_mach: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -8965,6 +9072,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
             pub grad_rho_e: wgpu::BindGroupEntry<'a>,
             pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub low_mach: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -9009,9 +9117,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 9,
                         resource: wgpu::BindingResource::Buffer(params.state_iter),
                     },
+                    low_mach: wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
                 [
                     self.state,
                     self.state_old,
@@ -9023,6 +9135,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.grad_rho_u_y,
                     self.grad_rho_e,
                     self.state_iter,
+                    self.low_mach,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -9150,6 +9263,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             },
                             count: None,
                         },
+                        #[doc = " @binding(10): \"low_mach\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 10,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::compressible_update::LowMachParams,
+                                >(
+                                )
+                                    as _),
+                            },
+                            count: None,
+                        },
                     ],
                 };
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -9228,10 +9356,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0_: f32,
 }
 
 @group(0) @binding(0) 
@@ -9254,6 +9385,8 @@ var<storage, read_write> grad_rho_u_y: array<Vector2_>;
 var<storage, read_write> grad_rho_e: array<Vector2_>;
 @group(0) @binding(9) 
 var<storage> state_iter: array<f32>;
+@group(0) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -11606,14 +11739,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -11631,10 +11756,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -11651,10 +11772,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
-                    pressure_coupling_alpha,
                 }
             }
         }
@@ -12047,10 +12164,6 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
-    pressure_coupling_alpha: f32,
 }
 
 @group(0) @binding(0) 
@@ -12304,14 +12417,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -12329,10 +12434,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -12349,10 +12450,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
-                    pressure_coupling_alpha,
                 }
             }
         }
@@ -12755,10 +12852,6 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
-    pressure_coupling_alpha: f32,
 }
 
 @group(0) @binding(0) 
@@ -12999,14 +13092,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -13024,10 +13109,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -13044,10 +13125,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
-                    pressure_coupling_alpha,
                 }
             }
         }
@@ -13230,10 +13307,6 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
-    pressure_coupling_alpha: f32,
 }
 
 @group(0) @binding(0) 
@@ -13289,14 +13362,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `u32`"]
-            pub precond_type: u32,
-            #[doc = "offset: 60, size: 4, type: `u32`"]
-            pub precond_model: u32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub precond_theta_floor: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
         }
         impl Constants {
             pub const fn new(
@@ -13314,10 +13379,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
-                precond_type: u32,
-                precond_model: u32,
-                precond_theta_floor: f32,
-                pressure_coupling_alpha: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -13334,10 +13395,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
-                    precond_type,
-                    precond_model,
-                    precond_theta_floor,
-                    pressure_coupling_alpha,
                 }
             }
         }
@@ -13526,10 +13583,6 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
-    pressure_coupling_alpha: f32,
 }
 
 @group(0) @binding(0) 

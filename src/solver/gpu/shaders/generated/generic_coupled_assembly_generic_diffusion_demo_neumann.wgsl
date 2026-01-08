@@ -22,10 +22,6 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
-    pressure_coupling_alpha: f32,
 }
 
 // Group 0: Mesh

@@ -20,8 +20,11 @@ use super::async_buffer::AsyncScalarReader;
 use super::bindings;
 use super::linear_solver::amg::{AmgResources, CsrMatrix};
 use super::model_defaults::default_incompressible_model;
+use super::preconditioners::CoupledPressurePreconditioner;
 use super::profiling::ProfileCategory;
-use super::structs::{CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams};
+use super::structs::{
+    CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
+};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use std::time::Instant;
 
@@ -1755,10 +1758,8 @@ impl GpuSolver {
         let abstol = 1e-7f32;
 
         self.ensure_fgmres_resources(max_restart);
-
-        if self.constants.precond_type == 1 {
-            pollster::block_on(self.ensure_amg_resources());
-        }
+        let pressure_precond = CoupledPressurePreconditioner::from_config(self.preconditioner);
+        pressure_precond.ensure_resources(self);
 
         let Some(res) = &self.coupled_resources else {
             return LinearSolverStats::default();
@@ -1769,10 +1770,11 @@ impl GpuSolver {
 
         let workgroups_dofs = self.workgroups_for_size(n);
         let workgroups_cells = self.workgroups_for_size(num_cells);
+        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
 
         // Reuse FGMRES pressure buffers directly in AMG level 0 to avoid copy-buffer hops.
         let bg_create_start = Instant::now();
-        let amg_level0_state_override = if self.constants.precond_type == 1 {
+        let amg_level0_state_override = if matches!(pressure_precond, CoupledPressurePreconditioner::Amg) {
             fgmres.amg_resources.as_ref().map(|amg| {
                 let level0 = &amg.levels[0];
                 self.context
@@ -1828,7 +1830,7 @@ impl GpuSolver {
             n: 0,
             num_cells: self.num_cells,
             omega: 1.2,
-            precond_type: self.constants.precond_type,
+            _pad0: 0,
         };
         let precond_write_start = Instant::now();
         self.context.queue.write_buffer(
@@ -1955,46 +1957,20 @@ impl GpuSolver {
                     "Schur Predict & Form",
                 );
 
-                // 3. Relax Pressure (Chebyshev)
+                // 3. Solve/relax pressure (pluggable module)
                 let mut p_result_in_sol = true;
-
-                if self.constants.precond_type == 1 {
-                    // AMG (Unchanged)
-                    if let Some(amg) = &self.fgmres_resources.as_ref().unwrap().amg_resources {
-                        amg.v_cycle(&mut encoder, amg_level0_state_override.as_ref());
-                    }
-                } else {
-                    // Chebyshev Relaxation
-                    let p_iters = (20 + (num_cells as f32).sqrt() as usize / 2)
-                        .min(200)
-                        .saturating_sub(1);
-
-                    if p_iters > 0 {
-                        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
-
-                        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                            label: Some("Schur Relax P"),
-                            timestamp_writes: None,
-                        });
-                        pass.set_pipeline(&fgmres.pipeline_relax_pressure);
-                        // Invariant BindGroups
-                        // Group 1: Coupled Matrix (Unused in relax_pressure but bound for consistency?)
-                        // Actually relax_pressure uses p_row_offsets which is in Group 3.
-                        // Does it use Group 1? No. But we bind it just in case Layout requires it (if shared layout).
-                        pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
-                        pass.set_bind_group(2, &fgmres.bg_precond, &[]);
-                        pass.set_bind_group(3, &fgmres.bg_pressure_matrix, &[]);
-
-                        for _ in 0..p_iters {
-                            let bg = if p_result_in_sol { current_bg } else { swap_bg };
-
-                            pass.set_bind_group(0, bg, &[]);
-                            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-
-                            p_result_in_sol = !p_result_in_sol;
-                        }
-                    }
-                }
+                pressure_precond.encode(
+                    self,
+                    &mut encoder,
+                    fgmres,
+                    amg_level0_state_override.as_ref(),
+                    current_bg,
+                    swap_bg,
+                    workgroups_cells,
+                    dispatch_x,
+                    dispatch_y,
+                    &mut p_result_in_sol,
+                );
 
                 // 4. Correct Velocity
                 // Use the bind group where binding 3 holds the final result

@@ -24,6 +24,27 @@ pub enum PreconditionerType {
     Amg = 1,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct GpuLowMachParams {
+    pub model: u32,
+    pub theta_floor: f32,
+    pub pressure_coupling_alpha: f32,
+    pub _pad0: f32,
+}
+
+impl Default for GpuLowMachParams {
+    fn default() -> Self {
+        Self {
+            // Default to no low-Mach preconditioning so transient acoustics behave like rhoCentralFoam.
+            model: 2,
+            theta_floor: 1e-6,
+            pressure_coupling_alpha: 1.0,
+            _pad0: 0.0,
+        }
+    }
+}
+
 pub struct CoupledSolverResources {
     pub num_unknowns: u32,
     pub b_row_offsets: wgpu::Buffer,
@@ -100,14 +121,6 @@ pub struct GpuConstants {
     pub time_scheme: u32, // 0: Euler, 1: BDF2
     pub inlet_velocity: f32,
     pub ramp_time: f32,
-    pub precond_type: u32, // 0: Jacobi, 1: AMG
-    /// Low-Mach preconditioning model:
-    /// - 0: legacy (Mach-scaled wave speed)
-    /// - 1: Weiss-Smith
-    /// - 2: off (rhoCentralFoam-like)
-    pub precond_model: u32,
-    pub precond_theta_floor: f32,
-    pub pressure_coupling_alpha: f32,
 }
 
 #[repr(C)]
@@ -124,7 +137,7 @@ pub struct PreconditionerParams {
     pub n: u32,
     pub num_cells: u32,
     pub omega: f32,
-    pub precond_type: u32, // 0: Jacobi, 1: AMG
+    pub _pad0: u32,
 }
 
 impl Default for PreconditionerParams {
@@ -133,7 +146,7 @@ impl Default for PreconditionerParams {
             n: 0,
             num_cells: 0,
             omega: 1.0,
-            precond_type: 0,
+            _pad0: 0,
         }
     }
 }
@@ -234,6 +247,7 @@ pub(crate) struct GpuSolver {
     pub num_faces: u32,
 
     pub constants: GpuConstants,
+    pub preconditioner: PreconditionerType,
     pub scheme_needs_gradients: bool,
 
     // Solver Stats

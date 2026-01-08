@@ -97,8 +97,7 @@ impl GpuSolver {
     }
 
     pub fn set_precond_type(&mut self, precond_type: super::structs::PreconditionerType) {
-        self.constants.precond_type = precond_type as u32;
-        self.update_constants();
+        self.preconditioner = precond_type;
     }
 
     pub fn update_constants(&self) {

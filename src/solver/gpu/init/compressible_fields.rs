@@ -1,4 +1,4 @@
-use crate::solver::gpu::structs::GpuConstants;
+use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams};
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Copy, Debug)]
@@ -20,7 +20,9 @@ pub struct CompressibleFieldBuffers {
     pub b_grad_rho_u_y: wgpu::Buffer,
     pub b_grad_rho_e: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
+    pub b_low_mach_params: wgpu::Buffer,
     pub constants: GpuConstants,
+    pub low_mach_params: GpuLowMachParams,
 }
 
 /// Full field resources including bind groups (created after pipelines).
@@ -36,9 +38,11 @@ pub struct CompressibleFieldResources {
     pub b_grad_rho_u_y: wgpu::Buffer,
     pub b_grad_rho_e: wgpu::Buffer,
     pub b_constants: wgpu::Buffer,
+    pub b_low_mach_params: wgpu::Buffer,
     pub bg_fields: wgpu::BindGroup,
     pub bg_fields_ping_pong: Vec<wgpu::BindGroup>,
     pub constants: GpuConstants,
+    pub low_mach_params: GpuLowMachParams,
 }
 
 pub fn init_compressible_field_buffers(
@@ -128,16 +132,17 @@ pub fn init_compressible_field_buffers(
         time_scheme: 0,
         inlet_velocity: 0.0,
         ramp_time: 0.0,
-        precond_type: 0,
-        // Default to no low-Mach preconditioning so transient acoustics behave like rhoCentralFoam.
-        // Use `set_precond_model(0|1)` to enable low-Mach variants.
-        precond_model: 2,
-        precond_theta_floor: 1e-6,
-        pressure_coupling_alpha: 1.0,
     };
     let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Compressible Constants Buffer"),
         contents: bytemuck::bytes_of(&constants),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    let low_mach_params = GpuLowMachParams::default();
+    let b_low_mach_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Compressible Low-Mach Params Buffer"),
+        contents: bytemuck::bytes_of(&low_mach_params),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
@@ -159,7 +164,9 @@ pub fn init_compressible_field_buffers(
         b_grad_rho_u_y,
         b_grad_rho_e,
         b_constants,
+        b_low_mach_params,
         constants,
+        low_mach_params,
     }
 }
 
@@ -222,6 +229,10 @@ pub fn create_compressible_field_bind_groups(
                     binding: 9,
                     resource: buffers.b_state_iter.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: buffers.b_low_mach_params.as_entire_binding(),
+                },
             ],
         });
         bg_fields_ping_pong.push(bg);
@@ -241,9 +252,11 @@ pub fn create_compressible_field_bind_groups(
         b_grad_rho_u_y: buffers.b_grad_rho_u_y,
         b_grad_rho_e: buffers.b_grad_rho_e,
         b_constants: buffers.b_constants,
+        b_low_mach_params: buffers.b_low_mach_params,
         bg_fields,
         bg_fields_ping_pong,
         constants: buffers.constants,
+        low_mach_params: buffers.low_mach_params,
     }
 }
 

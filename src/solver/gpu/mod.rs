@@ -9,6 +9,7 @@ pub mod init;
 pub mod kernel_graph;
 pub mod linear_solver;
 pub mod model_defaults;
+pub mod preconditioners;
 pub mod profiling;
 pub mod structs;
 pub mod unified_solver;

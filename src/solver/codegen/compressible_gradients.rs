@@ -26,6 +26,7 @@ fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
     items.push(Item::Struct(constants_struct()));
+    items.push(Item::Struct(low_mach_params_struct()));
     items.push(Item::Comment("Group 0: Mesh".to_string()));
     items.extend(mesh_bindings());
     items.push(Item::Comment("Group 1: Fields".to_string()));
@@ -61,10 +62,18 @@ fn constants_struct() -> StructDef {
             StructField::new("time_scheme", Type::U32),
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
-            StructField::new("precond_type", Type::U32),
-            StructField::new("precond_model", Type::U32),
-            StructField::new("precond_theta_floor", Type::F32),
+        ],
+    )
+}
+
+fn low_mach_params_struct() -> StructDef {
+    StructDef::new(
+        "LowMachParams",
+        vec![
+            StructField::new("model", Type::U32),
+            StructField::new("theta_floor", Type::F32),
             StructField::new("pressure_coupling_alpha", Type::F32),
+            StructField::new("_pad0", Type::F32),
         ],
     )
 }
@@ -223,6 +232,12 @@ fn state_bindings() -> Vec<Item> {
             1,
             9,
             AccessMode::Read,
+        ),
+        uniform_var(
+            "low_mach",
+            Type::Custom("LowMachParams".to_string()),
+            1,
+            10,
         ),
     ]
 }

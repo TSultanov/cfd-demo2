@@ -22,10 +22,13 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
-    precond_type: u32,
-    precond_model: u32,
-    precond_theta_floor: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
     pressure_coupling_alpha: f32,
+    _pad0: f32,
 }
 
 // Group 0: Mesh
@@ -97,6 +100,9 @@ var<storage, read_write> grad_rho_e: array<Vector2>;
 
 @group(1) @binding(9) 
 var<storage, read> state_iter: array<f32>;
+
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
 
 @compute
 @workgroup_size(64)

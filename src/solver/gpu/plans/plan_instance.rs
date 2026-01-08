@@ -1,11 +1,13 @@
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
-use crate::solver::gpu::structs::{GpuSolver, PreconditionerType};
+use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
 use crate::solver::scheme::Scheme;
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub(crate) type PlanFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
@@ -13,6 +15,16 @@ pub(crate) type PlanFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 pub struct FgmresSizing {
     pub num_unknowns: u32,
     pub num_dot_groups: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlanStepStats {
+    pub should_stop: Option<bool>,
+    pub degenerate_count: Option<u32>,
+    pub outer_iterations: Option<u32>,
+    pub outer_residual_u: Option<f32>,
+    pub outer_residual_p: Option<f32>,
+    pub linear_stats: Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +54,13 @@ pub enum PlanParamValue {
     LowMachModel(GpuLowMachPrecondModel),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanAction {
+    StartProfilingSession,
+    EndProfilingSession,
+    PrintProfilingReport,
+}
+
 pub(crate) trait GpuPlanInstance: Any + Send {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -59,6 +78,20 @@ pub(crate) trait GpuPlanInstance: Any + Send {
 
     fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
         Err("parameter is not supported by this plan".into())
+    }
+
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String>;
+
+    fn step_stats(&self) -> PlanStepStats {
+        PlanStepStats::default()
+    }
+
+    fn perform(&self, _action: PlanAction) -> Result<(), String> {
+        Err("action is not supported by this plan".into())
+    }
+
+    fn profiling_stats(&self) -> Option<Arc<ProfilingStats>> {
+        None
     }
 
     fn step(&mut self);
@@ -149,6 +182,47 @@ impl GpuPlanInstance for GpuSolver {
             }
             _ => Err("parameter is not supported by this plan".into()),
         }
+    }
+
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        self.context.queue.write_buffer(&self.b_state, 0, bytes);
+        Ok(())
+    }
+
+    fn step_stats(&self) -> PlanStepStats {
+        PlanStepStats {
+            should_stop: Some(self.should_stop),
+            degenerate_count: Some(self.degenerate_count),
+            outer_iterations: Some(*self.outer_iterations.lock().unwrap()),
+            outer_residual_u: Some(*self.outer_residual_u.lock().unwrap()),
+            outer_residual_p: Some(*self.outer_residual_p.lock().unwrap()),
+            linear_stats: Some((
+                *self.stats_ux.lock().unwrap(),
+                *self.stats_uy.lock().unwrap(),
+                *self.stats_p.lock().unwrap(),
+            )),
+        }
+    }
+
+    fn perform(&self, action: PlanAction) -> Result<(), String> {
+        match action {
+            PlanAction::StartProfilingSession => {
+                self.start_profiling_session();
+                Ok(())
+            }
+            PlanAction::EndProfilingSession => {
+                self.end_profiling_session();
+                Ok(())
+            }
+            PlanAction::PrintProfilingReport => {
+                self.print_profiling_report();
+                Ok(())
+            }
+        }
+    }
+
+    fn profiling_stats(&self) -> Option<Arc<ProfilingStats>> {
+        Some(self.get_profiling_stats())
     }
 
     fn step(&mut self) {
@@ -243,6 +317,11 @@ impl GpuPlanInstance for CompressiblePlanResources {
         }
     }
 
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        self.context.queue.write_buffer(&self.b_state, 0, bytes);
+        Ok(())
+    }
+
     fn step(&mut self) {
         crate::solver::gpu::plans::compressible::plan::step(self);
     }
@@ -299,6 +378,11 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
 
     fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
         Err("parameter is not supported by this plan".into())
+    }
+
+    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        GpuGenericCoupledSolver::write_state_bytes(self, bytes);
+        Ok(())
     }
 
     fn step(&mut self) {

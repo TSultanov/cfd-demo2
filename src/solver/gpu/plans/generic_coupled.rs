@@ -287,6 +287,12 @@ impl GpuGenericCoupledSolver {
         &self.state_buffers[idx_state]
     }
 
+    pub(crate) fn write_state_bytes(&self, bytes: &[u8]) {
+        for buf in &self.state_buffers {
+            self.linear.context.queue.write_buffer(buf, 0, bytes);
+        }
+    }
+
     pub fn step(&mut self) -> LinearSolverStats {
         let num_cells = self.linear.num_cells;
         let runtime = RuntimeDims {

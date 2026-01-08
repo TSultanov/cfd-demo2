@@ -138,7 +138,9 @@ fn bench_with_profiling(c: &mut Criterion) {
 
     let cell_size = 0.02;
     let (mut solver, num_cells) = setup_solver(cell_size);
-    solver.enable_detailed_profiling(true);
+    solver
+        .enable_detailed_profiling(true)
+        .expect("profiling enable");
 
     group.throughput(Throughput::Elements(num_cells as u64));
     group.bench_function(BenchmarkId::new("step_profiled", num_cells), |b| {

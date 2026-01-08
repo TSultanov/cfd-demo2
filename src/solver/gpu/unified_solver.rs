@@ -1,6 +1,6 @@
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
-use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanAction, PlanParam, PlanParamValue};
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::linear_solver::fgmres::workgroups_for_size;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
@@ -181,31 +181,24 @@ impl GpuUnifiedSolver {
     }
 
     pub fn incompressible_should_stop(&self) -> bool {
-        self.plan_ref::<GpuSolver>()
-            .map(|plan| plan.should_stop)
-            .unwrap_or(false)
+        self.plan.step_stats().should_stop.unwrap_or(false)
     }
 
     pub fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)> {
-        self.plan_ref::<GpuSolver>().map(|plan| {
-            let outer_iterations = *plan.outer_iterations.lock().unwrap();
-            let outer_residual_u = *plan.outer_residual_u.lock().unwrap();
-            let outer_residual_p = *plan.outer_residual_p.lock().unwrap();
-            (outer_iterations, outer_residual_u, outer_residual_p)
-        })
+        let stats = self.plan.step_stats();
+        Some((
+            stats.outer_iterations?,
+            stats.outer_residual_u?,
+            stats.outer_residual_p?,
+        ))
     }
 
     pub fn incompressible_linear_stats(&self) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
-        self.plan_ref::<GpuSolver>().map(|plan| {
-            let ux = *plan.stats_ux.lock().unwrap();
-            let uy = *plan.stats_uy.lock().unwrap();
-            let p = *plan.stats_p.lock().unwrap();
-            (ux, uy, p)
-        })
+        self.plan.step_stats().linear_stats
     }
 
     pub fn incompressible_degenerate_count(&self) -> Option<u32> {
-        self.plan_ref::<GpuSolver>().map(|plan| plan.degenerate_count)
+        self.plan.step_stats().degenerate_count
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {
@@ -269,46 +262,29 @@ impl GpuUnifiedSolver {
         )
     }
 
-    pub fn enable_detailed_profiling(&self, enable: bool) -> Result<(), String> {
-        self.plan_ref::<GpuSolver>()
-            .ok_or_else(|| String::from("detailed profiling is only supported for incompressible plans"))?
-            .enable_detailed_profiling(enable);
-        Ok(())
+    pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {
+        self.plan.set_param(
+            PlanParam::DetailedProfilingEnabled,
+            PlanParamValue::Bool(enable),
+        )
     }
 
     pub fn start_profiling_session(&self) -> Result<(), String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            plan.start_profiling_session();
-            Ok(())
-        } else {
-            Err("profiling sessions are only supported for incompressible plans".into())
-        }
+        self.plan.perform(PlanAction::StartProfilingSession)
     }
 
     pub fn end_profiling_session(&self) -> Result<(), String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            plan.end_profiling_session();
-            Ok(())
-        } else {
-            Err("profiling sessions are only supported for incompressible plans".into())
-        }
+        self.plan.perform(PlanAction::EndProfilingSession)
     }
 
     pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            Ok(plan.get_profiling_stats())
-        } else {
-            Err("profiling stats are only supported for incompressible plans".into())
-        }
+        self.plan
+            .profiling_stats()
+            .ok_or_else(|| "profiling stats are not supported by this plan".into())
     }
 
     pub fn print_profiling_report(&self) -> Result<(), String> {
-        if let Some(plan) = self.plan_ref::<GpuSolver>() {
-            plan.print_profiling_report();
-            Ok(())
-        } else {
-            Err("profiling reports are only supported for incompressible plans".into())
-        }
+        self.plan.perform(PlanAction::PrintProfilingReport)
     }
 
     pub async fn read_state_f32(&self) -> Vec<f32> {
@@ -319,19 +295,42 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
-        if let Some(plan) = self.plan_ref::<GpuGenericCoupledSolver>() {
-            plan.set_field_scalar(field, values)
-        } else {
-            Err("set_field_scalar is only supported for generic coupled plans".into())
+        let stride = self.model.state_layout.stride() as usize;
+        let offset = self
+            .model
+            .state_layout
+            .offset_for(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
+        if values.len() != self.num_cells() as usize {
+            return Err(format!(
+                "value length {} does not match num_cells {}",
+                values.len(),
+                self.num_cells()
+            ));
         }
+
+        let mut state = pollster::block_on(async { self.read_state_f32().await });
+        if state.len() != self.num_cells() as usize * stride {
+            state.resize(self.num_cells() as usize * stride, 0.0);
+        }
+        for (i, &v) in values.iter().enumerate() {
+            state[i * stride + offset] = v as f32;
+        }
+        self.plan
+            .write_state_bytes(bytemuck::cast_slice(&state))
     }
 
     pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
-        if let Some(plan) = self.plan_ref::<GpuGenericCoupledSolver>() {
-            plan.get_field_scalar(field).await
-        } else {
-            Err("get_field_scalar is only supported for generic coupled plans".into())
-        }
+        let data = self.read_state_f32().await;
+        let stride = self.model.state_layout.stride() as usize;
+        let offset = self
+            .model
+            .state_layout
+            .offset_for(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
+        Ok((0..self.num_cells() as usize)
+            .map(|i| data[i * stride + offset] as f64)
+            .collect())
     }
 
     pub async fn get_p(&self) -> Vec<f64> {

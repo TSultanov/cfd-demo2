@@ -18,18 +18,19 @@ One **model-driven** GPU solver pipeline with:
 - Readback staging buffers are shared via `StagingBufferCache`.
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
 - Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/plan_instance.rs`), keeping `UnifiedSolver` orchestration generic.
+- Generic coupled plan no longer depends on legacy `GpuSolver`; it uses a minimal scalar runtime (`src/solver/gpu/runtime.rs`) that owns mesh + constants + scalar CG resources.
 
 ## Gap Check (What Still Blocks The Goal)
-- Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering is not unified.
+- Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.
 - Some pipelines/bind groups are still owned by solver-family structs instead of module-owned resources.
-- `UnifiedSolver` still contains plan-specific convenience methods implemented via downcasts; this needs a universal “capabilities/parameters” surface.
+- `GpuPlanInstance` still exposes several plan-only hooks; `src/solver/gpu/plans/plan_instance.rs` needs to converge toward a small, universal “ports + params + actions” surface.
 - Generic coupled kernels are incomplete (convection/source/cross-coupling, broader BC support, closures).
 - Scheme expansion is only partially wired end-to-end (some auxiliary passes are still hand-selected in plan code).
 
 ## Next Milestones (Ordered)
-1. **Plan instance surface**
-   - Replace `UnifiedSolver` downcasts with a typed “capabilities/parameters” API (e.g. `PlanParam::{Viscosity,Density,...}`, `PlanCapability::{Profiling,LinearDebug,...}`).
-   - Keep `GpuPlanInstance` methods universal (avoid plan-only method creep; `src/solver/gpu/plans/plan_instance.rs`).
+1. **Tighten the plan surface**
+   - Reduce/replace plan-only methods in `src/solver/gpu/plans/plan_instance.rs` by routing through typed `PlanParam`/`PlanAction` and typed ports/views (capability-gated).
+   - Make all remaining `GpuPlanInstance` methods meaningful for *every* plan (or move them behind explicit capabilities).
 2. **Single model-driven lowerer**
    - Introduce `ModelLowerer` that produces a `ModelGpuProgramSpec` from `ModelSpec` + `SolverConfig` (ports, resource sizing, module list, execution plan).
    - Keep “generated-per-model WGSL” but unify the Rust-side binding/dispatch wiring.

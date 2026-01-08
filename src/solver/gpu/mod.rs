@@ -12,6 +12,7 @@ pub mod modules;
 pub(crate) mod plans;
 pub mod profiling;
 pub mod readback;
+pub(crate) mod runtime;
 pub mod structs;
 pub mod unified_solver;
 

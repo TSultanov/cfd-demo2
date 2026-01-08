@@ -1,4 +1,5 @@
-use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
+use crate::solver::gpu::runtime::GpuScalarRuntime;
+use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
 use bytemuck::cast_slice;
 use crate::solver::gpu::modules::generic_coupled_kernels::{
@@ -37,7 +38,7 @@ fn ping_pong_indices(i: usize) -> (usize, usize, usize) {
 }
 
 pub(crate) struct GpuGenericCoupledSolver {
-    pub linear: GpuSolver,
+    pub runtime: GpuScalarRuntime,
     model: ModelSpec,
 
     state_buffers: Vec<wgpu::Buffer>,
@@ -82,10 +83,10 @@ impl GpuGenericCoupledSolver {
             ));
         }
 
-        let linear = GpuSolver::new(mesh, device, queue).await;
-        linear.update_constants();
+        let runtime = GpuScalarRuntime::new(mesh, device, queue).await;
+        runtime.update_constants();
 
-        let device = &linear.context.device;
+        let device = &runtime.context.device;
 
         with_generic_coupled_kernels!(model.id, |gen_assembly, gen_update| {
             let pipeline_assembly = gen_assembly::compute::create_main_pipeline_embed_source(device);
@@ -99,20 +100,24 @@ impl GpuGenericCoupledSolver {
                     layout: &bgl,
                     entries: &gen_assembly::WgpuBindGroup0Entries::new(
                         gen_assembly::WgpuBindGroup0EntriesParams {
-                            face_owner: linear.b_face_owner.as_entire_buffer_binding(),
-                            face_neighbor: linear.b_face_neighbor.as_entire_buffer_binding(),
-                            face_areas: linear.b_face_areas.as_entire_buffer_binding(),
-                            face_normals: linear.b_face_normals.as_entire_buffer_binding(),
-                            face_centers: linear.b_face_centers.as_entire_buffer_binding(),
-                            cell_centers: linear.b_cell_centers.as_entire_buffer_binding(),
-                            cell_vols: linear.b_cell_vols.as_entire_buffer_binding(),
-                            cell_face_offsets: linear.b_cell_face_offsets.as_entire_buffer_binding(),
-                            cell_faces: linear.b_cell_faces.as_entire_buffer_binding(),
-                            cell_face_matrix_indices: linear
+                            face_owner: runtime.mesh.b_face_owner.as_entire_buffer_binding(),
+                            face_neighbor: runtime.mesh.b_face_neighbor.as_entire_buffer_binding(),
+                            face_areas: runtime.mesh.b_face_areas.as_entire_buffer_binding(),
+                            face_normals: runtime.mesh.b_face_normals.as_entire_buffer_binding(),
+                            face_centers: runtime.mesh.b_face_centers.as_entire_buffer_binding(),
+                            cell_centers: runtime.mesh.b_cell_centers.as_entire_buffer_binding(),
+                            cell_vols: runtime.mesh.b_cell_vols.as_entire_buffer_binding(),
+                            cell_face_offsets: runtime
+                                .mesh
+                                .b_cell_face_offsets
+                                .as_entire_buffer_binding(),
+                            cell_faces: runtime.mesh.b_cell_faces.as_entire_buffer_binding(),
+                            cell_face_matrix_indices: runtime
+                                .mesh
                                 .b_cell_face_matrix_indices
                                 .as_entire_buffer_binding(),
-                            diagonal_indices: linear.b_diagonal_indices.as_entire_buffer_binding(),
-                            face_boundary: linear.b_face_boundary.as_entire_buffer_binding(),
+                            diagonal_indices: runtime.mesh.b_diagonal_indices.as_entire_buffer_binding(),
+                            face_boundary: runtime.mesh.b_face_boundary.as_entire_buffer_binding(),
                         },
                     )
                     .into_array(),
@@ -120,7 +125,7 @@ impl GpuGenericCoupledSolver {
             };
 
             let stride = model.state_layout.stride() as usize;
-            let num_cells = linear.num_cells as usize;
+            let num_cells = runtime.num_cells as usize;
             let zero_state = vec![0.0f32; num_cells * stride];
 
             let state_buffers = (0..3)
@@ -150,7 +155,7 @@ impl GpuGenericCoupledSolver {
                                 state: state_buffers[idx_state].as_entire_buffer_binding(),
                                 state_old: state_buffers[idx_old].as_entire_buffer_binding(),
                                 state_old_old: state_buffers[idx_old_old].as_entire_buffer_binding(),
-                                constants: linear.b_constants.as_entire_buffer_binding(),
+                                constants: runtime.b_constants.as_entire_buffer_binding(),
                             },
                         )
                         .into_array(),
@@ -171,7 +176,7 @@ impl GpuGenericCoupledSolver {
                         entries: &gen_update::WgpuBindGroup0Entries::new(
                             gen_update::WgpuBindGroup0EntriesParams {
                                 state: state_buffers[idx_state].as_entire_buffer_binding(),
-                                constants: linear.b_constants.as_entire_buffer_binding(),
+                                constants: runtime.b_constants.as_entire_buffer_binding(),
                             },
                         )
                         .into_array(),
@@ -188,10 +193,7 @@ impl GpuGenericCoupledSolver {
                     layout: &bgl,
                     entries: &gen_update::WgpuBindGroup1Entries::new(
                         gen_update::WgpuBindGroup1EntriesParams {
-                            x: linear
-                                .linear_port_space
-                                .buffer(linear.linear_ports.x)
-                                .as_entire_buffer_binding(),
+                            x: runtime.scalar_cg.x().as_entire_buffer_binding(),
                         },
                     )
                     .into_array(),
@@ -206,18 +208,9 @@ impl GpuGenericCoupledSolver {
                     layout: &bgl,
                     entries: &gen_assembly::WgpuBindGroup2Entries::new(
                         gen_assembly::WgpuBindGroup2EntriesParams {
-                            matrix_values: linear
-                                .linear_port_space
-                                .buffer(linear.linear_ports.values)
-                                .as_entire_buffer_binding(),
-                            rhs: linear
-                                .linear_port_space
-                                .buffer(linear.linear_ports.rhs)
-                                .as_entire_buffer_binding(),
-                            scalar_row_offsets: linear
-                                .linear_port_space
-                                .buffer(linear.linear_ports.row_offsets)
-                                .as_entire_buffer_binding(),
+                            matrix_values: runtime.scalar_cg.matrix_values().as_entire_buffer_binding(),
+                            rhs: runtime.scalar_cg.rhs().as_entire_buffer_binding(),
+                            scalar_row_offsets: runtime.b_row_offsets.as_entire_buffer_binding(),
                         },
                     )
                     .into_array(),
@@ -257,7 +250,7 @@ impl GpuGenericCoupledSolver {
             };
 
             Ok(Self {
-                linear,
+                runtime,
                 model,
                 state_buffers,
                 kernels: GenericCoupledKernelsModule::new(
@@ -289,28 +282,27 @@ impl GpuGenericCoupledSolver {
 
     pub(crate) fn write_state_bytes(&self, bytes: &[u8]) {
         for buf in &self.state_buffers {
-            self.linear.context.queue.write_buffer(buf, 0, bytes);
+            self.runtime.context.queue.write_buffer(buf, 0, bytes);
         }
     }
 
     pub fn step(&mut self) -> LinearSolverStats {
-        let num_cells = self.linear.num_cells;
-        let runtime = RuntimeDims {
+        let num_cells = self.runtime.num_cells;
+        let dims = RuntimeDims {
             num_cells,
             num_faces: 0,
         };
 
         self.kernels.set_step_index(self.kernels.step_index() + 1);
-        self.linear.constants.time += self.linear.constants.dt;
-        self.linear.update_constants();
+        self.runtime.advance_time();
 
         self.assembly_graph
-            .execute(&self.linear.context, &self.kernels, runtime);
+            .execute(&self.runtime.context, &self.kernels, dims);
 
-        let stats = self.linear.solve_linear_system_cg(400, 1e-6);
+        let stats = self.runtime.solve_linear_system_cg(400, 1e-6);
 
         self.update_graph
-            .execute(&self.linear.context, &self.kernels, runtime);
+            .execute(&self.runtime.context, &self.kernels, dims);
         stats
     }
 
@@ -321,20 +313,20 @@ impl GpuGenericCoupledSolver {
             .state_layout
             .offset_for(field)
             .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
-        if values.len() != self.linear.num_cells as usize {
+        if values.len() != self.runtime.num_cells as usize {
             return Err(format!(
                 "value length {} does not match num_cells {}",
                 values.len(),
-                self.linear.num_cells
+                self.runtime.num_cells
             ));
         }
-        let mut packed = vec![0.0f32; self.linear.num_cells as usize * stride];
+        let mut packed = vec![0.0f32; self.runtime.num_cells as usize * stride];
         for (i, &v) in values.iter().enumerate() {
             packed[i * stride + offset] = v as f32;
         }
         let bytes = cast_slice(&packed);
         for buf in &self.state_buffers {
-            self.linear.context.queue.write_buffer(buf, 0, bytes);
+            self.runtime.context.queue.write_buffer(buf, 0, bytes);
         }
         Ok(())
     }
@@ -349,10 +341,10 @@ impl GpuGenericCoupledSolver {
 
         let (idx_state, _, _) = ping_pong_indices(self.kernels.step_index());
         let buf = &self.state_buffers[idx_state];
-        let bytes = (self.linear.num_cells as u64) * stride as u64 * 4;
-        let raw = self.linear.read_buffer(buf, bytes).await;
+        let bytes = (self.runtime.num_cells as u64) * stride as u64 * 4;
+        let raw = self.runtime.read_buffer(buf, bytes).await;
         let data: &[f32] = bytemuck::cast_slice(&raw);
-        Ok((0..self.linear.num_cells as usize)
+        Ok((0..self.runtime.num_cells as usize)
             .map(|i| data[i * stride + offset] as f64)
             .collect())
     }

@@ -412,35 +412,35 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
     }
 
     fn num_cells(&self) -> u32 {
-        self.linear.num_cells
+        self.runtime.num_cells
     }
 
     fn time(&self) -> f32 {
-        self.linear.constants.time
+        self.runtime.constants.time
     }
 
     fn dt(&self) -> f32 {
-        self.linear.constants.dt
+        self.runtime.constants.dt
     }
 
     fn state_buffer(&self) -> &wgpu::Buffer {
-        self.state_buffer()
+        GpuGenericCoupledSolver::state_buffer(self)
     }
 
     fn set_dt(&mut self, dt: f32) {
-        self.linear.set_dt(dt);
+        self.runtime.set_dt(dt);
     }
 
     fn set_advection_scheme(&mut self, scheme: Scheme) {
-        self.linear.set_scheme(scheme.gpu_id());
+        self.runtime.set_scheme(scheme.gpu_id());
     }
 
     fn set_time_scheme(&mut self, scheme: TimeScheme) {
-        self.linear.set_time_scheme(scheme as u32);
+        self.runtime.set_time_scheme(scheme as u32);
     }
 
     fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
-        self.linear.set_precond_type(preconditioner);
+        let _ = preconditioner;
     }
 
     fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
@@ -459,7 +459,7 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
     fn initialize_history(&self) {}
 
     fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
-        Box::pin(async move { self.linear.read_buffer(self.state_buffer(), bytes).await })
+        Box::pin(async move { self.runtime.read_buffer(self.state_buffer(), bytes).await })
     }
 }
 

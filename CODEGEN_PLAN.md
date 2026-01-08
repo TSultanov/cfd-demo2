@@ -19,6 +19,7 @@ One **model-driven** GPU solver pipeline with:
 - Readback is unified behind `read_buffer_cached` to avoid per-plan readback/profiling duplication (`src/solver/gpu/readback.rs`).
 - Legacy GMRES helpers also use the unified cached readback path (`src/solver/gpu/linear_solver/gmres.rs`).
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
+- Plan configuration (dt, spatial/temporal scheme, preconditioner) is routed through typed `PlanParam`/`PlanParamValue` instead of ad-hoc per-plan setters (`src/solver/gpu/plans/plan_instance.rs`).
 - `GpuPlanInstance` no longer requires `Any`/downcasts (`src/solver/gpu/plans/plan_instance.rs`).
 - Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/plan_instance.rs`), keeping `UnifiedSolver` orchestration generic.
 - Generic coupled plan no longer depends on legacy `GpuSolver`; it uses a minimal scalar runtime (`src/solver/gpu/runtime.rs`) that owns mesh + constants + scalar CG resources.
@@ -31,13 +32,13 @@ One **model-driven** GPU solver pipeline with:
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.
 - Some pipelines/bind groups are still owned by solver-family structs instead of module-owned resources.
-- `GpuPlanInstance` still exposes several plan-only hooks; `src/solver/gpu/plans/plan_instance.rs` needs to converge toward a small, universal “ports + params + actions” surface.
+- `GpuPlanInstance` still carries some non-core debug/inspection hooks; long-term this should become capability-gated or moved behind explicit debug modules.
 - Generic coupled kernels are incomplete (convection/source/cross-coupling, broader BC support, closures).
 - Scheme expansion is only partially wired end-to-end (some auxiliary passes are still hand-selected in plan code).
 
 ## Next Milestones (Ordered)
 1. **Tighten the plan surface**
-   - Reduce/replace plan-only methods in `src/solver/gpu/plans/plan_instance.rs` by routing through typed `PlanParam`/`PlanAction` and typed ports/views (capability-gated).
+   - Continue moving remaining plan-only hooks in `src/solver/gpu/plans/plan_instance.rs` behind typed `PlanParam`/`PlanAction` and typed ports/views (capability-gated).
    - Make all remaining `GpuPlanInstance` methods meaningful for *every* plan (or move them behind explicit capabilities).
 2. **Single model-driven lowerer**
    - Introduce `ModelLowerer` that produces a `ModelGpuProgramSpec` from `ModelSpec` + `SolverConfig` (ports, resource sizing, module list, execution plan).

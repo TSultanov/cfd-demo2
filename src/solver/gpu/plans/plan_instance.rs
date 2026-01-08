@@ -216,7 +216,9 @@ impl GpuPlanInstance for GpuSolver {
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        self.context.queue.write_buffer(&self.b_state, 0, bytes);
+        for buffer in &self.state_buffers {
+            self.context.queue.write_buffer(buffer, 0, bytes);
+        }
         Ok(())
     }
 

@@ -81,6 +81,7 @@ pub struct ScalarLinearSolverResources {
     pub b_scalars: wgpu::Buffer,
     pub b_staging_scalar: wgpu::Buffer,
     pub b_solver_params: wgpu::Buffer,
+    pub num_groups: u32,
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,
     pub bg_dot_params: wgpu::BindGroup,
@@ -94,6 +95,7 @@ pub struct ScalarLinearSolverResources {
     pub pipeline_cg_update_p: wgpu::ComputePipeline,
     pub ports: LinearSystemPorts,
     pub port_space: PortSpace,
+    pipeline_res: pipelines::PipelineResources,
 }
 
 pub fn init_scalar_linear_solver(
@@ -151,19 +153,21 @@ pub fn init_scalar_linear_solver(
         b_scalars: state_res.b_scalars,
         b_staging_scalar: state_res.b_staging_scalar,
         b_solver_params: state_res.b_solver_params,
-        bg_linear_matrix: pipeline_res.bg_linear_matrix,
-        bg_linear_state: pipeline_res.bg_linear_state,
-        bg_dot_params: pipeline_res.bg_dot_params,
-        bg_dot_p_v: pipeline_res.bg_dot_p_v,
-        bg_dot_r_r: pipeline_res.bg_dot_r_r,
-        bgl_dot_pair_inputs: pipeline_res.bgl_dot_pair_inputs,
-        pipeline_spmv_p_v: pipeline_res.pipeline_spmv_p_v,
-        pipeline_dot: pipeline_res.pipeline_dot,
-        pipeline_dot_pair: pipeline_res.pipeline_dot_pair,
-        pipeline_cg_update_x_r: pipeline_res.pipeline_cg_update_x_r,
-        pipeline_cg_update_p: pipeline_res.pipeline_cg_update_p,
+        num_groups: state_res.num_groups,
+        bg_linear_matrix: pipeline_res.bg_linear_matrix.clone(),
+        bg_linear_state: pipeline_res.bg_linear_state.clone(),
+        bg_dot_params: pipeline_res.bg_dot_params.clone(),
+        bg_dot_p_v: pipeline_res.bg_dot_p_v.clone(),
+        bg_dot_r_r: pipeline_res.bg_dot_r_r.clone(),
+        bgl_dot_pair_inputs: pipeline_res.bgl_dot_pair_inputs.clone(),
+        pipeline_spmv_p_v: pipeline_res.pipeline_spmv_p_v.clone(),
+        pipeline_dot: pipeline_res.pipeline_dot.clone(),
+        pipeline_dot_pair: pipeline_res.pipeline_dot_pair.clone(),
+        pipeline_cg_update_x_r: pipeline_res.pipeline_cg_update_x_r.clone(),
+        pipeline_cg_update_p: pipeline_res.pipeline_cg_update_p.clone(),
         ports,
         port_space,
+        pipeline_res,
     }
 }
 
@@ -173,75 +177,64 @@ pub fn init_linear_solver(
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
 ) -> LinearSolverResources {
-    let mut port_space = PortSpace::new();
-
-    // 1. Initialize Matrix Resources (Buffers)
-
-    // --- CSR Matrix Structure ---
-    debug_assert_eq!(
-        scalar_row_offsets.len(),
-        num_cells as usize + 1,
-        "unexpected CSR row_offsets length"
-    );
-    let matrix_res = matrix::init_matrix(device, scalar_row_offsets, scalar_col_indices);
+    let scalar = init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
     let row_offsets = scalar_row_offsets.to_vec();
     let col_indices = scalar_col_indices.to_vec();
-
-    // 2. Initialize State Resources
-    let state_res = state::init_state(device, num_cells);
-
-    let ports = {
-        let row_offsets_port = port_space.port::<BufU32>("linear:row_offsets");
-        port_space.insert(row_offsets_port, matrix_res.b_row_offsets.clone());
-        let col_indices_port = port_space.port::<BufU32>("linear:col_indices");
-        port_space.insert(col_indices_port, matrix_res.b_col_indices.clone());
-        let values_port = port_space.port::<BufF32>("linear:matrix_values");
-        port_space.insert(values_port, matrix_res.b_matrix_values.clone());
-        let rhs_port = port_space.port::<BufF32>("linear:rhs");
-        port_space.insert(rhs_port, state_res.b_rhs.clone());
-        let x_port = port_space.port::<BufF32>("linear:x");
-        port_space.insert(x_port, state_res.b_x.clone());
-        LinearSystemPorts {
-            row_offsets: row_offsets_port,
-            col_indices: col_indices_port,
-            values: values_port,
-            rhs: rhs_port,
-            x: x_port,
-        }
-    };
-
-    // 3. Initialize Pipelines
-    let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res);
 
     let coupled_resources = init_coupled_resources(
         device,
         num_cells,
-        &pipeline_res,
-        &matrix_res.b_row_offsets,
-        &matrix_res.b_matrix_values,
+        &scalar.pipeline_res,
+        &scalar.b_row_offsets,
+        &scalar.b_matrix_values,
         &row_offsets,
         &col_indices,
     );
 
-    LinearSolverResources {
-        b_row_offsets: matrix_res.b_row_offsets,
-        b_col_indices: matrix_res.b_col_indices,
-        num_nonzeros: matrix_res.num_nonzeros,
-        b_matrix_values: matrix_res.b_matrix_values,
+    let ScalarLinearSolverResources {
+        b_row_offsets,
+        b_col_indices,
+        num_nonzeros,
+        b_matrix_values,
+        b_rhs,
+        b_x,
+        b_r,
+        b_r0,
+        b_p_solver,
+        b_v,
+        b_s,
+        b_t,
+        b_dot_result,
+        b_dot_result_2,
+        b_scalars,
+        b_staging_scalar,
+        b_solver_params,
+        num_groups,
+        ports,
+        port_space,
+        pipeline_res,
+        ..
+    } = scalar;
 
-        b_rhs: state_res.b_rhs,
-        b_x: state_res.b_x,
-        b_r: state_res.b_r,
-        b_r0: state_res.b_r0,
-        b_p_solver: state_res.b_p_solver,
-        b_v: state_res.b_v,
-        b_s: state_res.b_s,
-        b_t: state_res.b_t,
-        b_dot_result: state_res.b_dot_result,
-        b_dot_result_2: state_res.b_dot_result_2,
-        b_scalars: state_res.b_scalars,
-        b_staging_scalar: state_res.b_staging_scalar,
-        b_solver_params: state_res.b_solver_params,
+    LinearSolverResources {
+        b_row_offsets,
+        b_col_indices,
+        num_nonzeros,
+        b_matrix_values,
+
+        b_rhs,
+        b_x,
+        b_r,
+        b_r0,
+        b_p_solver,
+        b_v,
+        b_s,
+        b_t,
+        b_dot_result,
+        b_dot_result_2,
+        b_scalars,
+        b_staging_scalar,
+        b_solver_params,
 
         bg_solver: pipeline_res.bg_solver,
         bg_linear_matrix: pipeline_res.bg_linear_matrix,
@@ -273,7 +266,7 @@ pub fn init_linear_solver(
 
         row_offsets,
         col_indices,
-        num_groups: state_res.num_groups,
+        num_groups,
         coupled_resources,
         ports,
         port_space,

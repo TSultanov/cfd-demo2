@@ -16,14 +16,14 @@
 // - All vectors remain on GPU
 // - Only scalar values (dot products, norms) are read to CPU
 // - Preconditioner sweep
-use crate::solver::gpu::bindings;
-use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
+use crate::solver::gpu::linear_solver::amg::CsrMatrix;
+use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
+use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::linear_solver::fgmres::{
     fgmres_solve_once_with_preconditioner, write_iter_params, FgmresSolveOnceConfig,
     FgmresPrecondBindings, FgmresWorkspace, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::model_defaults::default_incompressible_model;
-use crate::solver::gpu::preconditioners::CoupledPressurePreconditioner;
 use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{
     CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
@@ -34,22 +34,7 @@ use std::time::Instant;
 /// Resources for GPU-based FGMRES solver
 pub struct FgmresResources {
     pub fgmres: FgmresWorkspace,
-
-    /// Temporary buffer for pressure RHS (r_p')
-    pub b_temp_p: wgpu::Buffer,
-    pub b_p_sol: wgpu::Buffer,
-
-    /// Schur Vector bind group layout (r_in, z_out, temp_p, p_sol)
-    pub bgl_schur_vectors: wgpu::BindGroupLayout,
-
-    /// Bind group for pressure matrix (Group 4)
-    pub bg_pressure_matrix: wgpu::BindGroup,
-    pub pipeline_predict_and_form: wgpu::ComputePipeline,
-    /// Schur Preconditioner Pipelines
-    pub pipeline_relax_pressure: wgpu::ComputePipeline,
-    pub pipeline_correct_vel: wgpu::ComputePipeline,
-
-    pub amg_resources: Option<AmgResources>,
+    pub schur: CoupledSchurModule,
 }
 
 impl GpuSolver {
@@ -70,43 +55,6 @@ impl GpuSolver {
         if rebuild {
             let resources = self.init_fgmres_resources(max_restart);
             self.fgmres_resources = Some(resources);
-        }
-    }
-
-    pub async fn ensure_amg_resources(&mut self) {
-        let needs_init = if let Some(fgmres) = &self.fgmres_resources {
-            fgmres.amg_resources.is_none()
-        } else {
-            false
-        };
-
-        if needs_init {
-            let row_offsets = self
-                .read_buffer_u32(&self.b_row_offsets, self.num_cells + 1)
-                .await;
-            let col_indices = self
-                .read_buffer_u32(&self.b_col_indices, self.num_nonzeros)
-                .await;
-            let values = self
-                .read_buffer_f32(&self.b_matrix_values, self.num_nonzeros)
-                .await;
-
-            let matrix = CsrMatrix {
-                row_offsets,
-                col_indices,
-                values,
-                num_rows: self.num_cells as usize,
-                num_cols: self.num_cells as usize,
-            };
-
-            // Use enough levels to reach a small coarse grid (< 100 cells)
-            // For 1M cells with agg factor ~4, we need log4(1M/100) = log4(10000) = 6-7 levels.
-            // 20 is a safe upper bound; it will stop early when size < 100.
-            let amg = AmgResources::new(&self.context.device, &matrix, 20);
-
-            if let Some(fgmres) = &mut self.fgmres_resources {
-                fgmres.amg_resources = Some(amg);
-            }
         }
     }
 
@@ -135,178 +83,19 @@ impl GpuSolver {
             },
             "Coupled",
         );
-
-        let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("FGMRES temp_p"),
-            size: (self.num_cells as u64) * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let b_p_sol = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("FGMRES p_sol"),
-            size: (self.num_cells as u64) * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        // Create Pressure Matrix Bind Group Layout
-        let bgl_pressure_matrix =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("FGMRES Pressure Matrix BGL"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let bgl_schur_vectors = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("FGMRES Schur Vectors BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // temp_p (read/write)
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // p_sol (read/write)
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // p_prev/aux (read/write)
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let bg_pressure_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("FGMRES Pressure Matrix BG"),
-            layout: &bgl_pressure_matrix,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.b_row_offsets.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.b_col_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.b_matrix_values.as_entire_binding(),
-                },
-            ],
-        });
-
-        let pipeline_layout_schur =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("FGMRES Schur Pipeline Layout"),
-                bind_group_layouts: &[
-                    &bgl_schur_vectors,
-                    fgmres.matrix_layout(),
-                    fgmres.precond_layout(),
-                    &bgl_pressure_matrix,
-                ],
-                push_constant_ranges: &[],
-            });
-
-        let shader_schur = bindings::schur_precond::create_shader_module_embed_source(device);
-
-        let make_schur_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_schur),
-                module: &shader_schur,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        };
-
-        let pipeline_relax_pressure = make_schur_pipeline("Schur Relax P", "relax_pressure");
-        let pipeline_correct_vel = make_schur_pipeline("Schur Correct Vel", "correct_velocity");
-        let pipeline_predict_and_form =
-            make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur");
+        let schur = CoupledSchurModule::new(
+            device,
+            &fgmres,
+            self.num_cells,
+            &self.b_row_offsets,
+            &self.b_col_indices,
+            &self.b_matrix_values,
+            CoupledPressureSolveKind::Chebyshev,
+        );
 
         let resources = FgmresResources {
             fgmres,
-            b_temp_p,
-            b_p_sol,
-            bgl_schur_vectors,
-            bg_pressure_matrix,
-            pipeline_predict_and_form,
-            pipeline_relax_pressure,
-            pipeline_correct_vel,
-            amg_resources: None,
+            schur,
         };
 
         self.record_fgmres_allocations(&resources);
@@ -732,59 +521,41 @@ impl GpuSolver {
         let abstol = 1e-7f32;
 
         self.ensure_fgmres_resources(max_restart);
-        let pressure_precond = CoupledPressurePreconditioner::from_config(self.preconditioner);
-        pressure_precond.ensure_resources(self);
-
         let Some(res) = &self.coupled_resources else {
             return LinearSolverStats::default();
         };
-        let Some(fgmres) = &self.fgmres_resources else {
+        let Some(mut fgmres) = self.fgmres_resources.take() else {
             return LinearSolverStats::default();
         };
 
-        let core = fgmres
-            .fgmres
-            .core(&self.context.device, &self.context.queue);
+        let stats = 'stats: {
+            let pressure_kind = CoupledPressureSolveKind::from_config(self.preconditioner);
+            fgmres.schur.set_pressure_kind(pressure_kind);
+            if pressure_kind == CoupledPressureSolveKind::Amg {
+                let row_offsets =
+                    pollster::block_on(self.read_buffer_u32(&self.b_row_offsets, self.num_cells + 1));
+                let col_indices =
+                    pollster::block_on(self.read_buffer_u32(&self.b_col_indices, self.num_nonzeros));
+                let values =
+                    pollster::block_on(self.read_buffer_f32(&self.b_matrix_values, self.num_nonzeros));
+                let matrix = CsrMatrix {
+                    row_offsets,
+                    col_indices,
+                    values,
+                    num_rows: self.num_cells as usize,
+                    num_cols: self.num_cells as usize,
+                };
+                fgmres.schur.ensure_amg_resources(&self.context.device, matrix);
+            }
 
-        let workgroups_dofs = self.workgroups_for_size(n);
-        let workgroups_cells = self.workgroups_for_size(num_cells);
-        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
+            let core = fgmres
+                .fgmres
+                .core(&self.context.device, &self.context.queue);
 
-        // Reuse FGMRES pressure buffers directly in AMG level 0 to avoid copy-buffer hops.
-        let bg_create_start = Instant::now();
-        let amg_level0_state_override = if matches!(pressure_precond, CoupledPressurePreconditioner::Amg) {
-            fgmres.amg_resources.as_ref().map(|amg| {
-                let level0 = &amg.levels[0];
-                self.context
-                    .device
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("AMG Level0 State Override"),
-                        layout: &amg.bgl_state,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: fgmres.b_p_sol.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: fgmres.b_temp_p.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: level0.b_params.as_entire_binding(),
-                            },
-                        ],
-                    })
-            })
-        } else {
-            None
-        };
-        self.profiling_stats.record_location(
-            "fgmres:create_amg_override_bg",
-            ProfileCategory::GpuResourceCreation,
-            bg_create_start.elapsed(),
-            0,
-        );
+            let workgroups_dofs = self.workgroups_for_size(n);
+            let workgroups_cells = self.workgroups_for_size(num_cells);
+            let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups_cells);
+            let (dofs_dispatch_x, dofs_dispatch_y) = self.dispatch_2d(workgroups_dofs);
 
         // Initialize IterParams
         let iter_params = IterParams {
@@ -823,9 +594,9 @@ impl GpuSolver {
 
         // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
 
-        let rhs_norm = self.gpu_norm(fgmres, res.b_rhs.as_entire_binding(), n);
+        let rhs_norm = self.gpu_norm(&fgmres, res.b_rhs.as_entire_binding(), n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
-            return LinearSolverStats {
+            break 'stats LinearSolverStats {
                 iterations: 0,
                 residual: rhs_norm,
                 converged: rhs_norm < abstol,
@@ -836,9 +607,9 @@ impl GpuSolver {
 
         // Initial residual r = b - A x stored in V_0
         let mut residual_norm = self.compute_residual_into(
-            fgmres,
+            &fgmres,
             res,
-            self.basis_binding(fgmres, 0),
+            self.basis_binding(&fgmres, 0),
             workgroups_dofs,
             n,
         );
@@ -852,7 +623,7 @@ impl GpuSolver {
                     residual_norm, target_resid
                 );
             }
-            return LinearSolverStats {
+            break 'stats LinearSolverStats {
                 iterations: 0,
                 residual: residual_norm,
                 converged: true,
@@ -862,10 +633,10 @@ impl GpuSolver {
         }
 
         // Normalize V_0
-        self.write_scalars(fgmres, &[1.0 / residual_norm]);
+        self.write_scalars(&fgmres, &[1.0 / residual_norm]);
         self.scale_vector_in_place(
-            fgmres,
-            self.basis_binding(fgmres, 0),
+            &fgmres,
+            self.basis_binding(&fgmres, 0),
             workgroups_dofs,
             "FGMRES Normalize V0",
         ); // Initialize g on GPU
@@ -924,86 +695,24 @@ impl GpuSolver {
                     tol_abs: abstol,
                     reset_x_before_update: false,
                 },
-                |j, vj, z_buf| {
-                    // Schur complement preconditioner writes Z_j.
-                    let create_schur_bg = |vj: wgpu::BindingResource<'_>,
-                                           sol: wgpu::BindingResource<'_>,
-                                           aux: wgpu::BindingResource<'_>,
-                                           label: &str| {
-                        self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some(label),
-                            layout: &fgmres.bgl_schur_vectors,
-                            entries: &[
-                                wgpu::BindGroupEntry { binding: 0, resource: vj },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: z_buf.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: fgmres.b_temp_p.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry { binding: 3, resource: sol },
-                                wgpu::BindGroupEntry { binding: 4, resource: aux },
-                            ],
-                        })
-                    };
-
-                    let current_bg = create_schur_bg(
-                        vj.clone(),
-                        fgmres.b_p_sol.as_entire_binding(),
-                        fgmres.fgmres.temp_buffer().as_entire_binding(),
-                        &format!("FGMRES Schur BG {j}"),
-                    );
-                    let swap_bg = create_schur_bg(
-                        vj,
-                        fgmres.fgmres.temp_buffer().as_entire_binding(),
-                        fgmres.b_p_sol.as_entire_binding(),
-                        &format!("FGMRES Schur Swap BG {j}"),
-                    );
-
+                |_, vj, z_buf| {
                     let dispatch_start = Instant::now();
                     let mut encoder = self.context.device.create_command_encoder(
                         &wgpu::CommandEncoderDescriptor {
                             label: Some("FGMRES Preconditioner Step"),
                         },
                     );
-
-                    self.dispatch_vector_pipeline_with_encoder(
+                    fgmres.schur.encode_apply(
+                        &self.context.device,
                         &mut encoder,
-                        &fgmres.pipeline_predict_and_form,
-                        fgmres,
-                        &current_bg,
-                        &fgmres.bg_pressure_matrix,
-                        workgroups_cells,
-                        "Schur Predict & Form",
+                        &fgmres.fgmres,
+                        vj,
+                        z_buf,
+                        DispatchGrids {
+                            dofs: (dofs_dispatch_x, dofs_dispatch_y),
+                            cells: (dispatch_x, dispatch_y),
+                        },
                     );
-
-                    let mut p_result_in_sol = true;
-                    pressure_precond.encode(
-                        self,
-                        &mut encoder,
-                        fgmres,
-                        amg_level0_state_override.as_ref(),
-                        &current_bg,
-                        &swap_bg,
-                        workgroups_cells,
-                        dispatch_x,
-                        dispatch_y,
-                        &mut p_result_in_sol,
-                    );
-
-                    let correct_bg = if p_result_in_sol { &current_bg } else { &swap_bg };
-                    self.dispatch_vector_pipeline_with_encoder(
-                        &mut encoder,
-                        &fgmres.pipeline_correct_vel,
-                        fgmres,
-                        correct_bg,
-                        &fgmres.bg_pressure_matrix,
-                        workgroups_cells,
-                        "Schur Correct Vel",
-                    );
-
                     self.context.queue.submit(Some(encoder.finish()));
                     self.profiling_stats.record_location(
                         "FGMRES Preconditioner Step",
@@ -1031,9 +740,9 @@ impl GpuSolver {
 
             // Compute true residual (only when not already converged)
             residual_norm = self.compute_residual_into(
-                fgmres,
+                &fgmres,
                 res,
-                self.basis_binding(fgmres, 0),
+                self.basis_binding(&fgmres, 0),
                 workgroups_dofs,
                 n,
             );
@@ -1074,10 +783,10 @@ impl GpuSolver {
                 break;
             }
 
-            self.write_scalars(fgmres, &[1.0 / residual_norm]);
+            self.write_scalars(&fgmres, &[1.0 / residual_norm]);
             self.scale_vector_in_place(
-                fgmres,
-                self.basis_binding(fgmres, 0),
+                &fgmres,
+                self.basis_binding(&fgmres, 0),
                 workgroups_dofs,
                 "FGMRES Restart Normalize",
             );
@@ -1126,12 +835,16 @@ impl GpuSolver {
             0,
         );
 
-        LinearSolverStats {
+        break 'stats LinearSolverStats {
             iterations: total_iters,
             residual: final_resid,
             converged,
             diverged: final_resid.is_nan(),
             time: start_time.elapsed(),
-        }
+        };
+        };
+
+        self.fgmres_resources = Some(fgmres);
+        stats
     }
 }

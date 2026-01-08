@@ -1,27 +1,17 @@
-use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
-use crate::solver::gpu::bindings::generated::{
-    compressible_apply as generated_apply, compressible_assembly as generated_assembly,
-    compressible_flux_kt as generated_flux_kt, compressible_gradients as generated_gradients,
-    compressible_update as generated_update,
-};
 use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
-use crate::solver::gpu::init::compressible_fields::{
-    create_compressible_field_bind_groups, init_compressible_field_buffers, PackedStateConfig,
-};
-use crate::solver::gpu::init::linear_solver::matrix;
-use crate::solver::gpu::init::mesh;
 use crate::solver::gpu::kernel_graph::{ComputeNode, CopyBufferNode, KernelGraph, KernelNode};
 use crate::solver::gpu::model_defaults::default_compressible_model;
+use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
+use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
+use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use std::env;
-use wgpu::util::DeviceExt;
 
 #[derive(Clone, Copy, Debug)]
 struct CompressibleOffsets {
@@ -128,10 +118,6 @@ pub(crate) struct CompressiblePlanResources {
     pub num_unknowns: u32,
     pub state_step_index: usize,
     pub state_buffers: Vec<wgpu::Buffer>,
-    pub bg_fields_ping_pong: Vec<wgpu::BindGroup>,
-    pub bg_fields: wgpu::BindGroup,
-    pub bg_apply_fields_ping_pong: Vec<wgpu::BindGroup>,
-    pub bg_apply_fields: wgpu::BindGroup,
     pub b_state: wgpu::Buffer,
     pub b_state_old: wgpu::Buffer,
     pub b_state_old_old: wgpu::Buffer,
@@ -152,15 +138,7 @@ pub(crate) struct CompressiblePlanResources {
     pub b_rhs: wgpu::Buffer,
     pub b_x: wgpu::Buffer,
     pub b_scalar_row_offsets: wgpu::Buffer,
-    pub bg_mesh: wgpu::BindGroup,
-    pub bg_solver: wgpu::BindGroup,
-    pub bg_apply_solver: wgpu::BindGroup,
-    pub pipeline_assembly: wgpu::ComputePipeline,
-    pub pipeline_apply: wgpu::ComputePipeline,
-    pub pipeline_gradients: wgpu::ComputePipeline,
-    pub pipeline_flux: wgpu::ComputePipeline,
-    pub pipeline_explicit_update: wgpu::ComputePipeline,
-    pub pipeline_update: wgpu::ComputePipeline,
+    pub kernels: CompressibleKernelsModule,
     pub fgmres_resources: Option<CompressibleFgmresResources>,
     pub outer_iters: usize,
     pub nonconverged_relax: f32,
@@ -354,25 +332,25 @@ impl CompressiblePlanResources {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "compressible:gradients",
-                pipeline: |s| &s.pipeline_gradients,
+                pipeline: |s| s.kernels.pipeline_gradients(),
                 bind_groups: compressible_bind_mesh_fields,
                 workgroups: compressible_workgroups_cells,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "compressible:flux_kt",
-                pipeline: |s| &s.pipeline_flux,
+                pipeline: |s| s.kernels.pipeline_flux(),
                 bind_groups: compressible_bind_mesh_fields,
                 workgroups: compressible_workgroups_faces,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "compressible:explicit_update",
-                pipeline: |s| &s.pipeline_explicit_update,
+                pipeline: |s| s.kernels.pipeline_explicit_update(),
                 bind_groups: compressible_bind_mesh_fields,
                 workgroups: compressible_workgroups_cells,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "compressible:primitive_update",
-                pipeline: |s| &s.pipeline_update,
+                pipeline: |s| s.kernels.pipeline_update(),
                 bind_groups: compressible_bind_fields_only,
                 workgroups: compressible_workgroups_cells,
             }),
@@ -383,19 +361,19 @@ impl CompressiblePlanResources {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "compressible:flux_kt",
-                pipeline: |s| &s.pipeline_flux,
+                pipeline: |s| s.kernels.pipeline_flux(),
                 bind_groups: compressible_bind_mesh_fields,
                 workgroups: compressible_workgroups_faces,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "compressible:explicit_update",
-                pipeline: |s| &s.pipeline_explicit_update,
+                pipeline: |s| s.kernels.pipeline_explicit_update(),
                 bind_groups: compressible_bind_mesh_fields,
                 workgroups: compressible_workgroups_cells,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "compressible:primitive_update",
-                pipeline: |s| &s.pipeline_update,
+                pipeline: |s| s.kernels.pipeline_update(),
                 bind_groups: compressible_bind_fields_only,
                 workgroups: compressible_workgroups_cells,
             }),
@@ -406,13 +384,13 @@ impl CompressiblePlanResources {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "compressible:gradients",
-                pipeline: |s| &s.pipeline_gradients,
+                pipeline: |s| s.kernels.pipeline_gradients(),
                 bind_groups: compressible_bind_mesh_fields,
                 workgroups: compressible_workgroups_cells,
             }),
             KernelNode::Compute(ComputeNode {
                 label: "compressible:assembly",
-                pipeline: |s| &s.pipeline_assembly,
+                pipeline: |s| s.kernels.pipeline_assembly(),
                 bind_groups: compressible_bind_mesh_fields_solver,
                 workgroups: compressible_workgroups_cells,
             }),
@@ -422,7 +400,7 @@ impl CompressiblePlanResources {
     fn build_implicit_assembly_graph_first_order() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "compressible:assembly",
-            pipeline: |s| &s.pipeline_assembly,
+            pipeline: |s| s.kernels.pipeline_assembly(),
             bind_groups: compressible_bind_mesh_fields_solver,
             workgroups: compressible_workgroups_cells,
         })])
@@ -448,7 +426,7 @@ impl CompressiblePlanResources {
     fn build_implicit_apply_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "compressible:apply",
-            pipeline: |s| &s.pipeline_apply,
+            pipeline: |s| s.kernels.pipeline_apply(),
             bind_groups: compressible_bind_apply_fields_solver,
             workgroups: compressible_workgroups_cells,
         })])
@@ -457,7 +435,7 @@ impl CompressiblePlanResources {
     fn build_primitive_update_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "compressible:primitive_update",
-            pipeline: |s| &s.pipeline_update,
+            pipeline: |s| s.kernels.pipeline_update(),
             bind_groups: compressible_bind_fields_only,
             workgroups: compressible_workgroups_cells,
         })])
@@ -486,172 +464,35 @@ impl CompressiblePlanResources {
             u: layout.offset_for("u").expect("u offset missing"),
         };
 
-        let mesh_res = mesh::init_mesh(&context.device, mesh);
-
-        let field_buffers = init_compressible_field_buffers(
+        let lowered = CompressibleLowered::lower(
             &context.device,
-            num_cells,
-            num_faces,
-            PackedStateConfig {
-                state_stride: offsets.stride,
-                flux_stride: 4,
-            },
+            mesh,
+            &model.state_layout,
+            unknowns_per_cell,
+            4,
         );
-
-        let pipeline_assembly =
-            generated_assembly::compute::create_main_pipeline_embed_source(&context.device);
-        let pipeline_apply =
-            generated_apply::compute::create_main_pipeline_embed_source(&context.device);
-        let pipeline_gradients =
-            generated_gradients::compute::create_main_pipeline_embed_source(&context.device);
-        let pipeline_flux =
-            generated_flux_kt::compute::create_main_pipeline_embed_source(&context.device);
-        let pipeline_explicit_update =
-            explicit_update::compute::create_main_pipeline_embed_source(&context.device);
-        let pipeline_update =
-            generated_update::compute::create_main_pipeline_embed_source(&context.device);
-
-        let mesh_layout = context
-            .device
-            .create_bind_group_layout(&generated_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-        let bg_mesh = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Compressible Mesh Bind Group"),
-                layout: &mesh_layout,
-                entries: &generated_assembly::WgpuBindGroup0Entries::new(
-                    generated_assembly::WgpuBindGroup0EntriesParams {
-                        face_owner: mesh_res.b_face_owner.as_entire_buffer_binding(),
-                        face_neighbor: mesh_res.b_face_neighbor.as_entire_buffer_binding(),
-                        face_areas: mesh_res.b_face_areas.as_entire_buffer_binding(),
-                        face_normals: mesh_res.b_face_normals.as_entire_buffer_binding(),
-                        cell_centers: mesh_res.b_cell_centers.as_entire_buffer_binding(),
-                        cell_vols: mesh_res.b_cell_vols.as_entire_buffer_binding(),
-                        cell_face_offsets: mesh_res.b_cell_face_offsets.as_entire_buffer_binding(),
-                        cell_faces: mesh_res.b_cell_faces.as_entire_buffer_binding(),
-                        cell_face_matrix_indices: mesh_res
-                            .b_cell_face_matrix_indices
-                            .as_entire_buffer_binding(),
-                        diagonal_indices: mesh_res.b_diagonal_indices.as_entire_buffer_binding(),
-                        face_boundary: mesh_res.b_face_boundary.as_entire_buffer_binding(),
-                        face_centers: mesh_res.b_face_centers.as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            });
 
         let fields_layout = context
             .device
-            .create_bind_group_layout(&generated_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-        let fields_res =
-            create_compressible_field_bind_groups(&context.device, field_buffers, &fields_layout);
-
-        let b_scalar_row_offsets =
-            context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Compressible Scalar Row Offsets"),
-                    contents: cast_slice(&mesh_res.row_offsets),
-                    usage: wgpu::BufferUsages::STORAGE,
-                });
-
-        let scalar_row_offsets = mesh_res.row_offsets.clone();
-        let scalar_col_indices = mesh_res.col_indices.clone();
-        let (row_offsets, col_indices) = build_block_csr(
-            &mesh_res.row_offsets,
-            &mesh_res.col_indices,
-            unknowns_per_cell,
+            .create_bind_group_layout(
+                &crate::solver::gpu::bindings::generated::compressible_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
+            );
+        let fields_res = create_compressible_field_bind_groups(
+            &context.device,
+            lowered.fields,
+            &fields_layout,
         );
-        let block_row_offsets = row_offsets.clone();
-        let block_col_indices = col_indices.clone();
-        let matrix_res = matrix::init_matrix(&context.device, &row_offsets, &col_indices);
-        let b_rhs = context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Compressible RHS"),
-            size: num_unknowns as u64 * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let b_x = context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Compressible Solution"),
-            size: num_unknowns as u64 * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
 
-        let solver_layout = context
-            .device
-            .create_bind_group_layout(&generated_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
-        let bg_solver = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Compressible Solver Bind Group"),
-                layout: &solver_layout,
-                entries: &generated_assembly::WgpuBindGroup2Entries::new(
-                    generated_assembly::WgpuBindGroup2EntriesParams {
-                        matrix_values: matrix_res.b_matrix_values.as_entire_buffer_binding(),
-                        rhs: b_rhs.as_entire_buffer_binding(),
-                        scalar_row_offsets: b_scalar_row_offsets.as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            });
-
-        let apply_fields_layout = context
-            .device
-            .create_bind_group_layout(&generated_apply::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-        let mut bg_apply_fields_ping_pong = Vec::new();
-        for i in 0..3 {
-            let (idx_state, idx_old, idx_old_old) = match i {
-                0 => (0, 1, 2),
-                1 => (2, 0, 1),
-                2 => (1, 2, 0),
-                _ => (0, 1, 2),
-            };
-            let bg = context
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("Compressible Apply Fields Bind Group {}", i)),
-                    layout: &apply_fields_layout,
-                    entries: &generated_apply::WgpuBindGroup0Entries::new(
-                        generated_apply::WgpuBindGroup0EntriesParams {
-                            state: fields_res.state_buffers[idx_state].as_entire_buffer_binding(),
-                            state_old: fields_res.state_buffers[idx_old].as_entire_buffer_binding(),
-                            state_old_old: fields_res.state_buffers[idx_old_old]
-                                .as_entire_buffer_binding(),
-                            state_iter: fields_res.b_state_iter.as_entire_buffer_binding(),
-                            fluxes: fields_res.b_fluxes.as_entire_buffer_binding(),
-                            constants: fields_res.b_constants.as_entire_buffer_binding(),
-                            grad_rho: fields_res.b_grad_rho.as_entire_buffer_binding(),
-                            grad_rho_u_x: fields_res.b_grad_rho_u_x.as_entire_buffer_binding(),
-                            grad_rho_u_y: fields_res.b_grad_rho_u_y.as_entire_buffer_binding(),
-                            grad_rho_e: fields_res.b_grad_rho_e.as_entire_buffer_binding(),
-                            low_mach: fields_res.b_low_mach_params.as_entire_buffer_binding(),
-                        },
-                    )
-                    .into_array(),
-                });
-            bg_apply_fields_ping_pong.push(bg);
-        }
-        let bg_apply_fields = bg_apply_fields_ping_pong[0].clone();
-        let apply_solver_layout = context
-            .device
-            .create_bind_group_layout(&generated_apply::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-        let bg_apply_solver = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Compressible Apply Solver Bind Group"),
-                layout: &apply_solver_layout,
-                entries: &generated_apply::WgpuBindGroup1Entries::new(
-                    generated_apply::WgpuBindGroup1EntriesParams {
-                        solution: b_x.as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            });
+        let kernels = CompressibleKernelsModule::new(
+            &context.device,
+            &lowered.mesh,
+            &fields_res,
+            &lowered.matrix,
+            &lowered.b_rhs,
+            &lowered.b_x,
+            &lowered.b_scalar_row_offsets,
+            &lowered.scalar_row_offsets,
+        );
 
         let mut solver = Self {
             context,
@@ -660,10 +501,6 @@ impl CompressiblePlanResources {
             num_unknowns,
             state_step_index: 0,
             state_buffers: fields_res.state_buffers,
-            bg_fields_ping_pong: fields_res.bg_fields_ping_pong,
-            bg_fields: fields_res.bg_fields,
-            bg_apply_fields_ping_pong,
-            bg_apply_fields,
             b_state: fields_res.b_state,
             b_state_old: fields_res.b_state_old,
             b_state_old_old: fields_res.b_state_old_old,
@@ -678,28 +515,20 @@ impl CompressiblePlanResources {
             b_low_mach_params: fields_res.b_low_mach_params,
             low_mach_params: fields_res.low_mach_params,
             preconditioner: PreconditionerType::Jacobi,
-            b_row_offsets: matrix_res.b_row_offsets,
-            b_col_indices: matrix_res.b_col_indices,
-            b_matrix_values: matrix_res.b_matrix_values,
-            b_rhs,
-            b_x,
-            b_scalar_row_offsets,
-            bg_mesh,
-            bg_solver,
-            bg_apply_solver,
-            pipeline_assembly,
-            pipeline_apply,
-            pipeline_gradients,
-            pipeline_flux,
-            pipeline_explicit_update,
-            pipeline_update,
+            b_row_offsets: lowered.matrix.b_row_offsets,
+            b_col_indices: lowered.matrix.b_col_indices,
+            b_matrix_values: lowered.matrix.b_matrix_values,
+            b_rhs: lowered.b_rhs,
+            b_x: lowered.b_x,
+            b_scalar_row_offsets: lowered.b_scalar_row_offsets,
+            kernels,
             fgmres_resources: None,
             outer_iters: 1,
             nonconverged_relax: 0.5,
-            scalar_row_offsets,
-            scalar_col_indices,
-            block_row_offsets,
-            block_col_indices,
+            scalar_row_offsets: lowered.scalar_row_offsets,
+            scalar_col_indices: lowered.scalar_col_indices,
+            block_row_offsets: lowered.block_row_offsets,
+            block_col_indices: lowered.block_col_indices,
             implicit_tol: 0.0,
             implicit_max_restart: 1,
             implicit_retry_tol: 0.0,
@@ -963,8 +792,7 @@ pub(crate) mod plan {
         let step_start = std::time::Instant::now();
 
         solver.state_step_index = (solver.state_step_index + 1) % 3;
-        solver.bg_fields = solver.bg_fields_ping_pong[solver.state_step_index].clone();
-        solver.bg_apply_fields = solver.bg_apply_fields_ping_pong[solver.state_step_index].clone();
+        solver.kernels.set_step_index(solver.state_step_index);
 
         let (idx_state, idx_old, idx_old_old) = ping_pong_indices(solver.state_step_index);
         solver.b_state = solver.state_buffers[idx_state].clone();
@@ -1069,23 +897,23 @@ pub(crate) mod plan {
 }
 
 fn compressible_bind_mesh_fields(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
-    cpass.set_bind_group(0, &s.bg_mesh, &[]);
-    cpass.set_bind_group(1, &s.bg_fields, &[]);
+    cpass.set_bind_group(0, s.kernels.bg_mesh(), &[]);
+    cpass.set_bind_group(1, s.kernels.bg_fields(), &[]);
 }
 
 fn compressible_bind_mesh_fields_solver(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
-    cpass.set_bind_group(0, &s.bg_mesh, &[]);
-    cpass.set_bind_group(1, &s.bg_fields, &[]);
-    cpass.set_bind_group(2, &s.bg_solver, &[]);
+    cpass.set_bind_group(0, s.kernels.bg_mesh(), &[]);
+    cpass.set_bind_group(1, s.kernels.bg_fields(), &[]);
+    cpass.set_bind_group(2, s.kernels.bg_solver(), &[]);
 }
 
 fn compressible_bind_fields_only(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
-    cpass.set_bind_group(0, &s.bg_fields, &[]);
+    cpass.set_bind_group(0, s.kernels.bg_fields(), &[]);
 }
 
 fn compressible_bind_apply_fields_solver(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
-    cpass.set_bind_group(0, &s.bg_apply_fields, &[]);
-    cpass.set_bind_group(1, &s.bg_apply_solver, &[]);
+    cpass.set_bind_group(0, s.kernels.bg_apply_fields(), &[]);
+    cpass.set_bind_group(1, s.kernels.bg_apply_solver(), &[]);
 }
 
 fn compressible_workgroups_cells(s: &CompressiblePlanResources) -> (u32, u32, u32) {

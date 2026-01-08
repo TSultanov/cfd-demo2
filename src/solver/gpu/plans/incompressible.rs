@@ -297,17 +297,17 @@ impl GpuSolver {
             "linear:x",
             self.linear_port_space.buffer(self.linear_ports.x),
         );
-        record(self, "linear:r", &self.b_r);
-        record(self, "linear:r0", &self.b_r0);
-        record(self, "linear:p_solver", &self.b_p_solver);
-        record(self, "linear:v", &self.b_v);
-        record(self, "linear:s", &self.b_s);
-        record(self, "linear:t", &self.b_t);
-        record(self, "linear:dot_result", &self.b_dot_result);
-        record(self, "linear:dot_result_2", &self.b_dot_result_2);
-        record(self, "linear:scalars", &self.b_scalars);
-        record(self, "linear:staging_scalar", &self.b_staging_scalar);
-        record(self, "linear:solver_params", &self.b_solver_params);
+        record(self, "linear:r", self.scalar_cg.r());
+        record(self, "linear:r0", self.scalar_cg.r0());
+        record(self, "linear:p_solver", self.scalar_cg.p());
+        record(self, "linear:v", self.scalar_cg.v());
+        record(self, "linear:s", self.scalar_cg.s());
+        record(self, "linear:t", self.scalar_cg.t());
+        record(self, "linear:dot_result", self.scalar_cg.dot_result());
+        record(self, "linear:dot_result_2", self.scalar_cg.dot_result_2());
+        record(self, "linear:scalars", self.scalar_cg.scalars());
+        record(self, "linear:staging_scalar", self.scalar_cg.staging_scalar());
+        record(self, "linear:solver_params", self.scalar_cg.solver_params());
 
         if let Some(c) = &self.coupled_resources {
             for (label, buf) in [

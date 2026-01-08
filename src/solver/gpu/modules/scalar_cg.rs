@@ -158,6 +158,50 @@ impl ScalarCgModule {
         &self.b_x
     }
 
+    pub fn r(&self) -> &wgpu::Buffer {
+        &self.b_r
+    }
+
+    pub fn r0(&self) -> &wgpu::Buffer {
+        &self.b_r0
+    }
+
+    pub fn p(&self) -> &wgpu::Buffer {
+        &self.b_p
+    }
+
+    pub fn v(&self) -> &wgpu::Buffer {
+        &self.b_v
+    }
+
+    pub fn s(&self) -> &wgpu::Buffer {
+        &self.b_s
+    }
+
+    pub fn t(&self) -> &wgpu::Buffer {
+        &self.b_t
+    }
+
+    pub fn dot_result(&self) -> &wgpu::Buffer {
+        &self.b_dot_result
+    }
+
+    pub fn dot_result_2(&self) -> &wgpu::Buffer {
+        &self.b_dot_result_2
+    }
+
+    pub fn scalars(&self) -> &wgpu::Buffer {
+        &self.b_scalars
+    }
+
+    pub fn solver_params(&self) -> &wgpu::Buffer {
+        &self.b_solver_params
+    }
+
+    pub fn staging_scalar(&self) -> &wgpu::Buffer {
+        &self.b_staging_scalar
+    }
+
     pub fn solve(&self, context: &GpuContext, n: u32, max_iters: u32, tol: f32) -> LinearSolverStats {
         if n > self.capacity {
             panic!(
@@ -345,4 +389,3 @@ impl ScalarCgModule {
         r_r
     }
 }
-

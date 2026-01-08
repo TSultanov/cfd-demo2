@@ -30,6 +30,10 @@ pub struct PlanStepStats {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanParam {
+    Dt,
+    AdvectionScheme,
+    TimeScheme,
+    Preconditioner,
     Viscosity,
     Density,
     AlphaU,
@@ -53,6 +57,9 @@ pub enum PlanParamValue {
     Usize(usize),
     Bool(bool),
     LowMachModel(GpuLowMachPrecondModel),
+    Scheme(Scheme),
+    TimeScheme(TimeScheme),
+    Preconditioner(PreconditionerType),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,26 +75,7 @@ pub(crate) trait GpuPlanInstance: Send {
     fn dt(&self) -> f32;
     fn state_buffer(&self) -> &wgpu::Buffer;
 
-    fn set_dt(&mut self, dt: f32);
-
-    fn set_advection_scheme(&mut self, scheme: Scheme);
-    fn set_time_scheme(&mut self, scheme: TimeScheme);
-    fn set_preconditioner(&mut self, preconditioner: PreconditionerType);
-
-    fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
-        match (_param, _value) {
-            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
-                let stats = self.profiling_stats();
-                if enable {
-                    stats.enable();
-                } else {
-                    stats.disable();
-                }
-                Ok(())
-            }
-            _ => Err("parameter is not supported by this plan".into()),
-        }
-    }
+    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String>;
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String>;
 
@@ -169,24 +157,24 @@ impl GpuPlanInstance for GpuSolver {
         &self.b_state
     }
 
-    fn set_dt(&mut self, dt: f32) {
-        GpuSolver::set_dt(self, dt);
-    }
-
-    fn set_advection_scheme(&mut self, scheme: Scheme) {
-        GpuSolver::set_scheme(self, scheme.gpu_id());
-    }
-
-    fn set_time_scheme(&mut self, scheme: TimeScheme) {
-        GpuSolver::set_time_scheme(self, scheme as u32);
-    }
-
-    fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
-        GpuSolver::set_precond_type(self, preconditioner);
-    }
-
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
         match (param, value) {
+            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+                self.set_dt(dt);
+                Ok(())
+            }
+            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+                self.set_scheme(scheme.gpu_id());
+                Ok(())
+            }
+            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+                self.set_time_scheme(scheme as u32);
+                Ok(())
+            }
+            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+                self.set_precond_type(preconditioner);
+                Ok(())
+            }
             (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
                 self.set_viscosity(mu);
                 Ok(())
@@ -330,28 +318,28 @@ impl GpuPlanInstance for CompressiblePlanResources {
         &self.b_state
     }
 
-    fn set_dt(&mut self, dt: f32) {
-        CompressiblePlanResources::set_dt(self, dt);
-    }
-
-    fn set_advection_scheme(&mut self, scheme: Scheme) {
-        CompressiblePlanResources::set_scheme(self, scheme.gpu_id());
-    }
-
-    fn set_time_scheme(&mut self, scheme: TimeScheme) {
-        CompressiblePlanResources::set_time_scheme(self, scheme as u32);
-    }
-
-    fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
-        CompressiblePlanResources::set_precond_type(self, preconditioner);
-    }
-
     fn profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.profiling_stats)
     }
 
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
         match (param, value) {
+            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+                self.set_dt(dt);
+                Ok(())
+            }
+            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+                self.set_scheme(scheme.gpu_id());
+                Ok(())
+            }
+            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+                self.set_time_scheme(scheme as u32);
+                Ok(())
+            }
+            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+                self.set_precond_type(preconditioner);
+                Ok(())
+            }
             (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
                 self.set_viscosity(mu);
                 Ok(())
@@ -506,24 +494,38 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
         GpuGenericCoupledSolver::state_buffer(self)
     }
 
-    fn set_dt(&mut self, dt: f32) {
-        self.runtime.set_dt(dt);
-    }
-
-    fn set_advection_scheme(&mut self, scheme: Scheme) {
-        self.runtime.set_scheme(scheme.gpu_id());
-    }
-
-    fn set_time_scheme(&mut self, scheme: TimeScheme) {
-        self.runtime.set_time_scheme(scheme as u32);
-    }
-
-    fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
-        let _ = preconditioner;
-    }
-
     fn profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.runtime.profiling_stats)
+    }
+
+    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
+        match (param, value) {
+            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+                self.runtime.set_dt(dt);
+                Ok(())
+            }
+            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+                self.runtime.set_scheme(scheme.gpu_id());
+                Ok(())
+            }
+            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+                self.runtime.set_time_scheme(scheme as u32);
+                Ok(())
+            }
+            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(_preconditioner)) => {
+                // Generic coupled currently doesn't implement preconditioners.
+                Ok(())
+            }
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                if enable {
+                    self.runtime.profiling_stats.enable();
+                } else {
+                    self.runtime.profiling_stats.disable();
+                }
+                Ok(())
+            }
+            _ => Err("parameter is not supported by this plan".into()),
+        }
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {

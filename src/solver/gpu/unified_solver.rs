@@ -50,9 +50,18 @@ impl GpuUnifiedSolver {
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
         let mut plan: Box<dyn GpuPlanInstance> = build_plan_instance(mesh, &model, device, queue).await?;
-        plan.set_advection_scheme(config.advection_scheme);
-        plan.set_time_scheme(config.time_scheme);
-        plan.set_preconditioner(config.preconditioner);
+        plan.set_param(
+            PlanParam::AdvectionScheme,
+            PlanParamValue::Scheme(config.advection_scheme),
+        )?;
+        plan.set_param(
+            PlanParam::TimeScheme,
+            PlanParamValue::TimeScheme(config.time_scheme),
+        )?;
+        plan.set_param(
+            PlanParam::Preconditioner,
+            PlanParamValue::Preconditioner(config.preconditioner),
+        )?;
 
         Ok(Self {
             model,
@@ -86,7 +95,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        self.plan.set_dt(dt);
+        let _ = self.plan.set_param(PlanParam::Dt, PlanParamValue::F32(dt));
     }
 
     pub fn set_dtau(&mut self, dtau: f32) {
@@ -134,17 +143,24 @@ impl GpuUnifiedSolver {
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
         self.config.advection_scheme = scheme;
-        self.plan.set_advection_scheme(scheme);
+        let _ = self
+            .plan
+            .set_param(PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme));
     }
 
     pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
         self.config.time_scheme = scheme;
-        self.plan.set_time_scheme(scheme);
+        let _ = self
+            .plan
+            .set_param(PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme));
     }
 
     pub fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
         self.config.preconditioner = preconditioner;
-        self.plan.set_preconditioner(preconditioner);
+        let _ = self.plan.set_param(
+            PlanParam::Preconditioner,
+            PlanParamValue::Preconditioner(preconditioner),
+        );
     }
 
     pub fn set_outer_iters(&mut self, iters: usize) {

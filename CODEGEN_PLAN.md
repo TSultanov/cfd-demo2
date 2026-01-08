@@ -15,6 +15,7 @@ One **model-driven** GPU solver pipeline with:
 - `ExecutionPlan`/`ModuleGraph` exist and drive dispatch sequencing.
 - Readback is unified via cached staging buffers (`StagingBufferCache` + `read_buffer_cached`).
 - `GpuRuntimeCommon` consolidates GPU context + mesh + profiling + cached readback and is used by all current plans (compressible/incompressible/generic coupled/scalar runtimes).
+- Incompressible scalar CG work buffers/pipelines are owned by `ScalarCgModule` (no longer duplicated as `GpuSolver` fields).
 - `GpuPlanInstance` is universal and configured via typed `PlanParam`/`PlanParamValue` and queried via `PlanCapability` (no downcasts).
 - Linear debug path is supported across current plans (`set_linear_system`, `solve_linear_system_with_size`, `get_linear_solution`) with plan-appropriate Krylov under the hood (CG for scalar systems, FGMRES for compressible coupled).
 

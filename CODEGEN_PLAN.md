@@ -109,6 +109,34 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
    - Keep legacy implementations crate-internal until the generic runtime fully replaces them.
 10. **Eliminate legacy solver *implementations* (Compressible/Coupled)**
    Goal: no `GpuCompressibleSolver` / `GpuSolver` “solvers” at all; only `GpuUnifiedSolver` instances with different plans + resources.
+   Hard requirement: **no separate per-family lowering/compilation entrypoints**; everything flows through a single model-driven pipeline, with any “special sauce” expressed as pluggable closure modules.
+
+   - Introduce a single model-driven “program” representation:
+     - `ModelGpuProgramSpec`: a pure data description derived from `ModelSpec + SolverConfig + SchemeRegistry` that declares:
+       - required resources (typed ports): mesh, packed state + history, auxiliary fields (gradients), linear system buffers (CSR + values + RHS/X), BC tables, closure-specific params.
+       - compute nodes (in execution order or as a DAG): generic operators (assembly/apply/update/gradients) + closure kernels (KT flux, Rhie–Chow, primitive recovery/EOS, etc.).
+       - typed option enums required by kernels (time scheme, advection scheme, BC kinds, closure variants).
+     - `GpuProgramLowerer`: consumes `ModelGpuProgramSpec` and produces `ModelGpuProgram` (GPU resources):
+       - allocates all buffers via `PortSpace`
+       - builds pipelines + bind groups inside modules
+       - performs layout compatibility checks (ports/bindings) during lowering (the only place that knows memory layout).
+
+   - Make “closures” first-class modules (no branching in the lowering/compilation pipeline):
+     - Each closure module declares its IO ports and required runtime dims, and owns its internal resources.
+     - Closures are selected by the program builder based on `ModelSpec` (e.g. compressible gets KT flux + primitive recovery; incompressible gets Rhie–Chow/pressure-velocity coupling).
+
+   - Unify compilation around `DiscreteSystem` where possible:
+     - Generic operators (grad/assembly/apply/update) are emitted from `DiscreteSystem` for *all* models.
+     - Family-specific kernels remain only as closures until their behavior can be expressed in the generic operator set.
+     - Build-time codegen emits both generic operators and closures and registers them under a single `ModelGpuProgramSpec`.
+
+   - Concrete incremental path (keep tests passing at every step):
+     1) Add a generic `ModelLowerer` scaffold (mesh init + `PortSpace` + common sizing helpers) and migrate existing lowerers to use it.
+     2) Port linear system resources (CSR, values, RHS/X) to typed ports everywhere (compressible → coupled → generic coupled).
+     3) Convert plan execution to module graphs (`ModuleGraph`/`ExecutionPlan`) where every compute dispatch goes through a module node.
+     4) Move remaining “init” logic (state/history/BC tables) into the unified lowerer so plan resources don’t allocate ad-hoc buffers.
+     5) Replace `PlanInstance::{Compressible,Incompressible,GenericCoupled}` branching with a single `ModelGpuProgram` built from `ModelGpuProgramSpec`.
+
    - Introduce a plan/runtime split:
      - `GpuRuntimeCommon`: mesh buffers, constants, state ping-pong/history, and generic dispatch helpers.
      - `GpuPlanInstance`: plan-specific GPU resources (buffers/bind groups/pipelines) + an `ExecutionPlan` describing the timestep/nonlinear loop.

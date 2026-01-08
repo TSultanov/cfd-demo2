@@ -3,11 +3,11 @@ use crate::solver::gpu::init::compressible_fields::{
     init_compressible_field_buffers, CompressibleFieldBuffers, PackedStateConfig,
 };
 use crate::solver::gpu::init::linear_solver::matrix;
-use crate::solver::gpu::init::mesh;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::StateLayout;
 
-use super::ports::{BufF32, BufU32, Port, PortSpace};
+use super::model_lowerer::LoweredCommon;
+use super::ports::{BufF32, BufU32, Port};
 
 #[derive(Clone, Copy, Debug)]
 pub struct CompressibleLinearPorts {
@@ -17,16 +17,12 @@ pub struct CompressibleLinearPorts {
 }
 
 pub struct CompressibleLowered {
-    pub num_cells: u32,
-    pub num_faces: u32,
+    pub common: LoweredCommon,
     pub unknowns_per_cell: u32,
     pub num_unknowns: u32,
     pub state_stride: u32,
 
     pub ports: CompressibleLinearPorts,
-    pub port_space: PortSpace,
-
-    pub mesh: mesh::MeshResources,
     pub fields: CompressibleFieldBuffers,
 
     pub scalar_row_offsets: Vec<u32>,
@@ -45,37 +41,34 @@ impl CompressibleLowered {
         unknowns_per_cell: u32,
         flux_stride: u32,
     ) -> Self {
-        let num_cells = mesh_input.cell_cx.len() as u32;
-        let num_faces = mesh_input.face_owner.len() as u32;
-        let num_unknowns = num_cells * unknowns_per_cell;
+        let mut common = LoweredCommon::new(device, mesh_input);
+        let num_unknowns = common.num_cells * unknowns_per_cell;
         let state_stride = state_layout.stride();
 
-        let mesh_res = mesh::init_mesh(device, mesh_input);
         let fields = init_compressible_field_buffers(
             device,
-            num_cells,
-            num_faces,
+            common.num_cells,
+            common.num_faces,
             PackedStateConfig {
                 state_stride,
                 flux_stride,
             },
         );
 
-        let scalar_row_offsets = mesh_res.row_offsets.clone();
-        let scalar_col_indices = mesh_res.col_indices.clone();
+        let scalar_row_offsets = common.mesh.row_offsets.clone();
+        let scalar_col_indices = common.mesh.col_indices.clone();
         let (row_offsets, col_indices) =
-            build_block_csr(&mesh_res.row_offsets, &mesh_res.col_indices, unknowns_per_cell);
+            build_block_csr(&common.mesh.row_offsets, &common.mesh.col_indices, unknowns_per_cell);
         let block_row_offsets = row_offsets.clone();
         let block_col_indices = col_indices.clone();
 
         let matrix = matrix::init_matrix(device, &row_offsets, &col_indices);
 
-        let mut port_space = PortSpace::new();
         let (scalar_row_offsets_port, rhs_port, x_port) = {
-            let mut lowerer = port_space.lowerer(device);
+            let mut lowerer = common.lowerer(device);
             let scalar_row_offsets_port = lowerer.buffer_u32_init(
                 "compressible:scalar_row_offsets",
-                &mesh_res.row_offsets,
+                &scalar_row_offsets,
                 wgpu::BufferUsages::STORAGE,
                 "Compressible Scalar Row Offsets",
             );
@@ -104,14 +97,11 @@ impl CompressibleLowered {
         };
 
         Self {
-            num_cells,
-            num_faces,
+            common,
             unknowns_per_cell,
             num_unknowns,
             state_stride,
             ports,
-            port_space,
-            mesh: mesh_res,
             fields,
             scalar_row_offsets,
             scalar_col_indices,

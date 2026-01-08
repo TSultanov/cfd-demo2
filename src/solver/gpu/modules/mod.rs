@@ -5,3 +5,4 @@ pub mod compressible_lowering;
 pub mod krylov_precond;
 pub mod graph;
 pub mod ports;
+pub mod model_lowerer;

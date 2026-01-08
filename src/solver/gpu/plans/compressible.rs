@@ -483,13 +483,10 @@ impl CompressiblePlanResources {
         queue: Option<wgpu::Queue>,
     ) -> Self {
         let context = GpuContext::new(device, queue).await;
-        let num_cells = mesh.cell_cx.len() as u32;
-        let num_faces = mesh.face_owner.len() as u32;
         let profile = CompressibleProfile::new();
 
         let model = default_compressible_model();
         let unknowns_per_cell = model.system.unknowns_per_cell();
-        let num_unknowns = num_cells * unknowns_per_cell;
         let layout = &model.state_layout;
         let offsets = CompressibleOffsets {
             stride: layout.stride(),
@@ -507,6 +504,9 @@ impl CompressiblePlanResources {
             unknowns_per_cell,
             4,
         );
+        let num_cells = lowered.common.num_cells;
+        let num_faces = lowered.common.num_faces;
+        let num_unknowns = num_cells * unknowns_per_cell;
 
         let fields_layout = context
             .device
@@ -521,13 +521,15 @@ impl CompressiblePlanResources {
 
         let kernels = CompressibleKernelsModule::new(
             &context.device,
-            &lowered.mesh,
+            &lowered.common.mesh,
             &fields_res,
             &lowered.matrix,
-            &lowered.port_space,
+            &lowered.common.ports,
             lowered.ports,
             &lowered.scalar_row_offsets,
         );
+
+        let linear_port_space = lowered.common.ports;
 
         let mut solver = Self {
             context,
@@ -554,7 +556,7 @@ impl CompressiblePlanResources {
             b_col_indices: lowered.matrix.b_col_indices,
             b_matrix_values: lowered.matrix.b_matrix_values,
             linear_ports: lowered.ports,
-            linear_port_space: lowered.port_space,
+            linear_port_space,
             kernels,
             fgmres_resources: None,
             outer_iters: 1,

@@ -165,8 +165,8 @@ impl CompressiblePlanResources {
                 cells: (block_dispatch_x, block_dispatch_y),
             };
 
-            let b_x = self.linear_buffers.buffer(self.linear_ports.x);
-            let b_rhs = self.linear_buffers.buffer(self.linear_ports.rhs);
+            let b_x = self.linear_port_space.buffer(self.linear_ports.x);
+            let b_rhs = self.linear_port_space.buffer(self.linear_ports.rhs);
             self.zero_buffer(b_x, n);
 
             let tol_abs = 1e-6f32;

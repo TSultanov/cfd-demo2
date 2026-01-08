@@ -7,7 +7,7 @@ use crate::solver::gpu::init::mesh;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::StateLayout;
 
-use super::ports::{BufF32, BufU32, LoweredBuffers, Lowerer, Port};
+use super::ports::{BufF32, BufU32, Port, PortSpace};
 
 #[derive(Clone, Copy, Debug)]
 pub struct CompressibleLinearPorts {
@@ -24,7 +24,7 @@ pub struct CompressibleLowered {
     pub state_stride: u32,
 
     pub ports: CompressibleLinearPorts,
-    pub buffers: LoweredBuffers,
+    pub port_space: PortSpace,
 
     pub mesh: mesh::MeshResources,
     pub fields: CompressibleFieldBuffers,
@@ -70,35 +70,38 @@ impl CompressibleLowered {
 
         let matrix = matrix::init_matrix(device, &row_offsets, &col_indices);
 
-        let mut lowerer = Lowerer::new(device);
-        let scalar_row_offsets_port = lowerer.buffer_u32_init(
-            "compressible:scalar_row_offsets",
-            &mesh_res.row_offsets,
-            wgpu::BufferUsages::STORAGE,
-            "Compressible Scalar Row Offsets",
-        );
-        let rhs_port = lowerer.buffer_f32(
-            "compressible:rhs",
-            num_unknowns as u64 * 4,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            "Compressible RHS",
-        );
-        let x_port = lowerer.buffer_f32(
-            "compressible:x",
-            num_unknowns as u64 * 4,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            "Compressible Solution",
-        );
+        let mut port_space = PortSpace::new();
+        let (scalar_row_offsets_port, rhs_port, x_port) = {
+            let mut lowerer = port_space.lowerer(device);
+            let scalar_row_offsets_port = lowerer.buffer_u32_init(
+                "compressible:scalar_row_offsets",
+                &mesh_res.row_offsets,
+                wgpu::BufferUsages::STORAGE,
+                "Compressible Scalar Row Offsets",
+            );
+            let rhs_port = lowerer.buffer_f32(
+                "compressible:rhs",
+                num_unknowns as u64 * 4,
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                "Compressible RHS",
+            );
+            let x_port = lowerer.buffer_f32(
+                "compressible:x",
+                num_unknowns as u64 * 4,
+                wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                "Compressible Solution",
+            );
+            (scalar_row_offsets_port, rhs_port, x_port)
+        };
         let ports = CompressibleLinearPorts {
             rhs: rhs_port,
             x: x_port,
             scalar_row_offsets: scalar_row_offsets_port,
         };
-        let buffers: LoweredBuffers = lowerer.finish();
 
         Self {
             num_cells,
@@ -107,7 +110,7 @@ impl CompressibleLowered {
             num_unknowns,
             state_stride,
             ports,
-            buffers,
+            port_space,
             mesh: mesh_res,
             fields,
             scalar_row_offsets,

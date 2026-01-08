@@ -7,7 +7,9 @@ use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLinearPorts;
-use crate::solver::gpu::modules::ports::LoweredBuffers;
+use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, CompressiblePipeline};
+use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
+use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -138,7 +140,7 @@ pub(crate) struct CompressiblePlanResources {
     pub b_col_indices: wgpu::Buffer,
     pub b_matrix_values: wgpu::Buffer,
     pub linear_ports: CompressibleLinearPorts,
-    pub linear_buffers: LoweredBuffers,
+    pub linear_port_space: PortSpace,
     pub kernels: CompressibleKernelsModule,
     pub fgmres_resources: Option<CompressibleFgmresResources>,
     pub outer_iters: usize,
@@ -164,6 +166,8 @@ pub(crate) struct CompressiblePlanResources {
     implicit_apply_graph: KernelGraph<CompressiblePlanResources>,
     primitive_update_graph: KernelGraph<CompressiblePlanResources>,
     needs_gradients: bool,
+    explicit_module_graph: ModuleGraph<CompressibleKernelsModule>,
+    explicit_module_graph_first_order: ModuleGraph<CompressibleKernelsModule>,
 }
 
 impl CompressiblePlanResources {
@@ -213,6 +217,37 @@ impl CompressiblePlanResources {
         static PLAN: std::sync::OnceLock<ExecutionPlan<CompressiblePlanResources>> =
             std::sync::OnceLock::new();
         PLAN.get_or_init(CompressiblePlanResources::build_explicit_plan)
+    }
+
+    fn build_explicit_module_graph(include_gradients: bool) -> ModuleGraph<CompressibleKernelsModule> {
+        let mut nodes = Vec::new();
+        if include_gradients {
+            nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:gradients",
+                pipeline: CompressiblePipeline::Gradients,
+                bind: CompressibleBindGroups::MeshFields,
+                dispatch: DispatchKind::Cells,
+            }));
+        }
+        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
+            label: "compressible:flux_kt",
+            pipeline: CompressiblePipeline::FluxKt,
+            bind: CompressibleBindGroups::MeshFields,
+            dispatch: DispatchKind::Faces,
+        }));
+        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
+            label: "compressible:explicit_update",
+            pipeline: CompressiblePipeline::ExplicitUpdate,
+            bind: CompressibleBindGroups::MeshFields,
+            dispatch: DispatchKind::Cells,
+        }));
+        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
+            label: "compressible:primitive_update",
+            pipeline: CompressiblePipeline::PrimitiveUpdate,
+            bind: CompressibleBindGroups::FieldsOnly,
+            dispatch: DispatchKind::Cells,
+        }));
+        ModuleGraph::new(nodes)
     }
 
     fn implicit_iter_plan_grad_assembly_graph(
@@ -489,7 +524,7 @@ impl CompressiblePlanResources {
             &lowered.mesh,
             &fields_res,
             &lowered.matrix,
-            &lowered.buffers,
+            &lowered.port_space,
             lowered.ports,
             &lowered.scalar_row_offsets,
         );
@@ -519,7 +554,7 @@ impl CompressiblePlanResources {
             b_col_indices: lowered.matrix.b_col_indices,
             b_matrix_values: lowered.matrix.b_matrix_values,
             linear_ports: lowered.ports,
-            linear_buffers: lowered.buffers,
+            linear_port_space: lowered.port_space,
             kernels,
             fgmres_resources: None,
             outer_iters: 1,
@@ -547,6 +582,9 @@ impl CompressiblePlanResources {
             implicit_apply_graph: CompressiblePlanResources::build_implicit_apply_graph(),
             primitive_update_graph: CompressiblePlanResources::build_primitive_update_graph(),
             needs_gradients: false,
+            explicit_module_graph: CompressiblePlanResources::build_explicit_module_graph(true),
+            explicit_module_graph_first_order:
+                CompressiblePlanResources::build_explicit_module_graph(false),
         }
         ;
         solver.update_needs_gradients();
@@ -805,15 +843,24 @@ pub(crate) mod plan {
         // The implicit FGMRES path is retained for BDF2/pseudo-time (dtau) workflows.
         let use_explicit = solver.constants.time_scheme == 0 && solver.constants.dtau <= 0.0;
         if use_explicit {
+            solver.pre_step_graph.execute(&solver.context, &*solver);
+
+            let runtime = RuntimeDims {
+                num_cells: solver.num_cells,
+                num_faces: solver.num_faces,
+            };
+            let graph = if solver.needs_gradients {
+                &solver.explicit_module_graph
+            } else {
+                &solver.explicit_module_graph_first_order
+            };
+            let timings = graph.execute_split_timed(&solver.context, &solver.kernels, runtime);
+
             let total_secs = step_start.elapsed().as_secs_f64();
-            let plan_timings = CompressiblePlanResources::explicit_plan().execute(solver);
-            let detail = plan_timings
-                .graph_detail("compressible:explicit_graph")
-                .expect("explicit_graph timings missing");
-            let grad_secs = detail.seconds_for("compressible:gradients");
-            let flux_secs = detail.seconds_for("compressible:flux_kt");
-            let explicit_update_secs = detail.seconds_for("compressible:explicit_update");
-            let primitive_update_secs = detail.seconds_for("compressible:primitive_update");
+            let grad_secs = timings.seconds_for("compressible:gradients");
+            let flux_secs = timings.seconds_for("compressible:flux_kt");
+            let explicit_update_secs = timings.seconds_for("compressible:explicit_update");
+            let primitive_update_secs = timings.seconds_for("compressible:primitive_update");
             solver.profile.record(
                 total_secs,
                 grad_secs,

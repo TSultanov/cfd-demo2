@@ -9,7 +9,26 @@ use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::init::linear_solver::matrix::MatrixResources;
 
 use super::compressible_lowering::CompressibleLinearPorts;
-use super::ports::LoweredBuffers;
+use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
+use super::ports::PortSpace;
+
+#[derive(Clone, Copy, Debug)]
+pub enum CompressiblePipeline {
+    Assembly,
+    Apply,
+    Gradients,
+    FluxKt,
+    ExplicitUpdate,
+    PrimitiveUpdate,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum CompressibleBindGroups {
+    MeshFields,
+    MeshFieldsSolver,
+    FieldsOnly,
+    ApplyFieldsSolver,
+}
 
 pub struct CompressibleKernelsModule {
     state_step_index: usize,
@@ -34,13 +53,13 @@ impl CompressibleKernelsModule {
         mesh: &MeshResources,
         fields: &CompressibleFieldResources,
         matrix: &MatrixResources,
-        buffers: &LoweredBuffers,
+        port_space: &PortSpace,
         ports: CompressibleLinearPorts,
         _scalar_row_offsets: &[u32],
     ) -> Self {
-        let b_rhs = buffers.buffer(ports.rhs);
-        let b_x = buffers.buffer(ports.x);
-        let b_scalar_row_offsets = buffers.buffer(ports.scalar_row_offsets);
+        let b_rhs = port_space.buffer(ports.rhs);
+        let b_x = port_space.buffer(ports.x);
+        let b_scalar_row_offsets = port_space.buffer(ports.scalar_row_offsets);
 
         let pipeline_assembly =
             generated_assembly::compute::create_main_pipeline_embed_source(device);
@@ -201,5 +220,58 @@ impl CompressibleKernelsModule {
 
     pub fn pipeline_update(&self) -> &wgpu::ComputePipeline {
         &self.pipeline_update
+    }
+
+    fn bind_mesh_fields(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, &self.bg_mesh, &[]);
+        pass.set_bind_group(1, self.bg_fields(), &[]);
+    }
+
+    fn bind_mesh_fields_solver(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, &self.bg_mesh, &[]);
+        pass.set_bind_group(1, self.bg_fields(), &[]);
+        pass.set_bind_group(2, &self.bg_solver, &[]);
+    }
+
+    fn bind_fields_only(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, self.bg_fields(), &[]);
+    }
+
+    fn bind_apply_fields_solver(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, self.bg_apply_fields(), &[]);
+        pass.set_bind_group(1, &self.bg_apply_solver, &[]);
+    }
+}
+
+impl GpuComputeModule for CompressibleKernelsModule {
+    type PipelineKey = CompressiblePipeline;
+    type BindKey = CompressibleBindGroups;
+
+    fn pipeline(&self, key: Self::PipelineKey) -> &wgpu::ComputePipeline {
+        match key {
+            CompressiblePipeline::Assembly => self.pipeline_assembly(),
+            CompressiblePipeline::Apply => self.pipeline_apply(),
+            CompressiblePipeline::Gradients => self.pipeline_gradients(),
+            CompressiblePipeline::FluxKt => self.pipeline_flux(),
+            CompressiblePipeline::ExplicitUpdate => self.pipeline_explicit_update(),
+            CompressiblePipeline::PrimitiveUpdate => self.pipeline_update(),
+        }
+    }
+
+    fn bind(&self, key: Self::BindKey, pass: &mut wgpu::ComputePass) {
+        match key {
+            CompressibleBindGroups::MeshFields => self.bind_mesh_fields(pass),
+            CompressibleBindGroups::MeshFieldsSolver => self.bind_mesh_fields_solver(pass),
+            CompressibleBindGroups::FieldsOnly => self.bind_fields_only(pass),
+            CompressibleBindGroups::ApplyFieldsSolver => self.bind_apply_fields_solver(pass),
+        }
+    }
+
+    fn dispatch(&self, kind: DispatchKind, runtime: RuntimeDims) -> (u32, u32, u32) {
+        match kind {
+            DispatchKind::Cells => ((runtime.num_cells + 63) / 64, 1, 1),
+            DispatchKind::Faces => ((runtime.num_faces + 63) / 64, 1, 1),
+            DispatchKind::Custom { x, y, z } => (x, y, z),
+        }
     }
 }

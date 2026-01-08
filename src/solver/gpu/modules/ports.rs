@@ -88,18 +88,54 @@ impl LoweredBuffers {
     }
 }
 
-pub struct Lowerer<'a> {
-    device: &'a wgpu::Device,
+pub struct PortSpace {
     registry: PortRegistry,
     buffers: LoweredBuffers,
 }
 
-impl<'a> Lowerer<'a> {
-    pub fn new(device: &'a wgpu::Device) -> Self {
+impl Default for PortSpace {
+    fn default() -> Self {
         Self {
-            device,
             registry: PortRegistry::new(),
             buffers: LoweredBuffers::new(),
+        }
+    }
+}
+
+impl PortSpace {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn buffer<T>(&self, port: Port<T>) -> &wgpu::Buffer {
+        self.buffers.buffer(port)
+    }
+
+    pub fn clone_buffer<T>(&self, port: Port<T>) -> wgpu::Buffer {
+        self.buffers.clone_buffer(port)
+    }
+
+    pub fn lowerer<'a>(&'a mut self, device: &'a wgpu::Device) -> Lowerer<'a> {
+        Lowerer::new(device, &mut self.registry, &mut self.buffers)
+    }
+}
+
+pub struct Lowerer<'a> {
+    device: &'a wgpu::Device,
+    registry: &'a mut PortRegistry,
+    buffers: &'a mut LoweredBuffers,
+}
+
+impl<'a> Lowerer<'a> {
+    pub fn new(
+        device: &'a wgpu::Device,
+        registry: &'a mut PortRegistry,
+        buffers: &'a mut LoweredBuffers,
+    ) -> Self {
+        Self {
+            device,
+            registry,
+            buffers,
         }
     }
 
@@ -138,9 +174,5 @@ impl<'a> Lowerer<'a> {
             });
         self.buffers.insert(port, buffer);
         port
-    }
-
-    pub fn finish(self) -> LoweredBuffers {
-        self.buffers
     }
 }

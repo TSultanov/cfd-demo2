@@ -401,23 +401,22 @@ impl GpuSolver {
             solver.profiling_stats.record_gpu_alloc(label, buf.size());
         };
 
-        record(self, "fgmres:basis", &fgmres.b_basis);
-        for (i, buf) in fgmres.z_vectors.iter().enumerate() {
+        record(self, "fgmres:basis", &fgmres.fgmres.b_basis);
+        for (i, buf) in fgmres.fgmres.z_vectors.iter().enumerate() {
             record(self, &format!("fgmres:z_{}", i), buf);
         }
-        record(self, "fgmres:w", &fgmres.b_w);
-        record(self, "fgmres:temp", &fgmres.b_temp);
-        record(self, "fgmres:dot_partial", &fgmres.b_dot_partial);
-        record(self, "fgmres:scalars", &fgmres.b_scalars);
+        record(self, "fgmres:w", &fgmres.fgmres.b_w);
+        record(self, "fgmres:temp", &fgmres.fgmres.b_temp);
+        record(self, "fgmres:dot_partial", &fgmres.fgmres.b_dot_partial);
+        record(self, "fgmres:scalars", &fgmres.fgmres.b_scalars);
         record(self, "fgmres:temp_p", &fgmres.b_temp_p);
         record(self, "fgmres:p_sol", &fgmres.b_p_sol);
-        record(self, "fgmres:params", &fgmres.b_params);
-        record(self, "fgmres:precond_params", &fgmres.b_precond_params);
-        record(self, "fgmres:hessenberg", &fgmres.b_hessenberg);
-        record(self, "fgmres:givens", &fgmres.b_givens);
-        record(self, "fgmres:g", &fgmres.b_g);
-        record(self, "fgmres:y", &fgmres.b_y);
-        record(self, "fgmres:iter_params", &fgmres.b_iter_params);
-        record(self, "fgmres:staging_scalar", &fgmres.b_staging_scalar);
+        record(self, "fgmres:params", &fgmres.fgmres.b_params);
+        record(self, "fgmres:hessenberg", &fgmres.fgmres.b_hessenberg);
+        record(self, "fgmres:givens", &fgmres.fgmres.b_givens);
+        record(self, "fgmres:g", &fgmres.fgmres.b_g);
+        record(self, "fgmres:y", &fgmres.fgmres.b_y);
+        record(self, "fgmres:iter_params", &fgmres.fgmres.b_iter_params);
+        record(self, "fgmres:staging_scalar", &fgmres.fgmres.b_staging_scalar);
     }
 }

@@ -1,3 +1,4 @@
+use crate::solver::gpu::bindings;
 use bytemuck::{bytes_of, Pod, Zeroable};
 
 pub const WORKGROUP_SIZE: u32 = 64;
@@ -65,6 +66,893 @@ pub struct FgmresCore<'a> {
     pub pipeline_calc_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_reduce_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_update_w_cgs: &'a wgpu::ComputePipeline,
+}
+
+pub enum FgmresPrecondBindings<'a> {
+    Diag {
+        diag_u: &'a wgpu::Buffer,
+        diag_v: &'a wgpu::Buffer,
+        diag_p: &'a wgpu::Buffer,
+    },
+    DiagWithParams {
+        diag_u: &'a wgpu::Buffer,
+        diag_v: &'a wgpu::Buffer,
+        diag_p: &'a wgpu::Buffer,
+        precond_params: &'a wgpu::Buffer,
+    },
+}
+
+pub struct FgmresWorkspace {
+    pub max_restart: usize,
+    pub n: u32,
+    pub num_cells: u32,
+    pub num_dot_groups: u32,
+    pub basis_stride: u64,
+
+    pub b_basis: wgpu::Buffer,
+    pub z_vectors: Vec<wgpu::Buffer>,
+    pub b_w: wgpu::Buffer,
+    pub b_temp: wgpu::Buffer,
+    pub b_dot_partial: wgpu::Buffer,
+    pub b_scalars: wgpu::Buffer,
+    pub b_params: wgpu::Buffer,
+    pub b_iter_params: wgpu::Buffer,
+    pub b_hessenberg: wgpu::Buffer,
+    pub b_givens: wgpu::Buffer,
+    pub b_g: wgpu::Buffer,
+    pub b_y: wgpu::Buffer,
+    pub b_staging_scalar: wgpu::Buffer,
+
+    pub bgl_vectors: wgpu::BindGroupLayout,
+    pub bgl_matrix: wgpu::BindGroupLayout,
+    pub bgl_precond: wgpu::BindGroupLayout,
+    pub bgl_params: wgpu::BindGroupLayout,
+    pub bgl_logic: wgpu::BindGroupLayout,
+    pub bgl_logic_params: wgpu::BindGroupLayout,
+    pub bgl_cgs: wgpu::BindGroupLayout,
+
+    pub bg_matrix: wgpu::BindGroup,
+    pub bg_precond: wgpu::BindGroup,
+    pub bg_params: wgpu::BindGroup,
+    pub bg_logic: wgpu::BindGroup,
+    pub bg_logic_params: wgpu::BindGroup,
+    pub bg_cgs: wgpu::BindGroup,
+
+    pub pipeline_spmv: wgpu::ComputePipeline,
+    pub pipeline_axpy: wgpu::ComputePipeline,
+    pub pipeline_axpy_from_y: wgpu::ComputePipeline,
+    pub pipeline_axpby: wgpu::ComputePipeline,
+    pub pipeline_scale: wgpu::ComputePipeline,
+    pub pipeline_scale_in_place: wgpu::ComputePipeline,
+    pub pipeline_copy: wgpu::ComputePipeline,
+    pub pipeline_dot_partial: wgpu::ComputePipeline,
+    pub pipeline_norm_sq: wgpu::ComputePipeline,
+    pub pipeline_reduce_final: wgpu::ComputePipeline,
+    pub pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
+    pub pipeline_update_hessenberg: wgpu::ComputePipeline,
+    pub pipeline_solve_triangular: wgpu::ComputePipeline,
+    pub pipeline_calc_dots_cgs: wgpu::ComputePipeline,
+    pub pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
+    pub pipeline_update_w_cgs: wgpu::ComputePipeline,
+}
+
+impl FgmresWorkspace {
+    pub fn new(
+        device: &wgpu::Device,
+        n: u32,
+        num_cells: u32,
+        max_restart: usize,
+        matrix_row_offsets: &wgpu::Buffer,
+        matrix_col_indices: &wgpu::Buffer,
+        matrix_values: &wgpu::Buffer,
+        precond: FgmresPrecondBindings<'_>,
+        label_prefix: &str,
+    ) -> Self {
+        let num_dot_groups = workgroups_for_size(n);
+
+        let min_alignment = 256u64;
+        let basis_stride_unaligned = (n as u64) * 4;
+        let basis_stride = (basis_stride_unaligned + min_alignment - 1) & !(min_alignment - 1);
+        let basis_size = basis_stride * (max_restart as u64 + 1);
+
+        let b_basis = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES basis")),
+            size: basis_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let mut z_vectors = Vec::with_capacity(max_restart);
+        for i in 0..max_restart {
+            z_vectors.push(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("{label_prefix} FGMRES Z {i}")),
+                size: (n as u64) * 4,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }));
+        }
+
+        let b_w = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES w")),
+            size: (n as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_temp = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES temp")),
+            size: (n as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_dot_partial = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES dot partial")),
+            size: (num_dot_groups as u64) * ((max_restart + 1) as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_scalars = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES scalars")),
+            size: 16 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES params")),
+            size: std::mem::size_of::<RawFgmresParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let b_iter_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES iter params")),
+            size: std::mem::size_of::<IterParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let hessenberg_len = (max_restart + 1) * max_restart;
+        let b_hessenberg = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES hessenberg")),
+            size: (hessenberg_len as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_givens = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES givens")),
+            size: (max_restart as u64) * 8,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_g = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES g")),
+            size: ((max_restart + 1) as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_y = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES y")),
+            size: (max_restart as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let b_staging_scalar = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES staging scalar")),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bgl_vectors = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES vectors BGL")),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_matrix = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES matrix BGL")),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let (bgl_precond, bg_precond) = match precond {
+            FgmresPrecondBindings::Diag {
+                diag_u,
+                diag_v,
+                diag_p,
+            } => {
+                let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some(&format!("{label_prefix} FGMRES precond BGL")),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("{label_prefix} FGMRES precond BG")),
+                    layout: &bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: diag_u.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: diag_v.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: diag_p.as_entire_binding(),
+                        },
+                    ],
+                });
+                (bgl, bg)
+            }
+            FgmresPrecondBindings::DiagWithParams {
+                diag_u,
+                diag_v,
+                diag_p,
+                precond_params,
+            } => {
+                let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some(&format!("{label_prefix} FGMRES precond/params BGL")),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("{label_prefix} FGMRES precond/params BG")),
+                    layout: &bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: diag_u.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: diag_v.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: diag_p.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: precond_params.as_entire_binding(),
+                        },
+                    ],
+                });
+                (bgl, bg)
+            }
+        };
+
+        let bgl_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES params BGL")),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES matrix BG")),
+            layout: &bgl_matrix,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: matrix_row_offsets.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: matrix_col_indices.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: matrix_values.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES params BG")),
+            layout: &bgl_params,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_iter_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_y.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bgl_logic = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES logic BGL")),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bgl_logic_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES logic params BGL")),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg_logic = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES logic BG")),
+            layout: &bgl_logic,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_givens.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_g.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_y.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bg_logic_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES logic params BG")),
+            layout: &bgl_logic_params,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_iter_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bgl_cgs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES cgs BGL")),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let bg_cgs = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES cgs BG")),
+            layout: &bgl_cgs,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_basis.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_w.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_dot_partial.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_hessenberg.as_entire_binding(),
+                },
+            ],
+        });
+
+        let shader_ops = bindings::gmres_ops::create_shader_module_embed_source(device);
+        let pipeline_layout_ops = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES ops layout")),
+            bind_group_layouts: &[&bgl_vectors, &bgl_matrix, &bgl_precond, &bgl_params],
+            push_constant_ranges: &[],
+        });
+        let make_ops_pipeline = |label: &str, entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_ops),
+                module: &shader_ops,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let pipeline_spmv = make_ops_pipeline(&format!("{label_prefix} FGMRES SpMV"), "spmv");
+        let pipeline_axpy = make_ops_pipeline(&format!("{label_prefix} FGMRES AXPY"), "axpy");
+        let pipeline_axpy_from_y =
+            make_ops_pipeline(&format!("{label_prefix} FGMRES AXPY From Y"), "axpy_from_y");
+        let pipeline_axpby = make_ops_pipeline(&format!("{label_prefix} FGMRES AXPBY"), "axpby");
+        let pipeline_scale = make_ops_pipeline(&format!("{label_prefix} FGMRES Scale"), "scale");
+        let pipeline_scale_in_place = make_ops_pipeline(
+            &format!("{label_prefix} FGMRES Scale In Place"),
+            "scale_in_place",
+        );
+        let pipeline_copy = make_ops_pipeline(&format!("{label_prefix} FGMRES Copy"), "copy");
+        let pipeline_dot_partial = make_ops_pipeline(
+            &format!("{label_prefix} FGMRES Dot Partial"),
+            "dot_product_partial",
+        );
+        let pipeline_norm_sq =
+            make_ops_pipeline(&format!("{label_prefix} FGMRES Norm Sq"), "norm_sq_partial");
+        let pipeline_reduce_final =
+            make_ops_pipeline(&format!("{label_prefix} FGMRES Reduce Final"), "reduce_final");
+        let pipeline_reduce_final_and_finish_norm = make_ops_pipeline(
+            &format!("{label_prefix} FGMRES Reduce Final & Finish Norm"),
+            "reduce_final_and_finish_norm",
+        );
+
+        let shader_logic = bindings::gmres_logic::create_shader_module_embed_source(device);
+        let pipeline_layout_logic =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&format!("{label_prefix} FGMRES logic layout")),
+                bind_group_layouts: &[&bgl_logic, &bgl_logic_params],
+                push_constant_ranges: &[],
+            });
+        let make_logic_pipeline = |label: &str, entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_logic),
+                module: &shader_logic,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let pipeline_update_hessenberg = make_logic_pipeline(
+            &format!("{label_prefix} FGMRES Update Hessenberg"),
+            "update_hessenberg_givens",
+        );
+        let pipeline_solve_triangular =
+            make_logic_pipeline(&format!("{label_prefix} FGMRES Solve Triangular"), "solve_triangular");
+
+        let shader_cgs = bindings::gmres_cgs::create_shader_module_embed_source(device);
+        let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES cgs layout")),
+            bind_group_layouts: &[&bgl_cgs],
+            push_constant_ranges: &[],
+        });
+        let make_cgs_pipeline = |label: &str, entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout_cgs),
+                module: &shader_cgs,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        let pipeline_calc_dots_cgs =
+            make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Calc"), "calc_dots_cgs");
+        let pipeline_reduce_dots_cgs =
+            make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Reduce"), "reduce_dots_cgs");
+        let pipeline_update_w_cgs =
+            make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Update W"), "update_w_cgs");
+
+        Self {
+            max_restart,
+            n,
+            num_cells,
+            num_dot_groups,
+            basis_stride,
+            b_basis,
+            z_vectors,
+            b_w,
+            b_temp,
+            b_dot_partial,
+            b_scalars,
+            b_params,
+            b_iter_params,
+            b_hessenberg,
+            b_givens,
+            b_g,
+            b_y,
+            b_staging_scalar,
+            bgl_vectors,
+            bgl_matrix,
+            bgl_precond,
+            bgl_params,
+            bgl_logic,
+            bgl_logic_params,
+            bgl_cgs,
+            bg_matrix,
+            bg_precond,
+            bg_params,
+            bg_logic,
+            bg_logic_params,
+            bg_cgs,
+            pipeline_spmv,
+            pipeline_axpy,
+            pipeline_axpy_from_y,
+            pipeline_axpby,
+            pipeline_scale,
+            pipeline_scale_in_place,
+            pipeline_copy,
+            pipeline_dot_partial,
+            pipeline_norm_sq,
+            pipeline_reduce_final,
+            pipeline_reduce_final_and_finish_norm,
+            pipeline_update_hessenberg,
+            pipeline_solve_triangular,
+            pipeline_calc_dots_cgs,
+            pipeline_reduce_dots_cgs,
+            pipeline_update_w_cgs,
+        }
+    }
+
+    pub fn core<'a>(&'a self, device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> FgmresCore<'a> {
+        FgmresCore {
+            device,
+            queue,
+            n: self.n,
+            num_cells: self.num_cells,
+            max_restart: self.max_restart,
+            num_dot_groups: self.num_dot_groups,
+            basis_stride: self.basis_stride,
+            b_basis: &self.b_basis,
+            z_vectors: &self.z_vectors,
+            b_w: &self.b_w,
+            b_temp: &self.b_temp,
+            b_dot_partial: &self.b_dot_partial,
+            b_scalars: &self.b_scalars,
+            b_params: &self.b_params,
+            b_iter_params: &self.b_iter_params,
+            b_staging_scalar: &self.b_staging_scalar,
+            bg_matrix: &self.bg_matrix,
+            bg_precond: &self.bg_precond,
+            bg_params: &self.bg_params,
+            bg_logic: &self.bg_logic,
+            bg_logic_params: &self.bg_logic_params,
+            bg_cgs: &self.bg_cgs,
+            bgl_vectors: &self.bgl_vectors,
+            pipeline_spmv: &self.pipeline_spmv,
+            pipeline_scale: &self.pipeline_scale,
+            pipeline_norm_sq: &self.pipeline_norm_sq,
+            pipeline_reduce_final_and_finish_norm: &self.pipeline_reduce_final_and_finish_norm,
+            pipeline_update_hessenberg: &self.pipeline_update_hessenberg,
+            pipeline_solve_triangular: &self.pipeline_solve_triangular,
+            pipeline_axpy_from_y: &self.pipeline_axpy_from_y,
+            pipeline_calc_dots_cgs: &self.pipeline_calc_dots_cgs,
+            pipeline_reduce_dots_cgs: &self.pipeline_reduce_dots_cgs,
+            pipeline_update_w_cgs: &self.pipeline_update_w_cgs,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -436,4 +1324,3 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         converged,
     }
 }
-

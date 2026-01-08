@@ -2,8 +2,8 @@ use crate::solver::gpu::bindings;
 use super::compressible::CompressiblePlanResources;
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::{
-    fgmres_solve_once_with_preconditioner, write_params, write_scalars, write_zeros, FgmresCore,
-    FgmresSolveOnceConfig, IterParams, RawFgmresParams,
+    fgmres_solve_once_with_preconditioner, write_params, write_scalars, write_zeros,
+    FgmresSolveOnceConfig, FgmresWorkspace, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::preconditioners::CompressibleKrylovPreconditioner;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -12,62 +12,17 @@ use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
 pub struct CompressibleFgmresResources {
-    pub max_restart: usize,
-    pub num_unknowns: u32,
-    pub num_dot_groups: u32,
-    pub basis_stride: u64,
-    pub b_basis: wgpu::Buffer,
-    pub z_vectors: Vec<wgpu::Buffer>,
-    pub b_w: wgpu::Buffer,
-    pub b_temp: wgpu::Buffer,
-    pub b_dot_partial: wgpu::Buffer,
-    pub b_scalars: wgpu::Buffer,
-    pub b_params: wgpu::Buffer,
-    pub b_iter_params: wgpu::Buffer,
-    pub b_hessenberg: wgpu::Buffer,
-    pub b_givens: wgpu::Buffer,
-    pub b_g: wgpu::Buffer,
-    pub b_y: wgpu::Buffer,
-    pub b_staging_scalar: wgpu::Buffer,
+    pub fgmres: FgmresWorkspace,
     pub b_diag_u: wgpu::Buffer,
     pub b_diag_v: wgpu::Buffer,
     pub b_diag_p: wgpu::Buffer,
     pub b_block_inv: wgpu::Buffer,
     pub b_pack_params: wgpu::Buffer,
-    pub bgl_vectors: wgpu::BindGroupLayout,
-    pub bgl_matrix: wgpu::BindGroupLayout,
-    pub bgl_precond: wgpu::BindGroupLayout,
     pub bgl_block_precond: wgpu::BindGroupLayout,
     pub bgl_pack: wgpu::BindGroupLayout,
     pub bgl_pack_params: wgpu::BindGroupLayout,
-    pub bgl_params: wgpu::BindGroupLayout,
-    pub bgl_logic: wgpu::BindGroupLayout,
-    pub bgl_logic_params: wgpu::BindGroupLayout,
-    pub bgl_cgs: wgpu::BindGroupLayout,
-    pub bg_matrix: wgpu::BindGroup,
-    pub bg_precond: wgpu::BindGroup,
     pub bg_block_precond: wgpu::BindGroup,
     pub bg_pack_params: wgpu::BindGroup,
-    pub bg_params: wgpu::BindGroup,
-    pub bg_logic: wgpu::BindGroup,
-    pub bg_logic_params: wgpu::BindGroup,
-    pub bg_cgs: wgpu::BindGroup,
-    pub pipeline_spmv: wgpu::ComputePipeline,
-    pub pipeline_axpy: wgpu::ComputePipeline,
-    pub pipeline_axpy_from_y: wgpu::ComputePipeline,
-    pub pipeline_axpby: wgpu::ComputePipeline,
-    pub pipeline_scale: wgpu::ComputePipeline,
-    pub pipeline_scale_in_place: wgpu::ComputePipeline,
-    pub pipeline_copy: wgpu::ComputePipeline,
-    pub pipeline_dot_partial: wgpu::ComputePipeline,
-    pub pipeline_norm_sq: wgpu::ComputePipeline,
-    pub pipeline_reduce_final: wgpu::ComputePipeline,
-    pub pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
-    pub pipeline_update_hessenberg: wgpu::ComputePipeline,
-    pub pipeline_solve_triangular: wgpu::ComputePipeline,
-    pub pipeline_calc_dots_cgs: wgpu::ComputePipeline,
-    pub pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
-    pub pipeline_update_w_cgs: wgpu::ComputePipeline,
     pub pipeline_build_block_inv: wgpu::ComputePipeline,
     pub pipeline_apply_block_precond: wgpu::ComputePipeline,
     pub pipeline_pack_component: wgpu::ComputePipeline,
@@ -91,7 +46,7 @@ impl CompressiblePlanResources {
     pub(crate) fn ensure_fgmres_resources(&mut self, max_restart: usize) {
         let n = self.num_unknowns;
         let rebuild = match &self.fgmres_resources {
-            Some(existing) => existing.max_restart < max_restart || existing.num_unknowns != n,
+            Some(existing) => existing.fgmres.max_restart < max_restart || existing.fgmres.n != n,
             None => true,
         };
         if rebuild {
@@ -966,9 +921,10 @@ impl CompressiblePlanResources {
         let pipeline_unpack_component =
             make_pack_pipeline("Compressible AMG Unpack Component", "unpack_component");
 
-        CompressibleFgmresResources {
+        let fgmres = FgmresWorkspace {
             max_restart,
-            num_unknowns: n,
+            n,
+            num_cells,
             num_dot_groups,
             basis_stride,
             b_basis,
@@ -984,25 +940,15 @@ impl CompressiblePlanResources {
             b_g,
             b_y,
             b_staging_scalar,
-            b_diag_u,
-            b_diag_v,
-            b_diag_p,
-            b_block_inv,
-            b_pack_params,
             bgl_vectors,
             bgl_matrix,
             bgl_precond,
-            bgl_block_precond,
-            bgl_pack,
-            bgl_pack_params,
             bgl_params,
             bgl_logic,
             bgl_logic_params,
             bgl_cgs,
             bg_matrix,
             bg_precond,
-            bg_block_precond,
-            bg_pack_params,
             bg_params,
             bg_logic,
             bg_logic_params,
@@ -1023,6 +969,20 @@ impl CompressiblePlanResources {
             pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs,
+        };
+
+        CompressibleFgmresResources {
+            fgmres,
+            b_diag_u,
+            b_diag_v,
+            b_diag_p,
+            b_block_inv,
+            b_pack_params,
+            bgl_block_precond,
+            bgl_pack,
+            bgl_pack_params,
+            bg_block_precond,
+            bg_pack_params,
             pipeline_build_block_inv,
             pipeline_apply_block_precond,
             pipeline_pack_component,
@@ -1082,75 +1042,41 @@ impl CompressiblePlanResources {
             num_iters: 0,
             omega: 1.0,
             dispatch_x: dispatch_x_threads,
-            max_restart: fgmres.max_restart as u32,
+            max_restart: fgmres.fgmres.max_restart as u32,
             column_offset: 0,
             _pad3: 0,
         };
-        let core = FgmresCore {
-            device: &self.context.device,
-            queue: &self.context.queue,
-            n,
-            num_cells: self.num_cells,
-            max_restart: fgmres.max_restart,
-            num_dot_groups: fgmres.num_dot_groups,
-            basis_stride: fgmres.basis_stride,
-            b_basis: &fgmres.b_basis,
-            z_vectors: &fgmres.z_vectors,
-            b_w: &fgmres.b_w,
-            b_temp: &fgmres.b_temp,
-            b_dot_partial: &fgmres.b_dot_partial,
-            b_scalars: &fgmres.b_scalars,
-            b_params: &fgmres.b_params,
-            b_iter_params: &fgmres.b_iter_params,
-            b_staging_scalar: &fgmres.b_staging_scalar,
-            bg_matrix: &fgmres.bg_matrix,
-            bg_precond: &fgmres.bg_precond,
-            bg_params: &fgmres.bg_params,
-            bg_logic: &fgmres.bg_logic,
-            bg_logic_params: &fgmres.bg_logic_params,
-            bg_cgs: &fgmres.bg_cgs,
-            bgl_vectors: &fgmres.bgl_vectors,
-            pipeline_spmv: &fgmres.pipeline_spmv,
-            pipeline_scale: &fgmres.pipeline_scale,
-            pipeline_norm_sq: &fgmres.pipeline_norm_sq,
-            pipeline_reduce_final_and_finish_norm: &fgmres.pipeline_reduce_final_and_finish_norm,
-            pipeline_update_hessenberg: &fgmres.pipeline_update_hessenberg,
-            pipeline_solve_triangular: &fgmres.pipeline_solve_triangular,
-            pipeline_axpy_from_y: &fgmres.pipeline_axpy_from_y,
-            pipeline_calc_dots_cgs: &fgmres.pipeline_calc_dots_cgs,
-            pipeline_reduce_dots_cgs: &fgmres.pipeline_reduce_dots_cgs,
-            pipeline_update_w_cgs: &fgmres.pipeline_update_w_cgs,
-        };
+        let core = fgmres.fgmres.core(&self.context.device, &self.context.queue);
         write_params(&core, &params);
         precond.prepare(self, fgmres, block_workgroups);
 
         let iter_params = IterParams {
             current_idx: 0,
-            max_restart: fgmres.max_restart as u32,
+            max_restart: fgmres.fgmres.max_restart as u32,
             _pad1: 0,
             _pad2: 0,
         };
 
-        write_zeros(&core, &fgmres.b_hessenberg);
-        write_zeros(&core, &fgmres.b_givens);
-        write_zeros(&core, &fgmres.b_y);
-        let mut g_init = vec![0.0f32; fgmres.max_restart + 1];
+        write_zeros(&core, &fgmres.fgmres.b_hessenberg);
+        write_zeros(&core, &fgmres.fgmres.b_givens);
+        write_zeros(&core, &fgmres.fgmres.b_y);
+        let mut g_init = vec![0.0f32; fgmres.fgmres.max_restart + 1];
         g_init[0] = rhs_norm;
         self.context
             .queue
-            .write_buffer(&fgmres.b_g, 0, bytemuck::cast_slice(&g_init));
+            .write_buffer(&fgmres.fgmres.b_g, 0, bytemuck::cast_slice(&g_init));
 
         let basis0 = self.basis_binding(fgmres, 0);
         self.dispatch_vector_pipeline(
-            &fgmres.pipeline_copy,
+            &fgmres.fgmres.pipeline_copy,
             fgmres,
             &self.create_vector_bind_group(
                 fgmres,
                 self.b_rhs.as_entire_binding(),
                 basis0,
-                fgmres.b_temp.as_entire_binding(),
+                fgmres.fgmres.b_temp.as_entire_binding(),
             ),
-            &fgmres.bg_params,
+            &fgmres.fgmres.bg_params,
             dispatch_x,
             dispatch_y,
             );
@@ -1158,15 +1084,15 @@ impl CompressiblePlanResources {
         write_scalars(&core, &[1.0 / rhs_norm]);
         let basis0_y = self.basis_binding(fgmres, 0);
         self.dispatch_vector_pipeline(
-            &fgmres.pipeline_scale_in_place,
+            &fgmres.fgmres.pipeline_scale_in_place,
             fgmres,
             &self.create_vector_bind_group(
                 fgmres,
-                fgmres.b_w.as_entire_binding(),
+                fgmres.fgmres.b_w.as_entire_binding(),
                 basis0_y,
-                fgmres.b_temp.as_entire_binding(),
+                fgmres.fgmres.b_temp.as_entire_binding(),
             ),
-            &fgmres.bg_params,
+            &fgmres.fgmres.bg_params,
             dispatch_x,
             dispatch_y,
         );
@@ -1221,10 +1147,10 @@ impl CompressiblePlanResources {
         fgmres: &'a CompressibleFgmresResources,
         idx: usize,
     ) -> wgpu::BindingResource<'a> {
-        let stride = fgmres.basis_stride;
-        let vector_size = fgmres.b_w.size();
+        let stride = fgmres.fgmres.basis_stride;
+        let vector_size = fgmres.fgmres.b_w.size();
         wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &fgmres.b_basis,
+            buffer: &fgmres.fgmres.b_basis,
             offset: (idx as u64) * stride,
             size: std::num::NonZeroU64::new(vector_size),
         })
@@ -1241,7 +1167,7 @@ impl CompressiblePlanResources {
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Compressible FGMRES vector BG"),
-                layout: &fgmres.bgl_vectors,
+                layout: &fgmres.fgmres.bgl_vectors,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: x },
                     wgpu::BindGroupEntry { binding: 1, resource: y },
@@ -1296,8 +1222,8 @@ impl CompressiblePlanResources {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, vector_bg, &[]);
-            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
-            pass.set_bind_group(2, &fgmres.bg_precond, &[]);
+            pass.set_bind_group(1, &fgmres.fgmres.bg_matrix, &[]);
+            pass.set_bind_group(2, &fgmres.fgmres.bg_precond, &[]);
             pass.set_bind_group(3, group3_bg, &[]);
             pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
@@ -1350,9 +1276,9 @@ impl CompressiblePlanResources {
             });
             pass.set_pipeline(&fgmres.pipeline_build_block_inv);
             pass.set_bind_group(0, vector_bg, &[]);
-            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
+            pass.set_bind_group(1, &fgmres.fgmres.bg_matrix, &[]);
             pass.set_bind_group(2, &fgmres.bg_block_precond, &[]);
-            pass.set_bind_group(3, &fgmres.bg_params, &[]);
+            pass.set_bind_group(3, &fgmres.fgmres.bg_params, &[]);
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
@@ -1378,9 +1304,9 @@ impl CompressiblePlanResources {
             });
             pass.set_pipeline(&fgmres.pipeline_apply_block_precond);
             pass.set_bind_group(0, vector_bg, &[]);
-            pass.set_bind_group(1, &fgmres.bg_matrix, &[]);
+            pass.set_bind_group(1, &fgmres.fgmres.bg_matrix, &[]);
             pass.set_bind_group(2, &fgmres.bg_block_precond, &[]);
-            pass.set_bind_group(3, &fgmres.bg_params, &[]);
+            pass.set_bind_group(3, &fgmres.fgmres.bg_params, &[]);
             pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
@@ -1472,8 +1398,8 @@ impl CompressiblePlanResources {
                 timestamp_writes: None,
             });
             pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &fgmres.bg_logic, &[]);
-            pass.set_bind_group(1, &fgmres.bg_logic_params, &[]);
+            pass.set_bind_group(0, &fgmres.fgmres.bg_logic, &[]);
+            pass.set_bind_group(1, &fgmres.fgmres.bg_logic_params, &[]);
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
         self.context.queue.submit(Some(encoder.finish()));
@@ -1501,7 +1427,7 @@ impl CompressiblePlanResources {
     fn write_scalars(&self, fgmres: &CompressibleFgmresResources, scalars: &[f32]) {
         self.context
             .queue
-            .write_buffer(&fgmres.b_scalars, 0, bytemuck::cast_slice(scalars));
+            .write_buffer(&fgmres.fgmres.b_scalars, 0, bytemuck::cast_slice(scalars));
     }
 
     fn zero_buffer(&self, buffer: &wgpu::Buffer, n: u32) {
@@ -1518,10 +1444,16 @@ impl CompressiblePlanResources {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Compressible FGMRES read scalar"),
                 });
-        encoder.copy_buffer_to_buffer(&fgmres.b_scalars, 0, &fgmres.b_staging_scalar, 0, 4);
+        encoder.copy_buffer_to_buffer(
+            &fgmres.fgmres.b_scalars,
+            0,
+            &fgmres.fgmres.b_staging_scalar,
+            0,
+            4,
+        );
         self.context.queue.submit(Some(encoder.finish()));
 
-        let slice = fgmres.b_staging_scalar.slice(..);
+        let slice = fgmres.fgmres.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |v| {
             let _ = tx.send(v);
@@ -1534,7 +1466,7 @@ impl CompressiblePlanResources {
         let data = slice.get_mapped_range();
         let value = f32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
         drop(data);
-        fgmres.b_staging_scalar.unmap();
+        fgmres.fgmres.b_staging_scalar.unmap();
         value
     }
 
@@ -1550,15 +1482,15 @@ impl CompressiblePlanResources {
         let vector_bg = self.create_vector_bind_group(
             fgmres,
             x,
-            fgmres.b_temp.as_entire_binding(),
-            fgmres.b_dot_partial.as_entire_binding(),
+            fgmres.fgmres.b_temp.as_entire_binding(),
+            fgmres.fgmres.b_dot_partial.as_entire_binding(),
         );
 
         let reduce_bg = self.create_vector_bind_group(
             fgmres,
-            fgmres.b_dot_partial.as_entire_binding(),
-            fgmres.b_temp.as_entire_binding(),
-            fgmres.b_temp.as_entire_binding(),
+            fgmres.fgmres.b_dot_partial.as_entire_binding(),
+            fgmres.fgmres.b_temp.as_entire_binding(),
+            fgmres.fgmres.b_temp.as_entire_binding(),
         );
 
         let params = RawFgmresParams {
@@ -1567,34 +1499,34 @@ impl CompressiblePlanResources {
             num_iters: 0,
             omega: 1.0,
             dispatch_x: self.dispatch_x_threads(workgroups),
-            max_restart: fgmres.max_restart as u32,
+            max_restart: fgmres.fgmres.max_restart as u32,
             column_offset: 0,
             _pad3: 0,
         };
         self.context
             .queue
-            .write_buffer(&fgmres.b_params, 0, bytes_of(&params));
+            .write_buffer(&fgmres.fgmres.b_params, 0, bytes_of(&params));
         let iter_params = IterParams {
             current_idx: 0,
-            max_restart: fgmres.max_restart as u32,
+            max_restart: fgmres.fgmres.max_restart as u32,
             _pad1: 0,
             _pad2: 0,
         };
         self.context
             .queue
-            .write_buffer(&fgmres.b_iter_params, 0, bytes_of(&iter_params));
+            .write_buffer(&fgmres.fgmres.b_iter_params, 0, bytes_of(&iter_params));
 
         self.dispatch_vector_pipeline(
-            &fgmres.pipeline_norm_sq,
+            &fgmres.fgmres.pipeline_norm_sq,
             fgmres,
             &vector_bg,
-            &fgmres.bg_params,
+            &fgmres.fgmres.bg_params,
             dispatch_x,
             dispatch_y,
         );
 
         let reduce_params = RawFgmresParams {
-            n: fgmres.num_dot_groups,
+            n: fgmres.fgmres.num_dot_groups,
             num_cells: 0,
             num_iters: 0,
             omega: 0.0,
@@ -1605,13 +1537,13 @@ impl CompressiblePlanResources {
         };
         self.context
             .queue
-            .write_buffer(&fgmres.b_params, 0, bytes_of(&reduce_params));
+            .write_buffer(&fgmres.fgmres.b_params, 0, bytes_of(&reduce_params));
 
         self.dispatch_vector_pipeline(
-            &fgmres.pipeline_reduce_final,
+            &fgmres.fgmres.pipeline_reduce_final,
             fgmres,
             &reduce_bg,
-            &fgmres.bg_params,
+            &fgmres.fgmres.bg_params,
             1,
             1,
         );

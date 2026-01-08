@@ -10,6 +10,8 @@ use crate::solver::gpu::modules::compressible_krylov::{
 };
 use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
+use crate::solver::gpu::modules::linear_system::LinearSystemView;
+use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::collections::HashMap;
 
@@ -162,6 +164,16 @@ impl CompressiblePlanResources {
 
             let b_x = self.port_space.buffer(self.linear_ports.x);
             let b_rhs = self.port_space.buffer(self.linear_ports.rhs);
+            let system = LinearSystemView {
+                ports: LinearSystemPorts {
+                    row_offsets: self.matrix_ports.row_offsets,
+                    col_indices: self.matrix_ports.col_indices,
+                    values: self.matrix_ports.values,
+                    rhs: self.linear_ports.rhs,
+                    x: self.linear_ports.x,
+                },
+                space: &self.port_space,
+            };
             self.zero_buffer(b_x, n);
 
             let tol_abs = 1e-6f32;
@@ -262,7 +274,7 @@ impl CompressiblePlanResources {
             // Solve (single restart) using the shared GPU FGMRES core.
             let solve = fgmres.solve_once(
                 &self.context,
-                b_x,
+                system,
                 rhs_norm,
                 params,
                 iter_params,

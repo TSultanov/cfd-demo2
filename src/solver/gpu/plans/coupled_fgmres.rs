@@ -20,6 +20,7 @@ use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
 use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
+use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::linear_solver::fgmres::{
     write_iter_params, FgmresSolveOnceConfig, FgmresPrecondBindings, FgmresWorkspace, IterParams,
     RawFgmresParams,
@@ -513,10 +514,12 @@ impl GpuSolver {
             };
 
             // Shared GPU FGMRES core (inner loop + triangular solve + solution update).
-            let b_x = res.linear_port_space.buffer(res.linear_ports.x);
             let solve = fgmres.solve_once(
                 &self.context,
-                b_x,
+                LinearSystemView {
+                    ports: res.linear_ports,
+                    space: &res.linear_port_space,
+                },
                 rhs_norm,
                 params,
                 iter_params,

@@ -4,6 +4,7 @@ use crate::solver::gpu::linear_solver::fgmres::{
     FgmresWorkspace, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::linear_system::LinearSystemView;
 
 pub struct KrylovSolveModule<P> {
     pub fgmres: FgmresWorkspace,
@@ -20,7 +21,7 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
     pub fn solve_once(
         &mut self,
         context: &GpuContext,
-        x: &wgpu::Buffer,
+        system: LinearSystemView<'_>,
         rhs_norm: f32,
         params: RawFgmresParams,
         iter_params: IterParams,
@@ -31,7 +32,7 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
         let core = self.fgmres.core(&context.device, &context.queue);
         fgmres_solve_once_with_preconditioner(
             &core,
-            x,
+            system.x(),
             rhs_norm,
             params,
             iter_params,
@@ -55,4 +56,3 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
         )
     }
 }
-

@@ -16,13 +16,13 @@
 // - All vectors remain on GPU
 // - Only scalar values (dot products, norms) are read to CPU
 // - Preconditioner sweep
-use super::async_buffer::AsyncScalarReader;
-use super::bindings;
-use super::linear_solver::amg::{AmgResources, CsrMatrix};
-use super::model_defaults::default_incompressible_model;
-use super::preconditioners::CoupledPressurePreconditioner;
-use super::profiling::ProfileCategory;
-use super::structs::{
+use crate::solver::gpu::async_buffer::AsyncScalarReader;
+use crate::solver::gpu::bindings;
+use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
+use crate::solver::gpu::model_defaults::default_incompressible_model;
+use crate::solver::gpu::preconditioners::CoupledPressurePreconditioner;
+use crate::solver::gpu::profiling::ProfileCategory;
+use crate::solver::gpu::structs::{
     CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
 };
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};

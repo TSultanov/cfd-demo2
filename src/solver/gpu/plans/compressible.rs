@@ -4,7 +4,7 @@ use crate::solver::gpu::bindings::generated::{
     compressible_flux_kt as generated_flux_kt, compressible_gradients as generated_gradients,
     compressible_update as generated_update,
 };
-use crate::solver::gpu::compressible_fgmres::CompressibleFgmresResources;
+use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
@@ -121,7 +121,7 @@ impl CompressibleProfile {
     }
 }
 
-pub(crate) struct GpuCompressibleSolver {
+pub(crate) struct CompressiblePlanResources {
     pub context: GpuContext,
     pub num_cells: u32,
     pub num_faces: u32,
@@ -176,18 +176,18 @@ pub(crate) struct GpuCompressibleSolver {
     implicit_last_stats: LinearSolverStats,
     profile: CompressibleProfile,
     offsets: CompressibleOffsets,
-    pre_step_graph: KernelGraph<GpuCompressibleSolver>,
-    explicit_graph_first_order: KernelGraph<GpuCompressibleSolver>,
-    explicit_graph: KernelGraph<GpuCompressibleSolver>,
-    implicit_assembly_graph_first_order: KernelGraph<GpuCompressibleSolver>,
-    implicit_grad_assembly_graph: KernelGraph<GpuCompressibleSolver>,
-    implicit_snapshot_graph: KernelGraph<GpuCompressibleSolver>,
-    implicit_apply_graph: KernelGraph<GpuCompressibleSolver>,
-    primitive_update_graph: KernelGraph<GpuCompressibleSolver>,
+    pre_step_graph: KernelGraph<CompressiblePlanResources>,
+    explicit_graph_first_order: KernelGraph<CompressiblePlanResources>,
+    explicit_graph: KernelGraph<CompressiblePlanResources>,
+    implicit_assembly_graph_first_order: KernelGraph<CompressiblePlanResources>,
+    implicit_grad_assembly_graph: KernelGraph<CompressiblePlanResources>,
+    implicit_snapshot_graph: KernelGraph<CompressiblePlanResources>,
+    implicit_apply_graph: KernelGraph<CompressiblePlanResources>,
+    primitive_update_graph: KernelGraph<CompressiblePlanResources>,
     needs_gradients: bool,
 }
 
-impl GpuCompressibleSolver {
+impl CompressiblePlanResources {
     fn context_ref(&self) -> &GpuContext {
         &self.context
     }
@@ -197,14 +197,14 @@ impl GpuCompressibleSolver {
     }
 
     fn explicit_plan_pre_step_graph(
-        solver: &GpuCompressibleSolver,
-    ) -> &KernelGraph<GpuCompressibleSolver> {
+        solver: &CompressiblePlanResources,
+    ) -> &KernelGraph<CompressiblePlanResources> {
         &solver.pre_step_graph
     }
 
     fn explicit_plan_explicit_graph(
-        solver: &GpuCompressibleSolver,
-    ) -> &KernelGraph<GpuCompressibleSolver> {
+        solver: &CompressiblePlanResources,
+    ) -> &KernelGraph<CompressiblePlanResources> {
         if solver.needs_gradients {
             &solver.explicit_graph
         } else {
@@ -212,33 +212,33 @@ impl GpuCompressibleSolver {
         }
     }
 
-    fn build_explicit_plan() -> ExecutionPlan<GpuCompressibleSolver> {
+    fn build_explicit_plan() -> ExecutionPlan<CompressiblePlanResources> {
         ExecutionPlan::new(
-            GpuCompressibleSolver::context_ref,
+            CompressiblePlanResources::context_ref,
             vec![
                 PlanNode::Graph(GraphNode {
                     label: "compressible:pre_step",
-                    graph: GpuCompressibleSolver::explicit_plan_pre_step_graph,
+                    graph: CompressiblePlanResources::explicit_plan_pre_step_graph,
                     mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Graph(GraphNode {
                     label: "compressible:explicit_graph",
-                    graph: GpuCompressibleSolver::explicit_plan_explicit_graph,
+                    graph: CompressiblePlanResources::explicit_plan_explicit_graph,
                     mode: GraphExecMode::SplitTimed,
                 }),
             ],
         )
     }
 
-    fn explicit_plan() -> &'static ExecutionPlan<GpuCompressibleSolver> {
-        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuCompressibleSolver>> =
+    fn explicit_plan() -> &'static ExecutionPlan<CompressiblePlanResources> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<CompressiblePlanResources>> =
             std::sync::OnceLock::new();
-        PLAN.get_or_init(GpuCompressibleSolver::build_explicit_plan)
+        PLAN.get_or_init(CompressiblePlanResources::build_explicit_plan)
     }
 
     fn implicit_iter_plan_grad_assembly_graph(
-        solver: &GpuCompressibleSolver,
-    ) -> &KernelGraph<GpuCompressibleSolver> {
+        solver: &CompressiblePlanResources,
+    ) -> &KernelGraph<CompressiblePlanResources> {
         if solver.needs_gradients {
             &solver.implicit_grad_assembly_graph
         } else {
@@ -247,18 +247,18 @@ impl GpuCompressibleSolver {
     }
 
     fn implicit_iter_plan_snapshot_graph(
-        solver: &GpuCompressibleSolver,
-    ) -> &KernelGraph<GpuCompressibleSolver> {
+        solver: &CompressiblePlanResources,
+    ) -> &KernelGraph<CompressiblePlanResources> {
         &solver.implicit_snapshot_graph
     }
 
     fn implicit_iter_plan_apply_graph(
-        solver: &GpuCompressibleSolver,
-    ) -> &KernelGraph<GpuCompressibleSolver> {
+        solver: &CompressiblePlanResources,
+    ) -> &KernelGraph<CompressiblePlanResources> {
         &solver.implicit_apply_graph
     }
 
-    fn implicit_host_solve_fgmres(solver: &mut GpuCompressibleSolver) {
+    fn implicit_host_solve_fgmres(solver: &mut CompressiblePlanResources) {
         let mut iter_stats =
             solver.solve_compressible_fgmres(solver.implicit_max_restart, solver.implicit_tol);
         if !iter_stats.converged {
@@ -273,7 +273,7 @@ impl GpuCompressibleSolver {
         solver.implicit_last_stats = iter_stats;
     }
 
-    fn implicit_host_set_alpha_for_apply(solver: &mut GpuCompressibleSolver) {
+    fn implicit_host_set_alpha_for_apply(solver: &mut CompressiblePlanResources) {
         let apply_alpha = if solver.implicit_last_stats.converged {
             solver.implicit_base_alpha_u
         } else {
@@ -285,72 +285,72 @@ impl GpuCompressibleSolver {
         }
     }
 
-    fn implicit_host_restore_alpha(solver: &mut GpuCompressibleSolver) {
+    fn implicit_host_restore_alpha(solver: &mut CompressiblePlanResources) {
         if (solver.constants.alpha_u - solver.implicit_base_alpha_u).abs() > 1e-6 {
             solver.constants.alpha_u = solver.implicit_base_alpha_u;
             solver.update_constants();
         }
     }
 
-    fn build_implicit_iter_plan() -> ExecutionPlan<GpuCompressibleSolver> {
+    fn build_implicit_iter_plan() -> ExecutionPlan<CompressiblePlanResources> {
         ExecutionPlan::new(
-            GpuCompressibleSolver::context_ref,
+            CompressiblePlanResources::context_ref,
             vec![
                 PlanNode::Graph(GraphNode {
                     label: "compressible:implicit_grad_assembly",
-                    graph: GpuCompressibleSolver::implicit_iter_plan_grad_assembly_graph,
+                    graph: CompressiblePlanResources::implicit_iter_plan_grad_assembly_graph,
                     mode: GraphExecMode::SplitTimed,
                 }),
                 PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
                     label: "compressible:implicit_fgmres",
-                    run: GpuCompressibleSolver::implicit_host_solve_fgmres,
+                    run: CompressiblePlanResources::implicit_host_solve_fgmres,
                 }),
                 PlanNode::Graph(GraphNode {
                     label: "compressible:implicit_snapshot",
-                    graph: GpuCompressibleSolver::implicit_iter_plan_snapshot_graph,
+                    graph: CompressiblePlanResources::implicit_iter_plan_snapshot_graph,
                     mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
                     label: "compressible:implicit_set_alpha",
-                    run: GpuCompressibleSolver::implicit_host_set_alpha_for_apply,
+                    run: CompressiblePlanResources::implicit_host_set_alpha_for_apply,
                 }),
                 PlanNode::Graph(GraphNode {
                     label: "compressible:implicit_apply",
-                    graph: GpuCompressibleSolver::implicit_iter_plan_apply_graph,
+                    graph: CompressiblePlanResources::implicit_iter_plan_apply_graph,
                     mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
                     label: "compressible:implicit_restore_alpha",
-                    run: GpuCompressibleSolver::implicit_host_restore_alpha,
+                    run: CompressiblePlanResources::implicit_host_restore_alpha,
                 }),
             ],
         )
     }
 
-    fn implicit_iter_plan() -> &'static ExecutionPlan<GpuCompressibleSolver> {
-        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuCompressibleSolver>> =
+    fn implicit_iter_plan() -> &'static ExecutionPlan<CompressiblePlanResources> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<CompressiblePlanResources>> =
             std::sync::OnceLock::new();
-        PLAN.get_or_init(GpuCompressibleSolver::build_implicit_iter_plan)
+        PLAN.get_or_init(CompressiblePlanResources::build_implicit_iter_plan)
     }
 
-    fn build_pre_step_graph() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_pre_step_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![
             KernelNode::CopyBuffer(CopyBufferNode {
                 label: "compressible:copy_old_to_state",
                 src: |s| &s.b_state_old,
                 dst: |s| &s.b_state,
-                size_bytes: GpuCompressibleSolver::state_size_bytes,
+                size_bytes: CompressiblePlanResources::state_size_bytes,
             }),
             KernelNode::CopyBuffer(CopyBufferNode {
                 label: "compressible:copy_state_to_iter",
                 src: |s| &s.b_state,
                 dst: |s| &s.b_state_iter,
-                size_bytes: GpuCompressibleSolver::state_size_bytes,
+                size_bytes: CompressiblePlanResources::state_size_bytes,
             }),
         ])
     }
 
-    fn build_explicit_graph() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_explicit_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "compressible:gradients",
@@ -379,7 +379,7 @@ impl GpuCompressibleSolver {
         ])
     }
 
-    fn build_explicit_graph_first_order() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_explicit_graph_first_order() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "compressible:flux_kt",
@@ -402,7 +402,7 @@ impl GpuCompressibleSolver {
         ])
     }
 
-    fn build_implicit_grad_assembly_graph() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_implicit_grad_assembly_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "compressible:gradients",
@@ -419,7 +419,7 @@ impl GpuCompressibleSolver {
         ])
     }
 
-    fn build_implicit_assembly_graph_first_order() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_implicit_assembly_graph_first_order() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "compressible:assembly",
             pipeline: |s| &s.pipeline_assembly,
@@ -436,16 +436,16 @@ impl GpuCompressibleSolver {
             .unwrap_or(true);
     }
 
-    fn build_implicit_snapshot_graph() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_implicit_snapshot_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::CopyBuffer(CopyBufferNode {
             label: "compressible:snapshot_state_to_iter",
             src: |s| &s.b_state,
             dst: |s| &s.b_state_iter,
-            size_bytes: GpuCompressibleSolver::state_size_bytes,
+            size_bytes: CompressiblePlanResources::state_size_bytes,
         })])
     }
 
-    fn build_implicit_apply_graph() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_implicit_apply_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "compressible:apply",
             pipeline: |s| &s.pipeline_apply,
@@ -454,7 +454,7 @@ impl GpuCompressibleSolver {
         })])
     }
 
-    fn build_primitive_update_graph() -> KernelGraph<GpuCompressibleSolver> {
+    fn build_primitive_update_graph() -> KernelGraph<CompressiblePlanResources> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "compressible:primitive_update",
             pipeline: |s| &s.pipeline_update,
@@ -708,16 +708,16 @@ impl GpuCompressibleSolver {
             implicit_last_stats: LinearSolverStats::default(),
             profile,
             offsets,
-            pre_step_graph: GpuCompressibleSolver::build_pre_step_graph(),
-            explicit_graph_first_order: GpuCompressibleSolver::build_explicit_graph_first_order(),
-            explicit_graph: GpuCompressibleSolver::build_explicit_graph(),
+            pre_step_graph: CompressiblePlanResources::build_pre_step_graph(),
+            explicit_graph_first_order: CompressiblePlanResources::build_explicit_graph_first_order(),
+            explicit_graph: CompressiblePlanResources::build_explicit_graph(),
             implicit_assembly_graph_first_order:
-                GpuCompressibleSolver::build_implicit_assembly_graph_first_order(),
-            implicit_grad_assembly_graph: GpuCompressibleSolver::build_implicit_grad_assembly_graph(
+                CompressiblePlanResources::build_implicit_assembly_graph_first_order(),
+            implicit_grad_assembly_graph: CompressiblePlanResources::build_implicit_grad_assembly_graph(
             ),
-            implicit_snapshot_graph: GpuCompressibleSolver::build_implicit_snapshot_graph(),
-            implicit_apply_graph: GpuCompressibleSolver::build_implicit_apply_graph(),
-            primitive_update_graph: GpuCompressibleSolver::build_primitive_update_graph(),
+            implicit_snapshot_graph: CompressiblePlanResources::build_implicit_snapshot_graph(),
+            implicit_apply_graph: CompressiblePlanResources::build_implicit_apply_graph(),
+            primitive_update_graph: CompressiblePlanResources::build_primitive_update_graph(),
             needs_gradients: false,
         }
         ;
@@ -955,11 +955,11 @@ impl GpuCompressibleSolver {
 pub(crate) mod plan {
     use super::*;
 
-    pub(crate) fn step(solver: &mut GpuCompressibleSolver) {
+    pub(crate) fn step(solver: &mut CompressiblePlanResources) {
         let _ = step_with_stats(solver);
     }
 
-    pub(crate) fn step_with_stats(solver: &mut GpuCompressibleSolver) -> Vec<LinearSolverStats> {
+    pub(crate) fn step_with_stats(solver: &mut CompressiblePlanResources) -> Vec<LinearSolverStats> {
         let step_start = std::time::Instant::now();
 
         solver.state_step_index = (solver.state_step_index + 1) % 3;
@@ -979,7 +979,7 @@ pub(crate) mod plan {
         let use_explicit = solver.constants.time_scheme == 0 && solver.constants.dtau <= 0.0;
         if use_explicit {
             let total_secs = step_start.elapsed().as_secs_f64();
-            let plan_timings = GpuCompressibleSolver::explicit_plan().execute(solver);
+            let plan_timings = CompressiblePlanResources::explicit_plan().execute(solver);
             let detail = plan_timings
                 .graph_detail("compressible:explicit_graph")
                 .expect("explicit_graph timings missing");
@@ -1030,7 +1030,7 @@ pub(crate) mod plan {
             solver.implicit_max_restart = max_restart;
             solver.implicit_retry_restart = retry_restart;
 
-            let iter_timings = GpuCompressibleSolver::implicit_iter_plan().execute(solver);
+            let iter_timings = CompressiblePlanResources::implicit_iter_plan().execute(solver);
             let detail = iter_timings
                 .graph_detail("compressible:implicit_grad_assembly")
                 .expect("implicit_grad_assembly timings missing");
@@ -1068,32 +1068,32 @@ pub(crate) mod plan {
     }
 }
 
-fn compressible_bind_mesh_fields(s: &GpuCompressibleSolver, cpass: &mut wgpu::ComputePass) {
+fn compressible_bind_mesh_fields(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
     cpass.set_bind_group(0, &s.bg_mesh, &[]);
     cpass.set_bind_group(1, &s.bg_fields, &[]);
 }
 
-fn compressible_bind_mesh_fields_solver(s: &GpuCompressibleSolver, cpass: &mut wgpu::ComputePass) {
+fn compressible_bind_mesh_fields_solver(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
     cpass.set_bind_group(0, &s.bg_mesh, &[]);
     cpass.set_bind_group(1, &s.bg_fields, &[]);
     cpass.set_bind_group(2, &s.bg_solver, &[]);
 }
 
-fn compressible_bind_fields_only(s: &GpuCompressibleSolver, cpass: &mut wgpu::ComputePass) {
+fn compressible_bind_fields_only(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
     cpass.set_bind_group(0, &s.bg_fields, &[]);
 }
 
-fn compressible_bind_apply_fields_solver(s: &GpuCompressibleSolver, cpass: &mut wgpu::ComputePass) {
+fn compressible_bind_apply_fields_solver(s: &CompressiblePlanResources, cpass: &mut wgpu::ComputePass) {
     cpass.set_bind_group(0, &s.bg_apply_fields, &[]);
     cpass.set_bind_group(1, &s.bg_apply_solver, &[]);
 }
 
-fn compressible_workgroups_cells(s: &GpuCompressibleSolver) -> (u32, u32, u32) {
+fn compressible_workgroups_cells(s: &CompressiblePlanResources) -> (u32, u32, u32) {
     let workgroup_size = 64;
     (s.num_cells.div_ceil(workgroup_size), 1, 1)
 }
 
-fn compressible_workgroups_faces(s: &GpuCompressibleSolver) -> (u32, u32, u32) {
+fn compressible_workgroups_faces(s: &CompressiblePlanResources) -> (u32, u32, u32) {
     let workgroup_size = 64;
     (s.num_faces.div_ceil(workgroup_size), 1, 1)
 }

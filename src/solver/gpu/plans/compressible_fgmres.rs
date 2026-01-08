@@ -1,8 +1,8 @@
-use super::bindings;
-use super::compressible_solver::GpuCompressibleSolver;
-use super::linear_solver::amg::{AmgResources, CsrMatrix};
-use super::preconditioners::CompressibleKrylovPreconditioner;
-use super::structs::LinearSolverStats;
+use crate::solver::gpu::bindings;
+use super::compressible::CompressiblePlanResources;
+use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
+use crate::solver::gpu::preconditioners::CompressibleKrylovPreconditioner;
+use crate::solver::gpu::structs::LinearSolverStats;
 use bytemuck::{bytes_of, Pod, Zeroable};
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
@@ -102,7 +102,7 @@ struct PackParams {
     _pad2: u32,
 }
 
-impl GpuCompressibleSolver {
+impl CompressiblePlanResources {
     const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
     const WORKGROUP_SIZE: u32 = 64;
 

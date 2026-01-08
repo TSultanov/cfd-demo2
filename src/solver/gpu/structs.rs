@@ -1,6 +1,6 @@
 use super::async_buffer::AsyncScalarReader;
 use super::context::GpuContext;
-use super::coupled_solver_fgmres::FgmresResources;
+use super::plans::coupled_fgmres::FgmresResources;
 use super::kernel_graph::KernelGraph;
 use super::profiling::ProfilingStats;
 use bytemuck::{Pod, Zeroable};

@@ -1,6 +1,6 @@
-use super::compressible_fgmres::CompressibleFgmresResources;
-use super::compressible_solver::GpuCompressibleSolver;
-use super::coupled_solver_fgmres::FgmresResources;
+use super::plans::compressible::CompressiblePlanResources;
+use super::plans::compressible_fgmres::CompressibleFgmresResources;
+use super::plans::coupled_fgmres::FgmresResources;
 use super::structs::{GpuSolver, PreconditionerType};
 
 pub(crate) enum CoupledPressurePreconditioner {
@@ -90,7 +90,7 @@ impl CompressibleKrylovPreconditioner {
         Self::Identity
     }
 
-    pub fn ensure_resources(&self, solver: &mut GpuCompressibleSolver) {
+    pub fn ensure_resources(&self, solver: &mut CompressiblePlanResources) {
         if matches!(self, Self::Amg) {
             pollster::block_on(solver.ensure_amg_resources());
         }
@@ -98,7 +98,7 @@ impl CompressibleKrylovPreconditioner {
 
     pub fn prepare(
         &self,
-        solver: &GpuCompressibleSolver,
+        solver: &CompressiblePlanResources,
         fgmres: &CompressibleFgmresResources,
         workgroups_cells: u32,
     ) {
@@ -115,7 +115,7 @@ impl CompressibleKrylovPreconditioner {
 
     pub fn apply(
         &self,
-        solver: &GpuCompressibleSolver,
+        solver: &CompressiblePlanResources,
         fgmres: &CompressibleFgmresResources,
         vj: wgpu::BindingResource<'_>,
         z_out: &wgpu::Buffer,

@@ -44,6 +44,7 @@ This file tracks *codegen + solver orchestration* work. Pure physics/tuning task
 - Split the low-Mach “preconditioning” parameters out of the shared constants buffer into a dedicated `GpuLowMachParams` uniform bound in compressible kernels (`src/solver/gpu/structs.rs`, `src/solver/gpu/init/compressible_fields.rs`, `src/solver/codegen/compressible_*`).
 - Moved preconditioner selection out of `GpuConstants` into typed host-side selection (`PreconditionerType`) and refactored coupled/compressible FGMRES to use small pluggable modules (`src/solver/gpu/preconditioners.rs`).
 - Began separating “plans” from “resource containers”: `GpuUnifiedSolver::step()` now dispatches through plan modules (`src/solver/gpu/compressible_solver.rs` `plan::*`, `src/solver/gpu/coupled_solver.rs` `plan::*`) instead of calling backend `.step()` methods directly; coupled currently delegates to `step_coupled_impl` as an intermediate step.
+- Moved legacy per-family GPU implementations under `src/solver/gpu/plans/*` and renamed the unified dispatch enum from a “backend” to `PlanInstance` (`src/solver/gpu/unified_solver.rs`), so internal code is expressed as plan resources + plan functions rather than separate solver modules.
 - Added generic (model-driven) `assembly/apply/update` WGSL generators for arbitrary coupled systems (currently supports implicit `ddt` + implicit `laplacian` only) and a small demo model to force build-time shader emission (`src/solver/codegen/generic_coupled_kernels.rs`, `src/solver/model/definitions.rs`).
 - Added a first **generic boundary-condition** representation (`BoundarySpec` on `ModelSpec`) plus a helper to build GPU BC tables and a generic BC path in the generic coupled assembly kernel (Dirichlet + Neumann/zeroGradient for diffusion) (`src/solver/model/definitions.rs`, `src/solver/codegen/generic_coupled_kernels.rs`).
 - Added `ModelSpec.id` and emit generic coupled kernels under id-suffixed WGSL names (so multiple generated-per-model variants can coexist) and a first runtime backend for `ModelFields::GenericCoupled` in `GpuUnifiedSolver` (`src/solver/codegen/emit.rs`, `src/solver/gpu/generic_coupled_solver.rs`, `src/solver/gpu/unified_solver.rs`).
@@ -103,11 +104,29 @@ Everything else (unknown layout, kernel sequencing, auxiliary computations, matr
 9. **Eliminate legacy public solvers** (DONE: public API)
    - Make `GpuUnifiedSolver` the only public GPU solver entrypoint.
    - Keep legacy implementations crate-internal until the generic runtime fully replaces them.
+10. **Eliminate legacy solver *implementations* (Compressible/Coupled)**
+   Goal: no `GpuCompressibleSolver` / `GpuSolver` “solvers” at all; only `GpuUnifiedSolver` instances with different plans + resources.
+   - Introduce a plan/runtime split:
+     - `GpuRuntimeCommon`: mesh buffers, constants, state ping-pong/history, and generic dispatch helpers.
+     - `GpuPlanInstance`: plan-specific GPU resources (buffers/bind groups/pipelines) + an `ExecutionPlan` describing the timestep/nonlinear loop.
+   - Move per-family resources out of “solver” structs:
+     - `GpuCompressibleSolver` → `CompressiblePlanResources` (state offsets, flux/grad buffers, compressible linear buffers, graphs).
+     - Coupled portion of `GpuSolver` → `CoupledPlanResources` (coupled matrix buffers, max-diff buffers, coupled graphs, async reader).
+     - Keep `GpuSolver` only as a thin generic linear-solver helper (or fold into `GpuRuntimeCommon`) and delete coupled/compressible stepping methods entirely.
+   - Remove `UnifiedSolverBackend` enum:
+     - `GpuUnifiedSolver { common: GpuRuntimeCommon, plan: Box<dyn GpuPlanInstance> }` (or an internal `enum PlanInstance` if we want monomorphization without trait objects).
+     - Construction selects a plan builder based on `ModelSpec` + `SolverConfig` (and registered closure plugins).
+   - Make “closures” explicit plan nodes (already directionally true):
+     - compressible: KT flux + primitive recovery
+     - incompressible: flux update / pressure-velocity coupling kernels
+   - Delete or move legacy files after migration:
+     - `src/solver/gpu/compressible_solver.rs`, `src/solver/gpu/coupled_solver.rs` become plan modules/resources, not solvers.
+     - update tests + UI to ensure no direct references remain (already routed through `GpuUnifiedSolver`).
 
 ### Gap Check (Are We Approaching The Goal?)
 - The common *runtime sequencing* layer now exists (`KernelGraph` + `ExecutionPlan`) and both incompressible and compressible paths are progressively being expressed in it.
-- The solver still relies on model-family-specific kernels and host-side control flow for convergence + linear solves; the next material step is to derive plans from `ModelSpec`/`DiscreteSystem` rather than hardcoding per-solver pipelines.
-- Even though the public API is unified, the runtime still uses legacy per-family backends internally (`GpuSolver`/`GpuCompressibleSolver`). The remaining work to truly delete them is to (a) move their resources into a generic runtime context, and (b) derive all kernel graphs/host plugins from `ModelSpec` + scheme expansion + closure plugins.
+- The solver still relies on model-family-specific resource containers and some host-side control flow for convergence + linear solves; the next material step is to make **plans + plan resources** the only backend variants and to remove “solver” structs for each family.
+- Even though the public API is unified, the runtime still uses legacy per-family structs internally. The remaining work to truly delete them is to (a) introduce `GpuRuntimeCommon` + `GpuPlanInstance`, (b) migrate compressible/coupled resources into plan resources, and (c) remove `UnifiedSolverBackend` + legacy step methods.
 
 ### Decisions (Chosen)
 - **Generated-per-model kernels**: keep the current approach (no runtime compilation/reflection).

@@ -1,10 +1,10 @@
 // Force recompile 2
 use std::sync::Arc;
 
-use super::coupled_solver_fgmres::FgmresResources;
-use super::model_defaults::default_incompressible_model;
-use super::profiling::ProfilingStats;
-use super::structs::GpuSolver;
+use super::coupled_fgmres::FgmresResources;
+use crate::solver::gpu::model_defaults::default_incompressible_model;
+use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::structs::GpuSolver;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
 
@@ -96,7 +96,7 @@ impl GpuSolver {
         self.update_constants();
     }
 
-    pub fn set_precond_type(&mut self, precond_type: super::structs::PreconditionerType) {
+    pub fn set_precond_type(&mut self, precond_type: crate::solver::gpu::structs::PreconditionerType) {
         self.preconditioner = precond_type;
     }
 
@@ -149,7 +149,7 @@ impl GpuSolver {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        use super::profiling::ProfileCategory;
+        use crate::solver::gpu::profiling::ProfileCategory;
         use std::time::Instant;
 
         // 1. Obtain a cached staging buffer or create one if absent

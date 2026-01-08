@@ -9,15 +9,10 @@ pub mod init;
 pub mod kernel_graph;
 pub mod linear_solver;
 pub mod model_defaults;
+pub(crate) mod plans;
 pub mod preconditioners;
 pub mod profiling;
 pub mod structs;
 pub mod unified_solver;
-mod compressible_fgmres;
-mod compressible_solver;
-mod coupled_solver;
-mod coupled_solver_fgmres;
-mod generic_coupled_solver;
-mod solver;
 
 pub use unified_solver::{FgmresSizing, GpuUnifiedSolver, SolverConfig};

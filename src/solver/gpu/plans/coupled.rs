@@ -15,12 +15,12 @@
 // - p is the pressure field
 // - b_u is the momentum source term
 
-use super::context::GpuContext;
-use super::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
-use super::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
-use super::model_defaults::default_incompressible_model;
-use super::profiling::ProfileCategory;
-use super::structs::{GpuSolver, LinearSolverStats};
+use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
+use crate::solver::gpu::kernel_graph::{ComputeNode, KernelGraph, KernelNode};
+use crate::solver::gpu::model_defaults::default_incompressible_model;
+use crate::solver::gpu::profiling::ProfileCategory;
+use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use std::time::Instant;
 
 /// Enable debug reads for diagnosing matrix assembly issues.
@@ -73,7 +73,7 @@ fn coupled_graph_update(solver: &GpuSolver) -> &KernelGraph<GpuSolver> {
 }
 
 impl GpuSolver {
-    pub(super) fn build_coupled_init_prepare_graph() -> KernelGraph<GpuSolver> {
+    pub(crate) fn build_coupled_init_prepare_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "coupled:init_prepare",
             pipeline: |s| &s.pipeline_prepare_coupled,
@@ -82,7 +82,7 @@ impl GpuSolver {
         })])
     }
 
-    pub(super) fn build_coupled_prepare_assembly_graph() -> KernelGraph<GpuSolver> {
+    pub(crate) fn build_coupled_prepare_assembly_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![
             KernelNode::Compute(ComputeNode {
                 label: "coupled:prepare",
@@ -99,7 +99,7 @@ impl GpuSolver {
         ])
     }
 
-    pub(super) fn build_coupled_assembly_graph() -> KernelGraph<GpuSolver> {
+    pub(crate) fn build_coupled_assembly_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "coupled:assembly_merged",
             pipeline: |s| &s.pipeline_coupled_assembly_merged,
@@ -108,7 +108,7 @@ impl GpuSolver {
         })])
     }
 
-    pub(super) fn build_coupled_update_graph() -> KernelGraph<GpuSolver> {
+    pub(crate) fn build_coupled_update_graph() -> KernelGraph<GpuSolver> {
         KernelGraph::new(vec![KernelNode::Compute(ComputeNode {
             label: "coupled:update_fields_max_diff",
             pipeline: |s| &s.pipeline_update_from_coupled,

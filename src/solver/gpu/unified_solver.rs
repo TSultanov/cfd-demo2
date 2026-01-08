@@ -1,5 +1,5 @@
-use crate::solver::gpu::compressible_solver::GpuCompressibleSolver;
-use crate::solver::gpu::generic_coupled_solver::GpuGenericCoupledSolver;
+use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
+use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::profiling::ProfilingStats;
@@ -31,20 +31,20 @@ pub struct FgmresSizing {
     pub num_dot_groups: u32,
 }
 
-pub(crate) enum UnifiedSolverBackend {
+pub(crate) enum PlanInstance {
     Incompressible(GpuSolver),
-    Compressible(GpuCompressibleSolver),
+    Compressible(CompressiblePlanResources),
     GenericCoupled(GpuGenericCoupledSolver),
 }
 
-impl std::fmt::Debug for UnifiedSolverBackend {
+impl std::fmt::Debug for PlanInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UnifiedSolverBackend::Incompressible(_) => f.write_str("Incompressible(GpuSolver)"),
-            UnifiedSolverBackend::Compressible(_) => {
-                f.write_str("Compressible(GpuCompressibleSolver)")
+            PlanInstance::Incompressible(_) => f.write_str("Incompressible(GpuSolver)"),
+            PlanInstance::Compressible(_) => {
+                f.write_str("Compressible(CompressiblePlanResources)")
             }
-            UnifiedSolverBackend::GenericCoupled(_) => {
+            PlanInstance::GenericCoupled(_) => {
                 f.write_str("GenericCoupled(GpuGenericCoupledSolver)")
             }
         }
@@ -53,7 +53,7 @@ impl std::fmt::Debug for UnifiedSolverBackend {
 
 pub struct GpuUnifiedSolver {
     model: ModelSpec,
-    backend: UnifiedSolverBackend,
+    plan: PlanInstance,
     config: SolverConfig,
 }
 
@@ -65,27 +65,27 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
-        let backend = match &model.fields {
+        let plan = match &model.fields {
             ModelFields::Incompressible(_) => {
                 let mut solver = GpuSolver::new(mesh, device, queue).await;
                 apply_config_incompressible(&mut solver, config);
-                UnifiedSolverBackend::Incompressible(solver)
+                PlanInstance::Incompressible(solver)
             }
             ModelFields::Compressible(_) => {
-                let mut solver = GpuCompressibleSolver::new(mesh, device, queue).await;
+                let mut solver = CompressiblePlanResources::new(mesh, device, queue).await;
                 apply_config_compressible(&mut solver, config);
-                UnifiedSolverBackend::Compressible(solver)
+                PlanInstance::Compressible(solver)
             }
             ModelFields::GenericCoupled(_) => {
                 let mut solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
                 apply_config_incompressible(&mut solver.linear, config);
-                UnifiedSolverBackend::GenericCoupled(solver)
+                PlanInstance::GenericCoupled(solver)
             }
         };
 
         Ok(Self {
             model,
-            backend,
+            plan,
             config,
         })
     }
@@ -99,141 +99,141 @@ impl GpuUnifiedSolver {
     }
 
     pub fn num_cells(&self) -> u32 {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.num_cells,
-            UnifiedSolverBackend::Compressible(solver) => solver.num_cells,
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.num_cells,
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => solver.num_cells,
+            PlanInstance::Compressible(solver) => solver.num_cells,
+            PlanInstance::GenericCoupled(solver) => solver.linear.num_cells,
         }
     }
 
     pub fn time(&self) -> f32 {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.constants.time,
-            UnifiedSolverBackend::Compressible(solver) => solver.constants.time,
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.constants.time,
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => solver.constants.time,
+            PlanInstance::Compressible(solver) => solver.constants.time,
+            PlanInstance::GenericCoupled(solver) => solver.linear.constants.time,
         }
     }
 
     pub fn dt(&self) -> f32 {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.constants.dt,
-            UnifiedSolverBackend::Compressible(solver) => solver.constants.dt,
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.constants.dt,
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => solver.constants.dt,
+            PlanInstance::Compressible(solver) => solver.constants.dt,
+            PlanInstance::GenericCoupled(solver) => solver.linear.constants.dt,
         }
     }
 
     pub fn state_buffer(&self) -> &wgpu::Buffer {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => &solver.b_state,
-            UnifiedSolverBackend::Compressible(solver) => &solver.b_state,
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.state_buffer(),
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => &solver.b_state,
+            PlanInstance::Compressible(solver) => &solver.b_state,
+            PlanInstance::GenericCoupled(solver) => solver.state_buffer(),
         }
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_dt(dt),
-            UnifiedSolverBackend::Compressible(solver) => solver.set_dt(dt),
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_dt(dt),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_dt(dt),
+            PlanInstance::Compressible(solver) => solver.set_dt(dt),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_dt(dt),
         }
     }
 
     pub fn set_dtau(&mut self, dtau: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(_) => {}
-            UnifiedSolverBackend::Compressible(solver) => solver.set_dtau(dtau),
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &mut self.plan {
+            PlanInstance::Incompressible(_) => {}
+            PlanInstance::Compressible(solver) => solver.set_dtau(dtau),
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn set_viscosity(&mut self, mu: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_viscosity(mu),
-            UnifiedSolverBackend::Compressible(solver) => solver.set_viscosity(mu),
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_viscosity(mu),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_viscosity(mu),
+            PlanInstance::Compressible(solver) => solver.set_viscosity(mu),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_viscosity(mu),
         }
     }
 
     pub fn set_density(&mut self, rho: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_density(rho),
-            UnifiedSolverBackend::Compressible(_) => {}
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_density(rho),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_density(rho),
+            PlanInstance::Compressible(_) => {}
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_density(rho),
         }
     }
 
     pub fn set_alpha_u(&mut self, alpha_u: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_alpha_u(alpha_u),
-            UnifiedSolverBackend::Compressible(solver) => solver.set_alpha_u(alpha_u),
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_alpha_u(alpha_u),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_alpha_u(alpha_u),
+            PlanInstance::Compressible(solver) => solver.set_alpha_u(alpha_u),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_alpha_u(alpha_u),
         }
     }
 
     pub fn set_alpha_p(&mut self, alpha_p: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_alpha_p(alpha_p),
-            UnifiedSolverBackend::Compressible(_) => {}
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_alpha_p(alpha_p),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_alpha_p(alpha_p),
+            PlanInstance::Compressible(_) => {}
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_alpha_p(alpha_p),
         }
     }
 
     pub fn set_inlet_velocity(&mut self, velocity: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_inlet_velocity(velocity),
-            UnifiedSolverBackend::Compressible(solver) => solver.set_inlet_velocity(velocity),
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_inlet_velocity(velocity),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_inlet_velocity(velocity),
+            PlanInstance::Compressible(solver) => solver.set_inlet_velocity(velocity),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_inlet_velocity(velocity),
         }
     }
 
     pub fn set_ramp_time(&mut self, time: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_ramp_time(time),
-            UnifiedSolverBackend::Compressible(_) => {}
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_ramp_time(time),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_ramp_time(time),
+            PlanInstance::Compressible(_) => {}
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_ramp_time(time),
         }
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
         self.config.advection_scheme = scheme;
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_scheme(scheme.gpu_id()),
-            UnifiedSolverBackend::Compressible(solver) => solver.set_scheme(scheme.gpu_id()),
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_scheme(scheme.gpu_id()),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_scheme(scheme.gpu_id()),
+            PlanInstance::Compressible(solver) => solver.set_scheme(scheme.gpu_id()),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_scheme(scheme.gpu_id()),
         }
     }
 
     pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
         self.config.time_scheme = scheme;
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_time_scheme(scheme as u32),
-            UnifiedSolverBackend::Compressible(solver) => solver.set_time_scheme(scheme as u32),
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_time_scheme(scheme as u32),
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_time_scheme(scheme as u32),
+            PlanInstance::Compressible(solver) => solver.set_time_scheme(scheme as u32),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_time_scheme(scheme as u32),
         }
     }
 
     pub fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
         self.config.preconditioner = preconditioner;
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_precond_type(preconditioner),
-            UnifiedSolverBackend::Compressible(solver) => {
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_precond_type(preconditioner),
+            PlanInstance::Compressible(solver) => {
                 solver.set_precond_type(preconditioner)
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.linear.set_precond_type(preconditioner),
+            PlanInstance::GenericCoupled(solver) => solver.linear.set_precond_type(preconditioner),
         }
     }
 
     pub fn set_outer_iters(&mut self, iters: usize) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(_) => {}
-            UnifiedSolverBackend::Compressible(solver) => solver.set_outer_iters(iters),
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &mut self.plan {
+            PlanInstance::Incompressible(_) => {}
+            PlanInstance::Compressible(solver) => solver.set_outer_iters(iters),
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn set_incompressible_outer_correctors(&mut self, iters: u32) -> Result<(), String> {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => {
                 solver.n_outer_correctors = iters;
                 Ok(())
             }
@@ -245,21 +245,21 @@ impl GpuUnifiedSolver {
     }
 
     pub fn incompressible_set_should_stop(&mut self, value: bool) {
-        if let UnifiedSolverBackend::Incompressible(solver) = &mut self.backend {
+        if let PlanInstance::Incompressible(solver) = &mut self.plan {
             solver.should_stop = value;
         }
     }
 
     pub fn incompressible_should_stop(&self) -> bool {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.should_stop,
-            UnifiedSolverBackend::Compressible(_) => false,
-            UnifiedSolverBackend::GenericCoupled(_) => false,
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => solver.should_stop,
+            PlanInstance::Compressible(_) => false,
+            PlanInstance::GenericCoupled(_) => false,
         }
     }
 
     pub fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)> {
-        let UnifiedSolverBackend::Incompressible(solver) = &self.backend else {
+        let PlanInstance::Incompressible(solver) = &self.plan else {
             return None;
         };
         Some((
@@ -270,7 +270,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn incompressible_linear_stats(&self) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
-        let UnifiedSolverBackend::Incompressible(solver) = &self.backend else {
+        let PlanInstance::Incompressible(solver) = &self.plan else {
             return None;
         };
         Some((
@@ -281,72 +281,72 @@ impl GpuUnifiedSolver {
     }
 
     pub fn incompressible_degenerate_count(&self) -> Option<u32> {
-        let UnifiedSolverBackend::Incompressible(solver) = &self.backend else {
+        let PlanInstance::Incompressible(solver) = &self.plan else {
             return None;
         };
         Some(solver.degenerate_count)
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_u(u),
-            UnifiedSolverBackend::Compressible(_) => {}
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_u(u),
+            PlanInstance::Compressible(_) => {}
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn set_p(&mut self, p: &[f64]) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.set_p(p),
-            UnifiedSolverBackend::Compressible(_) => {}
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => solver.set_p(p),
+            PlanInstance::Compressible(_) => {}
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(_) => {}
-            UnifiedSolverBackend::Compressible(solver) => solver.set_uniform_state(rho, u, p),
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &mut self.plan {
+            PlanInstance::Incompressible(_) => {}
+            PlanInstance::Compressible(solver) => solver.set_uniform_state(rho, u, p),
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(_) => {}
-            UnifiedSolverBackend::Compressible(solver) => solver.set_state_fields(rho, u, p),
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &mut self.plan {
+            PlanInstance::Incompressible(_) => {}
+            PlanInstance::Compressible(solver) => solver.set_state_fields(rho, u, p),
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn step(&mut self) {
-        match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => super::coupled_solver::plan::step_coupled(solver),
-            UnifiedSolverBackend::Compressible(solver) => super::compressible_solver::plan::step(solver),
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+        match &mut self.plan {
+            PlanInstance::Incompressible(solver) => super::plans::coupled::plan::step_coupled(solver),
+            PlanInstance::Compressible(solver) => super::plans::compressible::plan::step(solver),
+            PlanInstance::GenericCoupled(solver) => {
                 let _ = solver.step();
             }
         }
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        match &mut self.backend {
-            UnifiedSolverBackend::Compressible(solver) => Ok(super::compressible_solver::plan::step_with_stats(solver)),
+        match &mut self.plan {
+            PlanInstance::Compressible(solver) => Ok(super::plans::compressible::plan::step_with_stats(solver)),
             _ => Err("step_with_stats is supported for Compressible models only".to_string()),
         }
     }
 
     pub fn initialize_history(&self) {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => solver.initialize_history(),
-            UnifiedSolverBackend::Compressible(solver) => solver.initialize_history(),
-            UnifiedSolverBackend::GenericCoupled(_) => {}
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => solver.initialize_history(),
+            PlanInstance::Compressible(solver) => solver.initialize_history(),
+            PlanInstance::GenericCoupled(_) => {}
         }
     }
 
     pub fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
-        match &mut self.backend {
-            UnifiedSolverBackend::Compressible(solver) => {
+        match &mut self.plan {
+            PlanInstance::Compressible(solver) => {
                 solver.set_precond_model(model as u32);
                 Ok(())
             }
@@ -355,8 +355,8 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
-        match &mut self.backend {
-            UnifiedSolverBackend::Compressible(solver) => {
+        match &mut self.plan {
+            PlanInstance::Compressible(solver) => {
                 solver.set_precond_theta_floor(theta);
                 Ok(())
             }
@@ -367,8 +367,8 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
-        match &mut self.backend {
-            UnifiedSolverBackend::Compressible(solver) => {
+        match &mut self.plan {
+            PlanInstance::Compressible(solver) => {
                 solver.set_nonconverged_relax(alpha);
                 Ok(())
             }
@@ -377,74 +377,74 @@ impl GpuUnifiedSolver {
     }
 
     pub fn enable_detailed_profiling(&self, enable: bool) -> Result<(), String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => {
                 solver.enable_detailed_profiling(enable);
                 Ok(())
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 solver.linear.enable_detailed_profiling(enable);
                 Ok(())
             }
-            UnifiedSolverBackend::Compressible(_) => Err(
+            PlanInstance::Compressible(_) => Err(
                 "enable_detailed_profiling is supported for Incompressible models only".to_string(),
             ),
         }
     }
 
     pub fn start_profiling_session(&self) -> Result<(), String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => {
                 solver.start_profiling_session();
                 Ok(())
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 solver.linear.start_profiling_session();
                 Ok(())
             }
-            UnifiedSolverBackend::Compressible(_) => Err(
+            PlanInstance::Compressible(_) => Err(
                 "start_profiling_session is supported for Incompressible models only".to_string(),
             ),
         }
     }
 
     pub fn end_profiling_session(&self) -> Result<(), String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => {
                 solver.end_profiling_session();
                 Ok(())
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 solver.linear.end_profiling_session();
                 Ok(())
             }
-            UnifiedSolverBackend::Compressible(_) => Err(
+            PlanInstance::Compressible(_) => Err(
                 "end_profiling_session is supported for Incompressible models only".to_string(),
             ),
         }
     }
 
     pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.get_profiling_stats()),
-            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.get_profiling_stats()),
-            UnifiedSolverBackend::Compressible(_) => Err(
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => Ok(solver.get_profiling_stats()),
+            PlanInstance::GenericCoupled(solver) => Ok(solver.linear.get_profiling_stats()),
+            PlanInstance::Compressible(_) => Err(
                 "get_profiling_stats is supported for Incompressible models only".to_string(),
             ),
         }
     }
 
     pub fn print_profiling_report(&self) -> Result<(), String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => {
                 solver.print_profiling_report();
                 Ok(())
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 solver.linear.print_profiling_report();
                 Ok(())
             }
-            UnifiedSolverBackend::Compressible(_) => Err(
+            PlanInstance::Compressible(_) => Err(
                 "print_profiling_report is supported for Incompressible models only".to_string(),
             ),
         }
@@ -453,16 +453,16 @@ impl GpuUnifiedSolver {
     pub async fn read_state_f32(&self) -> Vec<f32> {
         let stride = self.model.state_layout.stride() as u64;
         let bytes = self.num_cells() as u64 * stride * 4;
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => {
                 let raw = solver.read_buffer(&solver.b_state, bytes).await;
                 bytemuck::cast_slice(&raw).to_vec()
             }
-            UnifiedSolverBackend::Compressible(solver) => {
+            PlanInstance::Compressible(solver) => {
                 let raw = solver.read_buffer(&solver.b_state, bytes).await;
                 bytemuck::cast_slice(&raw).to_vec()
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 let raw = solver.linear.read_buffer(solver.state_buffer(), bytes).await;
                 bytemuck::cast_slice(&raw).to_vec()
             }
@@ -470,15 +470,15 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
-        match &mut self.backend {
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.set_field_scalar(field, values),
+        match &mut self.plan {
+            PlanInstance::GenericCoupled(solver) => solver.set_field_scalar(field, values),
             _ => Err("set_field_scalar is supported for GenericCoupled models only".to_string()),
         }
     }
 
     pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
-        match &self.backend {
-            UnifiedSolverBackend::GenericCoupled(solver) => solver.get_field_scalar(field).await,
+        match &self.plan {
+            PlanInstance::GenericCoupled(solver) => solver.get_field_scalar(field).await,
             _ => Err("get_field_scalar is supported for GenericCoupled models only".to_string()),
         }
     }
@@ -519,16 +519,16 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => {
                 solver.set_linear_system(matrix_values, rhs);
                 Ok(())
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 solver.linear.set_linear_system(matrix_values, rhs);
                 Ok(())
             }
-            UnifiedSolverBackend::Compressible(_) => Err(
+            PlanInstance::Compressible(_) => Err(
                 "set_linear_system is supported for Incompressible and GenericCoupled backends only"
                     .to_string(),
             ),
@@ -541,10 +541,10 @@ impl GpuUnifiedSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.solve_linear_system_cg_with_size(n, max_iters, tol)),
-            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.solve_linear_system_cg_with_size(n, max_iters, tol)),
-            UnifiedSolverBackend::Compressible(_) => Err(
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => Ok(solver.solve_linear_system_cg_with_size(n, max_iters, tol)),
+            PlanInstance::GenericCoupled(solver) => Ok(solver.linear.solve_linear_system_cg_with_size(n, max_iters, tol)),
+            PlanInstance::Compressible(_) => Err(
                 "solve_linear_system_cg_with_size is supported for Incompressible and GenericCoupled backends only"
                     .to_string(),
             ),
@@ -552,10 +552,10 @@ impl GpuUnifiedSolver {
     }
 
     pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.get_linear_solution().await),
-            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.get_linear_solution().await),
-            UnifiedSolverBackend::Compressible(_) => Err(
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => Ok(solver.get_linear_solution().await),
+            PlanInstance::GenericCoupled(solver) => Ok(solver.linear.get_linear_solution().await),
+            PlanInstance::Compressible(_) => Err(
                 "get_linear_solution is supported for Incompressible and GenericCoupled backends only"
                     .to_string(),
             ),
@@ -563,10 +563,10 @@ impl GpuUnifiedSolver {
     }
 
     pub fn coupled_unknowns(&self) -> Result<u32, String> {
-        match &self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => Ok(solver.coupled_unknowns()),
-            UnifiedSolverBackend::GenericCoupled(solver) => Ok(solver.linear.coupled_unknowns()),
-            UnifiedSolverBackend::Compressible(_) => Err(
+        match &self.plan {
+            PlanInstance::Incompressible(solver) => Ok(solver.coupled_unknowns()),
+            PlanInstance::GenericCoupled(solver) => Ok(solver.linear.coupled_unknowns()),
+            PlanInstance::Compressible(_) => Err(
                 "coupled_unknowns is supported for Incompressible and GenericCoupled backends only"
                     .to_string(),
             ),
@@ -574,16 +574,16 @@ impl GpuUnifiedSolver {
     }
 
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
-        let (num_unknowns, num_dot_groups) = match &mut self.backend {
-            UnifiedSolverBackend::Incompressible(solver) => {
+        let (num_unknowns, num_dot_groups) = match &mut self.plan {
+            PlanInstance::Incompressible(solver) => {
                 let resources = solver.init_fgmres_resources(max_restart);
                 (resources.num_unknowns, resources.num_dot_groups)
             }
-            UnifiedSolverBackend::GenericCoupled(solver) => {
+            PlanInstance::GenericCoupled(solver) => {
                 let resources = solver.linear.init_fgmres_resources(max_restart);
                 (resources.num_unknowns, resources.num_dot_groups)
             }
-            UnifiedSolverBackend::Compressible(_) => {
+            PlanInstance::Compressible(_) => {
                 return Err(
                     "fgmres_sizing is supported for Incompressible and GenericCoupled backends only"
                         .to_string(),
@@ -603,7 +603,7 @@ fn apply_config_incompressible(solver: &mut GpuSolver, config: SolverConfig) {
     solver.set_precond_type(config.preconditioner);
 }
 
-fn apply_config_compressible(solver: &mut GpuCompressibleSolver, config: SolverConfig) {
+fn apply_config_compressible(solver: &mut CompressiblePlanResources, config: SolverConfig) {
     solver.set_scheme(config.advection_scheme.gpu_id());
     solver.set_time_scheme(config.time_scheme as u32);
     solver.set_precond_type(config.preconditioner);

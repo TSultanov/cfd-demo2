@@ -38,7 +38,6 @@ pub fn init_pipelines(
     device: &wgpu::Device,
     matrix: &MatrixResources,
     state: &StateResources,
-    _bgl_mesh: &wgpu::BindGroupLayout,
 ) -> PipelineResources {
     // Use generated layouts
     // Group 0: Linear State (Vectors)

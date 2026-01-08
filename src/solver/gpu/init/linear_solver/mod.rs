@@ -8,7 +8,6 @@ use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generate
 use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
-use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
 
 pub struct LinearSolverResources {
@@ -62,50 +61,27 @@ pub struct LinearSolverResources {
 
 pub fn init_linear_solver(
     device: &wgpu::Device,
-    mesh: &Mesh,
     num_cells: u32,
-    bgl_mesh: &wgpu::BindGroupLayout,
+    scalar_row_offsets: &[u32],
+    scalar_col_indices: &[u32],
 ) -> LinearSolverResources {
     // 1. Initialize Matrix Resources (Buffers)
-    // We recalculate the CSR structure here to ensure it matches the mesh connectivity.
-    // Ideally, this should be passed from the mesh initialization, but for now we
-    // recompute it to keep the initialization logic self-contained.
 
     // --- CSR Matrix Structure ---
-    let mut row_offsets = vec![0u32; num_cells as usize + 1];
-    let mut col_indices = Vec::new();
-
-    let mut adj = vec![Vec::new(); num_cells as usize];
-    for (i, &owner) in mesh.face_owner.iter().enumerate() {
-        if let Some(neighbor) = mesh.face_neighbor[i] {
-            adj[owner].push(neighbor);
-            adj[neighbor].push(owner);
-        }
-    }
-
-    for (i, list) in adj.iter_mut().enumerate() {
-        list.push(i); // Add diagonal
-        list.sort();
-        list.dedup();
-    }
-
-    let mut current_offset = 0;
-    for (i, list) in adj.iter().enumerate() {
-        row_offsets[i] = current_offset;
-        for &neighbor in list {
-            col_indices.push(neighbor as u32);
-        }
-        current_offset += list.len() as u32;
-    }
-    row_offsets[num_cells as usize] = current_offset;
-
-    let matrix_res = matrix::init_matrix(device, &row_offsets, &col_indices);
+    debug_assert_eq!(
+        scalar_row_offsets.len(),
+        num_cells as usize + 1,
+        "unexpected CSR row_offsets length"
+    );
+    let matrix_res = matrix::init_matrix(device, scalar_row_offsets, scalar_col_indices);
+    let row_offsets = scalar_row_offsets.to_vec();
+    let col_indices = scalar_col_indices.to_vec();
 
     // 2. Initialize State Resources
     let state_res = state::init_state(device, num_cells);
 
     // 3. Initialize Pipelines
-    let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res, bgl_mesh);
+    let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res);
 
     let coupled_resources = init_coupled_resources(
         device,

@@ -434,6 +434,9 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        if !self.supports(PlanCapability::LinearSystemDebug) {
+            return Err("plan does not support linear system debug operations".into());
+        }
         self.plan.set_linear_system(matrix_values, rhs)
     }
 
@@ -443,18 +446,30 @@ impl GpuUnifiedSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
+        if !self.supports(PlanCapability::LinearSystemDebug) {
+            return Err("plan does not support linear system debug operations".into());
+        }
         self.plan.solve_linear_system_cg_with_size(n, max_iters, tol)
     }
 
     pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {
+        if !self.supports(PlanCapability::LinearSystemDebug) {
+            return Err("plan does not support linear system debug operations".into());
+        }
         self.plan.get_linear_solution().await
     }
 
     pub fn coupled_unknowns(&self) -> Result<u32, String> {
+        if !self.supports(PlanCapability::CoupledUnknowns) {
+            return Err("plan does not expose coupled unknown count".into());
+        }
         self.plan.coupled_unknowns()
     }
 
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
+        if !self.supports(PlanCapability::FgmresSizing) {
+            return Err("plan does not support FGMRES sizing query".into());
+        }
         self.plan.fgmres_sizing(max_restart)
     }
 

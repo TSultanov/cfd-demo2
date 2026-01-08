@@ -8,12 +8,24 @@ use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::StateLayout;
 use wgpu::util::DeviceExt;
 
+use super::ports::{BufF32, BufU32, LoweredBuffers, Port, PortRegistry};
+
+#[derive(Clone, Copy, Debug)]
+pub struct CompressibleLinearPorts {
+    pub rhs: Port<BufF32>,
+    pub x: Port<BufF32>,
+    pub scalar_row_offsets: Port<BufU32>,
+}
+
 pub struct CompressibleLowered {
     pub num_cells: u32,
     pub num_faces: u32,
     pub unknowns_per_cell: u32,
     pub num_unknowns: u32,
     pub state_stride: u32,
+
+    pub ports: CompressibleLinearPorts,
+    pub buffers: LoweredBuffers,
 
     pub mesh: mesh::MeshResources,
     pub fields: CompressibleFieldBuffers,
@@ -24,9 +36,6 @@ pub struct CompressibleLowered {
     pub block_col_indices: Vec<u32>,
 
     pub matrix: matrix::MatrixResources,
-    pub b_scalar_row_offsets: wgpu::Buffer,
-    pub b_rhs: wgpu::Buffer,
-    pub b_x: wgpu::Buffer,
 }
 
 impl CompressibleLowered {
@@ -61,28 +70,45 @@ impl CompressibleLowered {
         let block_col_indices = col_indices.clone();
 
         let matrix = matrix::init_matrix(device, &row_offsets, &col_indices);
-        let b_scalar_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Compressible Scalar Row Offsets"),
-            contents: bytemuck::cast_slice(&mesh_res.row_offsets),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
 
-        let b_rhs = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Compressible RHS"),
-            size: num_unknowns as u64 * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let b_x = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Compressible Solution"),
-            size: num_unknowns as u64 * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let mut registry = PortRegistry::new();
+        let ports = CompressibleLinearPorts {
+            rhs: registry.port("compressible:rhs"),
+            x: registry.port("compressible:x"),
+            scalar_row_offsets: registry.port("compressible:scalar_row_offsets"),
+        };
+
+        let mut buffers = LoweredBuffers::new();
+        buffers.insert(
+            ports.scalar_row_offsets,
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Compressible Scalar Row Offsets"),
+                contents: bytemuck::cast_slice(&mesh_res.row_offsets),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        buffers.insert(
+            ports.rhs,
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Compressible RHS"),
+                size: num_unknowns as u64 * 4,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+        );
+        buffers.insert(
+            ports.x,
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Compressible Solution"),
+                size: num_unknowns as u64 * 4,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+        );
 
         Self {
             num_cells,
@@ -90,6 +116,8 @@ impl CompressibleLowered {
             unknowns_per_cell,
             num_unknowns,
             state_stride,
+            ports,
+            buffers,
             mesh: mesh_res,
             fields,
             scalar_row_offsets,
@@ -97,10 +125,6 @@ impl CompressibleLowered {
             block_row_offsets,
             block_col_indices,
             matrix,
-            b_scalar_row_offsets,
-            b_rhs,
-            b_x,
         }
     }
 }
-

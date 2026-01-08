@@ -165,10 +165,12 @@ impl CompressiblePlanResources {
                 cells: (block_dispatch_x, block_dispatch_y),
             };
 
-            self.zero_buffer(&self.b_x, n);
+            let b_x = self.linear_buffers.buffer(self.linear_ports.x);
+            let b_rhs = self.linear_buffers.buffer(self.linear_ports.rhs);
+            self.zero_buffer(b_x, n);
 
             let tol_abs = 1e-6f32;
-            let rhs_norm = self.gpu_norm(&fgmres, self.b_rhs.as_entire_binding(), n);
+            let rhs_norm = self.gpu_norm(&fgmres, b_rhs.as_entire_binding(), n);
             if rhs_norm <= tol_abs {
                 let stats = LinearSolverStats {
                     iterations: 0,
@@ -202,7 +204,7 @@ impl CompressiblePlanResources {
                 &self.context.device,
                 &self.context.queue,
                 &fgmres.fgmres,
-                self.b_rhs.as_entire_binding(),
+                b_rhs.as_entire_binding(),
                 dispatch.cells,
             );
 
@@ -228,7 +230,7 @@ impl CompressiblePlanResources {
                 &fgmres,
                 &self.create_vector_bind_group(
                     &fgmres,
-                    self.b_rhs.as_entire_binding(),
+                    b_rhs.as_entire_binding(),
                     basis0,
                     fgmres.fgmres.temp_buffer().as_entire_binding(),
                 ),
@@ -256,7 +258,7 @@ impl CompressiblePlanResources {
             // Solve (single restart) using the shared GPU FGMRES core.
             let solve = fgmres_solve_once_with_preconditioner(
                 &core,
-                &self.b_x,
+                b_x,
                 rhs_norm,
                 params,
                 iter_params,

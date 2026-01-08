@@ -8,6 +8,9 @@ use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::init::linear_solver::matrix::MatrixResources;
 
+use super::compressible_lowering::CompressibleLinearPorts;
+use super::ports::LoweredBuffers;
+
 pub struct CompressibleKernelsModule {
     state_step_index: usize,
 
@@ -31,11 +34,14 @@ impl CompressibleKernelsModule {
         mesh: &MeshResources,
         fields: &CompressibleFieldResources,
         matrix: &MatrixResources,
-        b_rhs: &wgpu::Buffer,
-        b_x: &wgpu::Buffer,
-        b_scalar_row_offsets: &wgpu::Buffer,
+        buffers: &LoweredBuffers,
+        ports: CompressibleLinearPorts,
         _scalar_row_offsets: &[u32],
     ) -> Self {
+        let b_rhs = buffers.buffer(ports.rhs);
+        let b_x = buffers.buffer(ports.x);
+        let b_scalar_row_offsets = buffers.buffer(ports.scalar_row_offsets);
+
         let pipeline_assembly =
             generated_assembly::compute::create_main_pipeline_embed_source(device);
         let pipeline_apply = generated_apply::compute::create_main_pipeline_embed_source(device);

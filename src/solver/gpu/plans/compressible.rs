@@ -6,6 +6,8 @@ use crate::solver::gpu::model_defaults::default_compressible_model;
 use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
+use crate::solver::gpu::modules::compressible_lowering::CompressibleLinearPorts;
+use crate::solver::gpu::modules::ports::LoweredBuffers;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -135,9 +137,8 @@ pub(crate) struct CompressiblePlanResources {
     pub b_row_offsets: wgpu::Buffer,
     pub b_col_indices: wgpu::Buffer,
     pub b_matrix_values: wgpu::Buffer,
-    pub b_rhs: wgpu::Buffer,
-    pub b_x: wgpu::Buffer,
-    pub b_scalar_row_offsets: wgpu::Buffer,
+    pub linear_ports: CompressibleLinearPorts,
+    pub linear_buffers: LoweredBuffers,
     pub kernels: CompressibleKernelsModule,
     pub fgmres_resources: Option<CompressibleFgmresResources>,
     pub outer_iters: usize,
@@ -488,9 +489,8 @@ impl CompressiblePlanResources {
             &lowered.mesh,
             &fields_res,
             &lowered.matrix,
-            &lowered.b_rhs,
-            &lowered.b_x,
-            &lowered.b_scalar_row_offsets,
+            &lowered.buffers,
+            lowered.ports,
             &lowered.scalar_row_offsets,
         );
 
@@ -518,9 +518,8 @@ impl CompressiblePlanResources {
             b_row_offsets: lowered.matrix.b_row_offsets,
             b_col_indices: lowered.matrix.b_col_indices,
             b_matrix_values: lowered.matrix.b_matrix_values,
-            b_rhs: lowered.b_rhs,
-            b_x: lowered.b_x,
-            b_scalar_row_offsets: lowered.b_scalar_row_offsets,
+            linear_ports: lowered.ports,
+            linear_buffers: lowered.buffers,
             kernels,
             fgmres_resources: None,
             outer_iters: 1,

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
+use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 
 use super::profiling::ProfilingStats;
 use super::structs::{GpuSolver, PreconditionerType};
@@ -84,6 +85,40 @@ impl GpuSolver {
             fields::create_field_bind_groups(&context.device, field_buffers, &bgl_fields);
 
         // Misc
+        let scalar_cg = ScalarCgModule::new(
+            num_cells,
+            &linear_res.b_rhs,
+            &linear_res.b_x,
+            &linear_res.b_matrix_values,
+            &linear_res.b_r,
+            &linear_res.b_r0,
+            &linear_res.b_p_solver,
+            &linear_res.b_v,
+            &linear_res.b_s,
+            &linear_res.b_t,
+            &linear_res.b_dot_result,
+            &linear_res.b_dot_result_2,
+            &linear_res.b_scalars,
+            &linear_res.b_solver_params,
+            &linear_res.b_staging_scalar,
+            &linear_res.bg_linear_matrix,
+            &linear_res.bg_linear_state,
+            &linear_res.bg_dot_params,
+            &linear_res.bg_dot_p_v,
+            &linear_res.bg_dot_r_r,
+            &scalar_res.bg_scalars,
+            &linear_res.bgl_dot_pair_inputs,
+            &linear_res.pipeline_spmv_p_v,
+            &linear_res.pipeline_dot,
+            &linear_res.pipeline_dot_pair,
+            &linear_res.pipeline_cg_update_x_r,
+            &linear_res.pipeline_cg_update_p,
+            &scalar_res.pipeline_init_cg_scalars,
+            &scalar_res.pipeline_reduce_r0_v,
+            &scalar_res.pipeline_reduce_rho_new_r_r,
+            &context.device,
+        );
+
         let mut solver = Self {
             context,
             // Mesh
@@ -193,6 +228,7 @@ impl GpuSolver {
 
             linear_ports: linear_res.ports,
             linear_port_space: linear_res.port_space,
+            scalar_cg,
         };
         solver.update_needs_gradients();
         solver

@@ -7,3 +7,4 @@ pub mod graph;
 pub mod ports;
 pub mod model_lowerer;
 pub mod linear_system;
+pub mod scalar_cg;

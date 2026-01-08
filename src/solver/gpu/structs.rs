@@ -287,4 +287,6 @@ pub(crate) struct GpuSolver {
 
     pub linear_ports: crate::solver::gpu::modules::linear_system::LinearSystemPorts,
     pub linear_port_space: crate::solver::gpu::modules::ports::PortSpace,
+
+    pub scalar_cg: crate::solver::gpu::modules::scalar_cg::ScalarCgModule,
 }

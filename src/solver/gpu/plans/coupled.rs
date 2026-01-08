@@ -16,7 +16,7 @@
 // - b_u is the momentum source term
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{ExecutionPlan, HostNode, PlanNode};
+use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::incompressible_kernels::{IncompressibleBindGroups, IncompressiblePipeline};
@@ -47,6 +47,93 @@ fn coupled_graph_assembly(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu
 
 fn coupled_graph_update(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule> {
     &solver.coupled_update_graph
+}
+
+fn coupled_runtime(solver: &GpuSolver) -> RuntimeDims {
+    RuntimeDims {
+        num_cells: solver.num_cells,
+        num_faces: solver.num_faces,
+    }
+}
+
+fn coupled_run_graph_init_prepare(
+    solver: &GpuSolver,
+    context: &GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+    let runtime = coupled_runtime(solver);
+    let graph = coupled_graph_init_prepare(solver);
+    match mode {
+        GraphExecMode::SingleSubmit => {
+            let start = std::time::Instant::now();
+            graph.execute(context, &solver.incompressible_kernels, runtime);
+            (start.elapsed().as_secs_f64(), None)
+        }
+        GraphExecMode::SplitTimed => {
+            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
+            (timings.total_seconds, None)
+        }
+    }
+}
+
+fn coupled_run_graph_prepare_assembly(
+    solver: &GpuSolver,
+    context: &GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+    let runtime = coupled_runtime(solver);
+    let graph = coupled_graph_prepare_assembly(solver);
+    match mode {
+        GraphExecMode::SingleSubmit => {
+            let start = std::time::Instant::now();
+            graph.execute(context, &solver.incompressible_kernels, runtime);
+            (start.elapsed().as_secs_f64(), None)
+        }
+        GraphExecMode::SplitTimed => {
+            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
+            (timings.total_seconds, None)
+        }
+    }
+}
+
+fn coupled_run_graph_assembly(
+    solver: &GpuSolver,
+    context: &GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+    let runtime = coupled_runtime(solver);
+    let graph = coupled_graph_assembly(solver);
+    match mode {
+        GraphExecMode::SingleSubmit => {
+            let start = std::time::Instant::now();
+            graph.execute(context, &solver.incompressible_kernels, runtime);
+            (start.elapsed().as_secs_f64(), None)
+        }
+        GraphExecMode::SplitTimed => {
+            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
+            (timings.total_seconds, None)
+        }
+    }
+}
+
+fn coupled_run_graph_update(
+    solver: &GpuSolver,
+    context: &GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+    let runtime = coupled_runtime(solver);
+    let graph = coupled_graph_update(solver);
+    match mode {
+        GraphExecMode::SingleSubmit => {
+            let start = std::time::Instant::now();
+            graph.execute(context, &solver.incompressible_kernels, runtime);
+            (start.elapsed().as_secs_f64(), None)
+        }
+        GraphExecMode::SplitTimed => {
+            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
+            (timings.total_seconds, None)
+        }
+    }
 }
 
 impl GpuSolver {
@@ -102,33 +189,6 @@ impl GpuSolver {
         })])
     }
 
-    fn coupled_runtime(&self) -> RuntimeDims {
-        RuntimeDims {
-            num_cells: self.num_cells,
-            num_faces: self.num_faces,
-        }
-    }
-
-    fn coupled_host_exec_init_prepare_graph(solver: &mut GpuSolver) {
-        let runtime = solver.coupled_runtime();
-        coupled_graph_init_prepare(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
-    }
-
-    fn coupled_host_exec_prepare_assembly_graph(solver: &mut GpuSolver) {
-        let runtime = solver.coupled_runtime();
-        coupled_graph_prepare_assembly(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
-    }
-
-    fn coupled_host_exec_assembly_graph(solver: &mut GpuSolver) {
-        let runtime = solver.coupled_runtime();
-        coupled_graph_assembly(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
-    }
-
-    fn coupled_host_exec_update_graph(solver: &mut GpuSolver) {
-        let runtime = solver.coupled_runtime();
-        coupled_graph_update(&*solver).execute(&solver.context, &solver.incompressible_kernels, runtime);
-    }
-
     fn coupled_host_solve(solver: &mut GpuSolver) {
         solver.coupled_last_linear_stats = solver.solve_coupled_system();
     }
@@ -155,9 +215,10 @@ impl GpuSolver {
         ExecutionPlan::new(
             coupled_context,
             vec![
-                PlanNode::Host(HostNode {
+                PlanNode::Graph(GraphNode {
                     label: "coupled:prepare_assembly_merged",
-                    run: GpuSolver::coupled_host_exec_prepare_assembly_graph,
+                    run: coupled_run_graph_prepare_assembly,
+                    mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Host(HostNode {
                     label: "coupled:solve_coupled_system",
@@ -175,9 +236,10 @@ impl GpuSolver {
                     label: "coupled:set_component_0",
                     run: GpuSolver::coupled_host_set_component_0,
                 }),
-                PlanNode::Host(HostNode {
+                PlanNode::Graph(GraphNode {
                     label: "coupled:init_prepare",
-                    run: GpuSolver::coupled_host_exec_init_prepare_graph,
+                    run: coupled_run_graph_init_prepare,
+                    mode: GraphExecMode::SingleSubmit,
                 }),
             ],
         )
@@ -187,9 +249,10 @@ impl GpuSolver {
         ExecutionPlan::new(
             coupled_context,
             vec![
-                PlanNode::Host(HostNode {
+                PlanNode::Graph(GraphNode {
                     label: "coupled:assembly_merged",
-                    run: GpuSolver::coupled_host_exec_assembly_graph,
+                    run: coupled_run_graph_assembly,
+                    mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Host(HostNode {
                     label: "coupled:solve_coupled_system",
@@ -207,9 +270,10 @@ impl GpuSolver {
                     label: "coupled:clear_max_diff",
                     run: GpuSolver::coupled_host_clear_max_diff,
                 }),
-                PlanNode::Host(HostNode {
+                PlanNode::Graph(GraphNode {
                     label: "coupled:update_fields_max_diff",
-                    run: GpuSolver::coupled_host_exec_update_graph,
+                    run: coupled_run_graph_update,
+                    mode: GraphExecMode::SingleSubmit,
                 }),
             ],
         )

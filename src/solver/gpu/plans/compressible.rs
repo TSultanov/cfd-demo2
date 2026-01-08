@@ -184,6 +184,25 @@ impl CompressiblePlanResources {
         &solver.pre_step_graph
     }
 
+    fn explicit_plan_pre_step_run(
+        solver: &CompressiblePlanResources,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+        let graph = CompressiblePlanResources::explicit_plan_pre_step_graph(solver);
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                graph.execute(context, solver);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = graph.execute_split_timed(context, solver);
+                (detail.total_seconds, Some(detail))
+            }
+        }
+    }
+
     fn explicit_plan_explicit_graph(
         solver: &CompressiblePlanResources,
     ) -> &KernelGraph<CompressiblePlanResources> {
@@ -194,18 +213,37 @@ impl CompressiblePlanResources {
         }
     }
 
+    fn explicit_plan_explicit_run(
+        solver: &CompressiblePlanResources,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+        let graph = CompressiblePlanResources::explicit_plan_explicit_graph(solver);
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                graph.execute(context, solver);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = graph.execute_split_timed(context, solver);
+                (detail.total_seconds, Some(detail))
+            }
+        }
+    }
+
     fn build_explicit_plan() -> ExecutionPlan<CompressiblePlanResources> {
         ExecutionPlan::new(
             CompressiblePlanResources::context_ref,
             vec![
                 PlanNode::Graph(GraphNode {
                     label: "compressible:pre_step",
-                    graph: CompressiblePlanResources::explicit_plan_pre_step_graph,
+                    run: CompressiblePlanResources::explicit_plan_pre_step_run,
                     mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Graph(GraphNode {
                     label: "compressible:explicit_graph",
-                    graph: CompressiblePlanResources::explicit_plan_explicit_graph,
+                    run: CompressiblePlanResources::explicit_plan_explicit_run,
                     mode: GraphExecMode::SplitTimed,
                 }),
             ],
@@ -259,16 +297,73 @@ impl CompressiblePlanResources {
         }
     }
 
+    fn implicit_iter_plan_grad_assembly_run(
+        solver: &CompressiblePlanResources,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+        let graph = CompressiblePlanResources::implicit_iter_plan_grad_assembly_graph(solver);
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                graph.execute(context, solver);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = graph.execute_split_timed(context, solver);
+                (detail.total_seconds, Some(detail))
+            }
+        }
+    }
+
     fn implicit_iter_plan_snapshot_graph(
         solver: &CompressiblePlanResources,
     ) -> &KernelGraph<CompressiblePlanResources> {
         &solver.implicit_snapshot_graph
     }
 
+    fn implicit_iter_plan_snapshot_run(
+        solver: &CompressiblePlanResources,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+        let graph = CompressiblePlanResources::implicit_iter_plan_snapshot_graph(solver);
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                graph.execute(context, solver);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = graph.execute_split_timed(context, solver);
+                (detail.total_seconds, Some(detail))
+            }
+        }
+    }
+
     fn implicit_iter_plan_apply_graph(
         solver: &CompressiblePlanResources,
     ) -> &KernelGraph<CompressiblePlanResources> {
         &solver.implicit_apply_graph
+    }
+
+    fn implicit_iter_plan_apply_run(
+        solver: &CompressiblePlanResources,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::kernel_graph::KernelGraphTimings>) {
+        let graph = CompressiblePlanResources::implicit_iter_plan_apply_graph(solver);
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                graph.execute(context, solver);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = graph.execute_split_timed(context, solver);
+                (detail.total_seconds, Some(detail))
+            }
+        }
     }
 
     fn implicit_host_solve_fgmres(solver: &mut CompressiblePlanResources) {
@@ -311,7 +406,7 @@ impl CompressiblePlanResources {
             vec![
                 PlanNode::Graph(GraphNode {
                     label: "compressible:implicit_grad_assembly",
-                    graph: CompressiblePlanResources::implicit_iter_plan_grad_assembly_graph,
+                    run: CompressiblePlanResources::implicit_iter_plan_grad_assembly_run,
                     mode: GraphExecMode::SplitTimed,
                 }),
                 PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
@@ -320,7 +415,7 @@ impl CompressiblePlanResources {
                 }),
                 PlanNode::Graph(GraphNode {
                     label: "compressible:implicit_snapshot",
-                    graph: CompressiblePlanResources::implicit_iter_plan_snapshot_graph,
+                    run: CompressiblePlanResources::implicit_iter_plan_snapshot_run,
                     mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
@@ -329,7 +424,7 @@ impl CompressiblePlanResources {
                 }),
                 PlanNode::Graph(GraphNode {
                     label: "compressible:implicit_apply",
-                    graph: CompressiblePlanResources::implicit_iter_plan_apply_graph,
+                    run: CompressiblePlanResources::implicit_iter_plan_apply_run,
                     mode: GraphExecMode::SingleSubmit,
                 }),
                 PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {

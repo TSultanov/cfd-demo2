@@ -1,5 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::kernel_graph::{KernelGraph, KernelGraphTimings};
+use crate::solver::gpu::kernel_graph::KernelGraphTimings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphExecMode {
@@ -9,7 +9,11 @@ pub enum GraphExecMode {
 
 pub struct GraphNode<S> {
     pub label: &'static str,
-    pub graph: fn(&S) -> &KernelGraph<S>,
+    /// Executes a graph-like node and returns `(seconds, optional detail)`.
+    ///
+    /// `detail` is currently only used for `KernelGraph` split timings; other graph
+    /// executors can return `None`.
+    pub run: fn(&S, &GpuContext, GraphExecMode) -> (f64, Option<KernelGraphTimings>),
     pub mode: GraphExecMode,
 }
 
@@ -39,28 +43,12 @@ impl<S> ExecutionPlan<S> {
             match node {
                 PlanNode::Graph(graph_node) => {
                     let context = (self.context)(&*solver);
-                    match graph_node.mode {
-                        GraphExecMode::SingleSubmit => {
-                            let start = std::time::Instant::now();
-                            let graph = (graph_node.graph)(&*solver);
-                            graph.execute(context, &*solver);
-                            let secs = start.elapsed().as_secs_f64();
-                            timings.push(PlanNodeTiming::Graph(GraphTiming {
-                                label: graph_node.label,
-                                seconds: secs,
-                                detail: None,
-                            }));
-                        }
-                        GraphExecMode::SplitTimed => {
-                            let graph = (graph_node.graph)(&*solver);
-                            let detail = graph.execute_split_timed(context, &*solver);
-                            timings.push(PlanNodeTiming::Graph(GraphTiming {
-                                label: graph_node.label,
-                                seconds: detail.total_seconds,
-                                detail: Some(detail),
-                            }));
-                        }
-                    }
+                    let (seconds, detail) = (graph_node.run)(&*solver, context, graph_node.mode);
+                    timings.push(PlanNodeTiming::Graph(GraphTiming {
+                        label: graph_node.label,
+                        seconds,
+                        detail,
+                    }));
                 }
                 PlanNode::Host(host_node) => {
                     let start = std::time::Instant::now();

@@ -1,4 +1,5 @@
 use crate::solver::gpu::bindings;
+use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use bytemuck::{bytes_of, Pod, Zeroable};
 
 pub const WORKGROUP_SIZE: u32 = 64;
@@ -914,6 +915,28 @@ impl FgmresWorkspace {
             pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs,
         }
+    }
+
+    pub fn new_from_system(
+        device: &wgpu::Device,
+        n: u32,
+        num_cells: u32,
+        max_restart: usize,
+        system: LinearSystemView<'_>,
+        precond: FgmresPrecondBindings<'_>,
+        label_prefix: &str,
+    ) -> Self {
+        Self::new(
+            device,
+            n,
+            num_cells,
+            max_restart,
+            system.row_offsets(),
+            system.col_indices(),
+            system.values(),
+            precond,
+            label_prefix,
+        )
     }
 
     pub fn core<'a>(&'a self, device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> FgmresCore<'a> {

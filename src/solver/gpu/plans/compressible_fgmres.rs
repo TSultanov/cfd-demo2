@@ -110,14 +110,12 @@ impl CompressiblePlanResources {
             },
             space: &self.port_space,
         };
-        let fgmres = FgmresWorkspace::new(
+        let fgmres = FgmresWorkspace::new_from_system(
             device,
             n,
             num_cells,
             max_restart,
-            matrix.row_offsets(),
-            matrix.col_indices(),
-            matrix.values(),
+            matrix,
             FgmresPrecondBindings::Diag {
                 diag_u: &b_diag_u,
                 diag_v: &b_diag_v,

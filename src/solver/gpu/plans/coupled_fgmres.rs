@@ -70,14 +70,12 @@ impl GpuSolver {
             space: &coupled.linear_port_space,
         };
 
-        let fgmres = FgmresWorkspace::new(
+        let fgmres = FgmresWorkspace::new_from_system(
             device,
             n,
             self.num_cells,
             max_restart,
-            block_system.row_offsets(),
-            block_system.col_indices(),
-            block_system.values(),
+            block_system,
             FgmresPrecondBindings::DiagWithParams {
                 diag_u: &coupled.b_diag_u,
                 diag_v: &coupled.b_diag_v,

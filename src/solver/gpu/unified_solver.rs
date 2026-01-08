@@ -577,11 +577,11 @@ impl GpuUnifiedSolver {
         let (num_unknowns, num_dot_groups) = match &mut self.plan {
             PlanInstance::Incompressible(solver) => {
                 let resources = solver.init_fgmres_resources(max_restart);
-                (resources.fgmres.n, resources.fgmres.num_dot_groups)
+                (resources.fgmres.n(), resources.fgmres.num_dot_groups())
             }
             PlanInstance::GenericCoupled(solver) => {
                 let resources = solver.linear.init_fgmres_resources(max_restart);
-                (resources.fgmres.n, resources.fgmres.num_dot_groups)
+                (resources.fgmres.n(), resources.fgmres.num_dot_groups())
             }
             PlanInstance::Compressible(_) => {
                 return Err(

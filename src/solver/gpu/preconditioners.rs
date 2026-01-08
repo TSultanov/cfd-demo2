@@ -58,8 +58,8 @@ impl CoupledPressurePreconditioner {
                 });
                 pass.set_pipeline(&fgmres.pipeline_relax_pressure);
                 // Layout requires these bind groups even though relax_pressure doesn't use group 1.
-                pass.set_bind_group(1, &fgmres.fgmres.bg_matrix, &[]);
-                pass.set_bind_group(2, &fgmres.fgmres.bg_precond, &[]);
+                pass.set_bind_group(1, fgmres.fgmres.matrix_bg(), &[]);
+                pass.set_bind_group(2, fgmres.fgmres.precond_bg(), &[]);
                 pass.set_bind_group(3, &fgmres.bg_pressure_matrix, &[]);
 
                 for _ in 0..p_iters {
@@ -106,8 +106,8 @@ impl CompressibleKrylovPreconditioner {
             let precond_vectors = solver.create_vector_bind_group(
                 fgmres,
                 solver.b_rhs.as_entire_binding(),
-                fgmres.fgmres.b_w.as_entire_binding(),
-                fgmres.fgmres.b_temp.as_entire_binding(),
+                fgmres.fgmres.w_buffer().as_entire_binding(),
+                fgmres.fgmres.temp_buffer().as_entire_binding(),
             );
             solver.dispatch_precond_build(fgmres, &precond_vectors, workgroups_cells);
         }
@@ -138,21 +138,21 @@ impl CompressibleKrylovPreconditioner {
                     fgmres,
                     vj,
                     z_out.as_entire_binding(),
-                    fgmres.fgmres.b_temp.as_entire_binding(),
+                    fgmres.fgmres.temp_buffer().as_entire_binding(),
                 ),
                 block_dispatch_x,
                 block_dispatch_y,
             ),
             Self::Identity => solver.dispatch_vector_pipeline(
-                &fgmres.fgmres.pipeline_copy,
+                fgmres.fgmres.pipeline_copy(),
                 fgmres,
                 &solver.create_vector_bind_group(
                     fgmres,
                     vj,
                     z_out.as_entire_binding(),
-                    fgmres.fgmres.b_temp.as_entire_binding(),
+                    fgmres.fgmres.temp_buffer().as_entire_binding(),
                 ),
-                &fgmres.fgmres.bg_params,
+                fgmres.fgmres.params_bg(),
                 dispatch_x,
                 dispatch_y,
             ),

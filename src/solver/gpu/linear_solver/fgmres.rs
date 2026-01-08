@@ -83,57 +83,57 @@ pub enum FgmresPrecondBindings<'a> {
 }
 
 pub struct FgmresWorkspace {
-    pub max_restart: usize,
-    pub n: u32,
-    pub num_cells: u32,
-    pub num_dot_groups: u32,
-    pub basis_stride: u64,
+    max_restart: usize,
+    n: u32,
+    num_cells: u32,
+    num_dot_groups: u32,
+    basis_stride: u64,
 
-    pub b_basis: wgpu::Buffer,
-    pub z_vectors: Vec<wgpu::Buffer>,
-    pub b_w: wgpu::Buffer,
-    pub b_temp: wgpu::Buffer,
-    pub b_dot_partial: wgpu::Buffer,
-    pub b_scalars: wgpu::Buffer,
-    pub b_params: wgpu::Buffer,
-    pub b_iter_params: wgpu::Buffer,
-    pub b_hessenberg: wgpu::Buffer,
-    pub b_givens: wgpu::Buffer,
-    pub b_g: wgpu::Buffer,
-    pub b_y: wgpu::Buffer,
-    pub b_staging_scalar: wgpu::Buffer,
+    b_basis: wgpu::Buffer,
+    z_vectors: Vec<wgpu::Buffer>,
+    b_w: wgpu::Buffer,
+    b_temp: wgpu::Buffer,
+    b_dot_partial: wgpu::Buffer,
+    b_scalars: wgpu::Buffer,
+    b_params: wgpu::Buffer,
+    b_iter_params: wgpu::Buffer,
+    b_hessenberg: wgpu::Buffer,
+    b_givens: wgpu::Buffer,
+    b_g: wgpu::Buffer,
+    b_y: wgpu::Buffer,
+    b_staging_scalar: wgpu::Buffer,
 
-    pub bgl_vectors: wgpu::BindGroupLayout,
-    pub bgl_matrix: wgpu::BindGroupLayout,
-    pub bgl_precond: wgpu::BindGroupLayout,
-    pub bgl_params: wgpu::BindGroupLayout,
-    pub bgl_logic: wgpu::BindGroupLayout,
-    pub bgl_logic_params: wgpu::BindGroupLayout,
-    pub bgl_cgs: wgpu::BindGroupLayout,
+    bgl_vectors: wgpu::BindGroupLayout,
+    bgl_matrix: wgpu::BindGroupLayout,
+    bgl_precond: wgpu::BindGroupLayout,
+    bgl_params: wgpu::BindGroupLayout,
+    bgl_logic: wgpu::BindGroupLayout,
+    bgl_logic_params: wgpu::BindGroupLayout,
+    bgl_cgs: wgpu::BindGroupLayout,
 
-    pub bg_matrix: wgpu::BindGroup,
-    pub bg_precond: wgpu::BindGroup,
-    pub bg_params: wgpu::BindGroup,
-    pub bg_logic: wgpu::BindGroup,
-    pub bg_logic_params: wgpu::BindGroup,
-    pub bg_cgs: wgpu::BindGroup,
+    bg_matrix: wgpu::BindGroup,
+    bg_precond: wgpu::BindGroup,
+    bg_params: wgpu::BindGroup,
+    bg_logic: wgpu::BindGroup,
+    bg_logic_params: wgpu::BindGroup,
+    bg_cgs: wgpu::BindGroup,
 
-    pub pipeline_spmv: wgpu::ComputePipeline,
-    pub pipeline_axpy: wgpu::ComputePipeline,
-    pub pipeline_axpy_from_y: wgpu::ComputePipeline,
-    pub pipeline_axpby: wgpu::ComputePipeline,
-    pub pipeline_scale: wgpu::ComputePipeline,
-    pub pipeline_scale_in_place: wgpu::ComputePipeline,
-    pub pipeline_copy: wgpu::ComputePipeline,
-    pub pipeline_dot_partial: wgpu::ComputePipeline,
-    pub pipeline_norm_sq: wgpu::ComputePipeline,
-    pub pipeline_reduce_final: wgpu::ComputePipeline,
-    pub pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
-    pub pipeline_update_hessenberg: wgpu::ComputePipeline,
-    pub pipeline_solve_triangular: wgpu::ComputePipeline,
-    pub pipeline_calc_dots_cgs: wgpu::ComputePipeline,
-    pub pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
-    pub pipeline_update_w_cgs: wgpu::ComputePipeline,
+    pipeline_spmv: wgpu::ComputePipeline,
+    pipeline_axpy: wgpu::ComputePipeline,
+    pipeline_axpy_from_y: wgpu::ComputePipeline,
+    pipeline_axpby: wgpu::ComputePipeline,
+    pipeline_scale: wgpu::ComputePipeline,
+    pipeline_scale_in_place: wgpu::ComputePipeline,
+    pipeline_copy: wgpu::ComputePipeline,
+    pipeline_dot_partial: wgpu::ComputePipeline,
+    pipeline_norm_sq: wgpu::ComputePipeline,
+    pipeline_reduce_final: wgpu::ComputePipeline,
+    pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
+    pipeline_update_hessenberg: wgpu::ComputePipeline,
+    pipeline_solve_triangular: wgpu::ComputePipeline,
+    pipeline_calc_dots_cgs: wgpu::ComputePipeline,
+    pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
+    pipeline_update_w_cgs: wgpu::ComputePipeline,
 }
 
 impl FgmresWorkspace {
@@ -952,6 +952,189 @@ impl FgmresWorkspace {
             pipeline_reduce_dots_cgs: &self.pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs: &self.pipeline_update_w_cgs,
         }
+    }
+
+    pub fn max_restart(&self) -> usize {
+        self.max_restart
+    }
+
+    pub fn n(&self) -> u32 {
+        self.n
+    }
+
+    pub fn num_dot_groups(&self) -> u32 {
+        self.num_dot_groups
+    }
+
+    pub fn basis_stride(&self) -> u64 {
+        self.basis_stride
+    }
+
+    pub fn vector_bytes(&self) -> u64 {
+        (self.n as u64) * 4
+    }
+
+    pub fn basis_binding(&self, idx: usize) -> wgpu::BindingResource<'_> {
+        basis_binding(&self.b_basis, self.basis_stride, self.vector_bytes(), idx)
+    }
+
+    pub fn basis_buffer(&self) -> &wgpu::Buffer {
+        &self.b_basis
+    }
+
+    pub fn z_vectors(&self) -> &[wgpu::Buffer] {
+        &self.z_vectors
+    }
+
+    pub fn z_buffer(&self, idx: usize) -> &wgpu::Buffer {
+        &self.z_vectors[idx]
+    }
+
+    pub fn w_buffer(&self) -> &wgpu::Buffer {
+        &self.b_w
+    }
+
+    pub fn temp_buffer(&self) -> &wgpu::Buffer {
+        &self.b_temp
+    }
+
+    pub fn dot_partial_buffer(&self) -> &wgpu::Buffer {
+        &self.b_dot_partial
+    }
+
+    pub fn scalars_buffer(&self) -> &wgpu::Buffer {
+        &self.b_scalars
+    }
+
+    pub fn params_buffer(&self) -> &wgpu::Buffer {
+        &self.b_params
+    }
+
+    pub fn iter_params_buffer(&self) -> &wgpu::Buffer {
+        &self.b_iter_params
+    }
+
+    pub fn hessenberg_buffer(&self) -> &wgpu::Buffer {
+        &self.b_hessenberg
+    }
+
+    pub fn givens_buffer(&self) -> &wgpu::Buffer {
+        &self.b_givens
+    }
+
+    pub fn g_buffer(&self) -> &wgpu::Buffer {
+        &self.b_g
+    }
+
+    pub fn y_buffer(&self) -> &wgpu::Buffer {
+        &self.b_y
+    }
+
+    pub fn staging_scalar_buffer(&self) -> &wgpu::Buffer {
+        &self.b_staging_scalar
+    }
+
+    pub fn vectors_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bgl_vectors
+    }
+
+    pub fn matrix_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bgl_matrix
+    }
+
+    pub fn precond_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bgl_precond
+    }
+
+    pub fn params_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bgl_params
+    }
+
+    pub fn matrix_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_matrix
+    }
+
+    pub fn precond_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_precond
+    }
+
+    pub fn params_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_params
+    }
+
+    pub fn logic_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_logic
+    }
+
+    pub fn logic_params_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_logic_params
+    }
+
+    pub fn cgs_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_cgs
+    }
+
+    pub fn pipeline_spmv(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_spmv
+    }
+
+    pub fn pipeline_axpy(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_axpy
+    }
+
+    pub fn pipeline_axpy_from_y(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_axpy_from_y
+    }
+
+    pub fn pipeline_axpby(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_axpby
+    }
+
+    pub fn pipeline_scale(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_scale
+    }
+
+    pub fn pipeline_scale_in_place(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_scale_in_place
+    }
+
+    pub fn pipeline_copy(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_copy
+    }
+
+    pub fn pipeline_norm_sq(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_norm_sq
+    }
+
+    pub fn pipeline_reduce_final(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_reduce_final
+    }
+
+    pub fn pipeline_reduce_final_and_finish_norm(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_reduce_final_and_finish_norm
+    }
+
+    pub fn pipeline_calc_dots_cgs(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_calc_dots_cgs
+    }
+
+    pub fn pipeline_reduce_dots_cgs(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_reduce_dots_cgs
+    }
+
+    pub fn pipeline_update_w_cgs(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_update_w_cgs
+    }
+
+    pub fn create_vector_bind_group<'a>(
+        &self,
+        device: &wgpu::Device,
+        x: wgpu::BindingResource<'a>,
+        y: wgpu::BindingResource<'a>,
+        z: wgpu::BindingResource<'a>,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        create_vector_bind_group(device, &self.bgl_vectors, x, y, z, label)
     }
 }
 

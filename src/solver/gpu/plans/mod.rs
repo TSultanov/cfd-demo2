@@ -4,4 +4,4 @@ pub(crate) mod coupled;
 pub(crate) mod coupled_fgmres;
 pub(crate) mod generic_coupled;
 pub(crate) mod incompressible;
-
+pub(crate) mod plan_instance;

@@ -6,7 +6,6 @@ use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerTy
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
 use crate::solver::scheme::Scheme;
-use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -63,10 +62,7 @@ pub enum PlanAction {
     PrintProfilingReport,
 }
 
-pub(crate) trait GpuPlanInstance: Any + Send {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-
+pub(crate) trait GpuPlanInstance: Send {
     fn num_cells(&self) -> u32;
     fn time(&self) -> f32;
     fn dt(&self) -> f32;
@@ -134,14 +130,6 @@ pub(crate) trait GpuPlanInstance: Any + Send {
 }
 
 impl GpuPlanInstance for GpuSolver {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn num_cells(&self) -> u32 {
         self.num_cells
     }
@@ -303,14 +291,6 @@ impl GpuPlanInstance for GpuSolver {
 }
 
 impl GpuPlanInstance for CompressiblePlanResources {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn num_cells(&self) -> u32 {
         self.num_cells
     }
@@ -475,14 +455,6 @@ impl GpuPlanInstance for CompressiblePlanResources {
 }
 
 impl GpuPlanInstance for GpuGenericCoupledSolver {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn num_cells(&self) -> u32 {
         self.runtime.num_cells
     }

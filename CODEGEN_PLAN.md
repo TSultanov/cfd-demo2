@@ -17,6 +17,7 @@ One **model-driven** GPU solver pipeline with:
 - Linear system resources are increasingly passed as typed ports/views (`LinearSystemPorts`, `LinearSystemView`) instead of raw buffers.
 - Readback staging buffers are shared via `StagingBufferCache`.
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
+- `GpuPlanInstance` no longer requires `Any`/downcasts (`src/solver/gpu/plans/plan_instance.rs`).
 - Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/plan_instance.rs`), keeping `UnifiedSolver` orchestration generic.
 - Generic coupled plan no longer depends on legacy `GpuSolver`; it uses a minimal scalar runtime (`src/solver/gpu/runtime.rs`) that owns mesh + constants + scalar CG resources.
 - The “linear debug” hooks (`set_linear_system`/`solve_linear_system_*`/`get_linear_solution`) are implemented across all current plans (scalar CG for scalar plans, FGMRES for compressible), reducing plan-only method gaps in `src/solver/gpu/plans/plan_instance.rs`.

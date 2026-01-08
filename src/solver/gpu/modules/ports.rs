@@ -107,6 +107,14 @@ impl PortSpace {
         Self::default()
     }
 
+    pub fn port<T>(&mut self, name: &'static str) -> Port<T> {
+        self.registry.port(name)
+    }
+
+    pub fn insert<T>(&mut self, port: Port<T>, buffer: wgpu::Buffer) {
+        self.buffers.insert(port, buffer);
+    }
+
     pub fn buffer<T>(&self, port: Port<T>) -> &wgpu::Buffer {
         self.buffers.buffer(port)
     }

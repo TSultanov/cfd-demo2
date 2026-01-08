@@ -190,6 +190,9 @@ impl GpuSolver {
             coupled_prepare_assembly_graph: GpuSolver::build_coupled_prepare_assembly_graph(),
             coupled_assembly_graph: GpuSolver::build_coupled_assembly_graph(),
             coupled_update_graph: GpuSolver::build_coupled_update_graph(),
+
+            linear_ports: linear_res.ports,
+            linear_port_space: linear_res.port_space,
         };
         solver.update_needs_gradients();
         solver

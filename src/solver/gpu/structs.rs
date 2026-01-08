@@ -284,4 +284,7 @@ pub(crate) struct GpuSolver {
     pub coupled_prepare_assembly_graph: KernelGraph<GpuSolver>,
     pub coupled_assembly_graph: KernelGraph<GpuSolver>,
     pub coupled_update_graph: KernelGraph<GpuSolver>,
+
+    pub linear_ports: crate::solver::gpu::modules::linear_system::LinearSystemPorts,
+    pub linear_port_space: crate::solver::gpu::modules::ports::PortSpace,
 }

@@ -7,6 +7,8 @@ use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::model_defaults::default_incompressible_model;
+use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
+use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use wgpu::util::DeviceExt;
 
@@ -57,6 +59,8 @@ pub struct LinearSolverResources {
     pub col_indices: Vec<u32>,
     pub num_groups: u32,
     pub coupled_resources: CoupledSolverResources,
+    pub ports: LinearSystemPorts,
+    pub port_space: PortSpace,
 }
 
 pub fn init_linear_solver(
@@ -65,6 +69,8 @@ pub fn init_linear_solver(
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
 ) -> LinearSolverResources {
+    let mut port_space = PortSpace::new();
+
     // 1. Initialize Matrix Resources (Buffers)
 
     // --- CSR Matrix Structure ---
@@ -79,6 +85,26 @@ pub fn init_linear_solver(
 
     // 2. Initialize State Resources
     let state_res = state::init_state(device, num_cells);
+
+    let ports = {
+        let row_offsets_port = port_space.port::<BufU32>("linear:row_offsets");
+        port_space.insert(row_offsets_port, matrix_res.b_row_offsets.clone());
+        let col_indices_port = port_space.port::<BufU32>("linear:col_indices");
+        port_space.insert(col_indices_port, matrix_res.b_col_indices.clone());
+        let values_port = port_space.port::<BufF32>("linear:matrix_values");
+        port_space.insert(values_port, matrix_res.b_matrix_values.clone());
+        let rhs_port = port_space.port::<BufF32>("linear:rhs");
+        port_space.insert(rhs_port, state_res.b_rhs.clone());
+        let x_port = port_space.port::<BufF32>("linear:x");
+        port_space.insert(x_port, state_res.b_x.clone());
+        LinearSystemPorts {
+            row_offsets: row_offsets_port,
+            col_indices: col_indices_port,
+            values: values_port,
+            rhs: rhs_port,
+            x: x_port,
+        }
+    };
 
     // 3. Initialize Pipelines
     let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res);
@@ -145,6 +171,8 @@ pub fn init_linear_solver(
         col_indices,
         num_groups: state_res.num_groups,
         coupled_resources,
+        ports,
+        port_space,
     }
 }
 

@@ -28,7 +28,7 @@ use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{
     CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
 };
-use bytemuck::{bytes_of, cast_slice};
+use bytemuck::cast_slice;
 use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
@@ -254,196 +254,14 @@ impl GpuSolver {
         n: u32,
     ) -> f32 {
         let start = Instant::now();
-
-        let workgroups = self.workgroups_for_size(n);
-        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-
-        // Create bind groups
-        let vector_bg = self.create_vector_bind_group(
-            fgmres,
-            x,
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            fgmres.fgmres.dot_partial_buffer().as_entire_binding(),
-            "FGMRES Norm BG",
-        );
-
-        let reduce_bg = self.create_vector_bind_group(
-            fgmres,
-            fgmres.fgmres.dot_partial_buffer().as_entire_binding(),
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            "FGMRES Reduce BG",
-        );
-
-        // Write params for partial reduction (n = vector size)
-        let partial_params = RawFgmresParams {
-            n,
-            num_cells: self.num_cells,
-            num_iters: 2,
-            omega: 1.0,
-            dispatch_x: self.dispatch_x_threads(workgroups),
-            max_restart: fgmres.fgmres.max_restart() as u32,
-            column_offset: 0,
-            _pad3: 0,
-        };
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.params_buffer(), 0, bytes_of(&partial_params));
-
-        // Create a single encoder for all GPU work
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("GPU Norm Batched"),
-                });
-
-        // Pass 1: Partial norm-squared reduction
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Norm Partial"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(fgmres.fgmres.pipeline_norm_sq());
-            pass.set_bind_group(0, &vector_bg, &[]);
-            pass.set_bind_group(1, fgmres.fgmres.matrix_bg(), &[]);
-            pass.set_bind_group(2, fgmres.fgmres.precond_bg(), &[]);
-            pass.set_bind_group(3, fgmres.fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-        }
-
-        // Submit partial reduction first (params need to change)
-        self.context.queue.submit(Some(encoder.finish()));
-
-        // Write params for final reduction (n = num_dot_groups)
-        let reduce_params = RawFgmresParams {
-            n: fgmres.fgmres.num_dot_groups(),
-            num_cells: 0,
-            num_iters: 0,
-            omega: 0.0,
-            dispatch_x: Self::WORKGROUP_SIZE,
-            max_restart: 0,
-            column_offset: 0,
-            _pad3: 0,
-        };
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.params_buffer(), 0, bytes_of(&reduce_params));
-
-        // Create encoder for final reduction + copy
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("GPU Norm Final + Copy"),
-                });
-
-        // Pass 2: Final reduction (sums partials, writes to scalars[0])
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Norm Reduce Final"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(fgmres.fgmres.pipeline_reduce_final());
-            pass.set_bind_group(0, &reduce_bg, &[]);
-            pass.set_bind_group(1, fgmres.fgmres.matrix_bg(), &[]);
-            pass.set_bind_group(2, fgmres.fgmres.precond_bg(), &[]);
-            pass.set_bind_group(3, fgmres.fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(1, 1, 1);
-        }
-
-        // Copy result to staging buffer (in same encoder)
-        encoder.copy_buffer_to_buffer(
-            fgmres.fgmres.scalars_buffer(),
-            0,
-            fgmres.fgmres.staging_scalar_buffer(),
-            0,
-            4,
-        );
-
-        // Submit final reduction + copy together
-        self.context.queue.submit(Some(encoder.finish()));
-
+        let norm = fgmres.fgmres.gpu_norm(&self.context.device, &self.context.queue, x, n);
         self.profiling_stats.record_location(
-            "gpu_norm:dispatch",
+            "gpu_norm",
             ProfileCategory::GpuDispatch,
             start.elapsed(),
             0,
         );
-
-        // Restore params.n for future operations (non-blocking write)
-        let restore_params = RawFgmresParams {
-            n,
-            num_cells: self.num_cells,
-            num_iters: 2,
-            omega: 1.0,
-            dispatch_x: self.dispatch_x_threads(workgroups),
-            max_restart: fgmres.fgmres.max_restart() as u32,
-            column_offset: 0,
-            _pad3: 0,
-        };
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.params_buffer(), 0, bytes_of(&restore_params));
-
-        // Async read the scalar
-        let read_start = Instant::now();
-        let norm_sq = self.read_scalar_async(fgmres);
-        self.profiling_stats.record_location(
-            "gpu_norm:read_scalar_async",
-            ProfileCategory::GpuRead,
-            read_start.elapsed(),
-            4,
-        );
-
-        norm_sq.sqrt()
-    }
-
-    /// Async scalar read - starts async map immediately after submission
-    /// and polls with yielding to allow other work to proceed
-    fn read_scalar_async(&self, fgmres: &FgmresResources) -> f32 {
-        // Start async map immediately (work is already submitted)
-        let slice = fgmres.fgmres.staging_scalar_buffer().slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-
-        // Poll with a combination of spinning and yielding for efficiency
-        let mut spin_count = 0;
-        loop {
-            // Poll the device to make progress on GPU work
-            let _ = self.context.device.poll(wgpu::PollType::Poll);
-
-            match rx.try_recv() {
-                Ok(Ok(())) => break,
-                Ok(Err(e)) => panic!("Buffer mapping failed: {:?}", e),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    spin_count += 1;
-                    if spin_count < 100 {
-                        // Spin briefly for low-latency cases
-                        std::hint::spin_loop();
-                    } else if spin_count < 1000 {
-                        // Yield to other threads after initial spinning
-                        std::thread::yield_now();
-                    } else {
-                        // Sleep briefly if taking too long (shouldn't happen normally)
-                        std::thread::sleep(std::time::Duration::from_micros(10));
-                    }
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    panic!("Channel disconnected");
-                }
-            }
-        }
-
-        // Read the value
-        let data = slice.get_mapped_range();
-        let value: f32 = *bytemuck::from_bytes(&data[0..4]);
-        drop(data);
-        fgmres.fgmres.staging_scalar_buffer().unmap();
-
-        value
+        norm
     }
 
     fn compute_residual_into<'a>(

@@ -1,15 +1,15 @@
 use super::compressible::CompressiblePlanResources;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{
-    fgmres_solve_once_with_preconditioner, write_params, write_scalars, write_zeros,
-    FgmresPrecondBindings, FgmresSolveOnceConfig, FgmresWorkspace, IterParams, RawFgmresParams,
+    dispatch_2d, dispatch_vector_pipeline, dispatch_x_threads, fgmres_solve_once_with_preconditioner,
+    workgroups_for_size, write_params, write_scalars, write_zeros, FgmresPrecondBindings,
+    FgmresSolveOnceConfig, FgmresWorkspace, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::modules::compressible_krylov::{
     CompressibleKrylovModule, CompressibleKrylovPreconditionerKind,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::structs::LinearSolverStats;
-use bytemuck::bytes_of;
 use std::collections::HashMap;
 
 pub struct CompressibleFgmresResources {
@@ -18,9 +18,6 @@ pub struct CompressibleFgmresResources {
 }
 
 impl CompressiblePlanResources {
-    const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
-    const WORKGROUP_SIZE: u32 = 64;
-
     pub(crate) fn ensure_fgmres_resources(&mut self, max_restart: usize) {
         let n = self.num_unknowns;
         let rebuild = match &self.fgmres_resources {
@@ -158,11 +155,11 @@ impl CompressiblePlanResources {
 
         let stats = 'stats: {
             let n = self.num_unknowns;
-            let workgroups = self.workgroups_for_size(n);
-            let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-            let dispatch_x_threads = self.dispatch_x_threads(workgroups);
-            let block_workgroups = self.workgroups_for_size(self.num_cells);
-            let (block_dispatch_x, block_dispatch_y) = self.dispatch_2d(block_workgroups);
+            let workgroups = workgroups_for_size(n);
+            let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+            let dispatch_x_threads = dispatch_x_threads(workgroups);
+            let block_workgroups = workgroups_for_size(self.num_cells);
+            let (block_dispatch_x, block_dispatch_y) = dispatch_2d(block_workgroups);
             let dispatch = DispatchGrids {
                 dofs: (dispatch_x, dispatch_y),
                 cells: (block_dispatch_x, block_dispatch_y),
@@ -173,7 +170,12 @@ impl CompressiblePlanResources {
             self.zero_buffer(b_x, n);
 
             let tol_abs = 1e-6f32;
-            let rhs_norm = self.gpu_norm(&fgmres, b_rhs.as_entire_binding(), n);
+            let rhs_norm = fgmres.fgmres.gpu_norm(
+                &self.context.device,
+                &self.context.queue,
+                b_rhs.as_entire_binding(),
+                n,
+            );
             if rhs_norm <= tol_abs {
                 let stats = LinearSolverStats {
                     iterations: 0,
@@ -227,35 +229,39 @@ impl CompressiblePlanResources {
                 .queue
                 .write_buffer(fgmres.fgmres.g_buffer(), 0, bytemuck::cast_slice(&g_init));
 
-            let basis0 = self.basis_binding(&fgmres, 0);
-            self.dispatch_vector_pipeline(
+            let basis0 = fgmres.fgmres.basis_binding(0);
+            let copy_bg = fgmres.fgmres.create_vector_bind_group(
+                &self.context.device,
+                b_rhs.as_entire_binding(),
+                basis0,
+                fgmres.fgmres.temp_buffer().as_entire_binding(),
+                "Compressible FGMRES copy BG",
+            );
+            dispatch_vector_pipeline(
+                &core,
                 fgmres.fgmres.pipeline_copy(),
-                &fgmres,
-                &self.create_vector_bind_group(
-                    &fgmres,
-                    b_rhs.as_entire_binding(),
-                    basis0,
-                    fgmres.fgmres.temp_buffer().as_entire_binding(),
-                ),
-                fgmres.fgmres.params_bg(),
+                &copy_bg,
                 dispatch_x,
                 dispatch_y,
+                "Compressible FGMRES copy",
             );
 
             write_scalars(&core, &[1.0 / rhs_norm]);
-            let basis0_y = self.basis_binding(&fgmres, 0);
-            self.dispatch_vector_pipeline(
+            let basis0_y = fgmres.fgmres.basis_binding(0);
+            let scale_bg = fgmres.fgmres.create_vector_bind_group(
+                &self.context.device,
+                fgmres.fgmres.w_buffer().as_entire_binding(),
+                basis0_y,
+                fgmres.fgmres.temp_buffer().as_entire_binding(),
+                "Compressible FGMRES normalize BG",
+            );
+            dispatch_vector_pipeline(
+                &core,
                 fgmres.fgmres.pipeline_scale_in_place(),
-                &fgmres,
-                &self.create_vector_bind_group(
-                    &fgmres,
-                    fgmres.fgmres.w_buffer().as_entire_binding(),
-                    basis0_y,
-                    fgmres.fgmres.temp_buffer().as_entire_binding(),
-                ),
-                fgmres.fgmres.params_bg(),
+                &scale_bg,
                 dispatch_x,
                 dispatch_y,
+                "Compressible FGMRES normalize",
             );
 
             // Solve (single restart) using the shared GPU FGMRES core.
@@ -312,205 +318,11 @@ impl CompressiblePlanResources {
         stats
     }
 
-    fn basis_binding<'a>(
-        &self,
-        fgmres: &'a CompressibleFgmresResources,
-        idx: usize,
-    ) -> wgpu::BindingResource<'a> {
-        fgmres.fgmres.basis_binding(idx)
-    }
-
-    pub(crate) fn create_vector_bind_group<'a>(
-        &self,
-        fgmres: &CompressibleFgmresResources,
-        x: wgpu::BindingResource<'a>,
-        y: wgpu::BindingResource<'a>,
-        z: wgpu::BindingResource<'a>,
-    ) -> wgpu::BindGroup {
-        fgmres.fgmres.create_vector_bind_group(
-            &self.context.device,
-            x,
-            y,
-            z,
-            "Compressible FGMRES vector BG",
-        )
-    }
-
-    pub(crate) fn dispatch_vector_pipeline(
-        &self,
-        pipeline: &wgpu::ComputePipeline,
-        fgmres: &CompressibleFgmresResources,
-        vector_bg: &wgpu::BindGroup,
-        group3_bg: &wgpu::BindGroup,
-        dispatch_x: u32,
-        dispatch_y: u32,
-    ) {
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Compressible FGMRES vector pass"),
-                });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Compressible FGMRES vector"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, vector_bg, &[]);
-            pass.set_bind_group(1, fgmres.fgmres.matrix_bg(), &[]);
-            pass.set_bind_group(2, fgmres.fgmres.precond_bg(), &[]);
-            pass.set_bind_group(3, group3_bg, &[]);
-            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-        }
-        self.context.queue.submit(Some(encoder.finish()));
-    }
-
-    fn workgroups_for_size(&self, n: u32) -> u32 {
-        n.div_ceil(Self::WORKGROUP_SIZE)
-    }
-
-    fn dispatch_2d(&self, workgroups: u32) -> (u32, u32) {
-        if workgroups <= Self::MAX_WORKGROUPS_PER_DIMENSION {
-            (workgroups, 1)
-        } else {
-            let dispatch_y = workgroups.div_ceil(Self::MAX_WORKGROUPS_PER_DIMENSION);
-            let dispatch_x = workgroups.div_ceil(dispatch_y);
-            (dispatch_x, dispatch_y)
-        }
-    }
-
-    fn dispatch_x_threads(&self, workgroups: u32) -> u32 {
-        let (dispatch_x, _) = self.dispatch_2d(workgroups);
-        dispatch_x * Self::WORKGROUP_SIZE
-    }
-
-    fn write_scalars(&self, fgmres: &CompressibleFgmresResources, scalars: &[f32]) {
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.scalars_buffer(), 0, bytemuck::cast_slice(scalars));
-    }
-
     fn zero_buffer(&self, buffer: &wgpu::Buffer, n: u32) {
         let zeros = vec![0.0f32; n as usize];
         self.context
             .queue
             .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
-    }
-
-    fn read_scalar(&self, fgmres: &CompressibleFgmresResources) -> f32 {
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Compressible FGMRES read scalar"),
-                });
-        encoder.copy_buffer_to_buffer(
-            fgmres.fgmres.scalars_buffer(),
-            0,
-            fgmres.fgmres.staging_scalar_buffer(),
-            0,
-            4,
-        );
-        self.context.queue.submit(Some(encoder.finish()));
-
-        let slice = fgmres.fgmres.staging_scalar_buffer().slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| {
-            let _ = tx.send(v);
-        });
-        let _ = self
-            .context
-            .device
-            .poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().ok().and_then(|v| v.ok()).unwrap();
-        let data = slice.get_mapped_range();
-        let value = f32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
-        drop(data);
-        fgmres.fgmres.staging_scalar_buffer().unmap();
-        value
-    }
-
-    fn gpu_norm<'a>(
-        &self,
-        fgmres: &CompressibleFgmresResources,
-        x: wgpu::BindingResource<'a>,
-        n: u32,
-    ) -> f32 {
-        let workgroups = self.workgroups_for_size(n);
-        let (dispatch_x, dispatch_y) = self.dispatch_2d(workgroups);
-
-        let vector_bg = self.create_vector_bind_group(
-            fgmres,
-            x,
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            fgmres.fgmres.dot_partial_buffer().as_entire_binding(),
-        );
-
-        let reduce_bg = self.create_vector_bind_group(
-            fgmres,
-            fgmres.fgmres.dot_partial_buffer().as_entire_binding(),
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-        );
-
-        let params = RawFgmresParams {
-            n,
-            num_cells: self.num_cells,
-            num_iters: 0,
-            omega: 1.0,
-            dispatch_x: self.dispatch_x_threads(workgroups),
-            max_restart: fgmres.fgmres.max_restart() as u32,
-            column_offset: 0,
-            _pad3: 0,
-        };
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.params_buffer(), 0, bytes_of(&params));
-        let iter_params = IterParams {
-            current_idx: 0,
-            max_restart: fgmres.fgmres.max_restart() as u32,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.iter_params_buffer(), 0, bytes_of(&iter_params));
-
-        self.dispatch_vector_pipeline(
-            fgmres.fgmres.pipeline_norm_sq(),
-            fgmres,
-            &vector_bg,
-            fgmres.fgmres.params_bg(),
-            dispatch_x,
-            dispatch_y,
-        );
-
-        let reduce_params = RawFgmresParams {
-            n: fgmres.fgmres.num_dot_groups(),
-            num_cells: 0,
-            num_iters: 0,
-            omega: 0.0,
-            dispatch_x: Self::WORKGROUP_SIZE,
-            max_restart: 0,
-            column_offset: 0,
-            _pad3: 0,
-        };
-        self.context
-            .queue
-            .write_buffer(fgmres.fgmres.params_buffer(), 0, bytes_of(&reduce_params));
-
-        self.dispatch_vector_pipeline(
-            fgmres.fgmres.pipeline_reduce_final(),
-            fgmres,
-            &reduce_bg,
-            fgmres.fgmres.params_bg(),
-            1,
-            1,
-        );
-
-        let norm_sq = self.read_scalar(fgmres);
-        norm_sq.sqrt()
     }
 }
 

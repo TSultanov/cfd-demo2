@@ -1136,6 +1136,133 @@ impl FgmresWorkspace {
     ) -> wgpu::BindGroup {
         create_vector_bind_group(device, &self.bgl_vectors, x, y, z, label)
     }
+
+    pub fn gpu_norm<'a>(
+        &'a self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        x: wgpu::BindingResource<'a>,
+        n: u32,
+    ) -> f32 {
+        debug_assert_eq!(
+            n, self.n,
+            "FgmresWorkspace::gpu_norm expects n == self.n"
+        );
+
+        let core = self.core(device, queue);
+        let workgroups = workgroups_for_size(n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+        let dispatch_x_threads = dispatch_x_threads(workgroups);
+
+        let vector_bg = create_vector_bind_group(
+            device,
+            self.vectors_layout(),
+            x,
+            self.temp_buffer().as_entire_binding(),
+            self.dot_partial_buffer().as_entire_binding(),
+            "FGMRES norm_sq vector BG",
+        );
+
+        let reduce_bg = create_vector_bind_group(
+            device,
+            self.vectors_layout(),
+            self.dot_partial_buffer().as_entire_binding(),
+            self.temp_buffer().as_entire_binding(),
+            self.temp_buffer().as_entire_binding(),
+            "FGMRES norm_sq reduce BG",
+        );
+
+        // Pass 1: partial reduction
+        let partial_params = RawFgmresParams {
+            n,
+            num_cells: self.num_cells,
+            num_iters: 0,
+            omega: 1.0,
+            dispatch_x: dispatch_x_threads,
+            max_restart: self.max_restart as u32,
+            column_offset: 0,
+            _pad3: 0,
+        };
+        write_params(&core, &partial_params);
+
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("FGMRES norm_sq partial"),
+            });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES norm_sq partial"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(self.pipeline_norm_sq());
+                pass.set_bind_group(0, &vector_bg, &[]);
+                pass.set_bind_group(1, self.matrix_bg(), &[]);
+                pass.set_bind_group(2, self.precond_bg(), &[]);
+                pass.set_bind_group(3, self.params_bg(), &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+            queue.submit(Some(encoder.finish()));
+        }
+
+        // Pass 2: final reduction + staging copy
+        let reduce_params = RawFgmresParams {
+            n: self.num_dot_groups(),
+            num_cells: 0,
+            num_iters: 0,
+            omega: 0.0,
+            dispatch_x: WORKGROUP_SIZE,
+            max_restart: 0,
+            column_offset: 0,
+            _pad3: 0,
+        };
+        write_params(&core, &reduce_params);
+
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("FGMRES norm_sq reduce_final"),
+            });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES norm_sq reduce_final"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(self.pipeline_reduce_final());
+                pass.set_bind_group(0, &reduce_bg, &[]);
+                pass.set_bind_group(1, self.matrix_bg(), &[]);
+                pass.set_bind_group(2, self.precond_bg(), &[]);
+                pass.set_bind_group(3, self.params_bg(), &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            encoder.copy_buffer_to_buffer(self.scalars_buffer(), 0, self.staging_scalar_buffer(), 0, 4);
+            queue.submit(Some(encoder.finish()));
+        }
+
+        // Restore params for subsequent vector ops, just in case.
+        write_params(&core, &partial_params);
+
+        // Read scalar via async map + polling loop (avoids blocking the whole device).
+        let slice = self.staging_scalar_buffer().slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+
+        loop {
+            let _ = device.poll(wgpu::PollType::Poll);
+            match rx.try_recv() {
+                Ok(Ok(())) => break,
+                Ok(Err(e)) => panic!("buffer mapping failed: {e:?}"),
+                Err(std::sync::mpsc::TryRecvError::Empty) => std::thread::yield_now(),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("map_async channel disconnected"),
+            }
+        }
+
+        let data = slice.get_mapped_range();
+        let norm_sq: f32 = *bytemuck::from_bytes(&data[0..4]);
+        drop(data);
+        self.staging_scalar_buffer().unmap();
+        norm_sq.sqrt()
+    }
 }
 
 #[derive(Clone, Copy)]

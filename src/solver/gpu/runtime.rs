@@ -1,20 +1,14 @@
-use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::init::{linear_solver, mesh as mesh_init, scalars};
+use crate::solver::gpu::init::{linear_solver, scalars};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
-use crate::solver::gpu::profiling::ProfilingStats;
-use crate::solver::gpu::readback::StagingBufferCache;
+use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 pub(crate) struct GpuScalarRuntime {
-    pub context: GpuContext,
-    pub mesh: mesh_init::MeshResources,
-    pub num_cells: u32,
-    pub num_faces: u32,
+    pub common: GpuRuntimeCommon,
     pub num_nonzeros: u32,
 
     pub b_constants: wgpu::Buffer,
@@ -24,28 +18,21 @@ pub(crate) struct GpuScalarRuntime {
     pub linear_port_space: PortSpace,
 
     pub scalar_cg: ScalarCgModule,
-
-    pub profiling_stats: Arc<ProfilingStats>,
-    readback_cache: StagingBufferCache,
 }
 
 impl GpuScalarRuntime {
     pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
-        let context = GpuContext::new(device, queue).await;
-        let num_cells = mesh.cell_cx.len() as u32;
-        let num_faces = mesh.face_owner.len() as u32;
-
-        let mesh_res = mesh_init::init_mesh(&context.device, mesh);
+        let common = GpuRuntimeCommon::new(mesh, device, queue).await;
 
         let linear_res = linear_solver::init_scalar_linear_solver(
-            &context.device,
-            num_cells,
-            &mesh_res.row_offsets,
-            &mesh_res.col_indices,
+            &common.context.device,
+            common.num_cells,
+            &common.mesh.row_offsets,
+            &common.mesh.col_indices,
         );
 
         let scalar_res = scalars::init_scalars(
-            &context.device,
+            &common.context.device,
             &linear_res.b_scalars,
             &linear_res.b_dot_result,
             &linear_res.b_dot_result_2,
@@ -53,7 +40,7 @@ impl GpuScalarRuntime {
         );
 
         let scalar_cg = ScalarCgModule::new(
-            num_cells,
+            common.num_cells,
             &linear_res.b_rhs,
             &linear_res.b_x,
             &linear_res.b_matrix_values,
@@ -83,39 +70,36 @@ impl GpuScalarRuntime {
             &scalar_res.pipeline_init_cg_scalars,
             &scalar_res.pipeline_reduce_r0_v,
             &scalar_res.pipeline_reduce_rho_new_r_r,
-            &context.device,
+            &common.context.device,
         );
 
         let constants = default_constants();
-        let b_constants = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let b_constants = common
+            .context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Constants Buffer"),
             contents: bytemuck::bytes_of(&constants),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let profiling_stats = Arc::new(ProfilingStats::new());
-
         let linear_ports = linear_res.ports;
         let linear_port_space = linear_res.port_space;
 
         Self {
-            context,
-            mesh: mesh_res,
-            num_cells,
-            num_faces,
+            common,
             num_nonzeros: linear_res.num_nonzeros,
             b_constants,
             constants,
             linear_ports,
             linear_port_space,
             scalar_cg,
-            profiling_stats,
-            readback_cache: Default::default(),
         }
     }
 
     pub fn update_constants(&self) {
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
     }
@@ -146,11 +130,11 @@ impl GpuScalarRuntime {
     }
 
     pub fn solve_linear_system_cg_with_size(&self, n: u32, max_iters: u32, tol: f32) -> LinearSolverStats {
-        self.scalar_cg.solve(&self.context, n, max_iters, tol)
+        self.scalar_cg.solve(&self.common.context, n, max_iters, tol)
     }
 
     pub fn solve_linear_system_cg(&self, max_iters: u32, tol: f32) -> LinearSolverStats {
-        self.solve_linear_system_cg_with_size(self.num_cells, max_iters, tol)
+        self.solve_linear_system_cg_with_size(self.common.num_cells, max_iters, tol)
     }
 
     pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
@@ -161,19 +145,19 @@ impl GpuScalarRuntime {
                 self.num_nonzeros
             ));
         }
-        if rhs.len() != self.num_cells as usize {
+        if rhs.len() != self.common.num_cells as usize {
             return Err(format!(
                 "rhs length {} does not match num_cells {}",
                 rhs.len(),
-                self.num_cells
+                self.common.num_cells
             ));
         }
-        self.context.queue.write_buffer(
+        self.common.context.queue.write_buffer(
             self.linear_port_space.buffer(self.linear_ports.values),
             0,
             bytemuck::cast_slice(matrix_values),
         );
-        self.context.queue.write_buffer(
+        self.common.context.queue.write_buffer(
             self.linear_port_space.buffer(self.linear_ports.rhs),
             0,
             bytemuck::cast_slice(rhs),
@@ -182,10 +166,10 @@ impl GpuScalarRuntime {
     }
 
     pub async fn get_linear_solution(&self, n: u32) -> Result<Vec<f32>, String> {
-        if n != self.num_cells {
+        if n != self.common.num_cells {
             return Err(format!(
                 "requested solution size {} does not match num_cells {}",
-                n, self.num_cells
+                n, self.common.num_cells
             ));
         }
         let raw = self
@@ -198,15 +182,9 @@ impl GpuScalarRuntime {
     }
 
     pub async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        crate::solver::gpu::readback::read_buffer_cached(
-            &self.context,
-            &self.readback_cache,
-            &self.profiling_stats,
-            buffer,
-            size,
-            "Scalar Runtime Staging Buffer (cached)",
-        )
-        .await
+        self.common
+            .read_buffer(buffer, size, "Scalar Runtime Staging Buffer (cached)")
+            .await
     }
 }
 

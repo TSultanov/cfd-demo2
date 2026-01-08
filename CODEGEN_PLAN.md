@@ -17,6 +17,7 @@ One **model-driven** GPU solver pipeline with:
 - Linear system resources are increasingly passed as typed ports/views (`LinearSystemPorts`, `LinearSystemView`) instead of raw buffers.
 - Readback staging buffers are shared via `StagingBufferCache`.
 - Readback is unified behind `read_buffer_cached` to avoid per-plan readback/profiling duplication (`src/solver/gpu/readback.rs`).
+- Legacy GMRES helpers also use the unified cached readback path (`src/solver/gpu/linear_solver/gmres.rs`).
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
 - `GpuPlanInstance` no longer requires `Any`/downcasts (`src/solver/gpu/plans/plan_instance.rs`).
 - Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/plan_instance.rs`), keeping `UnifiedSolver` orchestration generic.

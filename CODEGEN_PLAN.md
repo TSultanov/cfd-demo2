@@ -18,6 +18,7 @@ One **model-driven** GPU solver pipeline with:
 - Readback staging buffers are shared via `StagingBufferCache`.
 - Readback is unified behind `read_buffer_cached` to avoid per-plan readback/profiling duplication (`src/solver/gpu/readback.rs`).
 - Legacy GMRES helpers also use the unified cached readback path (`src/solver/gpu/linear_solver/gmres.rs`).
+- `GpuRuntimeCommon` consolidates context+mesh+profiling+readback (initially used by scalar runtimes), as a stepping stone toward module-owned resources (`src/solver/gpu/runtime_common.rs`).
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
 - Plan configuration (dt, spatial/temporal scheme, preconditioner) is routed through typed `PlanParam`/`PlanParamValue` instead of ad-hoc per-plan setters (`src/solver/gpu/plans/plan_instance.rs`).
 - `GpuPlanInstance` no longer requires `Any`/downcasts (`src/solver/gpu/plans/plan_instance.rs`).

@@ -22,6 +22,7 @@ One **model-driven** GPU solver pipeline with:
 - Generic coupled plan no longer depends on legacy `GpuSolver`; it uses a minimal scalar runtime (`src/solver/gpu/runtime.rs`) that owns mesh + constants + scalar CG resources.
 - Scalar runtimes are port-based (`LinearSystemPorts` + `PortSpace`) to align with the unified lowering/dispatch wiring (`src/solver/gpu/runtime.rs`).
 - The “linear debug” hooks (`set_linear_system`/`solve_linear_system_*`/`get_linear_solution`) are implemented across all current plans (scalar CG for scalar plans, FGMRES for compressible), reducing plan-only method gaps in `src/solver/gpu/plans/plan_instance.rs`.
+- Profiling is available across plans (each plan exposes `ProfilingStats`; actions may print empty data if uninstrumented).
 
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.

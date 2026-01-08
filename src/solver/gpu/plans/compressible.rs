@@ -9,6 +9,7 @@ use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, 
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::StagingBufferCache;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
@@ -16,6 +17,7 @@ use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use std::env;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 struct CompressibleOffsets {
@@ -118,6 +120,7 @@ impl CompressibleProfile {
 pub(crate) struct CompressiblePlanResources {
     pub context: GpuContext,
     pub(crate) readback_cache: StagingBufferCache,
+    pub(crate) profiling_stats: Arc<ProfilingStats>,
     pub num_cells: u32,
     pub num_faces: u32,
     pub num_unknowns: u32,
@@ -446,6 +449,7 @@ impl CompressiblePlanResources {
     ) -> Self {
         let context = GpuContext::new(device, queue).await;
         let profile = CompressibleProfile::new();
+        let profiling_stats = Arc::new(ProfilingStats::new());
 
         let model = default_compressible_model();
         let unknowns_per_cell = model.system.unknowns_per_cell();
@@ -495,6 +499,7 @@ impl CompressiblePlanResources {
         let mut solver = Self {
             context,
             readback_cache: Default::default(),
+            profiling_stats,
             num_cells,
             num_faces,
             num_unknowns,

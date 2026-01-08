@@ -324,9 +324,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
-        self.plan
-            .profiling_stats()
-            .ok_or_else(|| "profiling stats are not supported by this plan".into())
+        Ok(self.plan.profiling_stats())
     }
 
     pub fn print_profiling_report(&self) -> Result<(), String> {

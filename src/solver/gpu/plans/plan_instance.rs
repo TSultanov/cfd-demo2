@@ -84,13 +84,25 @@ pub(crate) trait GpuPlanInstance: Send {
         PlanStepStats::default()
     }
 
-    fn perform(&self, _action: PlanAction) -> Result<(), String> {
-        Err("action is not supported by this plan".into())
+    fn perform(&self, action: PlanAction) -> Result<(), String> {
+        let stats = self.profiling_stats();
+        match action {
+            PlanAction::StartProfilingSession => {
+                stats.start_session();
+                Ok(())
+            }
+            PlanAction::EndProfilingSession => {
+                stats.end_session();
+                Ok(())
+            }
+            PlanAction::PrintProfilingReport => {
+                stats.print_report();
+                Ok(())
+            }
+        }
     }
 
-    fn profiling_stats(&self) -> Option<Arc<ProfilingStats>> {
-        None
-    }
+    fn profiling_stats(&self) -> Arc<ProfilingStats>;
 
     fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
         self.step();
@@ -243,8 +255,8 @@ impl GpuPlanInstance for GpuSolver {
         }
     }
 
-    fn profiling_stats(&self) -> Option<Arc<ProfilingStats>> {
-        Some(self.get_profiling_stats())
+    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+        self.get_profiling_stats()
     }
 
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
@@ -323,6 +335,27 @@ impl GpuPlanInstance for CompressiblePlanResources {
         CompressiblePlanResources::set_precond_type(self, preconditioner);
     }
 
+    fn perform(&self, action: PlanAction) -> Result<(), String> {
+        match action {
+            PlanAction::StartProfilingSession => {
+                self.profiling_stats.start_session();
+                Ok(())
+            }
+            PlanAction::EndProfilingSession => {
+                self.profiling_stats.end_session();
+                Ok(())
+            }
+            PlanAction::PrintProfilingReport => {
+                self.profiling_stats.print_report();
+                Ok(())
+            }
+        }
+    }
+
+    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+        Arc::clone(&self.profiling_stats)
+    }
+
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
         match (param, value) {
             (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
@@ -355,6 +388,14 @@ impl GpuPlanInstance for CompressiblePlanResources {
             }
             (PlanParam::NonconvergedRelax, PlanParamValue::F32(relax)) => {
                 self.set_nonconverged_relax(relax);
+                Ok(())
+            }
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                if enable {
+                    self.profiling_stats.enable();
+                } else {
+                    self.profiling_stats.disable();
+                }
                 Ok(())
             }
             _ => Err("parameter is not supported by this plan".into()),
@@ -487,8 +528,39 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
         let _ = preconditioner;
     }
 
+    fn perform(&self, action: PlanAction) -> Result<(), String> {
+        match action {
+            PlanAction::StartProfilingSession => {
+                self.runtime.profiling_stats.start_session();
+                Ok(())
+            }
+            PlanAction::EndProfilingSession => {
+                self.runtime.profiling_stats.end_session();
+                Ok(())
+            }
+            PlanAction::PrintProfilingReport => {
+                self.runtime.profiling_stats.print_report();
+                Ok(())
+            }
+        }
+    }
+
+    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+        Arc::clone(&self.runtime.profiling_stats)
+    }
+
     fn set_param(&mut self, _param: PlanParam, _value: PlanParamValue) -> Result<(), String> {
-        Err("parameter is not supported by this plan".into())
+        match (_param, _value) {
+            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+                if enable {
+                    self.runtime.profiling_stats.enable();
+                } else {
+                    self.runtime.profiling_stats.disable();
+                }
+                Ok(())
+            }
+            _ => Err("parameter is not supported by this plan".into()),
+        }
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {

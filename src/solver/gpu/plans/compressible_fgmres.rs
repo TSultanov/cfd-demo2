@@ -1,13 +1,14 @@
 use super::compressible::CompressiblePlanResources;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{
-    dispatch_2d, dispatch_x_threads, workgroups_for_size, write_params, FgmresPrecondBindings,
-    FgmresSolveOnceConfig, FgmresWorkspace, IterParams, RawFgmresParams,
+    write_params, FgmresPrecondBindings, FgmresSolveOnceConfig, FgmresWorkspace, IterParams,
+    RawFgmresParams,
 };
 use crate::solver::gpu::modules::compressible_krylov::{
     CompressibleKrylovModule, CompressibleKrylovPreconditionerKind,
 };
 use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
+use crate::solver::gpu::modules::krylov_precond::KrylovDispatch;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -152,15 +153,11 @@ impl CompressiblePlanResources {
 
         let stats = 'stats: {
             let n = self.num_unknowns;
-            let workgroups = workgroups_for_size(n);
-            let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
-            let dispatch_x_threads = dispatch_x_threads(workgroups);
-            let block_workgroups = workgroups_for_size(self.num_cells);
-            let (block_dispatch_x, block_dispatch_y) = dispatch_2d(block_workgroups);
-            let dispatch = DispatchGrids {
-                dofs: (dispatch_x, dispatch_y),
-                cells: (block_dispatch_x, block_dispatch_y),
-            };
+            let KrylovDispatch {
+                grids: dispatch,
+                dofs_dispatch_x_threads,
+                ..
+            } = DispatchGrids::for_sizes(n, self.num_cells);
 
             let system = LinearSystemView {
                 ports: self.system_ports,
@@ -192,7 +189,7 @@ impl CompressiblePlanResources {
                 num_cells: self.num_cells,
                 num_iters: 0,
                 omega: 1.0,
-                dispatch_x: dispatch_x_threads,
+                dispatch_x: dofs_dispatch_x_threads,
                 max_restart: fgmres.fgmres.max_restart() as u32,
                 column_offset: 0,
                 _pad3: 0,

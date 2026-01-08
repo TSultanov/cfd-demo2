@@ -18,11 +18,10 @@
 // - Preconditioner sweep
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
-use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
+use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::linear_solver::fgmres::{
-    dispatch_2d, dispatch_x_threads, workgroups_for_size,
     write_iter_params, FgmresSolveOnceConfig, FgmresPrecondBindings, FgmresWorkspace, IterParams,
     RawFgmresParams,
 };
@@ -152,11 +151,11 @@ impl GpuSolver {
         pipeline: &wgpu::ComputePipeline,
         fgmres: &FgmresResources,
         vector_bg: &wgpu::BindGroup,
-        workgroups: u32,
+        dispatch: (u32, u32),
         label: &str,
     ) {
         let start = Instant::now();
-        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+        let (dispatch_x, dispatch_y) = dispatch;
         let core = fgmres
             .fgmres
             .core(&self.common.context.device, &self.common.context.queue);
@@ -205,7 +204,7 @@ impl GpuSolver {
         fgmres: &'a FgmresResources,
         res: &'a CoupledSolverResources,
         target: wgpu::BindingResource<'a>,
-        workgroups: u32,
+        dispatch: (u32, u32),
         n: u32,
     ) -> f32 {
         let system = LinearSystemView {
@@ -224,7 +223,7 @@ impl GpuSolver {
             fgmres.fgmres.pipeline_spmv(),
             fgmres,
             &spmv_bg,
-            workgroups,
+            dispatch,
             "FGMRES Residual SpMV",
         );
 
@@ -240,7 +239,7 @@ impl GpuSolver {
             fgmres.fgmres.pipeline_axpby(),
             fgmres,
             &residual_bg,
-            workgroups,
+            dispatch,
             "FGMRES Residual Axpby",
         );
 
@@ -251,7 +250,7 @@ impl GpuSolver {
         &self,
         fgmres: &'a FgmresResources,
         buffer: wgpu::BindingResource<'a>,
-        workgroups: u32,
+        dispatch: (u32, u32),
         label: &str,
     ) {
         let vector_bg = self.create_vector_bind_group(
@@ -265,7 +264,7 @@ impl GpuSolver {
             fgmres.fgmres.pipeline_scale_in_place(),
             fgmres,
             &vector_bg,
-            workgroups,
+            dispatch,
             label,
         );
     }
@@ -331,10 +330,11 @@ impl GpuSolver {
                 .fgmres
                 .core(&self.common.context.device, &self.common.context.queue);
 
-            let workgroups_dofs = workgroups_for_size(n);
-            let workgroups_cells = workgroups_for_size(num_cells);
-            let (dispatch_x, dispatch_y) = dispatch_2d(workgroups_cells);
-            let (dofs_dispatch_x, dofs_dispatch_y) = dispatch_2d(workgroups_dofs);
+            let KrylovDispatch {
+                grids,
+                dofs_dispatch_x_threads,
+                ..
+            } = DispatchGrids::for_sizes(n, num_cells);
 
         // Initialize IterParams
         let iter_params = IterParams {
@@ -393,7 +393,7 @@ impl GpuSolver {
             &fgmres,
             res,
             self.basis_binding(&fgmres, 0),
-            workgroups_dofs,
+            grids.dofs,
             n,
         );
 
@@ -420,7 +420,7 @@ impl GpuSolver {
         self.scale_vector_in_place(
             &fgmres,
             self.basis_binding(&fgmres, 0),
-            workgroups_dofs,
+            grids.dofs,
             "FGMRES Normalize V0",
         ); // Initialize g on GPU
         let g_init_write_start = Instant::now();
@@ -456,7 +456,7 @@ impl GpuSolver {
                 num_cells,
                 num_iters: 0,
                 omega: 1.0,
-                dispatch_x: dispatch_x_threads(workgroups_dofs),
+                dispatch_x: dofs_dispatch_x_threads,
                 max_restart: max_restart as u32,
                 column_offset: 0,
                 _pad3: 0,
@@ -474,8 +474,8 @@ impl GpuSolver {
                     reset_x_before_update: false,
                 },
                 DispatchGrids {
-                    dofs: (dofs_dispatch_x, dofs_dispatch_y),
-                    cells: (dispatch_x, dispatch_y),
+                    dofs: grids.dofs,
+                    cells: grids.cells,
                 },
                 "FGMRES Preconditioner Step",
             );
@@ -500,7 +500,7 @@ impl GpuSolver {
                 &fgmres,
                 res,
                 self.basis_binding(&fgmres, 0),
-                workgroups_dofs,
+                grids.dofs,
                 n,
             );
             final_resid = residual_norm;
@@ -540,7 +540,7 @@ impl GpuSolver {
             self.scale_vector_in_place(
                 &fgmres,
                 self.basis_binding(&fgmres, 0),
-                workgroups_dofs,
+                grids.dofs,
                 "FGMRES Restart Normalize",
             );
 

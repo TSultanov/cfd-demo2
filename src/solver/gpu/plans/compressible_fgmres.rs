@@ -1,8 +1,7 @@
 use super::compressible::CompressiblePlanResources;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{
-    dispatch_2d, dispatch_vector_pipeline, dispatch_x_threads,
-    workgroups_for_size, write_params, write_scalars, write_zeros, FgmresPrecondBindings,
+    dispatch_2d, dispatch_x_threads, workgroups_for_size, write_params, FgmresPrecondBindings,
     FgmresSolveOnceConfig, FgmresWorkspace, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::modules::compressible_krylov::{
@@ -217,49 +216,13 @@ impl CompressiblePlanResources {
                 _pad2: 0,
             };
 
-            write_zeros(&core, fgmres.fgmres.hessenberg_buffer());
-            write_zeros(&core, fgmres.fgmres.givens_buffer());
-            write_zeros(&core, fgmres.fgmres.y_buffer());
-            let mut g_init = vec![0.0f32; fgmres.fgmres.max_restart() + 1];
-            g_init[0] = rhs_norm;
-            self.common
-                .context
-                .queue
-                .write_buffer(fgmres.fgmres.g_buffer(), 0, bytemuck::cast_slice(&g_init));
-
-            let basis0 = fgmres.fgmres.basis_binding(0);
-            let copy_bg = fgmres.fgmres.create_vector_bind_group(
-                &self.common.context.device,
+            fgmres.fgmres.clear_restart_aux(&core);
+            fgmres.fgmres.write_g0(&self.common.context.queue, rhs_norm);
+            fgmres.fgmres.init_basis0_from_vector_normalized(
+                &core,
                 system.rhs().as_entire_binding(),
-                basis0,
-                fgmres.fgmres.temp_buffer().as_entire_binding(),
-                "Compressible FGMRES copy BG",
-            );
-            dispatch_vector_pipeline(
-                &core,
-                fgmres.fgmres.pipeline_copy(),
-                &copy_bg,
-                dispatch_x,
-                dispatch_y,
-                "Compressible FGMRES copy",
-            );
-
-            write_scalars(&core, &[1.0 / rhs_norm]);
-            let basis0_y = fgmres.fgmres.basis_binding(0);
-            let scale_bg = fgmres.fgmres.create_vector_bind_group(
-                &self.common.context.device,
-                fgmres.fgmres.w_buffer().as_entire_binding(),
-                basis0_y,
-                fgmres.fgmres.temp_buffer().as_entire_binding(),
-                "Compressible FGMRES normalize BG",
-            );
-            dispatch_vector_pipeline(
-                &core,
-                fgmres.fgmres.pipeline_scale_in_place(),
-                &scale_bg,
-                dispatch_x,
-                dispatch_y,
-                "Compressible FGMRES normalize",
+                1.0 / rhs_norm,
+                "Compressible FGMRES",
             );
 
             // Solve (single restart) using the shared GPU FGMRES core.

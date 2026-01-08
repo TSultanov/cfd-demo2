@@ -977,6 +977,64 @@ impl FgmresWorkspace {
         }
     }
 
+    pub fn clear_restart_aux(&self, core: &FgmresCore<'_>) {
+        write_zeros(core, self.hessenberg_buffer());
+        write_zeros(core, self.givens_buffer());
+        write_zeros(core, self.y_buffer());
+    }
+
+    pub fn write_g0(&self, queue: &wgpu::Queue, g0: f32) {
+        let mut g = vec![0.0_f32; self.max_restart + 1];
+        g[0] = g0;
+        queue.write_buffer(self.g_buffer(), 0, bytemuck::cast_slice(&g));
+    }
+
+    pub fn init_basis0_from_vector_normalized<'src>(
+        &self,
+        core: &FgmresCore<'_>,
+        src: wgpu::BindingResource<'src>,
+        inv_norm: f32,
+        label_prefix: &str,
+    ) {
+        let workgroups = workgroups_for_size(self.n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+
+        let basis0 = self.basis_binding(0);
+        let copy_bg = self.create_vector_bind_group(
+            core.device,
+            src,
+            basis0,
+            self.temp_buffer().as_entire_binding(),
+            &format!("{label_prefix} basis0 copy BG"),
+        );
+        dispatch_vector_pipeline(
+            core,
+            self.pipeline_copy(),
+            &copy_bg,
+            dispatch_x,
+            dispatch_y,
+            &format!("{label_prefix} basis0 copy"),
+        );
+
+        write_scalars(core, &[inv_norm]);
+        let basis0 = self.basis_binding(0);
+        let scale_bg = self.create_vector_bind_group(
+            core.device,
+            self.w_buffer().as_entire_binding(),
+            basis0,
+            self.temp_buffer().as_entire_binding(),
+            &format!("{label_prefix} basis0 normalize BG"),
+        );
+        dispatch_vector_pipeline(
+            core,
+            self.pipeline_scale_in_place(),
+            &scale_bg,
+            dispatch_x,
+            dispatch_y,
+            &format!("{label_prefix} basis0 normalize"),
+        );
+    }
+
     pub fn max_restart(&self) -> usize {
         self.max_restart
     }

@@ -31,7 +31,6 @@ use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{
     CoupledSolverResources, GpuSolver, LinearSolverStats, PreconditionerParams,
 };
-use bytemuck::cast_slice;
 use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
@@ -424,18 +423,13 @@ impl GpuSolver {
             workgroups_dofs,
             "FGMRES Normalize V0",
         ); // Initialize g on GPU
-        let mut g_initial = vec![0.0f32; max_restart + 1];
-        g_initial[0] = residual_norm;
         let g_init_write_start = Instant::now();
-        self.common
-            .context
-            .queue
-            .write_buffer(fgmres.fgmres.g_buffer(), 0, cast_slice(&g_initial));
+        fgmres.fgmres.write_g0(&self.common.context.queue, residual_norm);
         self.common.profiling_stats.record_location(
             "fgmres:write_g_init",
             ProfileCategory::GpuWrite,
             g_init_write_start.elapsed(),
-            (g_initial.len() * 4) as u64,
+            fgmres.fgmres.g_buffer().size(),
         );
 
         let mut total_iters = 0u32;
@@ -525,18 +519,13 @@ impl GpuSolver {
 
             // Prepare for restart
             // Reset g on GPU
-            let mut g_initial = vec![0.0f32; max_restart + 1];
-            g_initial[0] = residual_norm;
             let g_write_start = Instant::now();
-            self.common
-                .context
-                .queue
-                .write_buffer(fgmres.fgmres.g_buffer(), 0, cast_slice(&g_initial));
+            fgmres.fgmres.write_g0(&self.common.context.queue, residual_norm);
             self.common.profiling_stats.record_location(
                 "fgmres:write_g_restart",
                 ProfileCategory::GpuWrite,
                 g_write_start.elapsed(),
-                (g_initial.len() * 4) as u64,
+                fgmres.fgmres.g_buffer().size(),
             );
 
             if residual_norm <= 0.0 {

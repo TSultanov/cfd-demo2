@@ -1,5 +1,7 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::init::{linear_solver, mesh as mesh_init, scalars};
+use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
+use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::readback::StagingBufferCache;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
@@ -16,7 +18,8 @@ pub(crate) struct GpuScalarRuntime {
     pub b_constants: wgpu::Buffer,
     pub constants: GpuConstants,
 
-    pub b_row_offsets: wgpu::Buffer,
+    pub linear_ports: LinearSystemPorts,
+    pub linear_port_space: PortSpace,
 
     pub scalar_cg: ScalarCgModule,
 
@@ -87,6 +90,9 @@ impl GpuScalarRuntime {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let linear_ports = linear_res.ports;
+        let linear_port_space = linear_res.port_space;
+
         Self {
             context,
             mesh: mesh_res,
@@ -95,7 +101,8 @@ impl GpuScalarRuntime {
             num_nonzeros: linear_res.num_nonzeros,
             b_constants,
             constants,
-            b_row_offsets: linear_res.b_row_offsets,
+            linear_ports,
+            linear_port_space,
             scalar_cg,
             readback_cache: Default::default(),
         }
@@ -156,13 +163,15 @@ impl GpuScalarRuntime {
             ));
         }
         self.context.queue.write_buffer(
-            self.scalar_cg.matrix_values(),
+            self.linear_port_space.buffer(self.linear_ports.values),
             0,
             bytemuck::cast_slice(matrix_values),
         );
-        self.context
-            .queue
-            .write_buffer(self.scalar_cg.rhs(), 0, bytemuck::cast_slice(rhs));
+        self.context.queue.write_buffer(
+            self.linear_port_space.buffer(self.linear_ports.rhs),
+            0,
+            bytemuck::cast_slice(rhs),
+        );
         Ok(())
     }
 
@@ -173,7 +182,12 @@ impl GpuScalarRuntime {
                 n, self.num_cells
             ));
         }
-        let raw = self.read_buffer(self.scalar_cg.x(), (n as u64) * 4).await;
+        let raw = self
+            .read_buffer(
+                self.linear_port_space.buffer(self.linear_ports.x),
+                (n as u64) * 4,
+            )
+            .await;
         Ok(bytemuck::cast_slice(&raw).to_vec())
     }
 

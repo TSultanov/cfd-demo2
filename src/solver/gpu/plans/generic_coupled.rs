@@ -193,7 +193,10 @@ impl GpuGenericCoupledSolver {
                     layout: &bgl,
                     entries: &gen_update::WgpuBindGroup1Entries::new(
                         gen_update::WgpuBindGroup1EntriesParams {
-                            x: runtime.scalar_cg.x().as_entire_buffer_binding(),
+                            x: runtime
+                                .linear_port_space
+                                .buffer(runtime.linear_ports.x)
+                                .as_entire_buffer_binding(),
                         },
                     )
                     .into_array(),
@@ -208,9 +211,18 @@ impl GpuGenericCoupledSolver {
                     layout: &bgl,
                     entries: &gen_assembly::WgpuBindGroup2Entries::new(
                         gen_assembly::WgpuBindGroup2EntriesParams {
-                            matrix_values: runtime.scalar_cg.matrix_values().as_entire_buffer_binding(),
-                            rhs: runtime.scalar_cg.rhs().as_entire_buffer_binding(),
-                            scalar_row_offsets: runtime.b_row_offsets.as_entire_buffer_binding(),
+                            matrix_values: runtime
+                                .linear_port_space
+                                .buffer(runtime.linear_ports.values)
+                                .as_entire_buffer_binding(),
+                            rhs: runtime
+                                .linear_port_space
+                                .buffer(runtime.linear_ports.rhs)
+                                .as_entire_buffer_binding(),
+                            scalar_row_offsets: runtime
+                                .linear_port_space
+                                .buffer(runtime.linear_ports.row_offsets)
+                                .as_entire_buffer_binding(),
                         },
                     )
                     .into_array(),

@@ -1,6 +1,6 @@
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanFuture, PlanParam, PlanParamValue,
+    FgmresSizing, GpuPlanInstance, PlanCapability, PlanFuture, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -382,6 +382,14 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
 
     fn state_buffer(&self) -> &wgpu::Buffer {
         GpuGenericCoupledSolver::state_buffer(self)
+    }
+
+    fn supports(&self, capability: PlanCapability) -> bool {
+        match capability {
+            PlanCapability::LinearSystemDebug => true,
+            PlanCapability::CoupledUnknowns => true,
+            PlanCapability::FgmresSizing => true,
+        }
     }
 
     fn profiling_stats(&self) -> Arc<ProfilingStats> {

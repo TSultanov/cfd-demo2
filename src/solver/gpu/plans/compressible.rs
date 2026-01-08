@@ -10,7 +10,7 @@ use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, 
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanFuture, PlanParam, PlanParamValue,
+    FgmresSizing, GpuPlanInstance, PlanCapability, PlanFuture, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::StagingBufferCache;
@@ -948,6 +948,14 @@ impl GpuPlanInstance for CompressiblePlanResources {
 
     fn state_buffer(&self) -> &wgpu::Buffer {
         &self.b_state
+    }
+
+    fn supports(&self, capability: PlanCapability) -> bool {
+        match capability {
+            PlanCapability::LinearSystemDebug => true,
+            PlanCapability::CoupledUnknowns => true,
+            PlanCapability::FgmresSizing => true,
+        }
     }
 
     fn profiling_stats(&self) -> Arc<ProfilingStats> {

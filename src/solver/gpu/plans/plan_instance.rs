@@ -65,11 +65,25 @@ pub enum PlanAction {
     PrintProfilingReport,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlanCapability {
+    /// Plan supports setting/solving/reading a linear system via the debug hooks.
+    LinearSystemDebug,
+    /// Plan exposes the notion of "coupled unknowns" for its linear system.
+    CoupledUnknowns,
+    /// Plan can report FGMRES sizing information.
+    FgmresSizing,
+}
+
 pub(crate) trait GpuPlanInstance: Send {
     fn num_cells(&self) -> u32;
     fn time(&self) -> f32;
     fn dt(&self) -> f32;
     fn state_buffer(&self) -> &wgpu::Buffer;
+
+    fn supports(&self, _capability: PlanCapability) -> bool {
+        false
+    }
 
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String>;
 

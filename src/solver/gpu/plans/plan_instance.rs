@@ -122,13 +122,13 @@ pub(crate) trait GpuPlanInstance: Send {
         Err("set_linear_system is not supported by this plan".into())
     }
 
-    fn solve_linear_system_cg_with_size(
+    fn solve_linear_system_with_size(
         &mut self,
         _n: u32,
         _max_iters: u32,
         _tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        Err("solve_linear_system_cg_with_size is not supported by this plan".into())
+        Err("solve_linear_system_with_size is not supported by this plan".into())
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {

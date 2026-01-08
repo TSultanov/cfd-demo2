@@ -30,7 +30,7 @@ use std::time::Instant;
 const DEBUG_READS_ENABLED: bool = false;
 
 fn coupled_context(solver: &GpuSolver) -> &GpuContext {
-    &solver.context
+    &solver.common.context
 }
 
 fn coupled_graph_init_prepare(solver: &GpuSolver) -> &ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule> {
@@ -206,6 +206,7 @@ impl GpuSolver {
             return;
         };
         solver
+            .common
             .context
             .queue
             .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
@@ -354,7 +355,7 @@ impl GpuSolver {
         {
             let init_dispatch_start = Instant::now();
             GpuSolver::coupled_init_plan().execute(self);
-            self.profiling_stats.record_location(
+            self.common.profiling_stats.record_location(
                 "coupled:init_prepare",
                 ProfileCategory::GpuDispatch,
                 init_dispatch_start.elapsed(),
@@ -376,12 +377,12 @@ impl GpuSolver {
         }
 
         for iter in 0..max_coupled_iters {
-            self.profiling_stats.increment_iteration();
+            self.common.profiling_stats.increment_iteration();
             let io_start = Instant::now();
             if !quiet {
                 println!("Coupled Iteration: {}", iter + 1);
             }
-            self.profiling_stats.record_location(
+            self.common.profiling_stats.record_location(
                 "coupled:println_iteration",
                 ProfileCategory::CpuCompute,
                 io_start.elapsed(),
@@ -392,7 +393,7 @@ impl GpuSolver {
             if DEBUG_READS_ENABLED && iter == 0 {
                 let read_start = Instant::now();
                 let d_p_vals = pollster::block_on(self.get_d_p());
-                self.profiling_stats.record_location(
+                self.common.profiling_stats.record_location(
                     "coupled:debug_get_d_p",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
@@ -419,7 +420,7 @@ impl GpuSolver {
                         self.constants.component = 0;
                         let update_const_start = Instant::now();
                         self.update_constants();
-                        self.profiling_stats.record_location(
+                        self.common.profiling_stats.record_location(
                             "coupled:update_constants",
                             ProfileCategory::GpuWrite,
                             update_const_start.elapsed(),
@@ -436,7 +437,7 @@ impl GpuSolver {
 
                 let assembly_secs = timings.seconds_for("coupled:gradient_assembly_merged");
                 if assembly_secs > 0.0 {
-                    self.profiling_stats.record_location(
+                    self.common.profiling_stats.record_location(
                         "coupled:gradient_assembly_merged",
                         ProfileCategory::GpuDispatch,
                         std::time::Duration::from_secs_f64(assembly_secs),
@@ -445,7 +446,7 @@ impl GpuSolver {
                 }
                 let solve_secs = timings.seconds_for("coupled:solve_coupled_system");
                 if solve_secs > 0.0 {
-                    self.profiling_stats.record_location(
+                    self.common.profiling_stats.record_location(
                         "coupled:solve_coupled_system",
                         ProfileCategory::CpuCompute,
                         std::time::Duration::from_secs_f64(solve_secs),
@@ -458,10 +459,11 @@ impl GpuSolver {
             if DEBUG_READS_ENABLED && iter == 0 {
                 let sync_start = Instant::now();
                 let _ = self
+                    .common
                     .context
                     .device
                     .poll(wgpu::PollType::wait_indefinitely());
-                self.profiling_stats.record_location(
+                self.common.profiling_stats.record_location(
                     "coupled:debug_sync",
                     ProfileCategory::GpuSync,
                     sync_start.elapsed(),
@@ -478,7 +480,7 @@ impl GpuSolver {
                 let matrix_vals = pollster::block_on(
                     self.read_buffer_f32(b_matrix_values, res.num_nonzeros),
                 );
-                self.profiling_stats.record_location(
+                self.common.profiling_stats.record_location(
                     "coupled:debug_read_matrix",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
@@ -490,7 +492,7 @@ impl GpuSolver {
                 let rhs_vals = pollster::block_on(
                     self.read_buffer_f32(b_rhs, self.num_cells * unknowns_per_cell),
                 );
-                self.profiling_stats.record_location(
+                self.common.profiling_stats.record_location(
                     "coupled:debug_read_rhs",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
@@ -503,7 +505,7 @@ impl GpuSolver {
                     .buffer(res.linear_ports.col_indices);
                 let col_indices =
                     pollster::block_on(self.read_buffer_u32(b_col_indices, res.num_nonzeros));
-                self.profiling_stats.record_location(
+                self.common.profiling_stats.record_location(
                     "coupled:debug_read_col_indices",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
@@ -519,7 +521,7 @@ impl GpuSolver {
                 let row_offsets = pollster::block_on(
                     self.read_buffer_u32(b_row_offsets, self.num_cells * unknowns_per_cell + 1),
                 );
-                self.profiling_stats.record_location(
+                self.common.profiling_stats.record_location(
                     "coupled:debug_read_row_offsets",
                     ProfileCategory::GpuRead,
                     read_start.elapsed(),
@@ -596,7 +598,7 @@ impl GpuSolver {
                     stats.iterations, stats.residual, stats.converged
                 );
             }
-            self.profiling_stats.record_location(
+            self.common.profiling_stats.record_location(
                 "coupled:println_linear_solve",
                 ProfileCategory::CpuCompute,
                 io_start.elapsed(),
@@ -614,7 +616,7 @@ impl GpuSolver {
                 if iter > 0 {
                     let clear_secs = timings.seconds_for("coupled:clear_max_diff");
                     if clear_secs > 0.0 {
-                        self.profiling_stats.record_location(
+                        self.common.profiling_stats.record_location(
                             "coupled:clear_max_diff",
                             ProfileCategory::GpuWrite,
                             std::time::Duration::from_secs_f64(clear_secs),
@@ -625,7 +627,7 @@ impl GpuSolver {
 
                 let update_secs = timings.seconds_for("coupled:update_fields_max_diff");
                 if update_secs > 0.0 {
-                    self.profiling_stats.record_location(
+                    self.common.profiling_stats.record_location(
                         "coupled:update_fields_max_diff",
                         ProfileCategory::GpuDispatch,
                         std::time::Duration::from_secs_f64(update_secs),
@@ -641,14 +643,14 @@ impl GpuSolver {
                     let async_start = Instant::now();
                     let mut reader = res.async_scalar_reader.borrow_mut();
                     reader.start_read(
-                        &self.context.device,
-                        &self.context.queue,
+                        &self.common.context.device,
+                        &self.common.context.queue,
                         &res.b_max_diff_result,
                         0,
                     );
 
                     reader.poll(); // Poll for completion of previous reads
-                    self.profiling_stats.record_location(
+                    self.common.profiling_stats.record_location(
                         "coupled:async_convergence_check",
                         ProfileCategory::Other,
                         async_start.elapsed(),
@@ -679,7 +681,7 @@ impl GpuSolver {
                                 max_diff_u, max_diff_p
                             );
                         }
-                        self.profiling_stats.record_location(
+                        self.common.profiling_stats.record_location(
                             "coupled:println_residuals",
                             ProfileCategory::CpuCompute,
                             io_start.elapsed(),
@@ -745,6 +747,7 @@ impl GpuSolver {
         self.check_evolution();
 
         let _ = self
+            .common
             .context
             .device
             .poll(wgpu::PollType::wait_indefinitely());

@@ -31,7 +31,8 @@ impl GpuSolver {
             state[base] = ux as f32;
             state[base + 1] = uy as f32;
         }
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&state));
     }
@@ -44,7 +45,8 @@ impl GpuSolver {
         for (i, &pval) in p.iter().enumerate() {
             state[i * stride + p_offset] = pval as f32;
         }
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&state));
     }
@@ -105,7 +107,8 @@ impl GpuSolver {
     }
 
     pub fn update_constants(&self) {
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
     }
@@ -153,15 +156,9 @@ impl GpuSolver {
     }
 
     pub(crate) async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        crate::solver::gpu::readback::read_buffer_cached(
-            &self.context,
-            &self.readback_cache,
-            &self.profiling_stats,
-            buffer,
-            size,
-            "Staging Buffer (cached)",
-        )
-        .await
+        self.common
+            .read_buffer(buffer, size, "Staging Buffer (cached)")
+            .await
     }
 
     pub(crate) async fn read_buffer_f32(&self, buffer: &wgpu::Buffer, count: u32) -> Vec<f32> {
@@ -181,37 +178,38 @@ impl GpuSolver {
 
     /// Get a reference to the detailed profiling statistics
     pub fn get_profiling_stats(&self) -> Arc<ProfilingStats> {
-        Arc::clone(&self.profiling_stats)
+        Arc::clone(&self.common.profiling_stats)
     }
 
     /// Enable detailed GPU-CPU communication profiling
     pub fn enable_detailed_profiling(&self, enable: bool) {
         if enable {
-            self.profiling_stats.enable();
+            self.common.profiling_stats.enable();
         } else {
-            self.profiling_stats.disable();
+            self.common.profiling_stats.disable();
         }
     }
 
     /// Start a profiling session
     pub fn start_profiling_session(&self) {
-        self.profiling_stats.start_session();
+        self.common.profiling_stats.start_session();
         self.record_initial_allocations();
     }
 
     /// End a profiling session and get the report
     pub fn end_profiling_session(&self) {
-        self.profiling_stats.end_session();
+        self.common.profiling_stats.end_session();
     }
 
     /// Print the profiling report
     pub fn print_profiling_report(&self) {
-        self.profiling_stats.print_report();
+        self.common.profiling_stats.print_report();
     }
 
     pub fn initialize_history(&self) {
         let mut encoder =
-            self.context
+            self.common
+                .context
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Initialize History Encoder"),
@@ -226,35 +224,42 @@ impl GpuSolver {
         // Copy state to state_old_old
         encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old_old, 0, state_size);
 
-        self.context.queue.submit(Some(encoder.finish()));
+        self.common.context.queue.submit(Some(encoder.finish()));
     }
 
     fn record_initial_allocations(&self) {
-        if !self.profiling_stats.is_enabled() {
+        if !self.common.profiling_stats.is_enabled() {
             return;
         }
 
         let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
-            solver.profiling_stats.record_gpu_alloc(label, buf.size());
+            solver
+                .common
+                .profiling_stats
+                .record_gpu_alloc(label, buf.size());
         };
 
         // Mesh
-        record(self, "mesh:face_owner", &self.b_face_owner);
-        record(self, "mesh:face_neighbor", &self.b_face_neighbor);
-        record(self, "mesh:face_boundary", &self.b_face_boundary);
-        record(self, "mesh:face_areas", &self.b_face_areas);
-        record(self, "mesh:face_normals", &self.b_face_normals);
-        record(self, "mesh:face_centers", &self.b_face_centers);
-        record(self, "mesh:cell_centers", &self.b_cell_centers);
-        record(self, "mesh:cell_vols", &self.b_cell_vols);
-        record(self, "mesh:cell_face_offsets", &self.b_cell_face_offsets);
-        record(self, "mesh:cell_faces", &self.b_cell_faces);
+        record(self, "mesh:face_owner", &self.common.mesh.b_face_owner);
+        record(self, "mesh:face_neighbor", &self.common.mesh.b_face_neighbor);
+        record(self, "mesh:face_boundary", &self.common.mesh.b_face_boundary);
+        record(self, "mesh:face_areas", &self.common.mesh.b_face_areas);
+        record(self, "mesh:face_normals", &self.common.mesh.b_face_normals);
+        record(self, "mesh:face_centers", &self.common.mesh.b_face_centers);
+        record(self, "mesh:cell_centers", &self.common.mesh.b_cell_centers);
+        record(self, "mesh:cell_vols", &self.common.mesh.b_cell_vols);
+        record(
+            self,
+            "mesh:cell_face_offsets",
+            &self.common.mesh.b_cell_face_offsets,
+        );
+        record(self, "mesh:cell_faces", &self.common.mesh.b_cell_faces);
         record(
             self,
             "mesh:cell_face_matrix_indices",
-            &self.b_cell_face_matrix_indices,
+            &self.common.mesh.b_cell_face_matrix_indices,
         );
-        record(self, "mesh:diagonal_indices", &self.b_diagonal_indices);
+        record(self, "mesh:diagonal_indices", &self.common.mesh.b_diagonal_indices);
 
         // Fields (consolidated FluidState buffers)
         record(self, "fields:state", &self.b_state);
@@ -328,12 +333,15 @@ impl GpuSolver {
     }
 
     pub(crate) fn record_fgmres_allocations(&self, fgmres: &FgmresResources) {
-        if !self.profiling_stats.is_enabled() {
+        if !self.common.profiling_stats.is_enabled() {
             return;
         }
 
         let record = |solver: &Self, label: &str, buf: &wgpu::Buffer| {
-            solver.profiling_stats.record_gpu_alloc(label, buf.size());
+            solver
+                .common
+                .profiling_stats
+                .record_gpu_alloc(label, buf.size());
         };
 
         record(self, "fgmres:basis", fgmres.fgmres.basis_buffer());
@@ -441,7 +449,7 @@ impl GpuPlanInstance for GpuSolver {
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
         for buffer in &self.state_buffers {
-            self.context.queue.write_buffer(buffer, 0, bytes);
+            self.common.context.queue.write_buffer(buffer, 0, bytes);
         }
         Ok(())
     }
@@ -487,7 +495,7 @@ impl GpuPlanInstance for GpuSolver {
         Ok(())
     }
 
-    fn solve_linear_system_cg_with_size(
+    fn solve_linear_system_with_size(
         &mut self,
         n: u32,
         max_iters: u32,

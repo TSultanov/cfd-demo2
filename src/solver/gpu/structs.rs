@@ -1,15 +1,12 @@
 use super::async_buffer::AsyncScalarReader;
-use super::context::GpuContext;
 use super::modules::incompressible_kernels::IncompressibleKernelsModule;
 use super::modules::linear_system::LinearSystemPorts;
 use super::modules::ports::PortSpace;
 use super::plans::coupled_fgmres::FgmresResources;
-use super::profiling::ProfilingStats;
-use super::readback::StagingBufferCache;
+use super::runtime_common::GpuRuntimeCommon;
 use super::modules::graph::ModuleGraph;
 use bytemuck::{Pod, Zeroable};
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -153,23 +150,7 @@ impl Default for PreconditionerParams {
 }
 
 pub(crate) struct GpuSolver {
-    pub context: GpuContext,
-
-    // Mesh buffers
-    pub b_face_owner: wgpu::Buffer,
-    pub b_face_neighbor: wgpu::Buffer,
-    pub b_face_boundary: wgpu::Buffer,
-    pub b_face_areas: wgpu::Buffer,
-    pub b_face_normals: wgpu::Buffer,
-    pub b_face_centers: wgpu::Buffer,
-    pub b_cell_centers: wgpu::Buffer,
-    pub b_cell_vols: wgpu::Buffer,
-
-    // Connectivity
-    pub b_cell_face_offsets: wgpu::Buffer,
-    pub b_cell_faces: wgpu::Buffer,
-    pub b_cell_face_matrix_indices: wgpu::Buffer,
-    pub b_diagonal_indices: wgpu::Buffer,
+    pub common: GpuRuntimeCommon,
 
     // Field buffers (consolidated FluidState)
     pub b_state: wgpu::Buffer,            // Current FluidState (read/write)
@@ -258,12 +239,6 @@ pub(crate) struct GpuSolver {
     pub prev_u_cpu: Vec<f32>,
     pub steady_state_count: u32,
     pub should_stop: bool,
-
-    /// Detailed profiling statistics for GPU-CPU communication analysis
-    pub profiling_stats: Arc<ProfilingStats>,
-
-    // Cache of persistent staging buffers for GPU->CPU reads, keyed by exact size in bytes
-    pub readback_cache: StagingBufferCache,
 
     // Prebuilt compute graphs for coupled solver dispatch (module-based).
     pub coupled_init_prepare_graph: ModuleGraph<IncompressibleKernelsModule>,

@@ -1056,7 +1056,7 @@ impl GpuPlanInstance for CompressiblePlanResources {
         Ok(())
     }
 
-    fn solve_linear_system_cg_with_size(
+    fn solve_linear_system_with_size(
         &mut self,
         n: u32,
         max_iters: u32,

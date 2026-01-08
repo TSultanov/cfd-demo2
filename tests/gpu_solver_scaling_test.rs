@@ -119,7 +119,7 @@ fn solve_identity_system(solver: &mut UnifiedSolver, mesh: &Mesh) {
         .set_linear_system(&matrix, &rhs)
         .expect("set linear system");
     let stats = solver
-        .solve_linear_system_cg_with_size(mesh.num_cells() as u32, 200, 1e-6)
+        .solve_linear_system_with_size(mesh.num_cells() as u32, 200, 1e-6)
         .expect("cg solve");
     assert!(
         stats.converged,

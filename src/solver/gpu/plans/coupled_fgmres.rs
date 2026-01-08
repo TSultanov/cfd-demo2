@@ -59,7 +59,7 @@ impl GpuSolver {
 
     /// Initialize FGMRES resources
     pub fn init_fgmres_resources(&self, max_restart: usize) -> FgmresResources {
-        let device = &self.context.device;
+        let device = &self.common.context.device;
         let coupled = self
             .coupled_resources
             .as_ref()
@@ -131,11 +131,12 @@ impl GpuSolver {
 
     fn write_scalars(&self, fgmres: &FgmresResources, scalars: &[f32]) {
         let start = Instant::now();
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(fgmres.fgmres.scalars_buffer(), 0, cast_slice(scalars));
         let bytes = (scalars.len() * 4) as u64;
-        self.profiling_stats.record_location(
+        self.common.profiling_stats.record_location(
             "write_scalars",
             ProfileCategory::GpuWrite,
             start.elapsed(),
@@ -162,8 +163,8 @@ impl GpuSolver {
         let start = Instant::now();
         let bg = fgmres
             .fgmres
-            .create_vector_bind_group(&self.context.device, x, y, z, label);
-        self.profiling_stats.record_location(
+            .create_vector_bind_group(&self.common.context.device, x, y, z, label);
+        self.common.profiling_stats.record_location(
             "create_vector_bind_group",
             ProfileCategory::CpuCompute,
             start.elapsed(),
@@ -183,6 +184,7 @@ impl GpuSolver {
     ) {
         let start = Instant::now();
         let mut encoder = self
+            .common
             .context
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
@@ -197,8 +199,8 @@ impl GpuSolver {
             label,
         );
 
-        self.context.queue.submit(Some(encoder.finish()));
-        self.profiling_stats.record_location(
+        self.common.context.queue.submit(Some(encoder.finish()));
+        self.common.profiling_stats.record_location(
             label,
             ProfileCategory::GpuDispatch,
             start.elapsed(),
@@ -242,8 +244,10 @@ impl GpuSolver {
         n: u32,
     ) -> f32 {
         let start = Instant::now();
-        let norm = fgmres.fgmres.gpu_norm(&self.context.device, &self.context.queue, x, n);
-        self.profiling_stats.record_location(
+        let norm = fgmres
+            .fgmres
+            .gpu_norm(&self.common.context.device, &self.common.context.queue, x, n);
+        self.common.profiling_stats.record_location(
             "gpu_norm",
             ProfileCategory::GpuDispatch,
             start.elapsed(),
@@ -377,12 +381,14 @@ impl GpuSolver {
                     num_rows: self.num_cells as usize,
                     num_cols: self.num_cells as usize,
                 };
-                fgmres.precond.ensure_amg_resources(&self.context.device, matrix);
+                fgmres
+                    .precond
+                    .ensure_amg_resources(&self.common.context.device, matrix);
             }
 
             let core = fgmres
                 .fgmres
-                .core(&self.context.device, &self.context.queue);
+                .core(&self.common.context.device, &self.common.context.queue);
 
             let workgroups_dofs = self.workgroups_for_size(n);
             let workgroups_cells = self.workgroups_for_size(num_cells);
@@ -398,7 +404,7 @@ impl GpuSolver {
         };
         let init_write_start = Instant::now();
         write_iter_params(&core, &iter_params);
-        self.profiling_stats.record_location(
+        self.common.profiling_stats.record_location(
             "fgmres:write_iter_params_init",
             ProfileCategory::GpuWrite,
             init_write_start.elapsed(),
@@ -412,12 +418,12 @@ impl GpuSolver {
             _pad0: 0,
         };
         let precond_write_start = Instant::now();
-        self.context.queue.write_buffer(
+        self.common.context.queue.write_buffer(
             &res.b_precond_params,
             0,
             bytemuck::bytes_of(&precond_params),
         );
-        self.profiling_stats.record_location(
+        self.common.profiling_stats.record_location(
             "fgmres:write_precond_params",
             ProfileCategory::GpuWrite,
             precond_write_start.elapsed(),
@@ -430,7 +436,7 @@ impl GpuSolver {
             ports: res.linear_ports,
             space: &res.linear_port_space,
         };
-        let rhs_norm = fgmres.rhs_norm(&self.context, system, n);
+        let rhs_norm = fgmres.rhs_norm(&self.common.context, system, n);
         if rhs_norm < abstol || !rhs_norm.is_finite() {
             break 'stats LinearSolverStats {
                 iterations: 0,
@@ -479,10 +485,11 @@ impl GpuSolver {
         let mut g_initial = vec![0.0f32; max_restart + 1];
         g_initial[0] = residual_norm;
         let g_init_write_start = Instant::now();
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(fgmres.fgmres.g_buffer(), 0, cast_slice(&g_initial));
-        self.profiling_stats.record_location(
+        self.common.profiling_stats.record_location(
             "fgmres:write_g_init",
             ProfileCategory::GpuWrite,
             g_init_write_start.elapsed(),
@@ -497,7 +504,7 @@ impl GpuSolver {
         if !quiet {
             println!("FGMRES: Initial residual = {:.2e}", residual_norm);
         }
-        self.profiling_stats.record_location(
+        self.common.profiling_stats.record_location(
             "fgmres:println",
             ProfileCategory::CpuCompute,
             io_start.elapsed(),
@@ -520,7 +527,7 @@ impl GpuSolver {
             };
 
             let solve = fgmres.solve_once(
-                &self.context,
+                &self.common.context,
                 system,
                 rhs_norm,
                 params,
@@ -579,10 +586,11 @@ impl GpuSolver {
             let mut g_initial = vec![0.0f32; max_restart + 1];
             g_initial[0] = residual_norm;
             let g_write_start = Instant::now();
-            self.context
+            self.common
+                .context
                 .queue
                 .write_buffer(fgmres.fgmres.g_buffer(), 0, cast_slice(&g_initial));
-            self.profiling_stats.record_location(
+            self.common.profiling_stats.record_location(
                 "fgmres:write_g_restart",
                 ProfileCategory::GpuWrite,
                 g_write_start.elapsed(),
@@ -642,7 +650,7 @@ impl GpuSolver {
                 total_iters, final_resid, converged
             );
         }
-        self.profiling_stats.record_location(
+        self.common.profiling_stats.record_location(
             "fgmres:println",
             ProfileCategory::CpuCompute,
             io_start.elapsed(),

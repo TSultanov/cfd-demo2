@@ -4,14 +4,13 @@ pub mod mesh;
 pub mod scalars;
 
 use crate::solver::mesh::Mesh;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 
-use super::profiling::ProfilingStats;
+use super::runtime_common::GpuRuntimeCommon;
 use super::structs::{GpuSolver, PreconditionerType};
 
 impl GpuSolver {
@@ -20,28 +19,25 @@ impl GpuSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Self {
-        let context = super::context::GpuContext::new(device, queue).await;
+        let common = GpuRuntimeCommon::new(mesh, device, queue).await;
 
-        let num_cells = mesh.cell_cx.len() as u32;
-        let num_faces = mesh.face_owner.len() as u32;
-
-        // 1. Initialize Mesh
-        let mesh_res = mesh::init_mesh(&context.device, mesh);
+        let num_cells = common.num_cells;
+        let num_faces = common.num_faces;
 
         // 2. Initialize Field Buffers (phase 1 - before pipelines)
-        let field_buffers = fields::init_field_buffers(&context.device, num_cells, num_faces);
+        let field_buffers = fields::init_field_buffers(&common.context.device, num_cells, num_faces);
 
         // 3. Initialize Linear Solver
         let linear_res = linear_solver::init_linear_solver(
-            &context.device,
+            &common.context.device,
             num_cells,
-            &mesh_res.row_offsets,
-            &mesh_res.col_indices,
+            &common.mesh.row_offsets,
+            &common.mesh.col_indices,
         );
 
         // 4. Initialize Scalars
         let scalar_res = scalars::init_scalars(
-            &context.device,
+            &common.context.device,
             &linear_res.b_scalars,
             &linear_res.b_dot_result,
             &linear_res.b_dot_result_2,
@@ -49,15 +45,15 @@ impl GpuSolver {
         );
 
         // 5. Create fields bind groups (phase 2)
-        let bgl_fields = context.device.create_bind_group_layout(
+        let bgl_fields = common.context.device.create_bind_group_layout(
             &generated_coupled_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
         );
         let fields_res =
-            fields::create_field_bind_groups(&context.device, field_buffers, &bgl_fields);
+            fields::create_field_bind_groups(&common.context.device, field_buffers, &bgl_fields);
 
         let incompressible_kernels = IncompressibleKernelsModule::new(
-            &context.device,
-            &mesh_res,
+            &common.context.device,
+            &common.mesh,
             &fields_res,
             &linear_res.coupled_resources,
         );
@@ -94,24 +90,11 @@ impl GpuSolver {
             &scalar_res.pipeline_init_cg_scalars,
             &scalar_res.pipeline_reduce_r0_v,
             &scalar_res.pipeline_reduce_rho_new_r_r,
-            &context.device,
+            &common.context.device,
         );
 
         let mut solver = Self {
-            context,
-            // Mesh
-            b_face_owner: mesh_res.b_face_owner,
-            b_face_neighbor: mesh_res.b_face_neighbor,
-            b_face_boundary: mesh_res.b_face_boundary,
-            b_face_areas: mesh_res.b_face_areas,
-            b_face_normals: mesh_res.b_face_normals,
-            b_face_centers: mesh_res.b_face_centers,
-            b_cell_centers: mesh_res.b_cell_centers,
-            b_cell_vols: mesh_res.b_cell_vols,
-            b_cell_face_offsets: mesh_res.b_cell_face_offsets,
-            b_cell_faces: mesh_res.b_cell_faces,
-            b_cell_face_matrix_indices: mesh_res.b_cell_face_matrix_indices,
-            b_diagonal_indices: mesh_res.b_diagonal_indices,
+            common,
 
             // Fields (consolidated FluidState buffers)
             b_state: fields_res.b_state,
@@ -182,8 +165,6 @@ impl GpuSolver {
             prev_u_cpu: Vec::new(),
             steady_state_count: 0,
             should_stop: false,
-            profiling_stats: Arc::new(ProfilingStats::new()),
-            readback_cache: Default::default(),
             coupled_init_prepare_graph: GpuSolver::build_coupled_init_prepare_graph(),
             coupled_prepare_assembly_graph: GpuSolver::build_coupled_prepare_assembly_graph(),
             coupled_assembly_graph: GpuSolver::build_coupled_assembly_graph(),

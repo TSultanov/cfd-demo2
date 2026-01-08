@@ -14,10 +14,12 @@ impl GpuSolver {
         );
         let values = self.linear_port_space.buffer(self.linear_ports.values);
         let b_rhs = self.linear_port_space.buffer(self.linear_ports.rhs);
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(values, 0, bytemuck::cast_slice(matrix_values));
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(b_rhs, 0, bytemuck::cast_slice(rhs));
     }
@@ -40,6 +42,6 @@ impl GpuSolver {
         max_iters: u32,
         tol: f32,
     ) -> LinearSolverStats {
-        self.scalar_cg.solve(&self.context, n, max_iters, tol)
+        self.scalar_cg.solve(&self.common.context, n, max_iters, tol)
     }
 }

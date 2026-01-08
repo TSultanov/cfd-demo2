@@ -447,7 +447,7 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
         self.runtime.set_linear_system(matrix_values, rhs)
     }
 
-    fn solve_linear_system_cg_with_size(
+    fn solve_linear_system_with_size(
         &mut self,
         n: u32,
         max_iters: u32,

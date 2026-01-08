@@ -440,7 +440,7 @@ impl GpuUnifiedSolver {
         self.plan.set_linear_system(matrix_values, rhs)
     }
 
-    pub fn solve_linear_system_cg_with_size(
+    pub fn solve_linear_system_with_size(
         &mut self,
         n: u32,
         max_iters: u32,
@@ -449,7 +449,7 @@ impl GpuUnifiedSolver {
         if !self.supports(PlanCapability::LinearSystemDebug) {
             return Err("plan does not support linear system debug operations".into());
         }
-        self.plan.solve_linear_system_cg_with_size(n, max_iters, tol)
+        self.plan.solve_linear_system_with_size(n, max_iters, tol)
     }
 
     pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {

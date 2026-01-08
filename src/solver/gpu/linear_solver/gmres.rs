@@ -118,15 +118,10 @@ impl GpuSolver {
     /// Read a GPU buffer to CPU (for Hessenberg matrix construction)
     pub async fn read_buffer_f32_async(&self, buffer: &wgpu::Buffer, count: u32) -> Vec<f32> {
         let size = (count as u64) * 4;
-        let raw = crate::solver::gpu::readback::read_buffer_cached(
-            &self.context,
-            &self.readback_cache,
-            &*self.profiling_stats,
-            buffer,
-            size,
-            "GMRES Staging Buffer (cached)",
-        )
-        .await;
+        let raw = self
+            .common
+            .read_buffer(buffer, size, "GMRES Staging Buffer (cached)")
+            .await;
         bytemuck::cast_slice(&raw).to_vec()
     }
 
@@ -138,7 +133,8 @@ impl GpuSolver {
         // (For production, use a GPU kernel)
         let data = pollster::block_on(self.read_buffer_f32_async(v, n));
         let scaled: Vec<f32> = data.iter().map(|x| x * alpha).collect();
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(v, 0, bytemuck::cast_slice(&scaled));
     }
@@ -150,7 +146,8 @@ impl GpuSolver {
         for i in 0..n as usize {
             y_data[i] += alpha * x_data[i];
         }
-        self.context
+        self.common
+            .context
             .queue
             .write_buffer(y, 0, bytemuck::cast_slice(&y_data));
     }
@@ -158,10 +155,11 @@ impl GpuSolver {
     /// Copy buffer
     pub fn copy_buffer(&self, src: &wgpu::Buffer, dst: &wgpu::Buffer, size: u64) {
         let mut encoder = self
+            .common
             .context
             .device
             .create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
-        self.context.queue.submit(Some(encoder.finish()));
+        self.common.context.queue.submit(Some(encoder.finish()));
     }
 }

@@ -2,6 +2,7 @@ use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
 use crate::solver::gpu::plans::plan_instance::GpuPlanInstance;
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
+use crate::solver::gpu::linear_solver::fgmres::workgroups_for_size;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::mesh::Mesh;
@@ -35,6 +36,14 @@ pub struct GpuUnifiedSolver {
 }
 
 impl GpuUnifiedSolver {
+    fn plan_ref<T: 'static>(&self) -> Option<&T> {
+        self.plan.as_any().downcast_ref::<T>()
+    }
+
+    fn plan_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.plan.as_any_mut().downcast_mut::<T>()
+    }
+
     pub async fn new(
         mesh: &Mesh,
         model: ModelSpec,
@@ -94,31 +103,51 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_dtau(&mut self, dtau: f32) {
-        self.plan.set_dtau(dtau);
+        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_dtau(dtau);
+        }
     }
 
     pub fn set_viscosity(&mut self, mu: f32) {
-        self.plan.set_viscosity(mu);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.set_viscosity(mu);
+        } else if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_viscosity(mu);
+        }
     }
 
     pub fn set_density(&mut self, rho: f32) {
-        self.plan.set_density(rho);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.set_density(rho);
+        }
     }
 
     pub fn set_alpha_u(&mut self, alpha_u: f32) {
-        self.plan.set_alpha_u(alpha_u);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.set_alpha_u(alpha_u);
+        } else if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_alpha_u(alpha_u);
+        }
     }
 
     pub fn set_alpha_p(&mut self, alpha_p: f32) {
-        self.plan.set_alpha_p(alpha_p);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.set_alpha_p(alpha_p);
+        }
     }
 
     pub fn set_inlet_velocity(&mut self, velocity: f32) {
-        self.plan.set_inlet_velocity(velocity);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.set_inlet_velocity(velocity);
+        } else if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_inlet_velocity(velocity);
+        }
     }
 
     pub fn set_ramp_time(&mut self, time: f32) {
-        self.plan.set_ramp_time(time);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.set_ramp_time(time);
+        }
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
@@ -137,47 +166,76 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_outer_iters(&mut self, iters: usize) {
-        self.plan.set_outer_iters(iters);
+        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_outer_iters(iters);
+        }
     }
 
     pub fn set_incompressible_outer_correctors(&mut self, iters: u32) -> Result<(), String> {
-        self.plan.set_incompressible_outer_correctors(iters)
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.n_outer_correctors = iters.max(1);
+            Ok(())
+        } else {
+            Err("incompressible outer correctors only supported for incompressible plans".into())
+        }
     }
 
     pub fn incompressible_set_should_stop(&mut self, value: bool) {
-        self.plan.incompressible_set_should_stop(value);
+        if let Some(plan) = self.plan_mut::<GpuSolver>() {
+            plan.should_stop = value;
+        }
     }
 
     pub fn incompressible_should_stop(&self) -> bool {
-        self.plan.incompressible_should_stop()
+        self.plan_ref::<GpuSolver>()
+            .map(|plan| plan.should_stop)
+            .unwrap_or(false)
     }
 
     pub fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)> {
-        self.plan.incompressible_outer_stats()
+        self.plan_ref::<GpuSolver>().map(|plan| {
+            let outer_iterations = *plan.outer_iterations.lock().unwrap();
+            let outer_residual_u = *plan.outer_residual_u.lock().unwrap();
+            let outer_residual_p = *plan.outer_residual_p.lock().unwrap();
+            (outer_iterations, outer_residual_u, outer_residual_p)
+        })
     }
 
     pub fn incompressible_linear_stats(&self) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
-        self.plan.incompressible_linear_stats()
+        self.plan_ref::<GpuSolver>().map(|plan| {
+            let ux = *plan.stats_ux.lock().unwrap();
+            let uy = *plan.stats_uy.lock().unwrap();
+            let p = *plan.stats_p.lock().unwrap();
+            (ux, uy, p)
+        })
     }
 
     pub fn incompressible_degenerate_count(&self) -> Option<u32> {
-        self.plan.incompressible_degenerate_count()
+        self.plan_ref::<GpuSolver>().map(|plan| plan.degenerate_count)
     }
 
     pub fn set_u(&mut self, u: &[(f64, f64)]) {
-        self.plan.set_u(u);
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.set_u(u);
+        }
     }
 
     pub fn set_p(&mut self, p: &[f64]) {
-        self.plan.set_p(p);
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.set_p(p);
+        }
     }
 
     pub fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        self.plan.set_uniform_state(rho, u, p);
+        if let Some(plan) = self.plan_ref::<CompressiblePlanResources>() {
+            plan.set_uniform_state(rho, u, p);
+        }
     }
 
     pub fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]) {
-        self.plan.set_state_fields(rho, u, p);
+        if let Some(plan) = self.plan_ref::<CompressiblePlanResources>() {
+            plan.set_state_fields(rho, u, p);
+        }
     }
 
     pub fn step(&mut self) {
@@ -185,7 +243,11 @@ impl GpuUnifiedSolver {
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        self.plan.step_with_stats()
+        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            Ok(plan.step_with_stats())
+        } else {
+            Err("step_with_stats is only supported for compressible plans".into())
+        }
     }
 
     pub fn initialize_history(&self) {
@@ -193,35 +255,74 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
-        self.plan.set_precond_model(model)
+        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_precond_model(model as u32);
+            Ok(())
+        } else {
+            Err("low-Mach preconditioner model is only supported for compressible plans".into())
+        }
     }
 
     pub fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
-        self.plan.set_precond_theta_floor(theta)
+        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_precond_theta_floor(theta);
+            Ok(())
+        } else {
+            Err("low-Mach theta floor is only supported for compressible plans".into())
+        }
     }
 
     pub fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
-        self.plan.set_nonconverged_relax(alpha)
+        if let Some(plan) = self.plan_mut::<CompressiblePlanResources>() {
+            plan.set_nonconverged_relax(alpha);
+            Ok(())
+        } else {
+            Err("nonconverged relaxation is only supported for compressible plans".into())
+        }
     }
 
     pub fn enable_detailed_profiling(&self, enable: bool) -> Result<(), String> {
-        self.plan.enable_detailed_profiling(enable)
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.enable_detailed_profiling(enable);
+            Ok(())
+        } else {
+            Err("detailed profiling is only supported for incompressible plans".into())
+        }
     }
 
     pub fn start_profiling_session(&self) -> Result<(), String> {
-        self.plan.start_profiling_session()
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.start_profiling_session();
+            Ok(())
+        } else {
+            Err("profiling sessions are only supported for incompressible plans".into())
+        }
     }
 
     pub fn end_profiling_session(&self) -> Result<(), String> {
-        self.plan.end_profiling_session()
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.end_profiling_session();
+            Ok(())
+        } else {
+            Err("profiling sessions are only supported for incompressible plans".into())
+        }
     }
 
     pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
-        self.plan.get_profiling_stats()
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            Ok(plan.get_profiling_stats())
+        } else {
+            Err("profiling stats are only supported for incompressible plans".into())
+        }
     }
 
     pub fn print_profiling_report(&self) -> Result<(), String> {
-        self.plan.print_profiling_report()
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.print_profiling_report();
+            Ok(())
+        } else {
+            Err("profiling reports are only supported for incompressible plans".into())
+        }
     }
 
     pub async fn read_state_f32(&self) -> Vec<f32> {
@@ -232,11 +333,19 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
-        self.plan.set_field_scalar(field, values)
+        if let Some(plan) = self.plan_ref::<GpuGenericCoupledSolver>() {
+            plan.set_field_scalar(field, values)
+        } else {
+            Err("set_field_scalar is only supported for generic coupled plans".into())
+        }
     }
 
     pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
-        self.plan.get_field_scalar(field.to_string()).await
+        if let Some(plan) = self.plan_ref::<GpuGenericCoupledSolver>() {
+            plan.get_field_scalar(field).await
+        } else {
+            Err("get_field_scalar is only supported for generic coupled plans".into())
+        }
     }
 
     pub async fn get_p(&self) -> Vec<f64> {
@@ -275,7 +384,12 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        self.plan.set_linear_system(matrix_values, rhs)
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            plan.set_linear_system(matrix_values, rhs);
+            Ok(())
+        } else {
+            Err("set_linear_system is only supported for incompressible plans".into())
+        }
     }
 
     pub fn solve_linear_system_cg_with_size(
@@ -284,18 +398,39 @@ impl GpuUnifiedSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        self.plan.solve_linear_system_cg_with_size(n, max_iters, tol)
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            Ok(plan.solve_linear_system_cg_with_size(n, max_iters, tol))
+        } else {
+            Err("CG solve is only supported for incompressible plans".into())
+        }
     }
 
     pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {
-        self.plan.get_linear_solution().await
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            Ok(plan.get_linear_solution().await)
+        } else {
+            Err("get_linear_solution is only supported for incompressible plans".into())
+        }
     }
 
     pub fn coupled_unknowns(&self) -> Result<u32, String> {
-        self.plan.coupled_unknowns()
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            Ok(plan.coupled_unknowns())
+        } else {
+            Err("coupled_unknowns is only supported for incompressible plans".into())
+        }
     }
 
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
-        self.plan.fgmres_sizing(max_restart)
+        let _ = max_restart;
+        if let Some(plan) = self.plan_ref::<GpuSolver>() {
+            let n = plan.coupled_unknowns();
+            Ok(FgmresSizing {
+                num_unknowns: n,
+                num_dot_groups: workgroups_for_size(n),
+            })
+        } else {
+            Err("fgmres_sizing is only supported for incompressible plans".into())
+        }
     }
 }

@@ -21,7 +21,8 @@ One **model-driven** GPU solver pipeline with:
 - `GpuPlanInstance` is now a small universal interface (`src/solver/gpu/plans/plan_instance.rs`) with typed `PlanParam`/`PlanAction` plus `PlanStepStats` and a few optional debug hooks (reducing plan-specific downcasts in `UnifiedSolver`).
 - Plan configuration (dt, spatial/temporal scheme, preconditioner) is routed through typed `PlanParam`/`PlanParamValue` instead of ad-hoc per-plan setters (`src/solver/gpu/plans/plan_instance.rs`).
 - `GpuPlanInstance` no longer requires `Any`/downcasts (`src/solver/gpu/plans/plan_instance.rs`).
-- Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/plan_instance.rs`), keeping `UnifiedSolver` orchestration generic.
+- Plan selection is centralized in `build_plan_instance` (`src/solver/gpu/plans/mod.rs`), keeping `UnifiedSolver` orchestration generic.
+- `GpuPlanInstance` implementations live with their plans (e.g. `src/solver/gpu/plans/incompressible.rs`, `src/solver/gpu/plans/compressible.rs`) so the interface module stays decoupled.
 - Generic coupled plan no longer depends on legacy `GpuSolver`; it uses a minimal scalar runtime (`src/solver/gpu/runtime.rs`) that owns mesh + constants + scalar CG resources.
 - Scalar runtimes are port-based (`LinearSystemPorts` + `PortSpace`) to align with the unified lowering/dispatch wiring (`src/solver/gpu/runtime.rs`).
 - Scalar runtimes use a scalar-only linear solver init (avoid allocating coupled/Schur resources when not needed) (`src/solver/gpu/init/linear_solver/mod.rs`).

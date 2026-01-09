@@ -20,7 +20,7 @@ One **model-driven** GPU solver pipeline with:
 ## Main Blockers
 - Op dispatch is still **structured by solver family** (`GraphOpKind`/`HostOpKind` enums and per-family resource containers). The registry exists and is validated, but we still lack a composable “module registry” and module-owned op IDs.
 - Solver-family resource containers (`GpuSolver`, `CompressiblePlanResources`, `GenericCoupledProgramResources`) still own most pipelines/bind groups and dictate wiring.
-- Kernel lookup is unified at runtime, but the non-generic portions are still wired via a hand-written `match` (not fully generated from codegen output).
+- Kernel lookup is unified and build-generated, but it still relies on build-time tables (i.e. not yet derived automatically from scheme expansion / `KernelPlan`).
 - Scheme expansion and aux-pass discovery are not yet driving required buffers/kernels/schedule end-to-end.
 
 ## Recently Implemented
@@ -45,6 +45,10 @@ One **model-driven** GPU solver pipeline with:
 - Unified kernel lookup + binding metadata (build time):
   - `kernel_registry::kernel_source(model_id, KernelKind)` provides shader + pipeline + binding metadata for generated kernels.
   - Bind groups can now be constructed from build-generated WGSL binding metadata via `src/solver/gpu/wgsl_reflect.rs`.
+- Fully codegen-driven kernel registry mapping:
+  - `build.rs` generates `kernel_registry_map.rs` with complete `KernelKind -> (shader, pipeline, bindings)` mapping.
+  - `kernel_registry.rs` now uses `generated::kernel_entry(kind)` eliminating all hand-written match statements for non-generic kernels.
+  - Generic coupled kernels remain model-id-based via `generic_coupled_pair(model_id)`.
 
 ## Next Steps (Prioritized)
 1. **Make op dispatch truly module-owned (beyond Phase 2)**
@@ -57,7 +61,8 @@ One **model-driven** GPU solver pipeline with:
    - Extend `TimeIntegrationModule` to cover restart/init + scheme-specific history rotation (e.g. BDF2 bootstrap) without duplicating time advancement.
 
 3. **Expand registry-driven kernel wiring**
-   - Generate the `KernelKind -> KernelSource` mapping from codegen output (eliminate the remaining hand-written `match`).
+   - ✅ Generate the `KernelKind -> KernelSource` mapping from codegen output (hand-written match eliminated).
+   - Derive kernel registry entries from `KernelPlan` / scheme expansion so adding a kernel doesn’t require updating build-time tables.
    - Extend binding metadata from `{group, binding, name}` to explicit `PortSpace`/resource contracts so modules can resolve resources without string matching.
    - Endgame: generate specialized kernel sets per (temporal scheme + spatial scheme) choice, each with its own optimized memory layout, rather than a single generic layout + `constants.scheme/time_scheme` runtime switching.
 

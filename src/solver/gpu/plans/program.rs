@@ -11,12 +11,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(crate) type ProgramGraphRun =
-    fn(&GpuProgramPlan, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>);
-pub(crate) type ProgramHostRun = fn(&mut GpuProgramPlan);
 pub(crate) type ProgramInitRun = fn(&GpuProgramPlan);
-pub(crate) type ProgramCondFn = fn(&GpuProgramPlan) -> bool;
-pub(crate) type ProgramCountFn = fn(&GpuProgramPlan) -> usize;
 pub(crate) type ProgramParamHandler = fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramSetParamFallback =
     fn(&mut GpuProgramPlan, PlanParam, PlanParamValue) -> Result<(), String>;
@@ -31,64 +26,101 @@ pub(crate) type ProgramLinearDebugProvider =
     fn(&mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ProgramGraphId(pub u16);
+pub(crate) enum GraphOpKind {
+    CompressibleExplicitGraph,
+    CompressibleImplicitGradAssembly,
+    CompressibleImplicitSnapshot,
+    CompressibleImplicitApply,
+    CompressiblePrimitiveUpdate,
+    IncompressibleCoupledPrepareAssembly,
+    IncompressibleCoupledAssembly,
+    IncompressibleCoupledUpdate,
+    IncompressibleCoupledInitPrepare,
+    GenericCoupledScalarAssembly,
+    GenericCoupledScalarUpdate,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ProgramHostId(pub u16);
+pub(crate) enum HostOpKind {
+    CompressibleExplicitPrepare,
+    CompressibleExplicitFinalize,
+    CompressibleImplicitPrepare,
+    CompressibleImplicitSetIterParams,
+    CompressibleImplicitSolveFgmres,
+    CompressibleImplicitRecordStats,
+    CompressibleImplicitSetAlpha,
+    CompressibleImplicitRestoreAlpha,
+    CompressibleImplicitAdvanceOuterIdx,
+    CompressibleImplicitFinalize,
+    IncompressibleCoupledBeginStep,
+    IncompressibleCoupledBeforeIter,
+    IncompressibleCoupledSolve,
+    IncompressibleCoupledClearMaxDiff,
+    IncompressibleCoupledConvergenceAdvance,
+    IncompressibleCoupledFinalizeStep,
+    GenericCoupledScalarPrepare,
+    GenericCoupledScalarSolve,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ProgramCondId(pub u16);
+pub(crate) enum CondOpKind {
+    CompressibleShouldUseExplicit,
+    IncompressibleHasCoupledResources,
+    IncompressibleCoupledNeedsPrepare,
+    IncompressibleCoupledShouldContinue,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ProgramCountId(pub u16);
+pub(crate) enum CountOpKind {
+    CompressibleImplicitOuterIters,
+    IncompressibleCoupledMaxIters,
+}
+
+pub(crate) trait ProgramOpDispatcher {
+    fn run_graph(
+        &self,
+        kind: GraphOpKind,
+        plan: &GpuProgramPlan,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<GraphDetail>);
+
+    fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan);
+
+    fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool;
+
+    fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramBlockId(pub u16);
-
-pub(crate) struct ProgramOps {
-    pub graph: HashMap<ProgramGraphId, ProgramGraphRun>,
-    pub host: HashMap<ProgramHostId, ProgramHostRun>,
-    pub cond: HashMap<ProgramCondId, ProgramCondFn>,
-    pub count: HashMap<ProgramCountId, ProgramCountFn>,
-}
-
-impl ProgramOps {
-    pub fn new() -> Self {
-        Self {
-            graph: HashMap::new(),
-            host: HashMap::new(),
-            cond: HashMap::new(),
-            count: HashMap::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ProgramSpecNode {
     Graph {
         label: &'static str,
-        id: ProgramGraphId,
+        kind: GraphOpKind,
         mode: GraphExecMode,
     },
     Host {
         label: &'static str,
-        id: ProgramHostId,
+        kind: HostOpKind,
     },
     If {
         label: &'static str,
-        cond: ProgramCondId,
+        cond: CondOpKind,
         then_block: ProgramBlockId,
         else_block: Option<ProgramBlockId>,
     },
     Repeat {
         label: &'static str,
-        times: ProgramCountId,
+        times: CountOpKind,
         body: ProgramBlockId,
     },
     While {
         label: &'static str,
-        max_iters: ProgramCountId,
-        cond: ProgramCondId,
+        max_iters: CountOpKind,
+        cond: CondOpKind,
         body: ProgramBlockId,
     },
 }
@@ -187,7 +219,7 @@ impl ProgramResources {
 }
 
 pub(crate) struct ModelGpuProgramSpec {
-    pub ops: ProgramOps,
+    pub ops: Arc<dyn ProgramOpDispatcher + Send + Sync>,
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,
@@ -348,25 +380,15 @@ impl GpuProgramPlan {
         let nodes = self.spec.program.block(block).nodes.clone();
         for node in nodes {
             match node {
-                ProgramSpecNode::Graph { id, mode, .. } => {
-                    let run = self
+                ProgramSpecNode::Graph { kind, mode, .. } => {
+                    let _ = self
                         .spec
                         .ops
-                        .graph
-                        .get(&id)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing graph op for id={id:?}"));
-                    let _ = run(&*self, &self.context, mode);
+                        .run_graph(kind, &*self, &self.context, mode);
                 }
-                ProgramSpecNode::Host { id, .. } => {
-                    let run = self
-                        .spec
-                        .ops
-                        .host
-                        .get(&id)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing host op for id={id:?}"));
-                    run(self)
+                ProgramSpecNode::Host { kind, .. } => {
+                    let ops = Arc::clone(&self.spec.ops);
+                    ops.run_host(kind, self);
                 }
                 ProgramSpecNode::If {
                     cond,
@@ -374,28 +396,15 @@ impl GpuProgramPlan {
                     else_block,
                     ..
                 } => {
-                    let cond = self
-                        .spec
-                        .ops
-                        .cond
-                        .get(&cond)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
-                    if cond(&*self) {
+                    if self.spec.ops.eval_cond(cond, &*self) {
                         self.execute_block(then_block);
                     } else if let Some(else_block) = else_block {
                         self.execute_block(else_block);
                     }
                 }
                 ProgramSpecNode::Repeat { times, body, .. } => {
-                    let times = self
-                        .spec
-                        .ops
-                        .count
-                        .get(&times)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing count op for id={times:?}"));
-                    for _ in 0..times(&*self) {
+                    let times = self.spec.ops.eval_count(times, &*self);
+                    for _ in 0..times {
                         self.execute_block(body);
                     }
                 }
@@ -405,22 +414,9 @@ impl GpuProgramPlan {
                     body,
                     ..
                 } => {
-                    let max_iters = self
-                        .spec
-                        .ops
-                        .count
-                        .get(&max_iters)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing count op for id={max_iters:?}"));
-                    let cond = self
-                        .spec
-                        .ops
-                        .cond
-                        .get(&cond)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
-                    for _ in 0..max_iters(&*self) {
-                        if !cond(&*self) {
+                    let max_iters = self.spec.ops.eval_count(max_iters, &*self);
+                    for _ in 0..max_iters {
+                        if !self.spec.ops.eval_cond(cond, &*self) {
                             break;
                         }
                         self.execute_block(body);

@@ -1,6 +1,6 @@
 use crate::solver::gpu::execution_plan::GraphExecMode;
 use crate::solver::gpu::plans::program::{
-    ProgramCondId, ProgramCountId, ProgramGraphId, ProgramHostId, ProgramSpec, ProgramSpecBuilder,
+    CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpec, ProgramSpecBuilder,
     ProgramSpecNode,
 };
 use crate::solver::model::{KernelKind, ModelSpec};
@@ -72,25 +72,33 @@ pub(crate) fn build_program_spec(kind: ProgramTemplateKind) -> ProgramSpec {
 pub(crate) mod compressible {
     use super::*;
 
-    pub(crate) const G_EXPLICIT_GRAPH: ProgramGraphId = ProgramGraphId(0);
-    pub(crate) const G_IMPLICIT_GRAD_ASSEMBLY: ProgramGraphId = ProgramGraphId(1);
-    pub(crate) const G_IMPLICIT_SNAPSHOT: ProgramGraphId = ProgramGraphId(2);
-    pub(crate) const G_IMPLICIT_APPLY: ProgramGraphId = ProgramGraphId(3);
-    pub(crate) const G_PRIMITIVE_UPDATE: ProgramGraphId = ProgramGraphId(4);
+    pub(crate) const G_EXPLICIT_GRAPH: GraphOpKind = GraphOpKind::CompressibleExplicitGraph;
+    pub(crate) const G_IMPLICIT_GRAD_ASSEMBLY: GraphOpKind =
+        GraphOpKind::CompressibleImplicitGradAssembly;
+    pub(crate) const G_IMPLICIT_SNAPSHOT: GraphOpKind = GraphOpKind::CompressibleImplicitSnapshot;
+    pub(crate) const G_IMPLICIT_APPLY: GraphOpKind = GraphOpKind::CompressibleImplicitApply;
+    pub(crate) const G_PRIMITIVE_UPDATE: GraphOpKind = GraphOpKind::CompressiblePrimitiveUpdate;
 
-    pub(crate) const H_EXPLICIT_PREPARE: ProgramHostId = ProgramHostId(0);
-    pub(crate) const H_EXPLICIT_FINALIZE: ProgramHostId = ProgramHostId(1);
-    pub(crate) const H_IMPLICIT_PREPARE: ProgramHostId = ProgramHostId(2);
-    pub(crate) const H_IMPLICIT_SET_ITER_PARAMS: ProgramHostId = ProgramHostId(3);
-    pub(crate) const H_IMPLICIT_SOLVE_FGMRES: ProgramHostId = ProgramHostId(4);
-    pub(crate) const H_IMPLICIT_RECORD_STATS: ProgramHostId = ProgramHostId(5);
-    pub(crate) const H_IMPLICIT_SET_ALPHA: ProgramHostId = ProgramHostId(6);
-    pub(crate) const H_IMPLICIT_RESTORE_ALPHA: ProgramHostId = ProgramHostId(7);
-    pub(crate) const H_IMPLICIT_ADVANCE_OUTER_IDX: ProgramHostId = ProgramHostId(8);
-    pub(crate) const H_IMPLICIT_FINALIZE: ProgramHostId = ProgramHostId(9);
+    pub(crate) const H_EXPLICIT_PREPARE: HostOpKind = HostOpKind::CompressibleExplicitPrepare;
+    pub(crate) const H_EXPLICIT_FINALIZE: HostOpKind = HostOpKind::CompressibleExplicitFinalize;
+    pub(crate) const H_IMPLICIT_PREPARE: HostOpKind = HostOpKind::CompressibleImplicitPrepare;
+    pub(crate) const H_IMPLICIT_SET_ITER_PARAMS: HostOpKind =
+        HostOpKind::CompressibleImplicitSetIterParams;
+    pub(crate) const H_IMPLICIT_SOLVE_FGMRES: HostOpKind =
+        HostOpKind::CompressibleImplicitSolveFgmres;
+    pub(crate) const H_IMPLICIT_RECORD_STATS: HostOpKind =
+        HostOpKind::CompressibleImplicitRecordStats;
+    pub(crate) const H_IMPLICIT_SET_ALPHA: HostOpKind = HostOpKind::CompressibleImplicitSetAlpha;
+    pub(crate) const H_IMPLICIT_RESTORE_ALPHA: HostOpKind =
+        HostOpKind::CompressibleImplicitRestoreAlpha;
+    pub(crate) const H_IMPLICIT_ADVANCE_OUTER_IDX: HostOpKind =
+        HostOpKind::CompressibleImplicitAdvanceOuterIdx;
+    pub(crate) const H_IMPLICIT_FINALIZE: HostOpKind = HostOpKind::CompressibleImplicitFinalize;
 
-    pub(crate) const C_SHOULD_USE_EXPLICIT: ProgramCondId = ProgramCondId(0);
-    pub(crate) const N_IMPLICIT_OUTER_ITERS: ProgramCountId = ProgramCountId(0);
+    pub(crate) const C_SHOULD_USE_EXPLICIT: CondOpKind =
+        CondOpKind::CompressibleShouldUseExplicit;
+    pub(crate) const N_IMPLICIT_OUTER_ITERS: CountOpKind =
+        CountOpKind::CompressibleImplicitOuterIters;
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();
@@ -103,14 +111,14 @@ pub(crate) mod compressible {
             explicit_block,
             ProgramSpecNode::Host {
                 label: "compressible:explicit_prepare",
-                id: H_EXPLICIT_PREPARE,
+                kind: H_EXPLICIT_PREPARE,
             },
         );
         program.push(
             explicit_block,
             ProgramSpecNode::Graph {
                 label: "compressible:explicit_graph",
-                id: G_EXPLICIT_GRAPH,
+                kind: G_EXPLICIT_GRAPH,
                 mode: GraphExecMode::SplitTimed,
             },
         );
@@ -118,49 +126,49 @@ pub(crate) mod compressible {
             explicit_block,
             ProgramSpecNode::Host {
                 label: "compressible:explicit_finalize",
-                id: H_EXPLICIT_FINALIZE,
+                kind: H_EXPLICIT_FINALIZE,
             },
         );
 
         for node in [
             ProgramSpecNode::Host {
                 label: "compressible:implicit_set_iter_params",
-                id: H_IMPLICIT_SET_ITER_PARAMS,
+                kind: H_IMPLICIT_SET_ITER_PARAMS,
             },
             ProgramSpecNode::Graph {
                 label: "compressible:implicit_grad_assembly",
-                id: G_IMPLICIT_GRAD_ASSEMBLY,
+                kind: G_IMPLICIT_GRAD_ASSEMBLY,
                 mode: GraphExecMode::SplitTimed,
             },
             ProgramSpecNode::Host {
                 label: "compressible:implicit_fgmres",
-                id: H_IMPLICIT_SOLVE_FGMRES,
+                kind: H_IMPLICIT_SOLVE_FGMRES,
             },
             ProgramSpecNode::Host {
                 label: "compressible:implicit_record_stats",
-                id: H_IMPLICIT_RECORD_STATS,
+                kind: H_IMPLICIT_RECORD_STATS,
             },
             ProgramSpecNode::Graph {
                 label: "compressible:implicit_snapshot",
-                id: G_IMPLICIT_SNAPSHOT,
+                kind: G_IMPLICIT_SNAPSHOT,
                 mode: GraphExecMode::SingleSubmit,
             },
             ProgramSpecNode::Host {
                 label: "compressible:implicit_set_alpha",
-                id: H_IMPLICIT_SET_ALPHA,
+                kind: H_IMPLICIT_SET_ALPHA,
             },
             ProgramSpecNode::Graph {
                 label: "compressible:implicit_apply",
-                id: G_IMPLICIT_APPLY,
+                kind: G_IMPLICIT_APPLY,
                 mode: GraphExecMode::SingleSubmit,
             },
             ProgramSpecNode::Host {
                 label: "compressible:implicit_restore_alpha",
-                id: H_IMPLICIT_RESTORE_ALPHA,
+                kind: H_IMPLICIT_RESTORE_ALPHA,
             },
             ProgramSpecNode::Host {
                 label: "compressible:implicit_outer_idx_inc",
-                id: H_IMPLICIT_ADVANCE_OUTER_IDX,
+                kind: H_IMPLICIT_ADVANCE_OUTER_IDX,
             },
         ] {
             program.push(implicit_iter_block, node);
@@ -170,7 +178,7 @@ pub(crate) mod compressible {
             implicit_block,
             ProgramSpecNode::Host {
                 label: "compressible:implicit_prepare",
-                id: H_IMPLICIT_PREPARE,
+                kind: H_IMPLICIT_PREPARE,
             },
         );
         program.push(
@@ -185,7 +193,7 @@ pub(crate) mod compressible {
             implicit_block,
             ProgramSpecNode::Graph {
                 label: "compressible:primitive_update",
-                id: G_PRIMITIVE_UPDATE,
+                kind: G_PRIMITIVE_UPDATE,
                 mode: GraphExecMode::SingleSubmit,
             },
         );
@@ -193,7 +201,7 @@ pub(crate) mod compressible {
             implicit_block,
             ProgramSpecNode::Host {
                 label: "compressible:implicit_finalize",
-                id: H_IMPLICIT_FINALIZE,
+                kind: H_IMPLICIT_FINALIZE,
             },
         );
 
@@ -214,23 +222,33 @@ pub(crate) mod compressible {
 pub(crate) mod incompressible_coupled {
     use super::*;
 
-    pub(crate) const G_COUPLED_PREPARE_ASSEMBLY: ProgramGraphId = ProgramGraphId(0);
-    pub(crate) const G_COUPLED_ASSEMBLY: ProgramGraphId = ProgramGraphId(1);
-    pub(crate) const G_COUPLED_UPDATE: ProgramGraphId = ProgramGraphId(2);
-    pub(crate) const G_COUPLED_INIT_PREPARE: ProgramGraphId = ProgramGraphId(3);
+    pub(crate) const G_COUPLED_PREPARE_ASSEMBLY: GraphOpKind =
+        GraphOpKind::IncompressibleCoupledPrepareAssembly;
+    pub(crate) const G_COUPLED_ASSEMBLY: GraphOpKind = GraphOpKind::IncompressibleCoupledAssembly;
+    pub(crate) const G_COUPLED_UPDATE: GraphOpKind = GraphOpKind::IncompressibleCoupledUpdate;
+    pub(crate) const G_COUPLED_INIT_PREPARE: GraphOpKind =
+        GraphOpKind::IncompressibleCoupledInitPrepare;
 
-    pub(crate) const H_COUPLED_BEGIN_STEP: ProgramHostId = ProgramHostId(0);
-    pub(crate) const H_COUPLED_BEFORE_ITER: ProgramHostId = ProgramHostId(1);
-    pub(crate) const H_COUPLED_SOLVE: ProgramHostId = ProgramHostId(2);
-    pub(crate) const H_COUPLED_CLEAR_MAX_DIFF: ProgramHostId = ProgramHostId(3);
-    pub(crate) const H_COUPLED_CONVERGENCE_ADVANCE: ProgramHostId = ProgramHostId(4);
-    pub(crate) const H_COUPLED_FINALIZE_STEP: ProgramHostId = ProgramHostId(5);
+    pub(crate) const H_COUPLED_BEGIN_STEP: HostOpKind =
+        HostOpKind::IncompressibleCoupledBeginStep;
+    pub(crate) const H_COUPLED_BEFORE_ITER: HostOpKind =
+        HostOpKind::IncompressibleCoupledBeforeIter;
+    pub(crate) const H_COUPLED_SOLVE: HostOpKind = HostOpKind::IncompressibleCoupledSolve;
+    pub(crate) const H_COUPLED_CLEAR_MAX_DIFF: HostOpKind =
+        HostOpKind::IncompressibleCoupledClearMaxDiff;
+    pub(crate) const H_COUPLED_CONVERGENCE_ADVANCE: HostOpKind =
+        HostOpKind::IncompressibleCoupledConvergenceAdvance;
+    pub(crate) const H_COUPLED_FINALIZE_STEP: HostOpKind =
+        HostOpKind::IncompressibleCoupledFinalizeStep;
 
-    pub(crate) const C_HAS_COUPLED_RESOURCES: ProgramCondId = ProgramCondId(0);
-    pub(crate) const C_COUPLED_NEEDS_PREPARE: ProgramCondId = ProgramCondId(1);
-    pub(crate) const C_COUPLED_SHOULD_CONTINUE: ProgramCondId = ProgramCondId(2);
+    pub(crate) const C_HAS_COUPLED_RESOURCES: CondOpKind =
+        CondOpKind::IncompressibleHasCoupledResources;
+    pub(crate) const C_COUPLED_NEEDS_PREPARE: CondOpKind =
+        CondOpKind::IncompressibleCoupledNeedsPrepare;
+    pub(crate) const C_COUPLED_SHOULD_CONTINUE: CondOpKind =
+        CondOpKind::IncompressibleCoupledShouldContinue;
 
-    pub(crate) const N_COUPLED_MAX_ITERS: ProgramCountId = ProgramCountId(0);
+    pub(crate) const N_COUPLED_MAX_ITERS: CountOpKind = CountOpKind::IncompressibleCoupledMaxIters;
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();
@@ -244,7 +262,7 @@ pub(crate) mod incompressible_coupled {
             coupled_prepare_block,
             ProgramSpecNode::Graph {
                 label: "incompressible:coupled_prepare_assembly",
-                id: G_COUPLED_PREPARE_ASSEMBLY,
+                kind: G_COUPLED_PREPARE_ASSEMBLY,
                 mode: GraphExecMode::SingleSubmit,
             },
         );
@@ -252,7 +270,7 @@ pub(crate) mod incompressible_coupled {
             coupled_assembly_block,
             ProgramSpecNode::Graph {
                 label: "incompressible:coupled_assembly",
-                id: G_COUPLED_ASSEMBLY,
+                kind: G_COUPLED_ASSEMBLY,
                 mode: GraphExecMode::SingleSubmit,
             },
         );
@@ -260,7 +278,7 @@ pub(crate) mod incompressible_coupled {
         for node in [
             ProgramSpecNode::Host {
                 label: "incompressible:coupled_before_iter",
-                id: H_COUPLED_BEFORE_ITER,
+                kind: H_COUPLED_BEFORE_ITER,
             },
             ProgramSpecNode::If {
                 label: "incompressible:coupled_prepare_or_assembly",
@@ -270,20 +288,20 @@ pub(crate) mod incompressible_coupled {
             },
             ProgramSpecNode::Host {
                 label: "incompressible:coupled_solve",
-                id: H_COUPLED_SOLVE,
+                kind: H_COUPLED_SOLVE,
             },
             ProgramSpecNode::Host {
                 label: "incompressible:coupled_clear_max_diff",
-                id: H_COUPLED_CLEAR_MAX_DIFF,
+                kind: H_COUPLED_CLEAR_MAX_DIFF,
             },
             ProgramSpecNode::Graph {
                 label: "incompressible:coupled_update_fields_max_diff",
-                id: G_COUPLED_UPDATE,
+                kind: G_COUPLED_UPDATE,
                 mode: GraphExecMode::SingleSubmit,
             },
             ProgramSpecNode::Host {
                 label: "incompressible:coupled_convergence_and_advance",
-                id: H_COUPLED_CONVERGENCE_ADVANCE,
+                kind: H_COUPLED_CONVERGENCE_ADVANCE,
             },
         ] {
             program.push(coupled_iter_block, node);
@@ -292,11 +310,11 @@ pub(crate) mod incompressible_coupled {
         for node in [
             ProgramSpecNode::Host {
                 label: "incompressible:coupled_begin_step",
-                id: H_COUPLED_BEGIN_STEP,
+                kind: H_COUPLED_BEGIN_STEP,
             },
             ProgramSpecNode::Graph {
                 label: "incompressible:coupled_init_prepare",
-                id: G_COUPLED_INIT_PREPARE,
+                kind: G_COUPLED_INIT_PREPARE,
                 mode: GraphExecMode::SingleSubmit,
             },
             ProgramSpecNode::While {
@@ -307,7 +325,7 @@ pub(crate) mod incompressible_coupled {
             },
             ProgramSpecNode::Host {
                 label: "incompressible:coupled_finalize_step",
-                id: H_COUPLED_FINALIZE_STEP,
+                kind: H_COUPLED_FINALIZE_STEP,
             },
         ] {
             program.push(coupled_step_block, node);
@@ -330,11 +348,11 @@ pub(crate) mod incompressible_coupled {
 pub(crate) mod generic_coupled_scalar {
     use super::*;
 
-    pub(crate) const G_ASSEMBLY: ProgramGraphId = ProgramGraphId(0);
-    pub(crate) const G_UPDATE: ProgramGraphId = ProgramGraphId(1);
+    pub(crate) const G_ASSEMBLY: GraphOpKind = GraphOpKind::GenericCoupledScalarAssembly;
+    pub(crate) const G_UPDATE: GraphOpKind = GraphOpKind::GenericCoupledScalarUpdate;
 
-    pub(crate) const H_PREPARE: ProgramHostId = ProgramHostId(0);
-    pub(crate) const H_SOLVE: ProgramHostId = ProgramHostId(1);
+    pub(crate) const H_PREPARE: HostOpKind = HostOpKind::GenericCoupledScalarPrepare;
+    pub(crate) const H_SOLVE: HostOpKind = HostOpKind::GenericCoupledScalarSolve;
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();
@@ -343,20 +361,20 @@ pub(crate) mod generic_coupled_scalar {
         for node in [
             ProgramSpecNode::Host {
                 label: "generic_coupled:prepare",
-                id: H_PREPARE,
+                kind: H_PREPARE,
             },
             ProgramSpecNode::Graph {
                 label: "generic_coupled:assembly",
-                id: G_ASSEMBLY,
+                kind: G_ASSEMBLY,
                 mode: GraphExecMode::SplitTimed,
             },
             ProgramSpecNode::Host {
                 label: "generic_coupled:solve",
-                id: H_SOLVE,
+                kind: H_SOLVE,
             },
             ProgramSpecNode::Graph {
                 label: "generic_coupled:update",
-                id: G_UPDATE,
+                kind: G_UPDATE,
                 mode: GraphExecMode::SingleSubmit,
             },
         ] {
@@ -366,4 +384,3 @@ pub(crate) mod generic_coupled_scalar {
         program.build()
     }
 }
-

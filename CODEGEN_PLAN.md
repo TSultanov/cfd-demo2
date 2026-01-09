@@ -15,30 +15,28 @@ One **model-driven** GPU solver pipeline with:
 - Several critical kernels are still handwritten WGSL (`src/solver/gpu/shaders/*.wgsl`), including solver-family-specific ones (`compressible_*`, `schur_precond`).
 
 ## Main Blockers
-- `ProgramSpec` is data, but `ProgramOps` is still a per-plan fn-pointer registry (IDs -> functions) rather than typed “op kinds” implemented by modules.
+- Program schedules now use typed op-kinds, but op dispatch is still centralized in per-family dispatchers rather than module-owned `OpKind` implementations (no module registry yet).
 - Solver-family resource containers (`GpuSolver`, `CompressiblePlanResources`, `GenericCoupledProgramResources`) still own most pipelines/bind groups and dictate wiring.
 - Kernel selection still relies on manual dispatch logic (e.g. string-based model-id matches in `src/solver/gpu/lowering/model_driven.rs`) instead of a generated registry keyed by `ModelSpec`/`KernelPlan`.
 - Scheme expansion and aux-pass discovery are not yet driving required buffers/kernels/schedule end-to-end.
 
 ## Recently Implemented
 - Single template-driven lowering entrypoint: `src/solver/gpu/lowering/model_driven.rs`.
-- Centralized schedules + stable op IDs: `src/solver/gpu/lowering/templates.rs`.
+- Centralized schedules + typed op kinds: `src/solver/gpu/lowering/templates.rs`.
 - Removed per-family lowering entrypoints (`lower_parts`); model-specific code is now runtime hooks/providers only.
+- Replaced fn-pointer op registries with typed op kinds + dispatcher (`GraphOpKind`/`HostOpKind`/`CondOpKind`/`CountOpKind` + `ProgramOpDispatcher`).
 
 ## Next Steps (Prioritized)
-1. **Replace fn-pointer ops with typed module ops**
-   - Replace `ProgramGraphId`/`ProgramHostId` registries with typed `OpKind` enums backed by modules (graph/host/cond/count).
-   - Target: program specs become stable data that can be generated and unit-tested without a plan instance.
-2. **Make resources module-owned and family-agnostic**
+1. **Make resources module-owned and family-agnostic**
    - Move pipelines/bind groups/buffers out of `GpuSolver` / `*PlanResources` into modules with explicit `PortSpace` contracts.
    - Standardize ping-pong state, linear-system ports, and time integration as shared modules.
-3. **Generate kernel bindings + dispatch**
+2. **Generate kernel bindings + dispatch**
    - Emit binding metadata alongside WGSL (ports/resources per bind group) and add a generic bind-group builder.
    - Replace string-based per-model kernel selection with a generated registry (`ModelSpec.id` + kernel kind -> pipeline/bind builders).
-4. **Eliminate handwritten WGSL (incremental)**
+3. **Eliminate handwritten WGSL (incremental)**
    - Start with solver-family-specific shaders (`compressible_*`, `schur_precond`) and migrate them into the codegen WGSL pipeline.
    - Keep handwritten WGSL only as a temporary bootstrapping layer.
-5. **Replace `PlanParam` with typed config deltas**
+4. **Replace `PlanParam` with typed config deltas**
    - Generate `SolverConfigDelta` + module-specific deltas from `ModelSpec` + module capabilities; remove ad-hoc host callbacks.
 
 ## Decisions (Locked In)

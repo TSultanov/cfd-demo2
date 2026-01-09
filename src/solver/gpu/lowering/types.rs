@@ -1,9 +1,10 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{
-    ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider, ProgramOps,
-    ProgramParamHandler, ProgramResources, ProgramSetParamFallback, ProgramSpec, ProgramStateBufferFn,
-    ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
+    ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
+    ProgramOpDispatcher, ProgramParamHandler, ProgramResources, ProgramSetParamFallback,
+    ProgramSpec, ProgramStateBufferFn, ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn,
+    ProgramWriteStateFn,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::model::ModelSpec;
@@ -11,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) struct ModelGpuProgramSpecParts {
-    pub ops: ProgramOps,
+    pub ops: Arc<dyn ProgramOpDispatcher + Send + Sync>,
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,
@@ -52,4 +53,3 @@ pub(crate) struct LoweredProgramParts {
     pub resources: ProgramResources,
     pub spec: ModelGpuProgramSpecParts,
 }
-

@@ -104,77 +104,7 @@ async fn lower_parts_for_template(
             let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
             resources.insert(models::compressible::CompressibleProgramResources::new(plan));
 
-            let mut ops = crate::solver::gpu::plans::program::ProgramOps::new();
-            ops.graph.insert(
-                super::templates::compressible::G_EXPLICIT_GRAPH,
-                models::compressible::explicit_graph_run as _,
-            );
-            ops.graph.insert(
-                super::templates::compressible::G_IMPLICIT_GRAD_ASSEMBLY,
-                models::compressible::implicit_grad_assembly_graph_run as _,
-            );
-            ops.graph.insert(
-                super::templates::compressible::G_IMPLICIT_SNAPSHOT,
-                models::compressible::implicit_snapshot_run as _,
-            );
-            ops.graph.insert(
-                super::templates::compressible::G_IMPLICIT_APPLY,
-                models::compressible::implicit_apply_graph_run as _,
-            );
-            ops.graph.insert(
-                super::templates::compressible::G_PRIMITIVE_UPDATE,
-                models::compressible::primitive_update_graph_run as _,
-            );
-
-            ops.host.insert(
-                super::templates::compressible::H_EXPLICIT_PREPARE,
-                models::compressible::host_explicit_prepare as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_EXPLICIT_FINALIZE,
-                models::compressible::host_explicit_finalize as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_PREPARE,
-                models::compressible::host_implicit_prepare as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_SET_ITER_PARAMS,
-                models::compressible::host_implicit_set_iter_params as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_SOLVE_FGMRES,
-                models::compressible::host_implicit_solve_fgmres as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_RECORD_STATS,
-                models::compressible::host_implicit_record_stats as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_SET_ALPHA,
-                models::compressible::host_implicit_set_alpha_for_apply as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_RESTORE_ALPHA,
-                models::compressible::host_implicit_restore_alpha as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_ADVANCE_OUTER_IDX,
-                models::compressible::host_implicit_advance_outer_idx as _,
-            );
-            ops.host.insert(
-                super::templates::compressible::H_IMPLICIT_FINALIZE,
-                models::compressible::host_implicit_finalize as _,
-            );
-
-            ops.cond.insert(
-                super::templates::compressible::C_SHOULD_USE_EXPLICIT,
-                models::compressible::should_use_explicit as _,
-            );
-            ops.count.insert(
-                super::templates::compressible::N_IMPLICIT_OUTER_ITERS,
-                models::compressible::implicit_outer_iters as _,
-            );
+            let ops = std::sync::Arc::new(models::compressible::CompressibleOpDispatcher);
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
@@ -211,65 +141,7 @@ async fn lower_parts_for_template(
             let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
             resources.insert(models::incompressible::IncompressibleProgramResources::new(plan));
 
-            let mut ops = crate::solver::gpu::plans::program::ProgramOps::new();
-            ops.graph.insert(
-                super::templates::incompressible_coupled::G_COUPLED_PREPARE_ASSEMBLY,
-                models::incompressible::coupled_graph_prepare_assembly_run as _,
-            );
-            ops.graph.insert(
-                super::templates::incompressible_coupled::G_COUPLED_ASSEMBLY,
-                models::incompressible::coupled_graph_assembly_run as _,
-            );
-            ops.graph.insert(
-                super::templates::incompressible_coupled::G_COUPLED_UPDATE,
-                models::incompressible::coupled_graph_update_run as _,
-            );
-            ops.graph.insert(
-                super::templates::incompressible_coupled::G_COUPLED_INIT_PREPARE,
-                models::incompressible::coupled_graph_init_prepare_run as _,
-            );
-
-            ops.host.insert(
-                super::templates::incompressible_coupled::H_COUPLED_BEGIN_STEP,
-                models::incompressible::host_coupled_begin_step as _,
-            );
-            ops.host.insert(
-                super::templates::incompressible_coupled::H_COUPLED_BEFORE_ITER,
-                models::incompressible::host_coupled_before_iter as _,
-            );
-            ops.host.insert(
-                super::templates::incompressible_coupled::H_COUPLED_SOLVE,
-                models::incompressible::host_coupled_solve as _,
-            );
-            ops.host.insert(
-                super::templates::incompressible_coupled::H_COUPLED_CLEAR_MAX_DIFF,
-                models::incompressible::host_coupled_clear_max_diff as _,
-            );
-            ops.host.insert(
-                super::templates::incompressible_coupled::H_COUPLED_CONVERGENCE_ADVANCE,
-                models::incompressible::host_coupled_convergence_and_advance as _,
-            );
-            ops.host.insert(
-                super::templates::incompressible_coupled::H_COUPLED_FINALIZE_STEP,
-                models::incompressible::host_coupled_finalize_step as _,
-            );
-
-            ops.cond.insert(
-                super::templates::incompressible_coupled::C_HAS_COUPLED_RESOURCES,
-                models::incompressible::has_coupled_resources as _,
-            );
-            ops.cond.insert(
-                super::templates::incompressible_coupled::C_COUPLED_NEEDS_PREPARE,
-                models::incompressible::coupled_needs_prepare as _,
-            );
-            ops.cond.insert(
-                super::templates::incompressible_coupled::C_COUPLED_SHOULD_CONTINUE,
-                models::incompressible::coupled_should_continue as _,
-            );
-            ops.count.insert(
-                super::templates::incompressible_coupled::N_COUPLED_MAX_ITERS,
-                models::incompressible::coupled_max_iters as _,
-            );
+            let ops = std::sync::Arc::new(models::incompressible::IncompressibleOpDispatcher);
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
@@ -530,24 +402,7 @@ async fn lower_parts_for_template(
                     models::generic_coupled::param_detailed_profiling as _,
                 );
 
-                let mut ops = crate::solver::gpu::plans::program::ProgramOps::new();
-                ops.graph.insert(
-                    super::templates::generic_coupled_scalar::G_ASSEMBLY,
-                    models::generic_coupled::assembly_graph_run as _,
-                );
-                ops.graph.insert(
-                    super::templates::generic_coupled_scalar::G_UPDATE,
-                    models::generic_coupled::update_graph_run as _,
-                );
-
-                ops.host.insert(
-                    super::templates::generic_coupled_scalar::H_PREPARE,
-                    models::generic_coupled::host_prepare_step as _,
-                );
-                ops.host.insert(
-                    super::templates::generic_coupled_scalar::H_SOLVE,
-                    models::generic_coupled::host_solve_linear_system as _,
-                );
+                let ops = std::sync::Arc::new(models::generic_coupled::GenericCoupledOpDispatcher);
 
                 Ok(LoweredProgramParts {
                     model: model.clone(),

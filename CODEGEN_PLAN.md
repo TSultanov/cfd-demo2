@@ -1,52 +1,43 @@
 # CFD2 Codegen + Unified Solver Plan
 
-This file tracks *codegen + solver orchestration* work. Pure physics/tuning tasks should live elsewhere.
+This file tracks *remaining* codegen + solver orchestration work. Pure physics/tuning tasks should live elsewhere.
 
 ## Goal
 One **model-driven** GPU solver pipeline with:
-- a single lowering/compilation path (no compressible/incompressible-specific compiler/lowerer forks)
-- a single runtime orchestration path (no per-family solver loops)
+- a single lowering + codegen path (no separate compressible/incompressible lowerers/compilers)
+- a single runtime orchestration path (no per-family step loops)
 - solver features implemented as **pluggable modules** that own their own GPU resources
-- numerical schemes + auxiliary computations derived automatically from `ModelSpec` + solver config
+- kernels + auxiliary passes derived automatically from `ModelSpec` + solver config (no handwritten WGSL)
 
-## Current State
-- One unified runtime plan type: `GpuProgramPlan` + `ModelGpuProgramSpec`.
-- `build_plan_instance(...)` returns a concrete `GpuProgramPlan` (no dyn plan layer).
-- Solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources only (not part of the plan API).
-- One unified lowering entrypoint: `src/solver/gpu/lowering/mod.rs` `lower_program(...)`.
-- Program runtime supports control flow (`If`, `Repeat`, `While`) + graph dispatch + host nodes.
-- Program schedule is now a data-only IR: `ProgramSpec` (blocks + ID nodes), interpreted by `GpuProgramPlan` and backed by `ModelGpuProgramSpec.ops: ProgramOps`.
-- Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes).
-- Incompressible coupled stepping is expressed as a program schedule (graphs + host nodes + outer-loop control flow).
-- Legacy per-family step loops (`step_with_stats`/`step_coupled_impl`) were removed; solver-family structs now exist only as internal resource containers + helpers.
+## Status (Reality Check)
+- Runtime orchestration is largely unified via `GpuProgramPlan` + `ProgramSpec`, but lowering still forks by `ModelFields` and manually builds schedules/ops in `src/solver/gpu/lowering/*_program.rs`.
+- Codegen emits WGSL at build time, but Rust-side pipeline/bind-group wiring is still handwritten and often solver-family-specific.
+- Several critical kernels are still handwritten WGSL (`src/solver/gpu/shaders/*.wgsl`), including solver-family-specific ones (`compressible_*`, `schur_precond`).
 
-## Assessment (Are We Approaching The Goal?)
-- Yes: the public surface is unified, config flows into lowering, and the runtime is moving toward module-graph execution with shared Krylov/FGMRES helpers.
-- Not yet: we still have solver-family resource containers and solver-family kernel binding/dispatch wiring. Generated WGSL exists, but the Rust-side binding/plumbing is not model-driven.
-
-## Remaining Gaps (Concrete)
-- `ModelGpuProgramSpec.ops` still relies on per-model dispatch tables (IDs -> fn pointers) over solver-family containers rather than typed “op kinds” implemented by modules.
-- Lowering still has per-family program builders (`compressible_program.rs` / `incompressible_program.rs` / `generic_coupled_program.rs`); schedules are handwritten rather than derived from `ModelSpec` + config.
-- Kernel wiring is still largely handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering), especially for generated-per-model kernels.
-- “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
-- Generic coupled remains intentionally incomplete (limited terms/BCs), and scheme expansion is not yet driving required auxiliary passes automatically.
-- Plan configuration is still driven by a global `PlanParam` enum and a handful of ad-hoc host callbacks; this should become a typed config/update path derived from `ModelSpec` and module capabilities.
+## Main Blockers
+- `ProgramSpec` is data, but `ProgramOps` is still a per-plan fn-pointer registry (IDs -> functions) rather than typed “op kinds” implemented by modules.
+- Solver-family resource containers (`GpuSolver`, `CompressiblePlanResources`, `GenericCoupledProgramResources`) still own most pipelines/bind groups and dictate wiring.
+- Kernel selection still relies on manual dispatch logic (e.g. string-based model-id matches in `generic_coupled_program.rs`) instead of a generated registry keyed by `ModelSpec`/`KernelPlan`.
+- Scheme expansion and aux-pass discovery are not yet driving required buffers/kernels/schedule end-to-end.
 
 ## Next Steps (Prioritized)
 1. **Make lowering truly model-driven**
-   - Generate `ProgramSpec` per model (build-time) from `ModelSpec::kernel_plan()` + solver config.
-   - Target: per-family builders become thin “resource providers”; schedule/aux passes come from generated `ProgramSpec`.
-   - Replace per-model fn-pointer registries with shared “op kinds” (typed enums) and module-owned dispatch.
-2. **Elevate “first-class modules”**
-   - Krylov / preconditioners / AMG become pluggable modules with explicit ports and self-owned resources.
-   - Replace solver-family resource containers with module-owned resources reachable only through ports.
-3. **Reduce handwritten kernel plumbing (incremental)**
-   - Add small shared helpers/macros to reduce bind-group/pipeline boilerplate in existing builders (start with `generic_coupled_program.rs`).
-   - Then move bind-group/pipeline construction toward “generated bindings + generic port wiring” so model-specific code becomes mostly “declare ports + compose module graphs”.
-4. **Drive scheme expansion end-to-end**
-   - Scheme selection expands to required auxiliary passes (gradients/reconstruction/history) for arbitrary fields/models.
-5. **Replace `PlanParam` with typed config updates**
-   - Replace `PlanParam/PlanParamValue` with typed `SolverConfigDelta` (and/or module-specific deltas) generated from `ModelSpec` + module capabilities.
+   - Introduce a single lowerer that consumes a `ProgramTemplate`/`KernelPlan` derived from `ModelSpec` + config.
+   - Delete per-family schedule authorship (`compressible_program.rs`, `incompressible_program.rs`, `generic_coupled_program.rs`); keep only reusable module/resource providers.
+2. **Replace fn-pointer ops with typed module ops**
+   - Replace `ProgramGraphId`/`ProgramHostId` registries with typed `OpKind` enums backed by modules (graph/host/cond/count).
+   - Target: program specs become stable data that can be generated and unit-tested without a plan instance.
+3. **Make resources module-owned and family-agnostic**
+   - Move pipelines/bind groups/buffers out of `GpuSolver` / `*PlanResources` into modules with explicit `PortSpace` contracts.
+   - Standardize ping-pong state, linear-system ports, and time integration as shared modules.
+4. **Generate kernel bindings + dispatch**
+   - Emit binding metadata alongside WGSL (ports/resources per bind group) and add a generic bind-group builder.
+   - Replace string-based per-model kernel selection with a generated registry (`ModelSpec.id` + kernel kind -> pipeline/bind builders).
+5. **Eliminate handwritten WGSL (incremental)**
+   - Start with solver-family-specific shaders (`compressible_*`, `schur_precond`) and migrate them into the codegen WGSL pipeline.
+   - Keep handwritten WGSL only as a temporary bootstrapping layer.
+6. **Replace `PlanParam` with typed config deltas**
+   - Generate `SolverConfigDelta` + module-specific deltas from `ModelSpec` + module capabilities; remove ad-hoc host callbacks.
 
 ## Decisions (Locked In)
 - **Generated-per-model WGSL** stays (no runtime compilation/reflection).
@@ -54,5 +45,5 @@ One **model-driven** GPU solver pipeline with:
 - **Options selection** uses typed enums (no strings).
 
 ## Notes / Constraints
-- `build.rs` `include!()`s codegen modules; new build-time-only modules must be added there.
+- `build.rs` `include!()`s codegen modules; build-time-only modules must be added there.
 - Build scripts are std-only (plus `wgsl_bindgen`/`glob` build-deps); avoid pulling runtime-only crates into code referenced by `build.rs`.

@@ -1,12 +1,13 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::lowering::templates::compressible::*;
+use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramGraphId,
-    ProgramHostId, ProgramOps, ProgramResources, ProgramSetParamFallback, ProgramSpecBuilder,
-    ProgramSpecNode, ProgramStepStatsFn, ProgramStepWithStatsFn,
+    GpuProgramPlan, ProgramOps, ProgramResources, ProgramSetParamFallback, ProgramStepStatsFn,
+    ProgramStepWithStatsFn,
 };
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::mesh::Mesh;
@@ -327,32 +328,12 @@ fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinea
     Some(plan.resources.get_mut::<CompressibleProgramResources>()? as &mut dyn PlanLinearSystemDebug)
 }
 
-const G_EXPLICIT_GRAPH: ProgramGraphId = ProgramGraphId(0);
-const G_IMPLICIT_GRAD_ASSEMBLY: ProgramGraphId = ProgramGraphId(1);
-const G_IMPLICIT_SNAPSHOT: ProgramGraphId = ProgramGraphId(2);
-const G_IMPLICIT_APPLY: ProgramGraphId = ProgramGraphId(3);
-const G_PRIMITIVE_UPDATE: ProgramGraphId = ProgramGraphId(4);
-
-const H_EXPLICIT_PREPARE: ProgramHostId = ProgramHostId(0);
-const H_EXPLICIT_FINALIZE: ProgramHostId = ProgramHostId(1);
-const H_IMPLICIT_PREPARE: ProgramHostId = ProgramHostId(2);
-const H_IMPLICIT_SET_ITER_PARAMS: ProgramHostId = ProgramHostId(3);
-const H_IMPLICIT_SOLVE_FGMRES: ProgramHostId = ProgramHostId(4);
-const H_IMPLICIT_RECORD_STATS: ProgramHostId = ProgramHostId(5);
-const H_IMPLICIT_SET_ALPHA: ProgramHostId = ProgramHostId(6);
-const H_IMPLICIT_RESTORE_ALPHA: ProgramHostId = ProgramHostId(7);
-const H_IMPLICIT_ADVANCE_OUTER_IDX: ProgramHostId = ProgramHostId(8);
-const H_IMPLICIT_FINALIZE: ProgramHostId = ProgramHostId(9);
-
-const C_SHOULD_USE_EXPLICIT: ProgramCondId = ProgramCondId(0);
-const N_IMPLICIT_OUTER_ITERS: ProgramCountId = ProgramCountId(0);
-
-pub(crate) async fn lower_compressible_program(
+pub(crate) async fn lower_parts(
     mesh: &Mesh,
     model: ModelSpec,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
-) -> Result<GpuProgramPlan, String> {
+) -> Result<LoweredProgramParts, String> {
     let plan = CompressiblePlanResources::new(mesh, model.clone(), device, queue).await?;
 
     let context = crate::solver::gpu::context::GpuContext {
@@ -412,141 +393,24 @@ pub(crate) async fn lower_compressible_program(
     ops.count
         .insert(N_IMPLICIT_OUTER_ITERS, implicit_outer_iters as _);
 
-    let mut program = ProgramSpecBuilder::new();
-    let root = program.root();
-    let explicit_block = program.new_block();
-    let implicit_iter_block = program.new_block();
-    let implicit_block = program.new_block();
-
-    program.push(
-        explicit_block,
-        ProgramSpecNode::Host {
-            label: "compressible:explicit_prepare",
-            id: H_EXPLICIT_PREPARE,
-        },
-    );
-    program.push(
-        explicit_block,
-        ProgramSpecNode::Graph {
-            label: "compressible:explicit_graph",
-            id: G_EXPLICIT_GRAPH,
-            mode: GraphExecMode::SplitTimed,
-        },
-    );
-    program.push(
-        explicit_block,
-        ProgramSpecNode::Host {
-            label: "compressible:explicit_finalize",
-            id: H_EXPLICIT_FINALIZE,
-        },
-    );
-
-    for node in [
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_set_iter_params",
-            id: H_IMPLICIT_SET_ITER_PARAMS,
-        },
-        ProgramSpecNode::Graph {
-            label: "compressible:implicit_grad_assembly",
-            id: G_IMPLICIT_GRAD_ASSEMBLY,
-            mode: GraphExecMode::SplitTimed,
-        },
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_fgmres",
-            id: H_IMPLICIT_SOLVE_FGMRES,
-        },
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_record_stats",
-            id: H_IMPLICIT_RECORD_STATS,
-        },
-        ProgramSpecNode::Graph {
-            label: "compressible:implicit_snapshot",
-            id: G_IMPLICIT_SNAPSHOT,
-            mode: GraphExecMode::SingleSubmit,
-        },
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_set_alpha",
-            id: H_IMPLICIT_SET_ALPHA,
-        },
-        ProgramSpecNode::Graph {
-            label: "compressible:implicit_apply",
-            id: G_IMPLICIT_APPLY,
-            mode: GraphExecMode::SingleSubmit,
-        },
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_restore_alpha",
-            id: H_IMPLICIT_RESTORE_ALPHA,
-        },
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_outer_idx_inc",
-            id: H_IMPLICIT_ADVANCE_OUTER_IDX,
-        },
-    ] {
-        program.push(implicit_iter_block, node);
-    }
-
-    program.push(
-        implicit_block,
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_prepare",
-            id: H_IMPLICIT_PREPARE,
-        },
-    );
-    program.push(
-        implicit_block,
-        ProgramSpecNode::Repeat {
-            label: "compressible:implicit_outer_loop",
-            times: N_IMPLICIT_OUTER_ITERS,
-            body: implicit_iter_block,
-        },
-    );
-    program.push(
-        implicit_block,
-        ProgramSpecNode::Graph {
-            label: "compressible:primitive_update",
-            id: G_PRIMITIVE_UPDATE,
-            mode: GraphExecMode::SingleSubmit,
-        },
-    );
-    program.push(
-        implicit_block,
-        ProgramSpecNode::Host {
-            label: "compressible:implicit_finalize",
-            id: H_IMPLICIT_FINALIZE,
-        },
-    );
-
-    program.push(
-        root,
-        ProgramSpecNode::If {
-            label: "compressible:select_step_path",
-            cond: C_SHOULD_USE_EXPLICIT,
-            then_block: explicit_block,
-            else_block: Some(implicit_block),
-        },
-    );
-
-    let spec = ModelGpuProgramSpec {
-        ops,
-        num_cells: spec_num_cells,
-        time: spec_time,
-        dt: spec_dt,
-        state_buffer: spec_state_buffer,
-        write_state_bytes: spec_write_state_bytes,
-        program: program.build(),
-        initialize_history: Some(init_history),
-        params: std::collections::HashMap::new(),
-        set_param_fallback: Some(set_param_fallback as ProgramSetParamFallback),
-        step_stats: Some(step_stats as ProgramStepStatsFn),
-        step_with_stats: Some(step_with_stats as ProgramStepWithStatsFn),
-        linear_debug: Some(linear_debug_provider),
-    };
-
-    Ok(GpuProgramPlan::new(
+    Ok(LoweredProgramParts {
         model,
         context,
         profiling_stats,
         resources,
-        spec,
-    ))
+        spec: ModelGpuProgramSpecParts {
+            ops,
+            num_cells: spec_num_cells,
+            time: spec_time,
+            dt: spec_dt,
+            state_buffer: spec_state_buffer,
+            write_state_bytes: spec_write_state_bytes,
+            initialize_history: Some(init_history),
+            params: std::collections::HashMap::new(),
+            set_param_fallback: Some(set_param_fallback as ProgramSetParamFallback),
+            step_stats: Some(step_stats as ProgramStepStatsFn),
+            step_with_stats: Some(step_with_stats as ProgramStepWithStatsFn),
+            linear_debug: Some(linear_debug_provider),
+        },
+    })
 }

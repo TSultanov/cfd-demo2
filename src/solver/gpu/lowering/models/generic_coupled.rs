@@ -1,4 +1,6 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::lowering::templates::generic_coupled_scalar::*;
+use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
 };
@@ -8,10 +10,7 @@ use crate::solver::gpu::modules::graph::{
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
-use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramGraphId, ProgramHostId, ProgramOps,
-    ProgramSpecBuilder, ProgramSpecNode,
-};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOps, ProgramResources};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
@@ -247,18 +246,12 @@ fn build_update_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
     })])
 }
 
-const G_ASSEMBLY: ProgramGraphId = ProgramGraphId(0);
-const G_UPDATE: ProgramGraphId = ProgramGraphId(1);
-
-const H_PREPARE: ProgramHostId = ProgramHostId(0);
-const H_SOLVE: ProgramHostId = ProgramHostId(1);
-
-pub(crate) async fn lower_generic_coupled_program(
+pub(crate) async fn lower_parts(
     mesh: &crate::solver::mesh::Mesh,
     model: ModelSpec,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
-) -> Result<GpuProgramPlan, String> {
+) -> Result<LoweredProgramParts, String> {
     let coupled_stride = model.system.unknowns_per_cell();
     if coupled_stride != 1 {
         return Err(format!(
@@ -495,7 +488,7 @@ pub(crate) async fn lower_generic_coupled_program(
             _b_bc_value: b_bc_value,
         };
 
-        let mut program_resources = crate::solver::gpu::plans::program::ProgramResources::new();
+        let mut program_resources = ProgramResources::new();
         program_resources.insert(resources);
 
         let mut params = std::collections::HashMap::new();
@@ -515,48 +508,25 @@ pub(crate) async fn lower_generic_coupled_program(
         ops.host.insert(H_PREPARE, host_prepare_step as _);
         ops.host.insert(H_SOLVE, host_solve_linear_system as _);
 
-        let mut program = ProgramSpecBuilder::new();
-        let root = program.root();
-        for node in [
-            ProgramSpecNode::Host {
-                label: "generic_coupled:prepare",
-                id: H_PREPARE,
+        Ok(LoweredProgramParts {
+            model,
+            context,
+            profiling_stats,
+            resources: program_resources,
+            spec: ModelGpuProgramSpecParts {
+                ops,
+                num_cells: spec_num_cells,
+                time: spec_time,
+                dt: spec_dt,
+                state_buffer: spec_state_buffer,
+                write_state_bytes: spec_write_state_bytes,
+                initialize_history: None,
+                params,
+                set_param_fallback: None,
+                step_stats: None,
+                step_with_stats: None,
+                linear_debug: Some(linear_debug_provider),
             },
-            ProgramSpecNode::Graph {
-                label: "generic_coupled:assembly",
-                id: G_ASSEMBLY,
-                mode: GraphExecMode::SplitTimed,
-            },
-            ProgramSpecNode::Host {
-                label: "generic_coupled:solve",
-                id: H_SOLVE,
-            },
-            ProgramSpecNode::Graph {
-                label: "generic_coupled:update",
-                id: G_UPDATE,
-                mode: GraphExecMode::SingleSubmit,
-            },
-        ] {
-            program.push(root, node);
-        }
-
-        let spec = ModelGpuProgramSpec {
-            ops,
-            num_cells: spec_num_cells,
-            time: spec_time,
-            dt: spec_dt,
-            state_buffer: spec_state_buffer,
-            write_state_bytes: spec_write_state_bytes,
-            program: program.build(),
-            initialize_history: None,
-            params,
-            set_param_fallback: None,
-            step_stats: None,
-            step_with_stats: None,
-            linear_debug: Some(linear_debug_provider),
-        };
-
-        let plan = GpuProgramPlan::new(model, context, profiling_stats, program_resources, spec);
-        Ok(plan)
+        })
     })
 }

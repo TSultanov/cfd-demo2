@@ -3,11 +3,11 @@ use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpRegistry,
-};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::env;
+
+use crate::solver::gpu::lowering::templates::compressible as op_ids;
 
 pub(in crate::solver::gpu::lowering) struct CompressibleProgramResources {
     plan: CompressiblePlanResources,
@@ -69,50 +69,50 @@ fn res_wrap_mut(plan: &mut GpuProgramPlan) -> &mut CompressibleProgramResources 
 pub(in crate::solver::gpu::lowering) fn register_ops(
     registry: &mut ProgramOpRegistry,
 ) -> Result<(), String> {
-    registry.register_graph(GraphOpKind::CompressibleExplicitGraph, explicit_graph_run)?;
+    registry.register_graph(op_ids::G_EXPLICIT_GRAPH, explicit_graph_run)?;
     registry.register_graph(
-        GraphOpKind::CompressibleImplicitGradAssembly,
+        op_ids::G_IMPLICIT_GRAD_ASSEMBLY,
         implicit_grad_assembly_graph_run,
     )?;
-    registry.register_graph(GraphOpKind::CompressibleImplicitSnapshot, implicit_snapshot_run)?;
-    registry.register_graph(GraphOpKind::CompressibleImplicitApply, implicit_apply_graph_run)?;
+    registry.register_graph(op_ids::G_IMPLICIT_SNAPSHOT, implicit_snapshot_run)?;
+    registry.register_graph(op_ids::G_IMPLICIT_APPLY, implicit_apply_graph_run)?;
     registry.register_graph(
-        GraphOpKind::CompressiblePrimitiveUpdate,
+        op_ids::G_PRIMITIVE_UPDATE,
         primitive_update_graph_run,
     )?;
 
-    registry.register_host(HostOpKind::CompressibleExplicitPrepare, host_explicit_prepare)?;
-    registry.register_host(HostOpKind::CompressibleExplicitFinalize, host_explicit_finalize)?;
-    registry.register_host(HostOpKind::CompressibleImplicitPrepare, host_implicit_prepare)?;
+    registry.register_host(op_ids::H_EXPLICIT_PREPARE, host_explicit_prepare)?;
+    registry.register_host(op_ids::H_EXPLICIT_FINALIZE, host_explicit_finalize)?;
+    registry.register_host(op_ids::H_IMPLICIT_PREPARE, host_implicit_prepare)?;
     registry.register_host(
-        HostOpKind::CompressibleImplicitSetIterParams,
+        op_ids::H_IMPLICIT_SET_ITER_PARAMS,
         host_implicit_set_iter_params,
     )?;
     registry.register_host(
-        HostOpKind::CompressibleImplicitSolveFgmres,
+        op_ids::H_IMPLICIT_SOLVE_FGMRES,
         host_implicit_solve_fgmres,
     )?;
     registry.register_host(
-        HostOpKind::CompressibleImplicitRecordStats,
+        op_ids::H_IMPLICIT_RECORD_STATS,
         host_implicit_record_stats,
     )?;
     registry.register_host(
-        HostOpKind::CompressibleImplicitSetAlpha,
+        op_ids::H_IMPLICIT_SET_ALPHA,
         host_implicit_set_alpha_for_apply,
     )?;
     registry.register_host(
-        HostOpKind::CompressibleImplicitRestoreAlpha,
+        op_ids::H_IMPLICIT_RESTORE_ALPHA,
         host_implicit_restore_alpha,
     )?;
     registry.register_host(
-        HostOpKind::CompressibleImplicitAdvanceOuterIdx,
+        op_ids::H_IMPLICIT_ADVANCE_OUTER_IDX,
         host_implicit_advance_outer_idx,
     )?;
-    registry.register_host(HostOpKind::CompressibleImplicitFinalize, host_implicit_finalize)?;
+    registry.register_host(op_ids::H_IMPLICIT_FINALIZE, host_implicit_finalize)?;
 
-    registry.register_cond(CondOpKind::CompressibleShouldUseExplicit, should_use_explicit)?;
+    registry.register_cond(op_ids::C_SHOULD_USE_EXPLICIT, should_use_explicit)?;
     registry.register_count(
-        CountOpKind::CompressibleImplicitOuterIters,
+        op_ids::N_IMPLICIT_OUTER_ITERS,
         implicit_outer_iters,
     )?;
 

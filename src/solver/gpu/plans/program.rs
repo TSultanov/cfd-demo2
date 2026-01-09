@@ -26,56 +26,16 @@ pub(crate) type ProgramLinearDebugProvider =
     fn(&mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum GraphOpKind {
-    CompressibleExplicitGraph,
-    CompressibleImplicitGradAssembly,
-    CompressibleImplicitSnapshot,
-    CompressibleImplicitApply,
-    CompressiblePrimitiveUpdate,
-    IncompressibleCoupledPrepareAssembly,
-    IncompressibleCoupledAssembly,
-    IncompressibleCoupledUpdate,
-    IncompressibleCoupledInitPrepare,
-    GenericCoupledScalarAssembly,
-    GenericCoupledScalarUpdate,
-}
+pub(crate) struct GraphOpKind(pub &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum HostOpKind {
-    CompressibleExplicitPrepare,
-    CompressibleExplicitFinalize,
-    CompressibleImplicitPrepare,
-    CompressibleImplicitSetIterParams,
-    CompressibleImplicitSolveFgmres,
-    CompressibleImplicitRecordStats,
-    CompressibleImplicitSetAlpha,
-    CompressibleImplicitRestoreAlpha,
-    CompressibleImplicitAdvanceOuterIdx,
-    CompressibleImplicitFinalize,
-    IncompressibleCoupledBeginStep,
-    IncompressibleCoupledBeforeIter,
-    IncompressibleCoupledSolve,
-    IncompressibleCoupledClearMaxDiff,
-    IncompressibleCoupledConvergenceAdvance,
-    IncompressibleCoupledFinalizeStep,
-    GenericCoupledScalarPrepare,
-    GenericCoupledScalarSolve,
-    GenericCoupledScalarFinalizeStep,
-}
+pub(crate) struct HostOpKind(pub &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum CondOpKind {
-    CompressibleShouldUseExplicit,
-    IncompressibleHasCoupledResources,
-    IncompressibleCoupledNeedsPrepare,
-    IncompressibleCoupledShouldContinue,
-}
+pub(crate) struct CondOpKind(pub &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum CountOpKind {
-    CompressibleImplicitOuterIters,
-    IncompressibleCoupledMaxIters,
-}
+pub(crate) struct CountOpKind(pub &'static str);
 
 pub(crate) trait ProgramOpDispatcher {
     fn run_graph(
@@ -587,7 +547,7 @@ impl GpuProgramPlan {
                     cond,
                     then_block,
                     else_block,
-                    ..
+                    .. 
                 } => {
                     if self.spec.ops.eval_cond(cond, &*self) {
                         self.execute_block(then_block);
@@ -605,7 +565,7 @@ impl GpuProgramPlan {
                     max_iters,
                     cond,
                     body,
-                    ..
+                    .. 
                 } => {
                     let max_iters = self.spec.ops.eval_count(max_iters, &*self);
                     for _ in 0..max_iters {
@@ -653,7 +613,7 @@ mod tests {
             root,
             ProgramSpecNode::Graph {
                 label: "t:g",
-                kind: GraphOpKind::CompressibleExplicitGraph,
+                kind: GraphOpKind("CompressibleExplicitGraph"),
                 mode: GraphExecMode::SingleSubmit,
             },
         );
@@ -661,14 +621,14 @@ mod tests {
             root,
             ProgramSpecNode::Host {
                 label: "t:h",
-                kind: HostOpKind::CompressibleExplicitPrepare,
+                kind: HostOpKind("CompressibleExplicitPrepare"),
             },
         );
         builder.push(
             root,
             ProgramSpecNode::If {
                 label: "t:if",
-                cond: CondOpKind::CompressibleShouldUseExplicit,
+                cond: CondOpKind("CompressibleShouldUseExplicit"),
                 then_block,
                 else_block: None,
             },
@@ -677,7 +637,7 @@ mod tests {
             root,
             ProgramSpecNode::Repeat {
                 label: "t:repeat",
-                times: CountOpKind::CompressibleImplicitOuterIters,
+                times: CountOpKind("CompressibleImplicitOuterIters"),
                 body: repeat_block,
             },
         );
@@ -685,8 +645,8 @@ mod tests {
             root,
             ProgramSpecNode::While {
                 label: "t:while",
-                max_iters: CountOpKind::IncompressibleCoupledMaxIters,
-                cond: CondOpKind::IncompressibleCoupledShouldContinue,
+                max_iters: CountOpKind("IncompressibleCoupledMaxIters"),
+                cond: CondOpKind("IncompressibleCoupledShouldContinue"),
                 body: repeat_block,
             },
         );
@@ -695,7 +655,7 @@ mod tests {
             then_block,
             ProgramSpecNode::Host {
                 label: "t:then:h",
-                kind: HostOpKind::CompressibleExplicitFinalize,
+                kind: HostOpKind("CompressibleExplicitFinalize"),
             },
         );
 
@@ -703,7 +663,7 @@ mod tests {
             repeat_block,
             ProgramSpecNode::Host {
                 label: "t:repeat:h",
-                kind: HostOpKind::IncompressibleCoupledBeginStep,
+                kind: HostOpKind("IncompressibleCoupledBeginStep"),
             },
         );
 
@@ -732,7 +692,7 @@ mod tests {
             root,
             ProgramSpecNode::Graph {
                 label: "t:g",
-                kind: GraphOpKind::CompressibleExplicitGraph,
+                kind: GraphOpKind("CompressibleExplicitGraph"),
                 mode: GraphExecMode::SingleSubmit,
             },
         );
@@ -740,14 +700,14 @@ mod tests {
             root,
             ProgramSpecNode::Host {
                 label: "t:h",
-                kind: HostOpKind::CompressibleExplicitPrepare,
+                kind: HostOpKind("CompressibleExplicitPrepare"),
             },
         );
         builder.push(
             root,
             ProgramSpecNode::If {
                 label: "t:if",
-                cond: CondOpKind::CompressibleShouldUseExplicit,
+                cond: CondOpKind("CompressibleShouldUseExplicit"),
                 then_block,
                 else_block: None,
             },
@@ -756,7 +716,7 @@ mod tests {
             root,
             ProgramSpecNode::Repeat {
                 label: "t:repeat",
-                times: CountOpKind::CompressibleImplicitOuterIters,
+                times: CountOpKind("CompressibleImplicitOuterIters"),
                 body: repeat_block,
             },
         );
@@ -764,8 +724,8 @@ mod tests {
             root,
             ProgramSpecNode::While {
                 label: "t:while",
-                max_iters: CountOpKind::IncompressibleCoupledMaxIters,
-                cond: CondOpKind::IncompressibleCoupledShouldContinue,
+                max_iters: CountOpKind("IncompressibleCoupledMaxIters"),
+                cond: CondOpKind("IncompressibleCoupledShouldContinue"),
                 body: repeat_block,
             },
         );
@@ -774,7 +734,7 @@ mod tests {
             then_block,
             ProgramSpecNode::Host {
                 label: "t:then:h",
-                kind: HostOpKind::CompressibleExplicitFinalize,
+                kind: HostOpKind("CompressibleExplicitFinalize"),
             },
         );
 
@@ -782,21 +742,21 @@ mod tests {
             repeat_block,
             ProgramSpecNode::Host {
                 label: "t:repeat:h",
-                kind: HostOpKind::IncompressibleCoupledBeginStep,
+                kind: HostOpKind("IncompressibleCoupledBeginStep"),
             },
         );
 
         let program = builder.build();
 
         let mut registry = ProgramOpRegistry::new();
-        registry.register_graph(GraphOpKind::CompressibleExplicitGraph, dummy_graph)?;
-        registry.register_host(HostOpKind::CompressibleExplicitPrepare, dummy_host)?;
-        registry.register_host(HostOpKind::CompressibleExplicitFinalize, dummy_host)?;
-        registry.register_host(HostOpKind::IncompressibleCoupledBeginStep, dummy_host)?;
-        registry.register_cond(CondOpKind::CompressibleShouldUseExplicit, dummy_cond)?;
-        registry.register_cond(CondOpKind::IncompressibleCoupledShouldContinue, dummy_cond)?;
-        registry.register_count(CountOpKind::CompressibleImplicitOuterIters, dummy_count)?;
-        registry.register_count(CountOpKind::IncompressibleCoupledMaxIters, dummy_count)?;
+        registry.register_graph(GraphOpKind("CompressibleExplicitGraph"), dummy_graph)?;
+        registry.register_host(HostOpKind("CompressibleExplicitPrepare"), dummy_host)?;
+        registry.register_host(HostOpKind("CompressibleExplicitFinalize"), dummy_host)?;
+        registry.register_host(HostOpKind("IncompressibleCoupledBeginStep"), dummy_host)?;
+        registry.register_cond(CondOpKind("CompressibleShouldUseExplicit"), dummy_cond)?;
+        registry.register_cond(CondOpKind("IncompressibleCoupledShouldContinue"), dummy_cond)?;
+        registry.register_count(CountOpKind("CompressibleImplicitOuterIters"), dummy_count)?;
+        registry.register_count(CountOpKind("IncompressibleCoupledMaxIters"), dummy_count)?;
 
         registry.validate_program_spec(&program)
     }

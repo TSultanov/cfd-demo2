@@ -2,10 +2,10 @@ use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExe
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpRegistry,
-};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
+
+use crate::solver::gpu::lowering::templates::incompressible_coupled as op_ids;
 
 pub(in crate::solver::gpu::lowering) struct IncompressibleProgramResources {
     plan: GpuSolver,
@@ -70,52 +70,52 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
     registry: &mut ProgramOpRegistry,
 ) -> Result<(), String> {
     registry.register_graph(
-        GraphOpKind::IncompressibleCoupledInitPrepare,
+        op_ids::G_COUPLED_INIT_PREPARE,
         coupled_graph_init_prepare_run,
     )?;
     registry.register_graph(
-        GraphOpKind::IncompressibleCoupledPrepareAssembly,
+        op_ids::G_COUPLED_PREPARE_ASSEMBLY,
         coupled_graph_prepare_assembly_run,
     )?;
     registry.register_graph(
-        GraphOpKind::IncompressibleCoupledAssembly,
+        op_ids::G_COUPLED_ASSEMBLY,
         coupled_graph_assembly_run,
     )?;
     registry.register_graph(
-        GraphOpKind::IncompressibleCoupledUpdate,
+        op_ids::G_COUPLED_UPDATE,
         coupled_graph_update_run,
     )?;
 
-    registry.register_host(HostOpKind::IncompressibleCoupledBeginStep, host_coupled_begin_step)?;
+    registry.register_host(op_ids::H_COUPLED_BEGIN_STEP, host_coupled_begin_step)?;
     registry.register_host(
-        HostOpKind::IncompressibleCoupledBeforeIter,
+        op_ids::H_COUPLED_BEFORE_ITER,
         host_coupled_before_iter,
     )?;
-    registry.register_host(HostOpKind::IncompressibleCoupledSolve, host_coupled_solve)?;
+    registry.register_host(op_ids::H_COUPLED_SOLVE, host_coupled_solve)?;
     registry.register_host(
-        HostOpKind::IncompressibleCoupledClearMaxDiff,
+        op_ids::H_COUPLED_CLEAR_MAX_DIFF,
         host_coupled_clear_max_diff,
     )?;
     registry.register_host(
-        HostOpKind::IncompressibleCoupledConvergenceAdvance,
+        op_ids::H_COUPLED_CONVERGENCE_ADVANCE,
         host_coupled_convergence_and_advance,
     )?;
     registry.register_host(
-        HostOpKind::IncompressibleCoupledFinalizeStep,
+        op_ids::H_COUPLED_FINALIZE_STEP,
         host_coupled_finalize_step,
     )?;
 
-    registry.register_cond(CondOpKind::IncompressibleHasCoupledResources, has_coupled_resources)?;
+    registry.register_cond(op_ids::C_HAS_COUPLED_RESOURCES, has_coupled_resources)?;
     registry.register_cond(
-        CondOpKind::IncompressibleCoupledNeedsPrepare,
+        op_ids::C_COUPLED_NEEDS_PREPARE,
         coupled_needs_prepare,
     )?;
     registry.register_cond(
-        CondOpKind::IncompressibleCoupledShouldContinue,
+        op_ids::C_COUPLED_SHOULD_CONTINUE,
         coupled_should_continue,
     )?;
 
-    registry.register_count(CountOpKind::IncompressibleCoupledMaxIters, coupled_max_iters)?;
+    registry.register_count(op_ids::N_COUPLED_MAX_ITERS, coupled_max_iters)?;
 
     Ok(())
 }

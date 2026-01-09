@@ -73,32 +73,32 @@ pub(crate) fn build_program_spec(kind: ProgramTemplateKind) -> ProgramSpec {
 pub(crate) mod compressible {
     use super::*;
 
-    pub(crate) const G_EXPLICIT_GRAPH: GraphOpKind = GraphOpKind::CompressibleExplicitGraph;
+    pub(crate) const G_EXPLICIT_GRAPH: GraphOpKind = GraphOpKind("compressible:explicit_graph");
     pub(crate) const G_IMPLICIT_GRAD_ASSEMBLY: GraphOpKind =
-        GraphOpKind::CompressibleImplicitGradAssembly;
-    pub(crate) const G_IMPLICIT_SNAPSHOT: GraphOpKind = GraphOpKind::CompressibleImplicitSnapshot;
-    pub(crate) const G_IMPLICIT_APPLY: GraphOpKind = GraphOpKind::CompressibleImplicitApply;
-    pub(crate) const G_PRIMITIVE_UPDATE: GraphOpKind = GraphOpKind::CompressiblePrimitiveUpdate;
+        GraphOpKind("compressible:implicit_grad_assembly");
+    pub(crate) const G_IMPLICIT_SNAPSHOT: GraphOpKind = GraphOpKind("compressible:implicit_snapshot");
+    pub(crate) const G_IMPLICIT_APPLY: GraphOpKind = GraphOpKind("compressible:implicit_apply");
+    pub(crate) const G_PRIMITIVE_UPDATE: GraphOpKind = GraphOpKind("compressible:primitive_update");
 
-    pub(crate) const H_EXPLICIT_PREPARE: HostOpKind = HostOpKind::CompressibleExplicitPrepare;
-    pub(crate) const H_EXPLICIT_FINALIZE: HostOpKind = HostOpKind::CompressibleExplicitFinalize;
-    pub(crate) const H_IMPLICIT_PREPARE: HostOpKind = HostOpKind::CompressibleImplicitPrepare;
+    pub(crate) const H_EXPLICIT_PREPARE: HostOpKind = HostOpKind("compressible:explicit_prepare");
+    pub(crate) const H_EXPLICIT_FINALIZE: HostOpKind = HostOpKind("compressible:explicit_finalize");
+    pub(crate) const H_IMPLICIT_PREPARE: HostOpKind = HostOpKind("compressible:implicit_prepare");
     pub(crate) const H_IMPLICIT_SET_ITER_PARAMS: HostOpKind =
-        HostOpKind::CompressibleImplicitSetIterParams;
+        HostOpKind("compressible:implicit_set_iter_params");
     pub(crate) const H_IMPLICIT_SOLVE_FGMRES: HostOpKind =
-        HostOpKind::CompressibleImplicitSolveFgmres;
+        HostOpKind("compressible:implicit_solve_fgmres");
     pub(crate) const H_IMPLICIT_RECORD_STATS: HostOpKind =
-        HostOpKind::CompressibleImplicitRecordStats;
-    pub(crate) const H_IMPLICIT_SET_ALPHA: HostOpKind = HostOpKind::CompressibleImplicitSetAlpha;
+        HostOpKind("compressible:implicit_record_stats");
+    pub(crate) const H_IMPLICIT_SET_ALPHA: HostOpKind = HostOpKind("compressible:implicit_set_alpha");
     pub(crate) const H_IMPLICIT_RESTORE_ALPHA: HostOpKind =
-        HostOpKind::CompressibleImplicitRestoreAlpha;
+        HostOpKind("compressible:implicit_restore_alpha");
     pub(crate) const H_IMPLICIT_ADVANCE_OUTER_IDX: HostOpKind =
-        HostOpKind::CompressibleImplicitAdvanceOuterIdx;
-    pub(crate) const H_IMPLICIT_FINALIZE: HostOpKind = HostOpKind::CompressibleImplicitFinalize;
+        HostOpKind("compressible:implicit_advance_outer_idx");
+    pub(crate) const H_IMPLICIT_FINALIZE: HostOpKind = HostOpKind("compressible:implicit_finalize");
 
-    pub(crate) const C_SHOULD_USE_EXPLICIT: CondOpKind = CondOpKind::CompressibleShouldUseExplicit;
+    pub(crate) const C_SHOULD_USE_EXPLICIT: CondOpKind = CondOpKind("compressible:should_use_explicit");
     pub(crate) const N_IMPLICIT_OUTER_ITERS: CountOpKind =
-        CountOpKind::CompressibleImplicitOuterIters;
+        CountOpKind("compressible:implicit_outer_iters");
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();
@@ -223,31 +223,31 @@ pub(crate) mod incompressible_coupled {
     use super::*;
 
     pub(crate) const G_COUPLED_PREPARE_ASSEMBLY: GraphOpKind =
-        GraphOpKind::IncompressibleCoupledPrepareAssembly;
-    pub(crate) const G_COUPLED_ASSEMBLY: GraphOpKind = GraphOpKind::IncompressibleCoupledAssembly;
-    pub(crate) const G_COUPLED_UPDATE: GraphOpKind = GraphOpKind::IncompressibleCoupledUpdate;
+        GraphOpKind("incompressible:coupled_prepare_assembly");
+    pub(crate) const G_COUPLED_ASSEMBLY: GraphOpKind = GraphOpKind("incompressible:coupled_assembly");
+    pub(crate) const G_COUPLED_UPDATE: GraphOpKind = GraphOpKind("incompressible:coupled_update");
     pub(crate) const G_COUPLED_INIT_PREPARE: GraphOpKind =
-        GraphOpKind::IncompressibleCoupledInitPrepare;
+        GraphOpKind("incompressible:coupled_init_prepare");
 
-    pub(crate) const H_COUPLED_BEGIN_STEP: HostOpKind = HostOpKind::IncompressibleCoupledBeginStep;
+    pub(crate) const H_COUPLED_BEGIN_STEP: HostOpKind = HostOpKind("incompressible:coupled_begin_step");
     pub(crate) const H_COUPLED_BEFORE_ITER: HostOpKind =
-        HostOpKind::IncompressibleCoupledBeforeIter;
-    pub(crate) const H_COUPLED_SOLVE: HostOpKind = HostOpKind::IncompressibleCoupledSolve;
+        HostOpKind("incompressible:coupled_before_iter");
+    pub(crate) const H_COUPLED_SOLVE: HostOpKind = HostOpKind("incompressible:coupled_solve");
     pub(crate) const H_COUPLED_CLEAR_MAX_DIFF: HostOpKind =
-        HostOpKind::IncompressibleCoupledClearMaxDiff;
+        HostOpKind("incompressible:coupled_clear_max_diff");
     pub(crate) const H_COUPLED_CONVERGENCE_ADVANCE: HostOpKind =
-        HostOpKind::IncompressibleCoupledConvergenceAdvance;
+        HostOpKind("incompressible:coupled_convergence_advance");
     pub(crate) const H_COUPLED_FINALIZE_STEP: HostOpKind =
-        HostOpKind::IncompressibleCoupledFinalizeStep;
+        HostOpKind("incompressible:coupled_finalize_step");
 
     pub(crate) const C_HAS_COUPLED_RESOURCES: CondOpKind =
-        CondOpKind::IncompressibleHasCoupledResources;
+        CondOpKind("incompressible:has_coupled_resources");
     pub(crate) const C_COUPLED_NEEDS_PREPARE: CondOpKind =
-        CondOpKind::IncompressibleCoupledNeedsPrepare;
+        CondOpKind("incompressible:coupled_needs_prepare");
     pub(crate) const C_COUPLED_SHOULD_CONTINUE: CondOpKind =
-        CondOpKind::IncompressibleCoupledShouldContinue;
+        CondOpKind("incompressible:coupled_should_continue");
 
-    pub(crate) const N_COUPLED_MAX_ITERS: CountOpKind = CountOpKind::IncompressibleCoupledMaxIters;
+    pub(crate) const N_COUPLED_MAX_ITERS: CountOpKind = CountOpKind("incompressible:coupled_max_iters");
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();
@@ -347,12 +347,12 @@ pub(crate) mod incompressible_coupled {
 pub(crate) mod generic_coupled_scalar {
     use super::*;
 
-    pub(crate) const G_ASSEMBLY: GraphOpKind = GraphOpKind::GenericCoupledScalarAssembly;
-    pub(crate) const G_UPDATE: GraphOpKind = GraphOpKind::GenericCoupledScalarUpdate;
+    pub(crate) const G_ASSEMBLY: GraphOpKind = GraphOpKind("generic_coupled:scalar_assembly");
+    pub(crate) const G_UPDATE: GraphOpKind = GraphOpKind("generic_coupled:scalar_update");
 
-    pub(crate) const H_PREPARE: HostOpKind = HostOpKind::GenericCoupledScalarPrepare;
-    pub(crate) const H_SOLVE: HostOpKind = HostOpKind::GenericCoupledScalarSolve;
-    pub(crate) const H_FINALIZE: HostOpKind = HostOpKind::GenericCoupledScalarFinalizeStep;
+    pub(crate) const H_PREPARE: HostOpKind = HostOpKind("generic_coupled:scalar_prepare");
+    pub(crate) const H_SOLVE: HostOpKind = HostOpKind("generic_coupled:scalar_solve");
+    pub(crate) const H_FINALIZE: HostOpKind = HostOpKind("generic_coupled:scalar_finalize_step");
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();

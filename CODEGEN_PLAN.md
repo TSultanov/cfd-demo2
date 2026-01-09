@@ -11,7 +11,7 @@ One **model-driven** GPU solver pipeline with:
 
 ## Status
 - The solver entrypoint is unified (`GpuUnifiedSolver`), and **all models now lower to a single runtime plan type**: `GpuProgramPlan` + `ModelGpuProgramSpec`.
-- Lowering is routed through `src/solver/gpu/lowering/mod.rs`, and both solver config and the caller-provided `ModelSpec` are passed into program construction.
+- Lowering is routed through `src/solver/gpu/lowering/mod.rs` via a single `lower_program(...)` entrypoint, and both solver config and the caller-provided `ModelSpec` are passed into program construction.
 - Orchestration is increasingly plan-driven (`ExecutionPlan`/`ModuleGraph`), and shared helpers are replacing per-plan boilerplate.
 - `ModelGpuProgramSpec` currently wraps existing solver-family resource containers (incompressible `GpuSolver`, compressible `CompressiblePlanResources`, generic coupled resources) and forwards `state_buffer`, params, stepping, and linear-debug hooks through the spec.
 

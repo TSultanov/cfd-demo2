@@ -7,6 +7,7 @@ pub mod enums;
 pub mod execution_plan;
 pub mod init;
 pub mod linear_solver;
+pub(crate) mod lowering;
 pub mod model_defaults;
 pub mod modules;
 pub(crate) mod plans;

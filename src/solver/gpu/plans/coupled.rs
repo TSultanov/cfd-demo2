@@ -730,7 +730,7 @@ impl GpuSolver {
             .poll(wgpu::PollType::wait_indefinitely());
     }
 
-    fn check_evolution(&mut self) {
+    pub(crate) fn check_evolution(&mut self) {
         let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
 
         // Read velocity field to check for evolution and variance
@@ -820,7 +820,7 @@ impl GpuSolver {
         }
     }
 
-    fn solve_coupled_system(&mut self) -> LinearSolverStats {
+    pub(crate) fn solve_coupled_system(&mut self) -> LinearSolverStats {
         // Use the FGMRES-based coupled solver implementation from
         // `coupled_solver_fgmres.rs` to solve the coupled block system.
         self.solve_coupled_fgmres()

@@ -83,6 +83,12 @@ pub(crate) enum ProgramNode {
         times: fn(&GpuProgramPlan) -> usize,
         body: Arc<ProgramExecutionPlan>,
     },
+    While {
+        label: &'static str,
+        max_iters: fn(&GpuProgramPlan) -> usize,
+        cond: fn(&GpuProgramPlan) -> bool,
+        body: Arc<ProgramExecutionPlan>,
+    },
 }
 
 pub(crate) struct ProgramExecutionPlan {
@@ -115,6 +121,19 @@ impl ProgramExecutionPlan {
                 }
                 ProgramNode::Repeat { times, body, .. } => {
                     for _ in 0..times(&*plan) {
+                        body.execute(plan);
+                    }
+                }
+                ProgramNode::While {
+                    max_iters,
+                    cond,
+                    body,
+                    ..
+                } => {
+                    for _ in 0..max_iters(&*plan) {
+                        if !cond(&*plan) {
+                            break;
+                        }
                         body.execute(plan);
                     }
                 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::coupled_fgmres::FgmresResources;
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanAction, PlanCapability, PlanFuture, PlanLinearSystemDebug, PlanParam,
+    GpuPlanInstance, PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParam,
     PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
@@ -379,12 +379,6 @@ impl GpuPlanInstance for GpuSolver {
 
     fn state_buffer(&self) -> &wgpu::Buffer {
         &self.b_state
-    }
-
-    fn supports(&self, capability: PlanCapability) -> bool {
-        match capability {
-            PlanCapability::LinearSystemDebug => true,
-        }
     }
 
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {

@@ -72,12 +72,6 @@ pub enum PlanAction {
     PrintProfilingReport,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlanCapability {
-    /// Plan supports setting/solving/reading a linear system via the debug hooks.
-    LinearSystemDebug,
-}
-
 pub(crate) trait PlanLinearSystemDebug: Send {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String>;
 
@@ -96,10 +90,6 @@ pub(crate) trait GpuPlanInstance: Send {
     fn time(&self) -> f32;
     fn dt(&self) -> f32;
     fn state_buffer(&self) -> &wgpu::Buffer;
-
-    fn supports(&self, _capability: PlanCapability) -> bool {
-        false
-    }
 
     fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String>;
 

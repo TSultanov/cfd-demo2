@@ -2,7 +2,7 @@ use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanCapability, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
+    GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -476,12 +476,6 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
 
     fn state_buffer(&self) -> &wgpu::Buffer {
         GpuGenericCoupledSolver::state_buffer(self)
-    }
-
-    fn supports(&self, capability: PlanCapability) -> bool {
-        match capability {
-            PlanCapability::LinearSystemDebug => true,
-        }
     }
 
     fn profiling_stats(&self) -> Arc<ProfilingStats> {

@@ -11,7 +11,6 @@ use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
 pub use crate::solver::gpu::plans::plan_instance::FgmresSizing;
-pub use crate::solver::gpu::plans::plan_instance::PlanCapability;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SolverConfig {
@@ -346,10 +345,6 @@ impl GpuUnifiedSolver {
 
     pub fn print_profiling_report(&self) -> Result<(), String> {
         self.plan.perform(PlanAction::PrintProfilingReport)
-    }
-
-    pub fn supports(&self, capability: PlanCapability) -> bool {
-        self.plan.supports(capability)
     }
 
     pub async fn read_state_f32(&self) -> Vec<f32> {

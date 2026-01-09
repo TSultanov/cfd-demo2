@@ -202,7 +202,13 @@ impl ScalarCgModule {
         &self.b_staging_scalar
     }
 
-    pub fn solve(&self, context: &GpuContext, n: u32, max_iters: u32, tol: f32) -> LinearSolverStats {
+    pub fn solve(
+        &self,
+        context: &GpuContext,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> LinearSolverStats {
         if n > self.capacity {
             panic!(
                 "requested solve size {} exceeds allocated size {}",

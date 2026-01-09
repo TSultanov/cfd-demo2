@@ -106,4 +106,3 @@ impl GpuComputeModule for GenericCoupledKernelsModule {
         }
     }
 }
-

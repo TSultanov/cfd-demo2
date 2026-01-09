@@ -1,19 +1,23 @@
-use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphExecMode};
-use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
+use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
+use crate::solver::gpu::modules::compressible_kernels::{
+    CompressibleBindGroups, CompressiblePipeline,
+};
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
-use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, CompressiblePipeline};
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
-use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
+use crate::solver::gpu::structs::{
+    GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType,
+};
 use crate::solver::mesh::Mesh;
-use crate::solver::model::ModelSpec;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
+use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use std::env;
@@ -177,65 +181,81 @@ impl CompressiblePlanResources {
 
     pub(crate) fn pre_step_copy(&self) {
         let size = self.state_size_bytes();
-        let mut encoder = self
-            .common
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("compressible:pre_step_copy"),
-            });
+        let mut encoder =
+            self.common
+                .context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("compressible:pre_step_copy"),
+                });
         encoder.copy_buffer_to_buffer(&self.b_state_old, 0, &self.b_state, 0, size);
         encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, size);
         self.common.context.queue.submit(Some(encoder.finish()));
     }
 
-    fn build_explicit_module_graph(include_gradients: bool) -> ModuleGraph<CompressibleKernelsModule> {
+    fn build_explicit_module_graph(
+        include_gradients: bool,
+    ) -> ModuleGraph<CompressibleKernelsModule> {
         let mut nodes = Vec::new();
         if include_gradients {
-            nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:gradients",
-                pipeline: CompressiblePipeline::Gradients,
+            nodes.push(ModuleNode::Compute(
+                crate::solver::gpu::modules::graph::ComputeSpec {
+                    label: "compressible:gradients",
+                    pipeline: CompressiblePipeline::Gradients,
+                    bind: CompressibleBindGroups::MeshFields,
+                    dispatch: DispatchKind::Cells,
+                },
+            ));
+        }
+        nodes.push(ModuleNode::Compute(
+            crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:flux_kt",
+                pipeline: CompressiblePipeline::FluxKt,
+                bind: CompressibleBindGroups::MeshFields,
+                dispatch: DispatchKind::Faces,
+            },
+        ));
+        nodes.push(ModuleNode::Compute(
+            crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:explicit_update",
+                pipeline: CompressiblePipeline::ExplicitUpdate,
                 bind: CompressibleBindGroups::MeshFields,
                 dispatch: DispatchKind::Cells,
-            }));
-        }
-        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-            label: "compressible:flux_kt",
-            pipeline: CompressiblePipeline::FluxKt,
-            bind: CompressibleBindGroups::MeshFields,
-            dispatch: DispatchKind::Faces,
-        }));
-        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-            label: "compressible:explicit_update",
-            pipeline: CompressiblePipeline::ExplicitUpdate,
-            bind: CompressibleBindGroups::MeshFields,
-            dispatch: DispatchKind::Cells,
-        }));
-        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-            label: "compressible:primitive_update",
-            pipeline: CompressiblePipeline::PrimitiveUpdate,
-            bind: CompressibleBindGroups::FieldsOnly,
-            dispatch: DispatchKind::Cells,
-        }));
+            },
+        ));
+        nodes.push(ModuleNode::Compute(
+            crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:primitive_update",
+                pipeline: CompressiblePipeline::PrimitiveUpdate,
+                bind: CompressibleBindGroups::FieldsOnly,
+                dispatch: DispatchKind::Cells,
+            },
+        ));
         ModuleGraph::new(nodes)
     }
 
-    fn build_implicit_grad_assembly_module_graph(include_gradients: bool) -> ModuleGraph<CompressibleKernelsModule> {
+    fn build_implicit_grad_assembly_module_graph(
+        include_gradients: bool,
+    ) -> ModuleGraph<CompressibleKernelsModule> {
         let mut nodes = Vec::new();
         if include_gradients {
-            nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:gradients",
-                pipeline: CompressiblePipeline::Gradients,
-                bind: CompressibleBindGroups::MeshFields,
-                dispatch: DispatchKind::Cells,
-            }));
+            nodes.push(ModuleNode::Compute(
+                crate::solver::gpu::modules::graph::ComputeSpec {
+                    label: "compressible:gradients",
+                    pipeline: CompressiblePipeline::Gradients,
+                    bind: CompressibleBindGroups::MeshFields,
+                    dispatch: DispatchKind::Cells,
+                },
+            ));
         }
-        nodes.push(ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-            label: "compressible:assembly",
-            pipeline: CompressiblePipeline::Assembly,
-            bind: CompressibleBindGroups::MeshFieldsSolver,
-            dispatch: DispatchKind::Cells,
-        }));
+        nodes.push(ModuleNode::Compute(
+            crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:assembly",
+                pipeline: CompressiblePipeline::Assembly,
+                bind: CompressibleBindGroups::MeshFieldsSolver,
+                dispatch: DispatchKind::Cells,
+            },
+        ));
         ModuleGraph::new(nodes)
     }
 
@@ -275,9 +295,12 @@ impl CompressiblePlanResources {
         match mode {
             GraphExecMode::SingleSubmit => {
                 let start = std::time::Instant::now();
-                let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("compressible:implicit_snapshot"),
-                });
+                let mut encoder =
+                    context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("compressible:implicit_snapshot"),
+                        });
                 encoder.copy_buffer_to_buffer(
                     &solver.b_state,
                     0,
@@ -290,9 +313,12 @@ impl CompressiblePlanResources {
             }
             GraphExecMode::SplitTimed => {
                 let start = std::time::Instant::now();
-                let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("compressible:implicit_snapshot"),
-                });
+                let mut encoder =
+                    context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("compressible:implicit_snapshot"),
+                        });
                 encoder.copy_buffer_to_buffer(
                     &solver.b_state,
                     0,
@@ -307,12 +333,14 @@ impl CompressiblePlanResources {
     }
 
     fn build_implicit_apply_module_graph() -> ModuleGraph<CompressibleKernelsModule> {
-        ModuleGraph::new(vec![ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-            label: "compressible:apply",
-            pipeline: CompressiblePipeline::Apply,
-            bind: CompressibleBindGroups::ApplyFieldsSolver,
-            dispatch: DispatchKind::Cells,
-        })])
+        ModuleGraph::new(vec![ModuleNode::Compute(
+            crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:apply",
+                pipeline: CompressiblePipeline::Apply,
+                bind: CompressibleBindGroups::ApplyFieldsSolver,
+                dispatch: DispatchKind::Cells,
+            },
+        )])
     }
 
     fn update_needs_gradients(&mut self) {
@@ -324,12 +352,14 @@ impl CompressiblePlanResources {
     }
 
     fn build_primitive_update_module_graph() -> ModuleGraph<CompressibleKernelsModule> {
-        ModuleGraph::new(vec![ModuleNode::Compute(crate::solver::gpu::modules::graph::ComputeSpec {
-            label: "compressible:primitive_update",
-            pipeline: CompressiblePipeline::PrimitiveUpdate,
-            bind: CompressibleBindGroups::FieldsOnly,
-            dispatch: DispatchKind::Cells,
-        })])
+        ModuleGraph::new(vec![ModuleNode::Compute(
+            crate::solver::gpu::modules::graph::ComputeSpec {
+                label: "compressible:primitive_update",
+                pipeline: CompressiblePipeline::PrimitiveUpdate,
+                bind: CompressibleBindGroups::FieldsOnly,
+                dispatch: DispatchKind::Cells,
+            },
+        )])
     }
 
     pub async fn new(
@@ -447,11 +477,11 @@ impl CompressiblePlanResources {
                 CompressiblePlanResources::build_implicit_grad_assembly_module_graph(true),
             implicit_assembly_module_graph_first_order:
                 CompressiblePlanResources::build_implicit_grad_assembly_module_graph(false),
-            implicit_apply_module_graph: CompressiblePlanResources::build_implicit_apply_module_graph(),
+            implicit_apply_module_graph:
+                CompressiblePlanResources::build_implicit_apply_module_graph(),
             primitive_update_module_graph:
                 CompressiblePlanResources::build_primitive_update_module_graph(),
-        }
-        ;
+        };
         solver.update_needs_gradients();
         Ok(solver)
     }
@@ -650,10 +680,8 @@ impl CompressiblePlanResources {
         let mut iter_stats =
             self.solve_compressible_fgmres(self.implicit_max_restart, self.implicit_tol);
         if !iter_stats.converged {
-            let retry_stats = self.solve_compressible_fgmres(
-                self.implicit_retry_restart,
-                self.implicit_retry_tol,
-            );
+            let retry_stats = self
+                .solve_compressible_fgmres(self.implicit_retry_restart, self.implicit_retry_tol);
             if retry_stats.converged || retry_stats.residual < iter_stats.residual {
                 iter_stats = retry_stats;
             }
@@ -738,10 +766,11 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) fn update_constants(&self) {
-        self.common
-            .context
-            .queue
-            .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
+        self.common.context.queue.write_buffer(
+            &self.b_constants,
+            0,
+            bytemuck::bytes_of(&self.constants),
+        );
     }
 
     fn update_low_mach_params(&self) {

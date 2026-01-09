@@ -141,11 +141,7 @@ impl TypedExpr {
 
     pub fn neg(&self) -> Result<Self, DslError> {
         match self.ty.shape {
-            Shape::Scalar | Shape::Vec(_) => Ok(Self::new(
-                -self.to_wgsl(),
-                self.ty,
-                self.unit,
-            )),
+            Shape::Scalar | Shape::Vec(_) => Ok(Self::new(-self.to_wgsl(), self.ty, self.unit)),
             _ => Err(DslError::Unsupported {
                 op: "neg",
                 ty: self.ty,
@@ -174,7 +170,10 @@ impl TypedExpr {
                 self.ty,
                 self.unit,
             )),
-            _ => Err(DslError::Unsupported { op: "abs", ty: self.ty }),
+            _ => Err(DslError::Unsupported {
+                op: "abs",
+                ty: self.ty,
+            }),
         }
     }
 
@@ -252,13 +251,13 @@ impl TypedExpr {
 
     pub fn dot(&self, rhs: &Self) -> Result<Self, DslError> {
         match (self.ty.scalar, self.ty.shape, rhs.ty.scalar, rhs.ty.shape) {
-            (ScalarType::F32, Shape::Vec(n), ScalarType::F32, Shape::Vec(m)) if n == m => Ok(
-                Self::new(
+            (ScalarType::F32, Shape::Vec(n), ScalarType::F32, Shape::Vec(m)) if n == m => {
+                Ok(Self::new(
                     Expr::call_named("dot", vec![self.to_wgsl(), rhs.to_wgsl()]),
                     DslType::f32(),
                     self.unit * rhs.unit,
-                ),
-            ),
+                ))
+            }
             _ => Err(DslError::TypeMismatch {
                 op: "dot",
                 lhs: self.ty,

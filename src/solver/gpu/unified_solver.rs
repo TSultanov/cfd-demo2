@@ -1,11 +1,11 @@
+use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::plans::build_plan_instance;
 use crate::solver::gpu::plans::plan_instance::{
     PlanAction, PlanInitConfig, PlanParam, PlanParamValue,
 };
-use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
-use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
-use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::plans::program::GpuProgramPlan;
+use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
@@ -130,10 +130,9 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_inlet_velocity(&mut self, velocity: f32) {
-        let _ = self.plan.set_param(
-            PlanParam::InletVelocity,
-            PlanParamValue::F32(velocity),
-        );
+        let _ = self
+            .plan
+            .set_param(PlanParam::InletVelocity, PlanParamValue::F32(velocity));
     }
 
     pub fn set_ramp_time(&mut self, time: f32) {
@@ -197,7 +196,9 @@ impl GpuUnifiedSolver {
         ))
     }
 
-    pub fn incompressible_linear_stats(&self) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
+    pub fn incompressible_linear_stats(
+        &self,
+    ) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
         self.plan.step_stats().linear_stats
     }
 
@@ -250,7 +251,10 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]) {
-        if rho.len() != self.num_cells() as usize || u.len() != self.num_cells() as usize || p.len() != self.num_cells() as usize {
+        if rho.len() != self.num_cells() as usize
+            || u.len() != self.num_cells() as usize
+            || p.len() != self.num_cells() as usize
+        {
             return;
         }
 
@@ -305,24 +309,18 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
-        self.plan.set_param(
-            PlanParam::LowMachModel,
-            PlanParamValue::LowMachModel(model),
-        )
+        self.plan
+            .set_param(PlanParam::LowMachModel, PlanParamValue::LowMachModel(model))
     }
 
     pub fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
-        self.plan.set_param(
-            PlanParam::LowMachThetaFloor,
-            PlanParamValue::F32(theta),
-        )
+        self.plan
+            .set_param(PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta))
     }
 
     pub fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
-        self.plan.set_param(
-            PlanParam::NonconvergedRelax,
-            PlanParamValue::F32(alpha),
-        )
+        self.plan
+            .set_param(PlanParam::NonconvergedRelax, PlanParamValue::F32(alpha))
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {
@@ -361,7 +359,8 @@ impl GpuUnifiedSolver {
             .model
             .state_layout
             .offset_for(field)
-            .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?
+            as usize;
         if values.len() != self.num_cells() as usize {
             return Err(format!(
                 "value length {} does not match num_cells {}",
@@ -387,7 +386,8 @@ impl GpuUnifiedSolver {
             .model
             .state_layout
             .offset_for(field)
-            .ok_or_else(|| format!("field '{field}' not found in layout"))? as usize;
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?
+            as usize;
         Ok((0..self.num_cells() as usize)
             .map(|i| data[i * stride + offset] as f64)
             .collect())

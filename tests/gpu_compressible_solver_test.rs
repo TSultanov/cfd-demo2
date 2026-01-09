@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
 use cfd2::solver::model::compressible_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 fn build_mesh() -> Mesh {
@@ -27,9 +27,14 @@ fn gpu_compressible_solver_preserves_uniform_state() {
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
     };
-    let mut solver =
-        pollster::block_on(UnifiedSolver::new(&mesh, compressible_model(), config, None, None))
-            .expect("solver init");
+    let mut solver = pollster::block_on(UnifiedSolver::new(
+        &mesh,
+        compressible_model(),
+        config,
+        None,
+        None,
+    ))
+    .expect("solver init");
 
     solver.set_dt(0.01);
     solver.set_inlet_velocity(0.0);

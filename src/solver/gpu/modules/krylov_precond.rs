@@ -1,5 +1,7 @@
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
-use crate::solver::gpu::linear_solver::fgmres::{dispatch_2d, dispatch_x_threads, workgroups_for_size};
+use crate::solver::gpu::linear_solver::fgmres::{
+    dispatch_2d, dispatch_x_threads, workgroups_for_size,
+};
 
 /// Dispatch grid dimensions in workgroups.
 #[derive(Clone, Copy, Debug)]

@@ -4,8 +4,8 @@ use super::backend::ast::{
 };
 use super::backend::state_layout::StateLayout;
 use super::kernel::{KernelKind, KernelPlan};
-use crate::solver::units::{si, UnitDim};
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
+use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -87,10 +87,7 @@ impl BoundarySpec {
         self.fields.get(name)
     }
 
-    pub fn to_gpu_tables(
-        &self,
-        system: &EquationSystem,
-    ) -> Result<(Vec<u32>, Vec<f32>), String> {
+    pub fn to_gpu_tables(&self, system: &EquationSystem) -> Result<(Vec<u32>, Vec<f32>), String> {
         let mut unknowns: Vec<(FieldRef, usize)> = Vec::new();
         for eqn in system.equations() {
             let field = eqn.target();
@@ -293,8 +290,7 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
     let momentum = (fvm::ddt_coeff(
         Coefficient::field(fields.rho).expect("rho must be scalar"),
         fields.u,
-    )
-        + fvm::div(fields.phi, fields.u)
+    ) + fvm::div(fields.phi, fields.u)
         + fvm::laplacian(
             Coefficient::field(fields.mu).expect("mu must be scalar"),
             fields.u,
@@ -322,13 +318,9 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     let rho_eqn =
         (fvm::ddt(fields.rho) + fvm::div_flux(fields.phi_rho, fields.rho)).eqn(fields.rho);
     let rho_u_eqn =
-        (fvm::ddt(fields.rho_u)
-            + fvm::div_flux(fields.phi_rho_u, fields.rho_u))
-            .eqn(fields.rho_u);
+        (fvm::ddt(fields.rho_u) + fvm::div_flux(fields.phi_rho_u, fields.rho_u)).eqn(fields.rho_u);
     let rho_e_eqn =
-        (fvm::ddt(fields.rho_e)
-            + fvm::div_flux(fields.phi_rho_e, fields.rho_e))
-            .eqn(fields.rho_e);
+        (fvm::ddt(fields.rho_e) + fvm::div_flux(fields.phi_rho_e, fields.rho_e)).eqn(fields.rho_e);
 
     let mut system = EquationSystem::new();
     system.add_equation(rho_eqn);
@@ -369,7 +361,13 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 pub fn compressible_model() -> ModelSpec {
     let fields = CompressibleFields::new();
     let system = build_compressible_system(&fields);
-    let layout = StateLayout::new(vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.u]);
+    let layout = StateLayout::new(vec![
+        fields.rho,
+        fields.rho_u,
+        fields.rho_e,
+        fields.p,
+        fields.u,
+    ]);
     ModelSpec {
         id: "compressible",
         system,
@@ -519,8 +517,14 @@ mod tests {
             .expect("gpu tables");
         assert_eq!(kind.len(), 4);
         assert_eq!(value.len(), 4);
-        assert_eq!(kind[GpuBoundaryType::Inlet as usize], GpuBcKind::Dirichlet as u32);
-        assert_eq!(kind[GpuBoundaryType::Outlet as usize], GpuBcKind::Dirichlet as u32);
+        assert_eq!(
+            kind[GpuBoundaryType::Inlet as usize],
+            GpuBcKind::Dirichlet as u32
+        );
+        assert_eq!(
+            kind[GpuBoundaryType::Outlet as usize],
+            GpuBcKind::Dirichlet as u32
+        );
         assert_eq!(
             kind[GpuBoundaryType::Wall as usize],
             GpuBcKind::ZeroGradient as u32

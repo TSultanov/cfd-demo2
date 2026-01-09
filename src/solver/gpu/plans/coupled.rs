@@ -16,7 +16,9 @@
 // - b_u is the momentum source term
 
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode};
-use crate::solver::gpu::modules::incompressible_kernels::{IncompressibleBindGroups, IncompressiblePipeline};
+use crate::solver::gpu::modules::incompressible_kernels::{
+    IncompressibleBindGroups, IncompressiblePipeline,
+};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 
 impl GpuSolver {

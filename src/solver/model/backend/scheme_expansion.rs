@@ -31,8 +31,8 @@ pub fn expand_schemes(
     for equation in system.equations() {
         for term in equation.terms() {
             let scheme = schemes.scheme_for(term);
-            let needs_gradient = matches!(term.op, TermOp::Div | TermOp::DivFlux)
-                && scheme != Scheme::Upwind;
+            let needs_gradient =
+                matches!(term.op, TermOp::Div | TermOp::DivFlux) && scheme != Scheme::Upwind;
             if !needs_gradient {
                 continue;
             }

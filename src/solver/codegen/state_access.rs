@@ -1,7 +1,7 @@
-use crate::solver::model::backend::StateLayout;
 use crate::solver::codegen::dsl::{DslType, TypedExpr};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::model::backend::FieldKind;
+use crate::solver::model::backend::StateLayout;
 
 pub fn state_component_expr(
     layout: &StateLayout,
@@ -46,7 +46,7 @@ pub fn state_component(
                 "missing field '{}' component {} in state layout",
                 field, component
             )
-    });
+        });
     let stride = layout.stride();
     let idx_expr = Expr::ident(idx);
     let index_expr = idx_expr * stride + offset;
@@ -111,7 +111,10 @@ mod tests {
 
     #[test]
     fn state_access_builds_scalar_and_vector_exprs() {
-        let layout = StateLayout::new(vec![vol_vector("U", si::VELOCITY), vol_scalar("p", si::PRESSURE)]);
+        let layout = StateLayout::new(vec![
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+        ]);
         let scalar = state_scalar_expr(&layout, "state", "idx", "p");
         assert_eq!(scalar, "state[idx * 3u + 2u]");
 
@@ -127,7 +130,10 @@ mod tests {
 
     #[test]
     fn state_access_builds_expr_ast() {
-        let layout = StateLayout::new(vec![vol_vector("U", si::VELOCITY), vol_scalar("p", si::PRESSURE)]);
+        let layout = StateLayout::new(vec![
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+        ]);
         let scalar = state_scalar(&layout, "state", "idx", "p");
         assert_eq!(scalar.to_string(), "state[idx * 3u + 2u]");
 
@@ -143,7 +149,10 @@ mod tests {
 
     #[test]
     fn typed_state_access_tracks_units() {
-        let layout = StateLayout::new(vec![vol_vector("U", si::VELOCITY), vol_scalar("p", si::PRESSURE)]);
+        let layout = StateLayout::new(vec![
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+        ]);
         let p = state_scalar_typed(&layout, "state", "idx", "p");
         assert_eq!(p.ty, DslType::f32());
         assert_eq!(p.unit, si::PRESSURE);

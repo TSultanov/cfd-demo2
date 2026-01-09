@@ -2,9 +2,7 @@
 use std::sync::Arc;
 
 use super::coupled_fgmres::FgmresResources;
-use crate::solver::gpu::plans::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug,
-};
+use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -100,15 +98,19 @@ impl GpuSolver {
         self.update_constants();
     }
 
-    pub fn set_precond_type(&mut self, precond_type: crate::solver::gpu::structs::PreconditionerType) {
+    pub fn set_precond_type(
+        &mut self,
+        precond_type: crate::solver::gpu::structs::PreconditionerType,
+    ) {
         self.preconditioner = precond_type;
     }
 
     pub fn update_constants(&self) {
-        self.common
-            .context
-            .queue
-            .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
+        self.common.context.queue.write_buffer(
+            &self.b_constants,
+            0,
+            bytemuck::bytes_of(&self.constants),
+        );
     }
 
     pub async fn get_u(&self) -> Vec<(f64, f64)> {
@@ -234,8 +236,16 @@ impl GpuSolver {
 
         // Mesh
         record(self, "mesh:face_owner", &self.common.mesh.b_face_owner);
-        record(self, "mesh:face_neighbor", &self.common.mesh.b_face_neighbor);
-        record(self, "mesh:face_boundary", &self.common.mesh.b_face_boundary);
+        record(
+            self,
+            "mesh:face_neighbor",
+            &self.common.mesh.b_face_neighbor,
+        );
+        record(
+            self,
+            "mesh:face_boundary",
+            &self.common.mesh.b_face_boundary,
+        );
         record(self, "mesh:face_areas", &self.common.mesh.b_face_areas);
         record(self, "mesh:face_normals", &self.common.mesh.b_face_normals);
         record(self, "mesh:face_centers", &self.common.mesh.b_face_centers);
@@ -252,7 +262,11 @@ impl GpuSolver {
             "mesh:cell_face_matrix_indices",
             &self.common.mesh.b_cell_face_matrix_indices,
         );
-        record(self, "mesh:diagonal_indices", &self.common.mesh.b_diagonal_indices);
+        record(
+            self,
+            "mesh:diagonal_indices",
+            &self.common.mesh.b_diagonal_indices,
+        );
 
         // Fields (consolidated FluidState buffers)
         record(self, "fields:state", &self.b_state);
@@ -299,7 +313,11 @@ impl GpuSolver {
         record(self, "linear:dot_result", self.scalar_cg.dot_result());
         record(self, "linear:dot_result_2", self.scalar_cg.dot_result_2());
         record(self, "linear:scalars", self.scalar_cg.scalars());
-        record(self, "linear:staging_scalar", self.scalar_cg.staging_scalar());
+        record(
+            self,
+            "linear:staging_scalar",
+            self.scalar_cg.staging_scalar(),
+        );
         record(self, "linear:solver_params", self.scalar_cg.solver_params());
 
         if let Some(c) = &self.coupled_resources {
@@ -343,7 +361,11 @@ impl GpuSolver {
         }
         record(self, "fgmres:w", fgmres.fgmres.w_buffer());
         record(self, "fgmres:temp", fgmres.fgmres.temp_buffer());
-        record(self, "fgmres:dot_partial", fgmres.fgmres.dot_partial_buffer());
+        record(
+            self,
+            "fgmres:dot_partial",
+            fgmres.fgmres.dot_partial_buffer(),
+        );
         record(self, "fgmres:scalars", fgmres.fgmres.scalars_buffer());
         record(self, "fgmres:temp_p", fgmres.precond.b_temp_p());
         record(self, "fgmres:p_sol", fgmres.precond.b_p_sol());
@@ -352,8 +374,16 @@ impl GpuSolver {
         record(self, "fgmres:givens", fgmres.fgmres.givens_buffer());
         record(self, "fgmres:g", fgmres.fgmres.g_buffer());
         record(self, "fgmres:y", fgmres.fgmres.y_buffer());
-        record(self, "fgmres:iter_params", fgmres.fgmres.iter_params_buffer());
-        record(self, "fgmres:staging_scalar", fgmres.fgmres.staging_scalar_buffer());
+        record(
+            self,
+            "fgmres:iter_params",
+            fgmres.fgmres.iter_params_buffer(),
+        );
+        record(
+            self,
+            "fgmres:staging_scalar",
+            fgmres.fgmres.staging_scalar_buffer(),
+        );
     }
 }
 
@@ -369,7 +399,9 @@ impl PlanLinearSystemDebug for GpuSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        Ok(GpuSolver::solve_linear_system_cg_with_size(self, n, max_iters, tol))
+        Ok(GpuSolver::solve_linear_system_cg_with_size(
+            self, n, max_iters, tol,
+        ))
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {

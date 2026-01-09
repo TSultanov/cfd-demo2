@@ -4,16 +4,16 @@ use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::reconstruction::vec2_reconstruction_xy;
 use super::state_access::{state_scalar, state_vec2};
-use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
-use crate::solver::model::IncompressibleMomentumFields;
-use crate::solver::model::backend::StateLayout;
-use crate::solver::scheme::Scheme;
 use super::wgsl::generate_wgsl_library_items;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::IncompressibleMomentumFields;
+use crate::solver::scheme::Scheme;
 
 pub fn generate_coupled_assembly_wgsl(
     system: &DiscreteSystem,
@@ -45,17 +45,13 @@ fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
     items.push(Item::Struct(constants_struct()));
-    items.push(Item::Comment(
-        "Group 0: Mesh".to_string(),
-    ));
+    items.push(Item::Comment("Group 0: Mesh".to_string()));
     items.extend(mesh_bindings());
     items.push(Item::Comment(
         "Group 1: Fields (consolidated state buffers)".to_string(),
     ));
     items.extend(state_bindings());
-    items.push(Item::Comment(
-        "Group 2: Solver (Coupled)".to_string(),
-    ));
+    items.push(Item::Comment("Group 2: Solver (Coupled)".to_string()));
     items.extend(solver_bindings());
     items.push(Item::Function(safe_inverse_fn()));
     items
@@ -95,13 +91,7 @@ fn constants_struct() -> StructDef {
 
 fn mesh_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "face_owner",
-            Type::array(Type::U32),
-            0,
-            0,
-            AccessMode::Read,
-        ),
+        storage_var("face_owner", Type::array(Type::U32), 0, 0, AccessMode::Read),
         storage_var(
             "face_neighbor",
             Type::array(Type::I32),
@@ -109,13 +99,7 @@ fn mesh_bindings() -> Vec<Item> {
             1,
             AccessMode::Read,
         ),
-        storage_var(
-            "face_areas",
-            Type::array(Type::F32),
-            0,
-            2,
-            AccessMode::Read,
-        ),
+        storage_var("face_areas", Type::array(Type::F32), 0, 2, AccessMode::Read),
         storage_var(
             "face_normals",
             Type::array(Type::Custom("Vector2".to_string())),
@@ -130,13 +114,7 @@ fn mesh_bindings() -> Vec<Item> {
             4,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_vols",
-            Type::array(Type::F32),
-            0,
-            5,
-            AccessMode::Read,
-        ),
+        storage_var("cell_vols", Type::array(Type::F32), 0, 5, AccessMode::Read),
         storage_var(
             "cell_face_offsets",
             Type::array(Type::U32),
@@ -144,13 +122,7 @@ fn mesh_bindings() -> Vec<Item> {
             6,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_faces",
-            Type::array(Type::U32),
-            0,
-            7,
-            AccessMode::Read,
-        ),
+        storage_var("cell_faces", Type::array(Type::U32), 0, 7, AccessMode::Read),
         storage_var(
             "cell_face_matrix_indices",
             Type::array(Type::U32),
@@ -184,20 +156,8 @@ fn mesh_bindings() -> Vec<Item> {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            1,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            1,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 1, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 1, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -278,13 +238,7 @@ fn solver_bindings() -> Vec<Item> {
     ]
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -416,13 +370,11 @@ fn main_body(
     ));
     stmts.push(dsl::let_expr(
         "start_row_1",
-        Expr::ident("start_row_0")
-            + Expr::ident("num_neighbors") * coupled_stride as u32,
+        Expr::ident("start_row_0") + Expr::ident("num_neighbors") * coupled_stride as u32,
     ));
     stmts.push(dsl::let_expr(
         "start_row_2",
-        Expr::ident("start_row_0")
-            + Expr::ident("num_neighbors") * row_stride_2 as u32,
+        Expr::ident("start_row_0") + Expr::ident("num_neighbors") * row_stride_2 as u32,
     ));
     let zero_vec2 = typed::VecExpr::<2>::zeros().expr();
     stmts.push(dsl::var_typed_expr(
@@ -441,10 +393,22 @@ fn main_body(
         Type::vec2_f32(),
         Some(zero_vec2),
     ));
-    stmts.push(dsl::var_typed_expr("sum_diag_pp", Type::F32, Some(0.0.into())));
-    stmts.push(dsl::var_typed_expr("rhs_uv", Type::vec2_f32(), Some(zero_vec2)));
+    stmts.push(dsl::var_typed_expr(
+        "sum_diag_pp",
+        Type::F32,
+        Some(0.0.into()),
+    ));
+    stmts.push(dsl::var_typed_expr(
+        "rhs_uv",
+        Type::vec2_f32(),
+        Some(zero_vec2),
+    ));
     stmts.push(dsl::var_typed_expr("rhs_p", Type::F32, Some(0.0.into())));
-    stmts.push(dsl::var_typed_expr("scalar_diag_p", Type::F32, Some(0.0.into())));
+    stmts.push(dsl::var_typed_expr(
+        "scalar_diag_p",
+        Type::F32,
+        Some(0.0.into()),
+    ));
     if let Some(ddt_op) = &plan.ddt {
         let rho_expr = coeff_cell_expr(
             layout,
@@ -465,10 +429,8 @@ fn main_body(
             Some(Expr::ident("u_n") * Expr::ident("coeff_time")),
         ));
         stmts.push(dsl::if_block_expr(
-            typed::EnumExpr::<TimeScheme>::from_expr(
-                Expr::ident("constants").field("time_scheme"),
-            )
-            .eq(TimeScheme::BDF2),
+            typed::EnumExpr::<TimeScheme>::from_expr(Expr::ident("constants").field("time_scheme"))
+                .eq(TimeScheme::BDF2),
             dsl::block(vec![
                 dsl::let_expr("dt", Expr::ident("constants").field("dt")),
                 dsl::let_expr("dt_old", Expr::ident("constants").field("dt_old")),
@@ -476,33 +438,31 @@ fn main_body(
                 dsl::let_typed_expr("u_nm1", Type::vec2_f32(), u_old_old_expr),
                 dsl::assign_expr(
                     Expr::ident("coeff_time"),
-                    Expr::ident("vol")
-                        * Expr::ident("rho")
-                        / Expr::ident("dt")
+                    Expr::ident("vol") * Expr::ident("rho") / Expr::ident("dt")
                         * (Expr::ident("r") * 2.0 + 1.0)
                         / (Expr::ident("r") + 1.0),
                 ),
                 dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                 dsl::let_expr(
                     "factor_nm1",
-                    (Expr::ident("r") * Expr::ident("r"))
-                        / (Expr::ident("r") + 1.0),
+                    (Expr::ident("r") * Expr::ident("r")) / (Expr::ident("r") + 1.0),
                 ),
-                dsl::assign_expr(
-                    Expr::ident("rhs_time"),
-                    {
-                        let coeff = Expr::ident("vol") * Expr::ident("rho") / Expr::ident("dt");
-                        let term_n = Expr::ident("factor_n") * Expr::ident("u_n");
-                        let term_nm1 = Expr::ident("factor_nm1") * Expr::ident("u_nm1");
-                        coeff * (term_n - term_nm1)
-                    },
-                ),
+                dsl::assign_expr(Expr::ident("rhs_time"), {
+                    let coeff = Expr::ident("vol") * Expr::ident("rho") / Expr::ident("dt");
+                    let term_n = Expr::ident("factor_n") * Expr::ident("u_n");
+                    let term_nm1 = Expr::ident("factor_nm1") * Expr::ident("u_nm1");
+                    coeff * (term_n - term_nm1)
+                }),
             ]),
             None,
         ));
         let coeff_time = Expr::ident("coeff_time");
         let diag_time = typed::VecExpr::<2>::from_components([coeff_time, coeff_time]).expr();
-        stmts.push(dsl::assign_op_expr(AssignOp::Add, Expr::ident("diag_uv"), diag_time));
+        stmts.push(dsl::assign_op_expr(
+            AssignOp::Add,
+            Expr::ident("diag_uv"),
+            diag_time,
+        ));
         stmts.push(dsl::assign_op_expr(
             AssignOp::Add,
             Expr::ident("rhs_uv"),
@@ -513,7 +473,9 @@ fn main_body(
     let d_p_idx_expr = state_scalar(layout, "state", "idx", d_p_field);
     let pressure_coeff_face_expr = coeff_face_expr(
         layout,
-        plan.pressure_diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
+        plan.pressure_diffusion
+            .as_ref()
+            .and_then(|op| op.coeff.as_ref()),
         "idx",
         "other_idx",
         Expr::ident("lambda"),
@@ -521,7 +483,9 @@ fn main_body(
     );
     let pressure_coeff_cell_expr = coeff_cell_expr(
         layout,
-        plan.pressure_diffusion.as_ref().and_then(|op| op.coeff.as_ref()),
+        plan.pressure_diffusion
+            .as_ref()
+            .and_then(|op| op.coeff.as_ref()),
         "idx",
         Expr::ident("d_p_own"),
     );
@@ -557,12 +521,22 @@ fn main_body(
             "f_center",
             dsl::array_access("face_centers", Expr::ident("face_idx")),
         ));
-        body.push(dsl::var_typed_expr("normal_sign", Type::F32, Some(1.0.into())));
+        body.push(dsl::var_typed_expr(
+            "normal_sign",
+            Type::F32,
+            Some(1.0.into()),
+        ));
         body.push(dsl::if_block_expr(
             Expr::ident("owner").ne(Expr::ident("idx")),
             dsl::block(vec![
-                dsl::assign_expr(Expr::ident("normal").field("x"), -Expr::ident("normal").field("x")),
-                dsl::assign_expr(Expr::ident("normal").field("y"), -Expr::ident("normal").field("y")),
+                dsl::assign_expr(
+                    Expr::ident("normal").field("x"),
+                    -Expr::ident("normal").field("x"),
+                ),
+                dsl::assign_expr(
+                    Expr::ident("normal").field("y"),
+                    -Expr::ident("normal").field("y"),
+                ),
                 dsl::assign_expr(Expr::ident("normal_sign"), -1.0),
             ]),
             None,
@@ -587,9 +561,21 @@ fn main_body(
             Type::Custom("Vector2".to_string()),
             None,
         ));
-        body.push(dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())));
-        body.push(dsl::var_typed_expr("other_idx", Type::U32, Some(0u32.into())));
-        body.push(dsl::var_typed_expr("d_p_neigh", Type::F32, Some(0.0.into())));
+        body.push(dsl::var_typed_expr(
+            "is_boundary",
+            Type::Bool,
+            Some(false.into()),
+        ));
+        body.push(dsl::var_typed_expr(
+            "other_idx",
+            Type::U32,
+            Some(0u32.into()),
+        ));
+        body.push(dsl::var_typed_expr(
+            "d_p_neigh",
+            Type::F32,
+            Some(0.0.into()),
+        ));
 
         let d_p_other_expr = state_scalar(layout, "state", "other_idx", d_p_field);
         body.push(dsl::if_block_expr(
@@ -621,20 +607,13 @@ fn main_body(
             ])),
         ));
 
-        body.push(dsl::let_expr(
-            "dist_proj",
-            {
-                let d_vec = typed::VecExpr::<2>::from_xy_fields(Expr::ident("other_center")).sub(
-                    &typed::VecExpr::<2>::from_xy_fields(Expr::ident("center")),
-                );
-                let normal_vec = typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"));
-                dsl::abs(d_vec.dot(&normal_vec))
-            },
-        ));
-        body.push(dsl::let_expr(
-            "dist",
-            dsl::max("dist_proj", 1e-6),
-        ));
+        body.push(dsl::let_expr("dist_proj", {
+            let d_vec = typed::VecExpr::<2>::from_xy_fields(Expr::ident("other_center"))
+                .sub(&typed::VecExpr::<2>::from_xy_fields(Expr::ident("center")));
+            let normal_vec = typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"));
+            dsl::abs(d_vec.dot(&normal_vec))
+        }));
+        body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
         if let Some(diff_op) = &plan.diffusion {
             let mu_expr = coeff_face_expr(
                 layout,
@@ -660,8 +639,14 @@ fn main_body(
                 "conv_coeff",
                 Expr::call_named("codegen_conv_coeff", vec![Expr::ident("flux")]),
             ));
-            body.push(dsl::let_expr("conv_coeff_diag", Expr::ident("conv_coeff").field("x")));
-            body.push(dsl::let_expr("conv_coeff_off", Expr::ident("conv_coeff").field("y")));
+            body.push(dsl::let_expr(
+                "conv_coeff_diag",
+                Expr::ident("conv_coeff").field("x"),
+            ));
+            body.push(dsl::let_expr(
+                "conv_coeff_off",
+                Expr::ident("conv_coeff").field("y"),
+            ));
         } else {
             body.push(dsl::let_expr("conv_coeff_diag", 0.0));
             body.push(dsl::let_expr("conv_coeff_off", 0.0));
@@ -717,18 +702,19 @@ fn main_body(
                 dsl::block(vec![dsl::assign_op_expr(
                     AssignOp::Add,
                     Expr::ident("diag_uv"),
-                    typed::VecExpr::<2>::from_components([Expr::ident("flux"), Expr::ident("flux")])
-                        .expr(),
+                    typed::VecExpr::<2>::from_components([
+                        Expr::ident("flux"),
+                        Expr::ident("flux"),
+                    ])
+                    .expr(),
                 )]),
-                Some(dsl::block(vec![
-                    dsl::assign_op_expr(
-                        AssignOp::Sub,
-                        Expr::ident("rhs_uv"),
-                        typed::VecExpr::<2>::from_expr(Expr::ident("u_bc"))
-                            .mul_scalar(Expr::ident("flux"))
-                            .expr(),
-                    ),
-                ])),
+                Some(dsl::block(vec![dsl::assign_op_expr(
+                    AssignOp::Sub,
+                    Expr::ident("rhs_uv"),
+                    typed::VecExpr::<2>::from_expr(Expr::ident("u_bc"))
+                        .mul_scalar(Expr::ident("flux"))
+                        .expr(),
+                )])),
             ),
         ];
         if plan.gradient.is_some() {
@@ -751,8 +737,11 @@ fn main_body(
         let mut wall_stmts = vec![dsl::assign_op_expr(
             AssignOp::Add,
             Expr::ident("diag_uv"),
-            typed::VecExpr::<2>::from_components([Expr::ident("diff_coeff"), Expr::ident("diff_coeff")])
-                .expr(),
+            typed::VecExpr::<2>::from_components([
+                Expr::ident("diff_coeff"),
+                Expr::ident("diff_coeff"),
+            ])
+            .expr(),
         )];
         if plan.gradient.is_some() {
             wall_stmts.push(dsl::assign_op_expr(
@@ -769,8 +758,11 @@ fn main_body(
                 dsl::block(vec![dsl::assign_op_expr(
                     AssignOp::Add,
                     Expr::ident("diag_uv"),
-                    typed::VecExpr::<2>::from_components([Expr::ident("flux"), Expr::ident("flux")])
-                        .expr(),
+                    typed::VecExpr::<2>::from_components([
+                        Expr::ident("flux"),
+                        Expr::ident("flux"),
+                    ])
+                    .expr(),
                 )]),
                 None,
             ),
@@ -836,21 +828,14 @@ fn main_body(
 
         if let Some(conv_op) = &plan.convection {
             let scheme_id = conv_op.scheme.gpu_id();
-            interior_stmts.push(dsl::let_typed_expr(
-                "scheme_id",
-                Type::U32,
-                scheme_id,
-            ));
+            interior_stmts.push(dsl::let_typed_expr("scheme_id", Type::U32, scheme_id));
             let scheme = typed::EnumExpr::<Scheme>::from_expr(Expr::ident("scheme_id"));
             interior_stmts.push(dsl::if_block_expr(
                 scheme.ne(Scheme::Upwind),
                 {
                     let mut ho_block = vec![
                         dsl::let_expr("u_own", state_vec2(layout, "state", "idx", u_field)),
-                        dsl::let_expr(
-                            "u_neigh",
-                            state_vec2(layout, "state", "other_idx", u_field),
-                        ),
+                        dsl::let_expr("u_neigh", state_vec2(layout, "state", "other_idx", u_field)),
                     ];
                     let recon = vec2_reconstruction_xy(
                         scheme,
@@ -991,7 +976,8 @@ fn main_body(
                 -Expr::ident("lapl_coeff"),
             ],
         ]);
-        interior_stmts.extend(offdiag_block.scatter_assign_to_block_entry_scaled(&neighbor_entry, None));
+        interior_stmts
+            .extend(offdiag_block.scatter_assign_to_block_entry_scaled(&neighbor_entry, None));
 
         body.push(dsl::if_block_expr(
             !Expr::ident("is_boundary"),
@@ -1084,10 +1070,12 @@ fn main_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar, vol_vector, Coefficient};
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::IncompressibleMomentumFields;
+    use crate::solver::model::backend::ast::{
+        fvm, surface_scalar, vol_scalar, vol_vector, Coefficient,
+    };
     use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
 
@@ -1114,16 +1102,12 @@ mod tests {
         let d_p = vol_scalar("d_p", si::D_P);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
-            .with_term(fvm::laplacian(
-                Coefficient::field(mu).unwrap(),
-                u.clone(),
-            ));
+            .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
-                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
-            ),
+            crate::solver::model::backend::ast::Equation::new(p.clone())
+                .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -1148,9 +1132,8 @@ mod tests {
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
-                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
-            ),
+            crate::solver::model::backend::ast::Equation::new(p.clone())
+                .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
@@ -1178,9 +1161,8 @@ mod tests {
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
-                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
-            ),
+            crate::solver::model::backend::ast::Equation::new(p.clone())
+                .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -1199,20 +1181,13 @@ mod tests {
         let p = vol_scalar("p", si::PRESSURE);
         let d_p = vol_scalar("d_p", si::D_P);
         let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
-            .with_term(fvm::ddt_coeff(
-                Coefficient::field(rho).unwrap(),
-                u.clone(),
-            ))
-            .with_term(fvm::laplacian(
-                Coefficient::field(mu).unwrap(),
-                u.clone(),
-            ));
+            .with_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()))
+            .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
         let mut system = crate::solver::model::backend::ast::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone()).with_term(
-                fvm::laplacian(Coefficient::field(d_p).unwrap(), p),
-            ),
+            crate::solver::model::backend::ast::Equation::new(p.clone())
+                .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
         let registry = SchemeRegistry::new(Scheme::Upwind);

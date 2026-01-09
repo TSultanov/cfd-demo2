@@ -1,9 +1,9 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::RectangularChannel;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
 use cfd2::solver::model::compressible_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
 use std::env;
 
@@ -90,7 +90,10 @@ fn compressible_shock_tube_relaxes_discontinuity() {
         final_energy += (p_val / (gamma - 1.0) + ke) * vol;
     }
 
-    assert!(mixed, "shock tube did not develop mixed states near interface");
+    assert!(
+        mixed,
+        "shock tube did not develop mixed states near interface"
+    );
     let mass_rel = (final_mass - initial_mass).abs() / initial_mass.max(1e-9);
     let energy_rel = (final_energy - initial_energy).abs() / initial_energy.max(1e-9);
     assert!(mass_rel < 0.02, "mass drift {:.3}", mass_rel);
@@ -186,12 +189,7 @@ fn compressible_acoustic_pulse_propagates() {
             .cell_cx
             .iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| {
-                (*a - mid)
-                    .abs()
-                    .partial_cmp(&(*b - mid).abs())
-                    .unwrap()
-            })
+            .min_by(|(_, a), (_, b)| (*a - mid).abs().partial_cmp(&(*b - mid).abs()).unwrap())
             .map(|(idx, _)| idx)
             .unwrap_or(0);
         println!(

@@ -101,5 +101,3 @@ pub fn collect_leaves<'a>(node: &'a QuadNode, leaves: &mut Vec<&'a QuadNode>) {
         }
     }
 }
-
-

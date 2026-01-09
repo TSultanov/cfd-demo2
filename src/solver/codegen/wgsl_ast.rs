@@ -151,9 +151,7 @@ impl GlobalVar {
             (StorageClass::Storage, Some(access)) => {
                 ctx.line(&format!(
                     "var<storage, {}> {}: {};",
-                    access,
-                    self.name,
-                    self.ty
+                    access, self.name, self.ty
                 ));
             }
             (StorageClass::Uniform, None) => {
@@ -165,9 +163,7 @@ impl GlobalVar {
             (StorageClass::Uniform, Some(access)) => {
                 ctx.line(&format!(
                     "var<uniform, {}> {}: {};",
-                    access,
-                    self.name,
-                    self.ty
+                    access, self.name, self.ty
                 ));
             }
             (StorageClass::Workgroup, None) => {
@@ -176,9 +172,7 @@ impl GlobalVar {
             (StorageClass::Workgroup, Some(access)) => {
                 ctx.line(&format!(
                     "var<workgroup, {}> {}: {};",
-                    access,
-                    self.name,
-                    self.ty
+                    access, self.name, self.ty
                 ));
             }
         }
@@ -348,22 +342,20 @@ impl Stmt {
                     ctx.line(&format!("let {} = {};", name, expr));
                 }
             }
-            Stmt::Var { name, ty, expr } => {
-                match (ty, expr) {
-                    (Some(ty), Some(expr)) => {
-                        ctx.line(&format!("var {}: {} = {};", name, ty, expr));
-                    }
-                    (Some(ty), None) => {
-                        ctx.line(&format!("var {}: {};", name, ty));
-                    }
-                    (None, Some(expr)) => {
-                        ctx.line(&format!("var {} = {};", name, expr));
-                    }
-                    (None, None) => {
-                        ctx.line(&format!("var {};", name));
-                    }
+            Stmt::Var { name, ty, expr } => match (ty, expr) {
+                (Some(ty), Some(expr)) => {
+                    ctx.line(&format!("var {}: {} = {};", name, ty, expr));
                 }
-            }
+                (Some(ty), None) => {
+                    ctx.line(&format!("var {}: {};", name, ty));
+                }
+                (None, Some(expr)) => {
+                    ctx.line(&format!("var {} = {};", name, expr));
+                }
+                (None, None) => {
+                    ctx.line(&format!("var {};", name));
+                }
+            },
             Stmt::Assign { target, value } => {
                 ctx.line(&format!("{} = {};", target, value));
             }
@@ -440,9 +432,20 @@ impl fmt::Display for AssignOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForInit {
-    Let { name: String, ty: Option<Type>, expr: Expr },
-    Var { name: String, ty: Option<Type>, expr: Expr },
-    Assign { target: Expr, value: Expr },
+    Let {
+        name: String,
+        ty: Option<Type>,
+        expr: Expr,
+    },
+    Var {
+        name: String,
+        ty: Option<Type>,
+        expr: Expr,
+    },
+    Assign {
+        target: Expr,
+        value: Expr,
+    },
 }
 
 impl ForInit {
@@ -470,8 +473,15 @@ impl ForInit {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForStep {
     Increment(Expr),
-    Assign { target: Expr, value: Expr },
-    AssignOp { target: Expr, op: AssignOp, value: Expr },
+    Assign {
+        target: Expr,
+        value: Expr,
+    },
+    AssignOp {
+        target: Expr,
+        op: AssignOp,
+        value: Expr,
+    },
 }
 
 impl ForStep {
@@ -555,11 +565,27 @@ pub struct Expr(u32);
 enum ExprNode {
     Literal(Literal),
     Ident(String),
-    Field { base: Expr, field: String },
-    Index { base: Expr, index: Expr },
-    Unary { op: UnaryOp, expr: Expr },
-    Binary { left: Expr, op: BinaryOp, right: Expr },
-    Call { callee: Expr, args: Vec<Expr> },
+    Field {
+        base: Expr,
+        field: String,
+    },
+    Index {
+        base: Expr,
+        index: Expr,
+    },
+    Unary {
+        op: UnaryOp,
+        expr: Expr,
+    },
+    Binary {
+        left: Expr,
+        op: BinaryOp,
+        right: Expr,
+    },
+    Call {
+        callee: Expr,
+        args: Vec<Expr>,
+    },
 }
 
 thread_local! {
@@ -627,7 +653,9 @@ impl Expr {
     }
 
     pub fn lit_f32(value: f32) -> Self {
-        Expr::alloc(ExprNode::Literal(Literal::Float(Self::format_f32_literal(value))))
+        Expr::alloc(ExprNode::Literal(Literal::Float(Self::format_f32_literal(
+            value,
+        ))))
     }
 
     pub fn field(self, field: impl Into<String>) -> Self {

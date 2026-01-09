@@ -23,8 +23,13 @@ async fn lower_program(
                 .await
         }
         ModelFields::GenericCoupled(_) => {
-            generic_coupled_program::lower_generic_coupled_program(mesh, model.clone(), device, queue)
-                .await
+            generic_coupled_program::lower_generic_coupled_program(
+                mesh,
+                model.clone(),
+                device,
+                queue,
+            )
+            .await
         }
     }
 }

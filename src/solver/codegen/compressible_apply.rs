@@ -1,12 +1,12 @@
 use super::dsl as typed;
 use super::state_access::{state_component, state_scalar, state_vec2};
-use crate::solver::model::CompressibleFields;
-use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
     StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::CompressibleFields;
 
 pub fn generate_compressible_apply_wgsl(
     layout: &StateLayout,
@@ -27,7 +27,9 @@ fn base_items() -> Vec<Item> {
     items.push(Item::Struct(vector2_struct()));
     items.push(Item::Struct(constants_struct()));
     items.push(Item::Struct(low_mach_params_struct()));
-    items.push(Item::Comment("Group 0: Fields (consolidated state buffers)".to_string()));
+    items.push(Item::Comment(
+        "Group 0: Fields (consolidated state buffers)".to_string(),
+    ));
     items.extend(state_bindings());
     items.push(Item::Comment("Group 1: Solver".to_string()));
     items.extend(solver_bindings());
@@ -80,20 +82,8 @@ fn low_mach_params_struct() -> StructDef {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            0,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            0,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 0, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 0, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -137,19 +127,8 @@ fn state_bindings() -> Vec<Item> {
             8,
             AccessMode::ReadWrite,
         ),
-        storage_var(
-            "state_iter",
-            Type::array(Type::F32),
-            0,
-            9,
-            AccessMode::Read,
-        ),
-        uniform_var(
-            "low_mach",
-            Type::Custom("LowMachParams".to_string()),
-            0,
-            10,
-        ),
+        storage_var("state_iter", Type::array(Type::F32), 0, 9, AccessMode::Read),
+        uniform_var("low_mach", Type::Custom("LowMachParams".to_string()), 0, 10),
     ]
 }
 
@@ -163,13 +142,7 @@ fn solver_bindings() -> Vec<Item> {
     )]
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -217,10 +190,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::let_expr(
         "num_cells",
-        Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("state").addr_of()],
-        ),
+        Expr::call_named("arrayLength", vec![Expr::ident("state").addr_of()]),
     ));
     stmts.push(dsl::if_block_expr(
         (Expr::ident("idx") * layout.stride()).ge("num_cells"),
@@ -242,13 +212,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         state_scalar(layout, "state", "idx", rho_e_field),
     ));
 
-    stmts.push(dsl::let_expr(
-        "base",
-        Expr::ident("idx") * 4u32,
-    ));
-    let solution_at = |offset: u32| {
-        Expr::ident("solution").index(Expr::ident("base") + offset)
-    };
+    stmts.push(dsl::let_expr("base", Expr::ident("idx") * 4u32));
+    let solution_at = |offset: u32| Expr::ident("solution").index(Expr::ident("base") + offset);
     stmts.push(dsl::let_expr("delta_rho", solution_at(0)));
     stmts.push(dsl::let_typed_expr(
         "delta_rho_u",
@@ -268,10 +233,12 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_typed_expr(
         "rho_u_new",
         Type::vec2_f32(),
-        typed::VecExpr::<2>::from_expr(Expr::ident("rho_u_base")).add(
-            &typed::VecExpr::<2>::from_expr(Expr::ident("delta_rho_u"))
-                .mul_scalar(Expr::ident("relax")),
-        ).expr(),
+        typed::VecExpr::<2>::from_expr(Expr::ident("rho_u_base"))
+            .add(
+                &typed::VecExpr::<2>::from_expr(Expr::ident("delta_rho_u"))
+                    .mul_scalar(Expr::ident("relax")),
+            )
+            .expr(),
     ));
     stmts.push(dsl::let_expr(
         "rho_e_new",

@@ -387,7 +387,9 @@ impl std::error::Error for CodegenError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnitValidationError {
-    MissingFlux { op: TermOp },
+    MissingFlux {
+        op: TermOp,
+    },
     FluxKindMismatch {
         op: TermOp,
         flux: String,
@@ -521,13 +523,7 @@ pub mod fvm {
     }
 
     pub fn grad(field: FieldRef) -> Term {
-        Term::new(
-            TermOp::Grad,
-            Discretization::Implicit,
-            field,
-            None,
-            None,
-        )
+        Term::new(TermOp::Grad, Discretization::Implicit, field, None, None)
     }
 
     pub fn laplacian(coeff: Coefficient, field: FieldRef) -> Term {
@@ -541,13 +537,7 @@ pub mod fvm {
     }
 
     pub fn source(field: FieldRef) -> Term {
-        Term::new(
-            TermOp::Source,
-            Discretization::Implicit,
-            field,
-            None,
-            None,
-        )
+        Term::new(TermOp::Source, Discretization::Implicit, field, None, None)
     }
 }
 
@@ -589,13 +579,7 @@ pub mod fvc {
     }
 
     pub fn grad(field: FieldRef) -> Term {
-        Term::new(
-            TermOp::Grad,
-            Discretization::Explicit,
-            field,
-            None,
-            None,
-        )
+        Term::new(TermOp::Grad, Discretization::Explicit, field, None, None)
     }
 
     pub fn laplacian(coeff: Coefficient, field: FieldRef) -> Term {
@@ -609,13 +593,7 @@ pub mod fvc {
     }
 
     pub fn source(field: FieldRef) -> Term {
-        Term::new(
-            TermOp::Source,
-            Discretization::Explicit,
-            field,
-            None,
-            None,
-        )
+        Term::new(TermOp::Source, Discretization::Explicit, field, None, None)
     }
 }
 
@@ -638,25 +616,16 @@ mod tests {
     fn coefficient_rejects_vector_field() {
         let u = vol_vector("U", si::VELOCITY);
         let err = Coefficient::field(u).unwrap_err();
-        assert!(matches!(
-            err,
-            CodegenError::NonScalarCoefficient { .. }
-        ));
+        assert!(matches!(err, CodegenError::NonScalarCoefficient { .. }));
     }
 
     #[test]
     fn coefficient_product_rejects_vector_field() {
         let u = vol_vector("U", si::VELOCITY);
         let rho = vol_scalar("rho", si::DENSITY);
-        let err = Coefficient::product(
-            Coefficient::field(rho).unwrap(),
-            Coefficient::Field(u),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            CodegenError::NonScalarCoefficient { .. }
-        ));
+        let err = Coefficient::product(Coefficient::field(rho).unwrap(), Coefficient::Field(u))
+            .unwrap_err();
+        assert!(matches!(err, CodegenError::NonScalarCoefficient { .. }));
     }
 
     #[test]

@@ -96,7 +96,10 @@ impl<const N: usize> VecExpr<N> {
     }
 
     pub fn from_components(components: [Expr; N]) -> Self {
-        Self::from_expr(Expr::call_named(Self::constructor_name(), components.into()))
+        Self::from_expr(Expr::call_named(
+            Self::constructor_name(),
+            components.into(),
+        ))
     }
 
     pub fn zeros() -> Self {
@@ -482,20 +485,17 @@ impl<const R: usize, const C: usize, RowAx, ColAx> NamedMatExpr<R, C, RowAx, Col
         })))
     }
 
-    pub fn mul_mat<const D: usize, OutColAx>(&self, rhs: &NamedMatExpr<C, D, ColAx, OutColAx>) -> NamedMatExpr<R, D, RowAx, OutColAx> {
+    pub fn mul_mat<const D: usize, OutColAx>(
+        &self,
+        rhs: &NamedMatExpr<C, D, ColAx, OutColAx>,
+    ) -> NamedMatExpr<R, D, RowAx, OutColAx> {
         NamedMatExpr::from_mat(self.mat.mul_mat(&rhs.mat))
     }
 }
 
 impl<const N: usize> MatExpr<N, N> {
     pub fn identity() -> Self {
-        Self::from_fn(|row, col| {
-            if row == col {
-                1.0.into()
-            } else {
-                0.0.into()
-            }
-        })
+        Self::from_fn(|row, col| if row == col { 1.0.into() } else { 0.0.into() })
     }
 }
 

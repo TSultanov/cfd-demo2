@@ -28,4 +28,3 @@ impl LoweredCommon {
         self.ports.lowerer(device)
     }
 }
-

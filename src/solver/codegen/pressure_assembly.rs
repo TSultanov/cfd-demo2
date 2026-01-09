@@ -2,14 +2,14 @@ use super::coeff_expr::{coeff_cell_expr, coeff_face_expr};
 use super::dsl as typed;
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::state_access::{state_scalar, state_vec2};
-use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::model::IncompressibleMomentumFields;
-use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_pressure_assembly_wgsl(
     system: &DiscreteSystem,
@@ -76,13 +76,7 @@ fn constants_struct() -> StructDef {
 
 fn mesh_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "face_owner",
-            Type::array(Type::U32),
-            0,
-            0,
-            AccessMode::Read,
-        ),
+        storage_var("face_owner", Type::array(Type::U32), 0, 0, AccessMode::Read),
         storage_var(
             "face_neighbor",
             Type::array(Type::I32),
@@ -90,13 +84,7 @@ fn mesh_bindings() -> Vec<Item> {
             1,
             AccessMode::Read,
         ),
-        storage_var(
-            "face_areas",
-            Type::array(Type::F32),
-            0,
-            2,
-            AccessMode::Read,
-        ),
+        storage_var("face_areas", Type::array(Type::F32), 0, 2, AccessMode::Read),
         storage_var(
             "face_normals",
             Type::array(Type::Custom("Vector2".to_string())),
@@ -111,13 +99,7 @@ fn mesh_bindings() -> Vec<Item> {
             4,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_vols",
-            Type::array(Type::F32),
-            0,
-            5,
-            AccessMode::Read,
-        ),
+        storage_var("cell_vols", Type::array(Type::F32), 0, 5, AccessMode::Read),
         storage_var(
             "cell_face_offsets",
             Type::array(Type::U32),
@@ -125,13 +107,7 @@ fn mesh_bindings() -> Vec<Item> {
             6,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_faces",
-            Type::array(Type::U32),
-            0,
-            7,
-            AccessMode::Read,
-        ),
+        storage_var("cell_faces", Type::array(Type::U32), 0, 7, AccessMode::Read),
         storage_var(
             "cell_face_matrix_indices",
             Type::array(Type::U32),
@@ -165,20 +141,8 @@ fn mesh_bindings() -> Vec<Item> {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            1,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            1,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 1, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 1, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -210,13 +174,7 @@ fn solver_bindings() -> Vec<Item> {
     ]
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -327,7 +285,11 @@ fn main_body(
         "vol",
         dsl::array_access("cell_vols", Expr::ident("idx")),
     ));
-    stmts.push(dsl::var_typed_expr("diag_coeff", Type::F32, Some(0.0.into())));
+    stmts.push(dsl::var_typed_expr(
+        "diag_coeff",
+        Type::F32,
+        Some(0.0.into()),
+    ));
     stmts.push(dsl::var_typed_expr("rhs_val", Type::F32, Some(0.0.into())));
 
     let d_p_field = fields.d_p.name();
@@ -406,7 +368,9 @@ fn main_body(
             .lt(0.0),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal_vec"),
-            typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
+            typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
+                .neg()
+                .expr(),
         )]),
         None,
     ));
@@ -420,7 +384,9 @@ fn main_body(
         dsl::block(vec![
             dsl::assign_expr(
                 Expr::ident("normal_vec"),
-                typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
+                typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
+                    .neg()
+                    .expr(),
             ),
             dsl::assign_expr(Expr::ident("normal_sign"), -1.0),
         ]),
@@ -452,8 +418,16 @@ fn main_body(
         Type::Bool,
         Some(false.into()),
     ));
-    loop_body.push(dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))));
-    loop_body.push(dsl::var_typed_expr("d_p_neigh", Type::F32, Some(0.0.into())));
+    loop_body.push(dsl::var_typed_expr(
+        "other_idx",
+        Type::U32,
+        Some(Expr::ident("idx")),
+    ));
+    loop_body.push(dsl::var_typed_expr(
+        "d_p_neigh",
+        Type::F32,
+        Some(0.0.into()),
+    ));
 
     let d_p_other_expr = state_scalar(layout, "state", "other_idx", d_p_field);
 
@@ -499,14 +473,8 @@ fn main_body(
                 .expr(),
         ),
         dsl::let_expr("dist", dsl::length("d_vec")),
-        dsl::let_expr(
-            "d_own",
-            dsl::distance("center_vec", "f_center_vec"),
-        ),
-        dsl::let_expr(
-            "d_neigh",
-            dsl::distance("other_center_vec", "f_center_vec"),
-        ),
+        dsl::let_expr("d_own", dsl::distance("center_vec", "f_center_vec")),
+        dsl::let_expr("d_neigh", dsl::distance("other_center_vec", "f_center_vec")),
         dsl::let_expr("total_dist", Expr::ident("d_own") + Expr::ident("d_neigh")),
         dsl::var_typed_expr("lambda", Type::F32, Some(0.5.into())),
         dsl::if_block_expr(
@@ -546,10 +514,7 @@ fn main_body(
             Expr::ident("diag_coeff"),
             Expr::ident("coeff"),
         ),
-        dsl::let_expr(
-            "area_over_dist",
-            Expr::ident("area") / Expr::ident("dist"),
-        ),
+        dsl::let_expr("area_over_dist", Expr::ident("area") / Expr::ident("dist")),
         dsl::let_typed_expr(
             "k_raw",
             Type::vec2_f32(),
@@ -585,7 +550,10 @@ fn main_body(
         ),
         dsl::if_block_expr(
             Expr::ident("owner").ne(Expr::ident("idx")),
-            dsl::block(vec![dsl::assign_expr(Expr::ident("other_idx_p"), Expr::ident("owner"))]),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("other_idx_p"),
+                Expr::ident("owner"),
+            )]),
             None,
         ),
         dsl::let_typed_expr("grad_p_own", Type::vec2_f32(), grad_p_idx_expr.clone()),
@@ -642,7 +610,9 @@ fn main_body(
             ),
             dsl::let_expr(
                 "dist",
-                dsl::sqrt(Expr::ident("dx") * Expr::ident("dx") + Expr::ident("dy") * Expr::ident("dy")),
+                dsl::sqrt(
+                    Expr::ident("dx") * Expr::ident("dx") + Expr::ident("dy") * Expr::ident("dy"),
+                ),
             ),
             dsl::let_expr("d_p_own", d_p_idx_expr.clone()),
             dsl::let_expr("pressure_coeff_cell", pressure_coeff_cell_expr.clone()),
@@ -693,9 +663,9 @@ fn main_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::incompressible_momentum_model;
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::model::incompressible_momentum_model;
     use crate::solver::scheme::Scheme;
 
     #[test]
@@ -703,7 +673,10 @@ mod tests {
         let model = incompressible_momentum_model();
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&model.system, &registry).unwrap();
-        let fields = model.fields.incompressible().expect("incompressible fields");
+        let fields = model
+            .fields
+            .incompressible()
+            .expect("incompressible fields");
         let wgsl = generate_pressure_assembly_wgsl(&discrete, &model.state_layout, fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("matrix_values"));

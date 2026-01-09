@@ -7,11 +7,7 @@ impl GpuSolver {
             self.num_nonzeros as usize,
             "matrix_values length mismatch"
         );
-        assert_eq!(
-            rhs.len(),
-            self.num_cells as usize,
-            "rhs length mismatch"
-        );
+        assert_eq!(rhs.len(), self.num_cells as usize, "rhs length mismatch");
         let values = self.linear_port_space.buffer(self.linear_ports.values);
         let b_rhs = self.linear_port_space.buffer(self.linear_ports.rhs);
         self.common
@@ -26,9 +22,7 @@ impl GpuSolver {
 
     pub async fn get_linear_solution(&self) -> Vec<f32> {
         let b_x = self.linear_port_space.buffer(self.linear_ports.x);
-        let data = self
-            .read_buffer(b_x, (self.num_cells as u64) * 4)
-            .await;
+        let data = self.read_buffer(b_x, (self.num_cells as u64) * 4).await;
         bytemuck::cast_slice(&data).to_vec()
     }
 
@@ -42,6 +36,7 @@ impl GpuSolver {
         max_iters: u32,
         tol: f32,
     ) -> LinearSolverStats {
-        self.scalar_cg.solve(&self.common.context, n, max_iters, tol)
+        self.scalar_cg
+            .solve(&self.common.context, n, max_iters, tol)
     }
 }

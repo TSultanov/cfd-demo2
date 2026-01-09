@@ -1,9 +1,9 @@
-use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
 use cfd2::solver::model::compressible_model;
+use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 use std::env;
 use std::fs;
@@ -121,7 +121,8 @@ fn low_mach_debug_fast() {
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
     comp.set_alpha_u(alpha_u as f32);
-    comp.set_precond_model(precond_model).expect("precond model");
+    comp.set_precond_model(precond_model)
+        .expect("precond model");
     comp.set_precond_theta_floor(precond_theta_floor as f32)
         .expect("theta floor");
     comp.set_nonconverged_relax(nonconv_relax as f32)

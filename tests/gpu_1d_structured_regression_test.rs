@@ -1,11 +1,11 @@
-use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{
     generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh,
 };
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
+use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use image::{Rgb, RgbImage};
 use nalgebra::{Point2, Vector2};
 use std::fs;

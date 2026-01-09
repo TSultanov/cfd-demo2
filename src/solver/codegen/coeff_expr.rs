@@ -37,9 +37,7 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                     panic!("coefficient '{}' must be scalar", field.name());
                 }
                 match sample {
-                    CoeffSample::Cell { idx } => {
-                        state_scalar(layout, "state", idx, field.name())
-                    }
+                    CoeffSample::Cell { idx } => state_scalar(layout, "state", idx, field.name()),
                     CoeffSample::Face {
                         owner_idx,
                         neighbor_idx,
@@ -118,14 +116,7 @@ mod tests {
         )
         .unwrap();
 
-        let expr = coeff_face_expr(
-            &layout,
-            Some(&coeff),
-            "i",
-            "j",
-            0.5.into(),
-            1.0.into(),
-        );
+        let expr = coeff_face_expr(&layout, Some(&coeff), "i", "j", 0.5.into(), 1.0.into());
         assert_eq!(
             expr.to_string(),
             "constants.density * (0.5 * state[i * 1u + 0u] + (1.0 - 0.5) * state[j * 1u + 0u])"

@@ -810,8 +810,10 @@ impl FgmresWorkspace {
         );
         let pipeline_norm_sq =
             make_ops_pipeline(&format!("{label_prefix} FGMRES Norm Sq"), "norm_sq_partial");
-        let pipeline_reduce_final =
-            make_ops_pipeline(&format!("{label_prefix} FGMRES Reduce Final"), "reduce_final");
+        let pipeline_reduce_final = make_ops_pipeline(
+            &format!("{label_prefix} FGMRES Reduce Final"),
+            "reduce_final",
+        );
         let pipeline_reduce_final_and_finish_norm = make_ops_pipeline(
             &format!("{label_prefix} FGMRES Reduce Final & Finish Norm"),
             "reduce_final_and_finish_norm",
@@ -839,8 +841,10 @@ impl FgmresWorkspace {
             &format!("{label_prefix} FGMRES Update Hessenberg"),
             "update_hessenberg_givens",
         );
-        let pipeline_solve_triangular =
-            make_logic_pipeline(&format!("{label_prefix} FGMRES Solve Triangular"), "solve_triangular");
+        let pipeline_solve_triangular = make_logic_pipeline(
+            &format!("{label_prefix} FGMRES Solve Triangular"),
+            "solve_triangular",
+        );
 
         let shader_cgs = bindings::gmres_cgs::create_shader_module_embed_source(device);
         let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -861,10 +865,14 @@ impl FgmresWorkspace {
 
         let pipeline_calc_dots_cgs =
             make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Calc"), "calc_dots_cgs");
-        let pipeline_reduce_dots_cgs =
-            make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Reduce"), "reduce_dots_cgs");
-        let pipeline_update_w_cgs =
-            make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Update W"), "update_w_cgs");
+        let pipeline_reduce_dots_cgs = make_cgs_pipeline(
+            &format!("{label_prefix} FGMRES CGS Reduce"),
+            "reduce_dots_cgs",
+        );
+        let pipeline_update_w_cgs = make_cgs_pipeline(
+            &format!("{label_prefix} FGMRES CGS Update W"),
+            "update_w_cgs",
+        );
 
         Self {
             max_restart,
@@ -1292,10 +1300,7 @@ impl FgmresWorkspace {
         x: wgpu::BindingResource<'a>,
         n: u32,
     ) -> f32 {
-        debug_assert_eq!(
-            n, self.n,
-            "FgmresWorkspace::gpu_norm expects n == self.n"
-        );
+        debug_assert_eq!(n, self.n, "FgmresWorkspace::gpu_norm expects n == self.n");
 
         let core = self.core(device, queue);
         let workgroups = workgroups_for_size(n);
@@ -1381,7 +1386,13 @@ impl FgmresWorkspace {
                 pass.set_bind_group(3, self.params_bg(), &[]);
                 pass.dispatch_workgroups(1, 1, 1);
             }
-            encoder.copy_buffer_to_buffer(self.scalars_buffer(), 0, self.staging_scalar_buffer(), 0, 4);
+            encoder.copy_buffer_to_buffer(
+                self.scalars_buffer(),
+                0,
+                self.staging_scalar_buffer(),
+                0,
+                4,
+            );
             queue.submit(Some(encoder.finish()));
         }
 
@@ -1401,7 +1412,9 @@ impl FgmresWorkspace {
                 Ok(Ok(())) => break,
                 Ok(Err(e)) => panic!("buffer mapping failed: {e:?}"),
                 Err(std::sync::mpsc::TryRecvError::Empty) => std::thread::yield_now(),
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("map_async channel disconnected"),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("map_async channel disconnected")
+                }
             }
         }
 
@@ -1470,9 +1483,18 @@ pub fn create_vector_bind_group<'a>(
         label: Some(label),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: x },
-            wgpu::BindGroupEntry { binding: 1, resource: y },
-            wgpu::BindGroupEntry { binding: 2, resource: z },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: x,
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: y,
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: z,
+            },
         ],
     })
 }
@@ -1626,9 +1648,11 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         params.dispatch_x = core.num_dot_groups;
         write_params(core, &params);
         {
-            let mut encoder = core.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("FGMRES CGS"),
-            });
+            let mut encoder = core
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("FGMRES CGS"),
+                });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("FGMRES CGS Calc"),
@@ -1735,7 +1759,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         // Update Hessenberg/Givens and residual estimate.
         iter_params.current_idx = j as u32;
         write_iter_params(core, &iter_params);
-        dispatch_logic_pipeline(core, core.pipeline_update_hessenberg, 1, "FGMRES Update Hessenberg");
+        dispatch_logic_pipeline(
+            core,
+            core.pipeline_update_hessenberg,
+            1,
+            "FGMRES Update Hessenberg",
+        );
 
         final_residual = read_scalar(core);
         if final_residual <= config.tol_rel * rhs_norm || final_residual <= tol_abs {
@@ -1747,7 +1776,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     // Solve upper triangular system for y (size=basis_size)
     iter_params.current_idx = basis_size as u32;
     write_iter_params(core, &iter_params);
-    dispatch_logic_pipeline(core, core.pipeline_solve_triangular, 1, "FGMRES Solve Triangular");
+    dispatch_logic_pipeline(
+        core,
+        core.pipeline_solve_triangular,
+        1,
+        "FGMRES Solve Triangular",
+    );
 
     if config.reset_x_before_update {
         let size = x.size() as usize;

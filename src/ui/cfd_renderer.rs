@@ -273,12 +273,21 @@ impl CfdRenderResources {
     }
 
     /// Update the vertex buffer with new mesh data
-    pub fn update_mesh(&mut self, queue: &wgpu::Queue, vertices: &[CfdVertex], line_vertices: &[CfdVertex]) {
+    pub fn update_mesh(
+        &mut self,
+        queue: &wgpu::Queue,
+        vertices: &[CfdVertex],
+        line_vertices: &[CfdVertex],
+    ) {
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
-        
+
         self.num_line_vertices = line_vertices.len() as u32;
-        queue.write_buffer(&self.line_vertex_buffer, 0, bytemuck::cast_slice(line_vertices));
+        queue.write_buffer(
+            &self.line_vertex_buffer,
+            0,
+            bytemuck::cast_slice(line_vertices),
+        );
     }
 
     /// Update the uniform buffer with new transform
@@ -313,7 +322,7 @@ impl CfdRenderResources {
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..self.num_vertices, 0..1);
         }
-        
+
         if draw_lines && self.num_line_vertices > 0 {
             render_pass.set_pipeline(&self.line_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
@@ -323,12 +332,8 @@ impl CfdRenderResources {
     }
 }
 
-
-
 /// Build mesh vertices from cell data for GPU rendering
-pub fn build_mesh_vertices(
-    cells: &[Vec<[f64; 2]>],
-) -> Vec<CfdVertex> {
+pub fn build_mesh_vertices(cells: &[Vec<[f64; 2]>]) -> Vec<CfdVertex> {
     let mut vertices = Vec::new();
 
     for (cell_idx, polygon) in cells.iter().enumerate() {
@@ -361,9 +366,7 @@ pub fn build_mesh_vertices(
 }
 
 /// Build line vertices from cell data for GPU rendering
-pub fn build_line_vertices(
-    cells: &[Vec<[f64; 2]>],
-) -> Vec<CfdVertex> {
+pub fn build_line_vertices(cells: &[Vec<[f64; 2]>]) -> Vec<CfdVertex> {
     let mut vertices = Vec::new();
 
     for (cell_idx, polygon) in cells.iter().enumerate() {
@@ -374,7 +377,7 @@ pub fn build_line_vertices(
         for i in 0..polygon.len() {
             let p1 = polygon[i];
             let p2 = polygon[(i + 1) % polygon.len()];
-            
+
             vertices.push(CfdVertex {
                 position: [p1[0] as f32, p1[1] as f32],
                 cell_index: cell_idx as u32,

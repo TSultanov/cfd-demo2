@@ -45,9 +45,11 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
     }
 
     pub fn execute(&self, context: &GpuContext, module: &M, runtime: RuntimeDims) {
-        let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("ModuleGraph Encoder"),
-        });
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("ModuleGraph Encoder"),
+            });
         for node in &self.nodes {
             node.encode(&mut encoder, module, runtime);
         }
@@ -63,9 +65,12 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
         let mut timings = ModuleGraphTimings::default();
         for node in &self.nodes {
             let start = std::time::Instant::now();
-            let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(node.label()),
-            });
+            let mut encoder =
+                context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(node.label()),
+                    });
             node.encode(&mut encoder, module, runtime);
             context.queue.submit(Some(encoder.finish()));
             let secs = start.elapsed().as_secs_f64();
@@ -128,4 +133,3 @@ pub struct ModuleNodeTiming {
     pub label: &'static str,
     pub seconds: f64,
 }
-

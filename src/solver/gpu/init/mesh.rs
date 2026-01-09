@@ -18,10 +18,7 @@ pub struct MeshResources {
     pub col_indices: Vec<u32>,
 }
 
-pub fn init_mesh(
-    device: &wgpu::Device,
-    mesh: &Mesh,
-) -> MeshResources {
+pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
     let num_cells = mesh.cell_cx.len() as u32;
 
     // --- CSR Matrix Structure ---

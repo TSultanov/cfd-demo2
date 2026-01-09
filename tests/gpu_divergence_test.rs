@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 #[test]
@@ -94,7 +94,9 @@ fn test_gpu_divergence_channel_obstacle() {
         if step % 10 == 0 {
             println!(
                 "Step {}: Max Vel = {:.4}, dt = {:.6}",
-                step, max_vel, gpu_solver.dt()
+                step,
+                max_vel,
+                gpu_solver.dt()
             );
 
             if max_vel > 20.0 || max_vel.is_nan() {

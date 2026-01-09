@@ -1,10 +1,10 @@
-mod gpu;
-mod codegen;
 pub mod backend;
+mod codegen;
 pub mod compiler;
+mod gpu;
 pub mod kernels;
-pub mod model;
 pub mod mesh;
+pub mod model;
 pub mod options;
 pub mod profiling;
 pub mod scheme;

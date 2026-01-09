@@ -1,12 +1,12 @@
 use super::dsl as typed;
 use super::state_access::{state_component, state_scalar, state_vec2};
-use crate::solver::model::CompressibleFields;
-use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
     StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::CompressibleFields;
 
 pub fn generate_compressible_update_wgsl(
     layout: &StateLayout,
@@ -27,7 +27,9 @@ fn base_items() -> Vec<Item> {
     items.push(Item::Struct(vector2_struct()));
     items.push(Item::Struct(constants_struct()));
     items.push(Item::Struct(low_mach_params_struct()));
-    items.push(Item::Comment("Group 0: Fields (consolidated state buffers)".to_string()));
+    items.push(Item::Comment(
+        "Group 0: Fields (consolidated state buffers)".to_string(),
+    ));
     items.extend(state_bindings());
     items
 }
@@ -78,20 +80,8 @@ fn low_mach_params_struct() -> StructDef {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            0,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            0,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 0, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 0, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -135,29 +125,12 @@ fn state_bindings() -> Vec<Item> {
             8,
             AccessMode::ReadWrite,
         ),
-        storage_var(
-            "state_iter",
-            Type::array(Type::F32),
-            0,
-            9,
-            AccessMode::Read,
-        ),
-        uniform_var(
-            "low_mach",
-            Type::Custom("LowMachParams".to_string()),
-            0,
-            10,
-        ),
+        storage_var("state_iter", Type::array(Type::F32), 0, 9, AccessMode::Read),
+        uniform_var("low_mach", Type::Custom("LowMachParams".to_string()), 0, 10),
     ]
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -205,10 +178,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
     stmts.push(dsl::let_expr(
         "num_cells",
-        Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("state").addr_of()],
-        ),
+        Expr::call_named("arrayLength", vec![Expr::ident("state").addr_of()]),
     ));
     stmts.push(dsl::if_block_expr(
         (Expr::ident("idx") * layout.stride()).ge("num_cells"),
@@ -243,7 +213,8 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "u2",
-        typed::VecExpr::<2>::from_expr(Expr::ident("u")).dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u"))),
+        typed::VecExpr::<2>::from_expr(Expr::ident("u"))
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("u"))),
     ));
     stmts.push(dsl::let_expr(
         "ke",
@@ -251,7 +222,10 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
     ));
     stmts.push(dsl::let_expr(
         "p_val",
-        dsl::max(0.0, (Expr::ident("rho_e") - Expr::ident("ke")) * gamma_minus_1),
+        dsl::max(
+            0.0,
+            (Expr::ident("rho_e") - Expr::ident("ke")) * gamma_minus_1,
+        ),
     ));
 
     let u_x_target = state_component(layout, "state", "idx", u_field, 0);

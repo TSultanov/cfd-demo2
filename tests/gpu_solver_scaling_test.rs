@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {
@@ -124,8 +124,7 @@ fn solve_identity_system(solver: &mut UnifiedSolver, mesh: &Mesh) {
     assert!(
         stats.converged,
         "CG did not converge (iters {}, residual {:.3e})",
-        stats.iterations,
-        stats.residual
+        stats.iterations, stats.residual
     );
 
     let solution = pollster::block_on(solver.get_linear_solution()).expect("get solution");

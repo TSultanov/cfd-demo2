@@ -51,8 +51,9 @@ impl IncompressibleKernelsModule {
         let pipeline_update_fields_from_coupled =
             generated_update_fields::compute::create_main_pipeline_embed_source(device);
 
-        let mesh_layout =
-            device.create_bind_group_layout(&generated_prepare_coupled::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+        let mesh_layout = device.create_bind_group_layout(
+            &generated_prepare_coupled::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
+        );
         let bg_mesh = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Incompressible: mesh bind group"),
             layout: &mesh_layout,
@@ -67,7 +68,9 @@ impl IncompressibleKernelsModule {
                     cell_vols: mesh.b_cell_vols.as_entire_buffer_binding(),
                     cell_face_offsets: mesh.b_cell_face_offsets.as_entire_buffer_binding(),
                     cell_faces: mesh.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: mesh.b_cell_face_matrix_indices.as_entire_buffer_binding(),
+                    cell_face_matrix_indices: mesh
+                        .b_cell_face_matrix_indices
+                        .as_entire_buffer_binding(),
                     diagonal_indices: mesh.b_diagonal_indices.as_entire_buffer_binding(),
                     face_boundary: mesh.b_face_boundary.as_entire_buffer_binding(),
                 },
@@ -79,8 +82,9 @@ impl IncompressibleKernelsModule {
         let bg_solver = coupled.bg_solver.clone();
 
         let bg_update_fields_ping_pong = {
-            let bgl = device
-                .create_bind_group_layout(&generated_update_fields::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+            let bgl = device.create_bind_group_layout(
+                &generated_update_fields::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
+            );
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
                 let (idx_state, idx_old, idx_old_old) = match i {
@@ -89,20 +93,23 @@ impl IncompressibleKernelsModule {
                     2 => (1, 2, 0),
                     _ => (0, 1, 2),
                 };
-                out.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("Incompressible update fields bind group {i}")),
-                    layout: &bgl,
-                    entries: &generated_update_fields::WgpuBindGroup0Entries::new(
-                        generated_update_fields::WgpuBindGroup0EntriesParams {
-                            state: fields.state_buffers[idx_state].as_entire_buffer_binding(),
-                            state_old: fields.state_buffers[idx_old].as_entire_buffer_binding(),
-                            state_old_old: fields.state_buffers[idx_old_old].as_entire_buffer_binding(),
-                            fluxes: fields.b_fluxes.as_entire_buffer_binding(),
-                            constants: fields.b_constants.as_entire_buffer_binding(),
-                        },
-                    )
-                    .into_array(),
-                }));
+                out.push(
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(&format!("Incompressible update fields bind group {i}")),
+                        layout: &bgl,
+                        entries: &generated_update_fields::WgpuBindGroup0Entries::new(
+                            generated_update_fields::WgpuBindGroup0EntriesParams {
+                                state: fields.state_buffers[idx_state].as_entire_buffer_binding(),
+                                state_old: fields.state_buffers[idx_old].as_entire_buffer_binding(),
+                                state_old_old: fields.state_buffers[idx_old_old]
+                                    .as_entire_buffer_binding(),
+                                fluxes: fields.b_fluxes.as_entire_buffer_binding(),
+                                constants: fields.b_constants.as_entire_buffer_binding(),
+                            },
+                        )
+                        .into_array(),
+                    }),
+                );
             }
             out
         };
@@ -163,7 +170,9 @@ impl GpuComputeModule for IncompressibleKernelsModule {
     fn bind(&self, key: Self::BindKey, pass: &mut wgpu::ComputePass) {
         match key {
             IncompressibleBindGroups::MeshFieldsSolver => self.bind_mesh_fields_solver(pass),
-            IncompressibleBindGroups::UpdateFieldsSolution => self.bind_update_fields_solution(pass),
+            IncompressibleBindGroups::UpdateFieldsSolution => {
+                self.bind_update_fields_solution(pass)
+            }
         }
     }
 
@@ -175,4 +184,3 @@ impl GpuComputeModule for IncompressibleKernelsModule {
         }
     }
 }
-

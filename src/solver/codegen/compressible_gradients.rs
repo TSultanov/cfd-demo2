@@ -1,12 +1,12 @@
 use super::dsl as typed;
 use super::state_access::{state_scalar, state_vec2};
-use crate::solver::model::CompressibleFields;
-use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::CompressibleFields;
 
 pub fn generate_compressible_gradients_wgsl(
     layout: &StateLayout,
@@ -80,13 +80,7 @@ fn low_mach_params_struct() -> StructDef {
 
 fn mesh_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "face_owner",
-            Type::array(Type::U32),
-            0,
-            0,
-            AccessMode::Read,
-        ),
+        storage_var("face_owner", Type::array(Type::U32), 0, 0, AccessMode::Read),
         storage_var(
             "face_neighbor",
             Type::array(Type::I32),
@@ -94,13 +88,7 @@ fn mesh_bindings() -> Vec<Item> {
             1,
             AccessMode::Read,
         ),
-        storage_var(
-            "face_areas",
-            Type::array(Type::F32),
-            0,
-            2,
-            AccessMode::Read,
-        ),
+        storage_var("face_areas", Type::array(Type::F32), 0, 2, AccessMode::Read),
         storage_var(
             "face_normals",
             Type::array(Type::Custom("Vector2".to_string())),
@@ -115,13 +103,7 @@ fn mesh_bindings() -> Vec<Item> {
             4,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_vols",
-            Type::array(Type::F32),
-            0,
-            5,
-            AccessMode::Read,
-        ),
+        storage_var("cell_vols", Type::array(Type::F32), 0, 5, AccessMode::Read),
         storage_var(
             "cell_face_offsets",
             Type::array(Type::U32),
@@ -129,13 +111,7 @@ fn mesh_bindings() -> Vec<Item> {
             6,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_faces",
-            Type::array(Type::U32),
-            0,
-            7,
-            AccessMode::Read,
-        ),
+        storage_var("cell_faces", Type::array(Type::U32), 0, 7, AccessMode::Read),
         storage_var(
             "cell_face_matrix_indices",
             Type::array(Type::U32),
@@ -169,20 +145,8 @@ fn mesh_bindings() -> Vec<Item> {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            1,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            1,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 1, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 1, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -226,29 +190,12 @@ fn state_bindings() -> Vec<Item> {
             8,
             AccessMode::ReadWrite,
         ),
-        storage_var(
-            "state_iter",
-            Type::array(Type::F32),
-            1,
-            9,
-            AccessMode::Read,
-        ),
-        uniform_var(
-            "low_mach",
-            Type::Custom("LowMachParams".to_string()),
-            1,
-            10,
-        ),
+        storage_var("state_iter", Type::array(Type::F32), 1, 9, AccessMode::Read),
+        uniform_var("low_mach", Type::Custom("LowMachParams".to_string()), 1, 10),
     ]
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -381,13 +328,21 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         None,
     ));
 
-    loop_body.push(dsl::var_typed_expr("rho_r", Type::F32, Some(Expr::ident("rho_l"))));
+    loop_body.push(dsl::var_typed_expr(
+        "rho_r",
+        Type::F32,
+        Some(Expr::ident("rho_l")),
+    ));
     loop_body.push(dsl::var_typed_expr(
         "rho_u_r",
         Type::vec2_f32(),
         Some(Expr::ident("rho_u_l")),
     ));
-    loop_body.push(dsl::var_typed_expr("rho_e_r", Type::F32, Some(Expr::ident("rho_e_l"))));
+    loop_body.push(dsl::var_typed_expr(
+        "rho_e_r",
+        Type::F32,
+        Some(Expr::ident("rho_e_l")),
+    ));
 
     let rho_neigh_expr = state_scalar(layout, "state", "other_idx", rho_field);
     let rho_u_neigh_expr = state_vec2(layout, "state", "other_idx", rho_u_field);
@@ -418,13 +373,21 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
         None,
     ));
 
-    loop_body.push(dsl::var_typed_expr("rho_face", Type::F32, Some(Expr::ident("rho_l"))));
+    loop_body.push(dsl::var_typed_expr(
+        "rho_face",
+        Type::F32,
+        Some(Expr::ident("rho_l")),
+    ));
     loop_body.push(dsl::var_typed_expr(
         "rho_u_face",
         Type::vec2_f32(),
         Some(Expr::ident("rho_u_l")),
     ));
-    loop_body.push(dsl::var_typed_expr("rho_e_face", Type::F32, Some(Expr::ident("rho_e_l"))));
+    loop_body.push(dsl::var_typed_expr(
+        "rho_e_face",
+        Type::F32,
+        Some(Expr::ident("rho_e_l")),
+    ));
     loop_body.push(dsl::if_block_expr(
         Expr::ident("neighbor").ne(-1),
         dsl::block(vec![
@@ -484,8 +447,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     let store_grad = |buf: &str, accum: &str| {
         dsl::assign_expr(
-            Expr::ident(buf)
-                .index(Expr::ident("idx")),
+            Expr::ident(buf).index(Expr::ident("idx")),
             typed::VecExpr::<2>::from_expr(Expr::ident(accum)).to_vector2_struct(),
         )
     };

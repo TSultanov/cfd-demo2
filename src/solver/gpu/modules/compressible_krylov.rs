@@ -122,16 +122,17 @@ impl CompressibleKrylovModule {
             }],
         });
 
-        let pipeline_layout_precond = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Compressible precond pipeline layout"),
-            bind_group_layouts: &[
-                fgmres.vectors_layout(),
-                fgmres.matrix_layout(),
-                &bgl_block_precond,
-                fgmres.params_layout(),
-            ],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout_precond =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compressible precond pipeline layout"),
+                bind_group_layouts: &[
+                    fgmres.vectors_layout(),
+                    fgmres.matrix_layout(),
+                    &bgl_block_precond,
+                    fgmres.params_layout(),
+                ],
+                push_constant_ranges: &[],
+            });
 
         let shader_precond =
             bindings::compressible_precond::create_shader_module_embed_source(device);
@@ -201,7 +202,8 @@ impl CompressibleKrylovModule {
             bind_group_layouts: &[&bgl_pack, &bgl_pack_params],
             push_constant_ranges: &[],
         });
-        let shader_pack = bindings::compressible_amg_pack::create_shader_module_embed_source(device);
+        let shader_pack =
+            bindings::compressible_amg_pack::create_shader_module_embed_source(device);
         let make_pack_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),
@@ -273,7 +275,12 @@ impl CompressibleKrylovModule {
         self.kind
     }
 
-    pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix, levels: usize) {
+    pub fn ensure_amg_resources(
+        &mut self,
+        device: &wgpu::Device,
+        matrix: CsrMatrix,
+        levels: usize,
+    ) {
         if self.amg.is_some() {
             return;
         }

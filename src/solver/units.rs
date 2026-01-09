@@ -46,8 +46,7 @@ impl UnitExp {
             return self;
         }
 
-        let num =
-            (self.num as i64) * (rhs.den as i64) + (rhs.num as i64) * (self.den as i64);
+        let num = (self.num as i64) * (rhs.den as i64) + (rhs.num as i64) * (self.den as i64);
         let den = (self.den as i64) * (rhs.den as i64);
         Self::new(i64_to_i32_checked(num), i64_to_i32_checked(den))
     }
@@ -56,8 +55,7 @@ impl UnitExp {
         if rhs.num == 0 {
             return self;
         }
-        let num =
-            (self.num as i64) * (rhs.den as i64) - (rhs.num as i64) * (self.den as i64);
+        let num = (self.num as i64) * (rhs.den as i64) - (rhs.num as i64) * (self.den as i64);
         let den = (self.den as i64) * (rhs.den as i64);
         Self::new(i64_to_i32_checked(num), i64_to_i32_checked(den))
     }
@@ -141,7 +139,11 @@ const fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
         b = r;
     }
     let a = abs_i32(a);
-    if a == 0 { 1 } else { a }
+    if a == 0 {
+        1
+    } else {
+        a
+    }
 }
 
 /// Physical dimension exponents in **SI base units** with rational powers.

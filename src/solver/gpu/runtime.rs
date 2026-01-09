@@ -21,7 +21,11 @@ pub(crate) struct GpuScalarRuntime {
 }
 
 impl GpuScalarRuntime {
-    pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+    pub async fn new(
+        mesh: &Mesh,
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    ) -> Self {
         let common = GpuRuntimeCommon::new(mesh, device, queue).await;
 
         let cg = linear_solver::init_scalar_cg(
@@ -32,14 +36,15 @@ impl GpuScalarRuntime {
         );
 
         let constants = default_constants();
-        let b_constants = common
-            .context
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Constants Buffer"),
-            contents: bytemuck::bytes_of(&constants),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let b_constants =
+            common
+                .context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Constants Buffer"),
+                    contents: bytemuck::bytes_of(&constants),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
 
         Self {
             common,
@@ -53,10 +58,11 @@ impl GpuScalarRuntime {
     }
 
     pub fn update_constants(&self) {
-        self.common
-            .context
-            .queue
-            .write_buffer(&self.b_constants, 0, bytemuck::bytes_of(&self.constants));
+        self.common.context.queue.write_buffer(
+            &self.b_constants,
+            0,
+            bytemuck::bytes_of(&self.constants),
+        );
     }
 
     pub fn set_dt(&mut self, dt: f32) {
@@ -84,8 +90,14 @@ impl GpuScalarRuntime {
         self.update_constants();
     }
 
-    pub fn solve_linear_system_cg_with_size(&self, n: u32, max_iters: u32, tol: f32) -> LinearSolverStats {
-        self.scalar_cg.solve(&self.common.context, n, max_iters, tol)
+    pub fn solve_linear_system_cg_with_size(
+        &self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> LinearSolverStats {
+        self.scalar_cg
+            .solve(&self.common.context, n, max_iters, tol)
     }
 
     pub fn solve_linear_system_cg(&self, max_iters: u32, tol: f32) -> LinearSolverStats {

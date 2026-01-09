@@ -49,7 +49,8 @@ impl CompressibleLowered {
 
         let scalar_row_offsets = mesh.row_offsets.clone();
         let scalar_col_indices = mesh.col_indices.clone();
-        let (row_offsets, col_indices) = build_block_csr(&mesh.row_offsets, &mesh.col_indices, unknowns_per_cell);
+        let (row_offsets, col_indices) =
+            build_block_csr(&mesh.row_offsets, &mesh.col_indices, unknowns_per_cell);
         let block_row_offsets = row_offsets.clone();
         let block_col_indices = col_indices.clone();
 

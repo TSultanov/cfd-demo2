@@ -1,11 +1,11 @@
-use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
-use crate::solver::{SolverConfig, UnifiedSolver};
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
 };
 use crate::solver::model::{compressible_model, incompressible_momentum_model};
+use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
 use crate::solver::scheme::Scheme;
+use crate::solver::{SolverConfig, UnifiedSolver};
 use crate::ui::cfd_renderer;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};

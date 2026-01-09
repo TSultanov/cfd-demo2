@@ -213,7 +213,10 @@ impl CoupledSchurModule {
             b_p_sol,
             bgl_schur_vectors,
             bg_pressure_matrix,
-            pipeline_predict_and_form: make_schur_pipeline("Schur Predict & Form", "predict_and_form_schur"),
+            pipeline_predict_and_form: make_schur_pipeline(
+                "Schur Predict & Form",
+                "predict_and_form_schur",
+            ),
             pipeline_relax_pressure: make_schur_pipeline("Schur Relax P", "relax_pressure"),
             pipeline_correct_vel: make_schur_pipeline("Schur Correct Vel", "correct_velocity"),
             amg: None,
@@ -308,14 +311,26 @@ impl CoupledSchurModule {
             label: Some(label),
             layout: &self.bgl_schur_vectors,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: v },
-                wgpu::BindGroupEntry { binding: 1, resource: z },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: v,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: z,
+                },
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: self.b_temp_p.as_entire_binding(),
                 },
-                wgpu::BindGroupEntry { binding: 3, resource: p_sol },
-                wgpu::BindGroupEntry { binding: 4, resource: aux },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: p_sol,
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: aux,
+                },
             ],
         })
     }
@@ -388,7 +403,11 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                 pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
 
                 for _ in 0..p_iters {
-                    let bg = if p_result_in_sol { &current_bg } else { &swap_bg };
+                    let bg = if p_result_in_sol {
+                        &current_bg
+                    } else {
+                        &swap_bg
+                    };
                     pass.set_bind_group(0, bg, &[]);
                     pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
                     p_result_in_sol = !p_result_in_sol;
@@ -396,7 +415,11 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
 
                 drop(pass);
 
-                let correct_bg = if p_result_in_sol { &current_bg } else { &swap_bg };
+                let correct_bg = if p_result_in_sol {
+                    &current_bg
+                } else {
+                    &swap_bg
+                };
                 self.dispatch_schur(
                     encoder,
                     &self.pipeline_correct_vel,

@@ -1,11 +1,11 @@
 use super::state_access::{state_component, state_scalar, state_vec2};
-use crate::solver::model::IncompressibleMomentumFields;
-use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, StorageClass,
     StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_update_fields_from_coupled_wgsl(
     layout: &StateLayout,
@@ -27,7 +27,9 @@ fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
     items.push(Item::Struct(constants_struct()));
-    items.push(Item::Comment("Group 0: Fields (consolidated state buffers)".to_string()));
+    items.push(Item::Comment(
+        "Group 0: Fields (consolidated state buffers)".to_string(),
+    ));
     items.extend(state_bindings());
     items.push(Item::Comment("Group 1: Linear solver outputs".to_string()));
     items.extend(solver_bindings());
@@ -68,20 +70,8 @@ fn constants_struct() -> StructDef {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            0,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            0,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 0, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 0, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -133,13 +123,7 @@ fn shared_max_p_var() -> GlobalVar {
     )
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -216,10 +200,7 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
     stmts.push(dsl::var_typed_expr("diff_p", Type::F32, Some(0.0.into())));
     stmts.push(dsl::let_expr(
         "num_cells",
-        Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("state").addr_of()],
-        ) / stride,
+        Expr::call_named("arrayLength", vec![Expr::ident("state").addr_of()]) / stride,
     ));
 
     let u_x_target = state_component(layout, "state", "idx", u_field, 0);
@@ -234,29 +215,14 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                 Expr::call_named(
                     "vec2<f32>",
                     vec![
-                        dsl::array_access_linear(
-                            "x",
-                            Expr::ident("idx"),
-                            coupled_stride_u32,
-                            0,
-                        ),
-                        dsl::array_access_linear(
-                            "x",
-                            Expr::ident("idx"),
-                            coupled_stride_u32,
-                            1,
-                        ),
+                        dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride_u32, 0),
+                        dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride_u32, 1),
                     ],
                 ),
             ),
             dsl::let_expr(
                 "p_new_val",
-                dsl::array_access_linear(
-                    "x",
-                    Expr::ident("idx"),
-                    coupled_stride_u32,
-                    p_offset_u32,
-                ),
+                dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride_u32, p_offset_u32),
             ),
             dsl::let_expr("u_old_val", state_vec2(layout, "state", "idx", u_field)),
             dsl::let_expr("p_old_val", state_scalar(layout, "state", "idx", p_field)),
@@ -270,7 +236,8 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
             dsl::let_expr(
                 "p_updated",
                 Expr::ident("p_old_val")
-                    + Expr::ident("alpha_p") * (Expr::ident("p_new_val") - Expr::ident("p_old_val")),
+                    + Expr::ident("alpha_p")
+                        * (Expr::ident("p_new_val") - Expr::ident("p_old_val")),
             ),
             dsl::assign_expr(u_x_target, Expr::ident("u_updated").field("x")),
             dsl::assign_expr(u_y_target, Expr::ident("u_updated").field("y")),
@@ -282,13 +249,17 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
                     vec![
                         Expr::call_named(
                             "abs",
-                            vec![Expr::ident("u_updated").field("x")
-                                - Expr::ident("u_old_val").field("x")],
+                            vec![
+                                Expr::ident("u_updated").field("x")
+                                    - Expr::ident("u_old_val").field("x"),
+                            ],
                         ),
                         Expr::call_named(
                             "abs",
-                            vec![Expr::ident("u_updated").field("y")
-                                - Expr::ident("u_old_val").field("y")],
+                            vec![
+                                Expr::ident("u_updated").field("y")
+                                    - Expr::ident("u_old_val").field("y"),
+                            ],
                         ),
                     ],
                 ),
@@ -314,7 +285,10 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
         Expr::ident("lid"),
         Expr::ident("diff_p"),
     ));
-    stmts.push(dsl::call_stmt_expr(Expr::call_named("workgroupBarrier", Vec::new())));
+    stmts.push(dsl::call_stmt_expr(Expr::call_named(
+        "workgroupBarrier",
+        Vec::new(),
+    )));
 
     stmts.push(dsl::for_loop_expr(
         dsl::for_init_var_expr("stride", 32u32),
@@ -395,7 +369,10 @@ mod tests {
     #[test]
     fn update_fields_codegen_emits_state_arrays() {
         let model = incompressible_momentum_model();
-        let fields = model.fields.incompressible().expect("incompressible fields");
+        let fields = model
+            .fields
+            .incompressible()
+            .expect("incompressible fields");
         let wgsl = generate_update_fields_from_coupled_wgsl(&model.state_layout, fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("atomicMax"));

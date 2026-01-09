@@ -44,10 +44,7 @@ pub fn momentum_plan(
     }
 
     if !found {
-        panic!(
-            "missing momentum equation for field '{}'",
-            momentum_field
-        );
+        panic!("missing momentum equation for field '{}'", momentum_field);
     }
 
     for equation in &system.equations {

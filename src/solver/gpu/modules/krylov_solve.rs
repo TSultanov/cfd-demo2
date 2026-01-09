@@ -16,12 +16,7 @@ impl<P> KrylovSolveModule<P> {
         Self { fgmres, precond }
     }
 
-    pub fn rhs_norm(
-        &self,
-        context: &GpuContext,
-        system: LinearSystemView<'_>,
-        n: u32,
-    ) -> f32 {
+    pub fn rhs_norm(&self, context: &GpuContext, system: LinearSystemView<'_>, n: u32) -> f32 {
         self.fgmres.gpu_norm(
             &context.device,
             &context.queue,
@@ -52,11 +47,12 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
             iter_params,
             config,
             |_j, vj, z_buf| {
-                let mut encoder = context
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some(precond_label),
-                    });
+                let mut encoder =
+                    context
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some(precond_label),
+                        });
                 self.precond.encode_apply(
                     &context.device,
                     &mut encoder,

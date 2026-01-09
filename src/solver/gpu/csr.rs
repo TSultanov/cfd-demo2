@@ -28,4 +28,3 @@ pub fn build_block_csr(
 
     (block_row_offsets, block_col_indices)
 }
-

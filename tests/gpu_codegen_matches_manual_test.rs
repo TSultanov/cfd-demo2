@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 fn build_mesh() -> Mesh {

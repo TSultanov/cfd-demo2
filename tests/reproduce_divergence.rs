@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
 
 #[test]
@@ -88,9 +88,11 @@ fn test_reproduce_divergence() {
             // Check for divergence
             let (outer_iters, outer_res_u, outer_res_p) =
                 solver.incompressible_outer_stats().unwrap_or((0, 0.0, 0.0));
-            let (stats_ux, _stats_uy, stats_p) = solver
-                .incompressible_linear_stats()
-                .unwrap_or((Default::default(), Default::default(), Default::default()));
+            let (stats_ux, _stats_uy, stats_p) = solver.incompressible_linear_stats().unwrap_or((
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            ));
 
             println!(
                 "Step {}: dt={:.2e}, ResU={:.2e}, ResP={:.2e}, LinU={} (res {:.2e}), LinP={} (res {:.2e}), OuterIters={}",

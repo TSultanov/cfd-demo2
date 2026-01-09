@@ -319,8 +319,6 @@ impl Mesh {
             .reduce(|| 0.0, f64::max)
     }
 
-
-
     pub fn get_cell_at_pos(&self, p: Point2<f64>) -> Option<usize> {
         for i in 0..self.cell_cx.len() {
             // Point in polygon test (Ray casting)

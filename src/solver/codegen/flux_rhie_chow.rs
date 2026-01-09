@@ -3,14 +3,14 @@ use super::dsl as typed;
 use super::ir::DiscreteSystem;
 use super::plan::{momentum_plan, MomentumPlan};
 use super::state_access::{state_scalar, state_vec2};
-use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::model::IncompressibleMomentumFields;
-use crate::solver::model::backend::StateLayout;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StructDef,
     StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::model::backend::StateLayout;
+use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_flux_rhie_chow_wgsl(
     system: &DiscreteSystem,
@@ -75,13 +75,7 @@ fn constants_struct() -> StructDef {
 
 fn mesh_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "face_owner",
-            Type::array(Type::U32),
-            0,
-            0,
-            AccessMode::Read,
-        ),
+        storage_var("face_owner", Type::array(Type::U32), 0, 0, AccessMode::Read),
         storage_var(
             "face_neighbor",
             Type::array(Type::I32),
@@ -89,13 +83,7 @@ fn mesh_bindings() -> Vec<Item> {
             1,
             AccessMode::Read,
         ),
-        storage_var(
-            "face_areas",
-            Type::array(Type::F32),
-            0,
-            2,
-            AccessMode::Read,
-        ),
+        storage_var("face_areas", Type::array(Type::F32), 0, 2, AccessMode::Read),
         storage_var(
             "face_normals",
             Type::array(Type::Custom("Vector2".to_string())),
@@ -110,13 +98,7 @@ fn mesh_bindings() -> Vec<Item> {
             4,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_vols",
-            Type::array(Type::F32),
-            0,
-            5,
-            AccessMode::Read,
-        ),
+        storage_var("cell_vols", Type::array(Type::F32), 0, 5, AccessMode::Read),
         storage_var(
             "cell_face_offsets",
             Type::array(Type::U32),
@@ -124,13 +106,7 @@ fn mesh_bindings() -> Vec<Item> {
             6,
             AccessMode::Read,
         ),
-        storage_var(
-            "cell_faces",
-            Type::array(Type::U32),
-            0,
-            7,
-            AccessMode::Read,
-        ),
+        storage_var("cell_faces", Type::array(Type::U32), 0, 7, AccessMode::Read),
         storage_var(
             "cell_face_matrix_indices",
             Type::array(Type::U32),
@@ -164,20 +140,8 @@ fn mesh_bindings() -> Vec<Item> {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            1,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        storage_var(
-            "state_old",
-            Type::array(Type::F32),
-            1,
-            1,
-            AccessMode::Read,
-        ),
+        storage_var("state", Type::array(Type::F32), 1, 0, AccessMode::ReadWrite),
+        storage_var("state_old", Type::array(Type::F32), 1, 1, AccessMode::Read),
         storage_var(
             "state_old_old",
             Type::array(Type::F32),
@@ -196,13 +160,7 @@ fn state_bindings() -> Vec<Item> {
     ]
 }
 
-fn storage_var(
-    name: &str,
-    ty: Type,
-    group: u32,
-    binding: u32,
-    access: AccessMode,
-) -> Item {
+fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
@@ -315,7 +273,9 @@ fn main_body(
             .lt(0.0),
         dsl::block(vec![dsl::assign_expr(
             Expr::ident("normal_vec"),
-            typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")).neg().expr(),
+            typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
+                .neg()
+                .expr(),
         )]),
         None,
     ));
@@ -342,14 +302,26 @@ fn main_body(
         Expr::ident("rho_face"),
     );
 
-    stmts.push(dsl::var_typed_expr("u_face", Type::vec2_f32(), Some(u_owner_expr)));
-    stmts.push(dsl::var_typed_expr("d_p_face", Type::F32, Some(dp_owner_expr)));
+    stmts.push(dsl::var_typed_expr(
+        "u_face",
+        Type::vec2_f32(),
+        Some(u_owner_expr),
+    ));
+    stmts.push(dsl::var_typed_expr(
+        "d_p_face",
+        Type::F32,
+        Some(dp_owner_expr),
+    ));
     stmts.push(dsl::var_typed_expr(
         "grad_p_avg",
         Type::vec2_f32(),
         Some(grad_p_owner_expr),
     ));
-    stmts.push(dsl::var_typed_expr("rho_face", Type::F32, Some(rho_owner_expr)));
+    stmts.push(dsl::var_typed_expr(
+        "rho_face",
+        Type::F32,
+        Some(rho_owner_expr),
+    ));
 
     let interior_block = {
         let u_neigh_expr = state_vec2(layout, "state", "neigh_idx", u_field);
@@ -359,7 +331,10 @@ fn main_body(
         let p_neigh_expr = state_scalar(layout, "state", "neigh_idx", p_field);
 
         dsl::block(vec![
-            dsl::let_expr("neigh_idx", Expr::call_named("u32", vec![Expr::ident("neighbor")])),
+            dsl::let_expr(
+                "neigh_idx",
+                Expr::call_named("u32", vec![Expr::ident("neighbor")]),
+            ),
             dsl::let_typed_expr("u_neigh", Type::vec2_f32(), u_neigh_expr),
             dsl::let_expr("d_p_neigh", dp_neigh_expr),
             dsl::let_typed_expr("grad_p_neigh", Type::vec2_f32(), grad_p_neigh_expr),
@@ -372,14 +347,8 @@ fn main_body(
                 Type::vec2_f32(),
                 typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr(),
             ),
-            dsl::let_expr(
-                "d_own",
-                dsl::distance("c_owner_vec", "face_center_vec"),
-            ),
-            dsl::let_expr(
-                "d_neigh",
-                dsl::distance("c_neigh_vec", "face_center_vec"),
-            ),
+            dsl::let_expr("d_own", dsl::distance("c_owner_vec", "face_center_vec")),
+            dsl::let_expr("d_neigh", dsl::distance("c_neigh_vec", "face_center_vec")),
             dsl::let_expr("total_dist", Expr::ident("d_own") + Expr::ident("d_neigh")),
             dsl::var_typed_expr("lambda", Type::F32, Some(0.5.into())),
             dsl::if_block_expr(
@@ -390,10 +359,7 @@ fn main_body(
                 )]),
                 None,
             ),
-            dsl::let_expr(
-                "lambda_other",
-                Expr::from(1.0) - Expr::ident("lambda"),
-            ),
+            dsl::let_expr("lambda_other", Expr::from(1.0) - Expr::ident("lambda")),
             dsl::assign_expr(Expr::ident("rho_face"), rho_face_expr),
             dsl::let_typed_expr(
                 "u_central",
@@ -436,10 +402,7 @@ fn main_body(
                         .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
                 ),
             ),
-            dsl::let_expr(
-                "dist",
-                dsl::max("dist_proj", 1e-6),
-            ),
+            dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)),
             dsl::let_expr("p_own", p_owner_expr),
             dsl::let_expr("p_neigh", p_neigh_expr),
             dsl::let_expr(
@@ -490,9 +453,7 @@ fn main_body(
         ),
         dsl::assign_expr(
             Expr::ident("fluxes").index(Expr::ident("idx")),
-            Expr::ident("rho_face")
-                * dsl::dot("u_bc", "normal_vec")
-                * Expr::ident("area"),
+            Expr::ident("rho_face") * dsl::dot("u_bc", "normal_vec") * Expr::ident("area"),
         ),
     ]);
 
@@ -508,10 +469,7 @@ fn main_body(
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
         ),
         dsl::var_typed_expr("rc_term", Type::F32, Some(0.0.into())),
-        dsl::let_expr(
-            "dist_face",
-            dsl::distance("c_owner_vec", "face_center_vec"),
-        ),
+        dsl::let_expr("dist_face", dsl::distance("c_owner_vec", "face_center_vec")),
         dsl::if_block_expr(
             Expr::ident("dist_face").gt(1e-6),
             dsl::block(vec![dsl::assign_expr(Expr::ident("rc_term"), 0.0)]),
@@ -559,8 +517,8 @@ fn main_body(
 mod tests {
     use super::*;
     use crate::solver::codegen::lower_system;
-    use crate::solver::model::incompressible_momentum_model;
     use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::model::incompressible_momentum_model;
     use crate::solver::scheme::Scheme;
 
     #[test]
@@ -568,7 +526,10 @@ mod tests {
         let model = incompressible_momentum_model();
         let schemes = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&model.system, &schemes).unwrap();
-        let fields = model.fields.incompressible().expect("incompressible fields");
+        let fields = model
+            .fields
+            .incompressible()
+            .expect("incompressible fields");
         let wgsl = generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("face_owner"));

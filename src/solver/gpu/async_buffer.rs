@@ -244,7 +244,4 @@ impl AsyncStagingBuffer {
         self.receiver = Some(rx);
         self.is_pending = true;
     }
-
 }
-
-

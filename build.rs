@@ -11,7 +11,10 @@ mod solver {
     }
     pub mod gpu {
         pub mod enums {
-            include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/gpu/enums.rs"));
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/gpu/enums.rs"
+            ));
         }
     }
     pub mod model {
@@ -58,27 +61,27 @@ mod solver {
         }
         #[allow(unused_imports)]
         pub use definitions::{
-            compressible_model, compressible_system, incompressible_momentum_model,
-            incompressible_momentum_system, generic_diffusion_demo_model, CompressibleFields,
-            generic_diffusion_demo_neumann_model, GenericCoupledFields, IncompressibleMomentumFields,
-            ModelFields, ModelSpec,
+            compressible_model, compressible_system, generic_diffusion_demo_model,
+            generic_diffusion_demo_neumann_model, incompressible_momentum_model,
+            incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
+            IncompressibleMomentumFields, ModelFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
     }
-        pub mod codegen {
-            pub mod dsl {
-                pub mod enums {
-                    include!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/src/solver/codegen/dsl/enums.rs"
-                    ));
-                }
-                pub mod expr {
-                    include!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/src/solver/codegen/dsl/expr.rs"
-                    ));
+    pub mod codegen {
+        pub mod dsl {
+            pub mod enums {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/enums.rs"
+                ));
+            }
+            pub mod expr {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/dsl/expr.rs"
+                ));
             }
             pub mod matrix {
                 include!(concat!(
@@ -114,7 +117,9 @@ mod solver {
                 BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix,
                 CsrPattern,
             };
-            pub use tensor::{AxisCons, AxisXY, Cons, MatExpr, NamedMatExpr, NamedVecExpr, VecExpr, XY};
+            pub use tensor::{
+                AxisCons, AxisXY, Cons, MatExpr, NamedMatExpr, NamedVecExpr, VecExpr, XY,
+            };
             pub use types::{DslType, ScalarType, Shape};
             pub use units::UnitDim;
         }
@@ -264,35 +269,27 @@ fn main() {
         .derive_serde(false)
         .output("src/solver/gpu/bindings.rs");
 
-    let manifest_dir =
-        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     if let Err(err) = solver::codegen::emit::emit_incompressible_momentum_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
     let model = solver::model::incompressible_momentum_model();
-    let schemes =
-        solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
-    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
-        &manifest_dir,
-        &model,
-        &schemes,
-    ) {
+    let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
+    if let Err(err) =
+        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
+    {
         panic!("codegen failed: {}", err);
     }
     let compressible_model = solver::model::compressible_model();
-    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
-        &manifest_dir,
-        &compressible_model,
-        &schemes,
-    ) {
+    if let Err(err) =
+        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &compressible_model, &schemes)
+    {
         panic!("codegen failed: {}", err);
     }
     let generic_model = solver::model::generic_diffusion_demo_model();
-    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
-        &manifest_dir,
-        &generic_model,
-        &schemes,
-    ) {
+    if let Err(err) =
+        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &generic_model, &schemes)
+    {
         panic!("codegen failed: {}", err);
     }
     let generic_neumann_model = solver::model::generic_diffusion_demo_neumann_model();

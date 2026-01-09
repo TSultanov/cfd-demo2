@@ -173,17 +173,9 @@ impl BlockCsrSoaMatrix {
             .start_rows
             .iter()
             .cloned()
-            .map(|start| {
-                start + *rank * cols
-            })
+            .map(|start| start + *rank * cols)
             .collect();
-        BlockCsrSoaEntry::new(
-            self.values,
-            bases,
-            self.block,
-            self.scalar,
-            self.entry_unit,
-        )
+        BlockCsrSoaEntry::new(self.values, bases, self.block, self.scalar, self.entry_unit)
     }
 
     pub fn entry(&self, rank: &Expr, row: u8, col: u8) -> TypedExpr {

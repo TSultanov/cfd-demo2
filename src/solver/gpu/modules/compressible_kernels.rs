@@ -86,7 +86,9 @@ impl CompressibleKernelsModule {
                     cell_vols: mesh.b_cell_vols.as_entire_buffer_binding(),
                     cell_face_offsets: mesh.b_cell_face_offsets.as_entire_buffer_binding(),
                     cell_faces: mesh.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: mesh.b_cell_face_matrix_indices.as_entire_buffer_binding(),
+                    cell_face_matrix_indices: mesh
+                        .b_cell_face_matrix_indices
+                        .as_entire_buffer_binding(),
                     diagonal_indices: mesh.b_diagonal_indices.as_entire_buffer_binding(),
                     face_boundary: mesh.b_face_boundary.as_entire_buffer_binding(),
                     face_centers: mesh.b_face_centers.as_entire_buffer_binding(),

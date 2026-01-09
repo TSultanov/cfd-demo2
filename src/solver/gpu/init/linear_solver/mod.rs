@@ -8,8 +8,8 @@ use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generate
 use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::init::scalars;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
-use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
+use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
 use wgpu::util::DeviceExt;
 
@@ -143,7 +143,8 @@ pub fn init_scalar_cg(
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
 ) -> ScalarCgInit {
-    let linear_res = init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
+    let linear_res =
+        init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
     let scalar_cg = build_scalar_cg(device, num_cells, &linear_res);
 
     ScalarCgInit {
@@ -209,7 +210,8 @@ pub fn init_linear_solver(
     scalar_col_indices: &[u32],
     unknowns_per_cell: u32,
 ) -> LinearSolverResources {
-    let scalar = init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
+    let scalar =
+        init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
     let row_offsets = scalar_row_offsets.to_vec();
     let col_indices = scalar_col_indices.to_vec();
 
@@ -366,9 +368,8 @@ fn init_coupled_resources(
     // Reuse layouts from pipeline_res
 
     // Create custom layout for coupled solver assembly
-    let layout = device.create_bind_group_layout(
-        &generated_coupled_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR,
-    );
+    let layout = device
+        .create_bind_group_layout(&generated_coupled_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
     let bg_solver = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Coupled Solver Bind Group"),
         layout: &layout,

@@ -280,20 +280,20 @@ impl ProfilingStats {
         self.location_stats.lock().unwrap().clone()
     }
 
-    pub fn record_memory_event(&self, domain: MemoryDomain, location: &str, bytes: u64, is_alloc: bool) {
+    pub fn record_memory_event(
+        &self,
+        domain: MemoryDomain,
+        location: &str,
+        bytes: u64,
+        is_alloc: bool,
+    ) {
         if !self.is_enabled() {
             return;
         }
 
         let (totals, locations) = match domain {
-            MemoryDomain::Cpu => (
-                &self.memory_cpu,
-                &self.memory_locations_cpu,
-            ),
-            MemoryDomain::Gpu => (
-                &self.memory_gpu,
-                &self.memory_locations_gpu,
-            ),
+            MemoryDomain::Cpu => (&self.memory_cpu, &self.memory_locations_cpu),
+            MemoryDomain::Gpu => (&self.memory_gpu, &self.memory_locations_gpu),
         };
 
         {
@@ -306,7 +306,9 @@ impl ProfilingStats {
         }
 
         let mut map = locations.lock().unwrap();
-        let entry = map.entry(location.to_string()).or_insert_with(MemoryStats::default);
+        let entry = map
+            .entry(location.to_string())
+            .or_insert_with(MemoryStats::default);
         if is_alloc {
             entry.record_alloc(bytes);
         } else {
@@ -503,10 +505,7 @@ impl ProfilingStats {
             for (loc, stats) in locations.into_iter().take(10) {
                 println!(
                     "{:<50} {:>14} {:>12} {:>14}",
-                    loc,
-                    stats.alloc_bytes,
-                    stats.alloc_count,
-                    stats.max_alloc_request,
+                    loc, stats.alloc_bytes, stats.alloc_count, stats.max_alloc_request,
                 );
             }
         }

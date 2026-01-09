@@ -51,11 +51,7 @@ pub fn scalar_reconstruction(
         ) * 0.125;
     let phi_quick = dsl::select(quick_neg, quick_pos, flux.gt(0.0));
 
-    let phi_ho = dsl::select(
-        phi_upwind,
-        phi_sou,
-        scheme.eq(Scheme::SecondOrderUpwind),
-    );
+    let phi_ho = dsl::select(phi_upwind, phi_sou, scheme.eq(Scheme::SecondOrderUpwind));
     let phi_ho = dsl::select(phi_ho, phi_quick, scheme.eq(Scheme::QUICK));
 
     ScalarReconstruction { phi_upwind, phi_ho }
@@ -124,21 +120,15 @@ pub fn limited_linear_reconstruct_face(
     let phi_face = format!("{prefix}_{side}_face");
 
     let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr(
-        &diff,
-        phi_other - phi_cell,
-    ));
-    stmts.push(dsl::let_expr(
-        &min_diff,
-        dsl::min(Expr::ident(&diff), 0.0),
-    ));
-    stmts.push(dsl::let_expr(
-        &max_diff,
-        dsl::max(Expr::ident(&diff), 0.0),
-    ));
+    stmts.push(dsl::let_expr(&diff, phi_other - phi_cell));
+    stmts.push(dsl::let_expr(&min_diff, dsl::min(Expr::ident(&diff), 0.0)));
+    stmts.push(dsl::let_expr(&max_diff, dsl::max(Expr::ident(&diff), 0.0)));
     stmts.push(dsl::let_expr(
         &delta,
-        dsl::dot(dsl::vec2_f32_from_xy_fields(grad_cell), dsl::vec2_f32(r_x, r_y)),
+        dsl::dot(
+            dsl::vec2_f32_from_xy_fields(grad_cell),
+            dsl::vec2_f32(r_x, r_y),
+        ),
     ));
     stmts.push(dsl::let_expr(
         &delta_limited,

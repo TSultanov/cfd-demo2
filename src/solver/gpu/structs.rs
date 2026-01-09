@@ -1,14 +1,14 @@
 use super::async_buffer::AsyncScalarReader;
+use super::modules::graph::ModuleGraph;
 use super::modules::incompressible_kernels::IncompressibleKernelsModule;
 use super::modules::linear_system::LinearSystemPorts;
 use super::modules::ports::PortSpace;
 use super::plans::coupled_fgmres::FgmresResources;
 use super::runtime_common::GpuRuntimeCommon;
-use super::modules::graph::ModuleGraph;
+use crate::solver::model::ModelSpec;
 use bytemuck::{Pod, Zeroable};
 use std::cell::RefCell;
 use std::sync::Mutex;
-use crate::solver::model::ModelSpec;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {

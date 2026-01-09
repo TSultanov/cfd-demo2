@@ -1,7 +1,8 @@
 use crate::solver::scheme::Scheme;
 
 use crate::solver::model::backend::ast::{
-    Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp, UnitValidationError,
+    Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp,
+    UnitValidationError,
 };
 use crate::solver::model::backend::SchemeRegistry;
 

@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
 
 async fn run_coupled_solver(
@@ -96,12 +96,8 @@ fn test_coupled_schemes() {
         assert!(p_upwind.iter().all(|x| x.is_finite()));
 
         // 2. SOU + Euler
-        let (u_sou, p_sou) = run_coupled_solver(
-            Scheme::SecondOrderUpwind,
-            TimeScheme::Euler,
-            "SOU + Euler",
-        )
-        .await;
+        let (u_sou, p_sou) =
+            run_coupled_solver(Scheme::SecondOrderUpwind, TimeScheme::Euler, "SOU + Euler").await;
         assert!(u_sou.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_sou.iter().all(|x| x.is_finite()));
 

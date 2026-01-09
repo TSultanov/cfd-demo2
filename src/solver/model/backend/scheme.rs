@@ -98,7 +98,10 @@ mod tests {
     #[test]
     fn scheme_registry_uses_default_when_unset() {
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
+        let term = fvm::div(
+            surface_scalar("phi", si::MASS_FLUX),
+            vol_scalar("U", si::VELOCITY),
+        );
         assert_eq!(registry.scheme_for(&term), Scheme::Upwind);
     }
 
@@ -107,7 +110,10 @@ mod tests {
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_op(TermOp::Div, Scheme::QUICK);
 
-        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
+        let term = fvm::div(
+            surface_scalar("phi", si::MASS_FLUX),
+            vol_scalar("U", si::VELOCITY),
+        );
         assert_eq!(registry.scheme_for(&term), Scheme::QUICK);
     }
 
@@ -127,7 +133,10 @@ mod tests {
     #[test]
     fn scheme_registry_default_impl_uses_upwind() {
         let registry = SchemeRegistry::default();
-        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
+        let term = fvm::div(
+            surface_scalar("phi", si::MASS_FLUX),
+            vol_scalar("U", si::VELOCITY),
+        );
         assert_eq!(registry.scheme_for(&term), Scheme::Upwind);
     }
 
@@ -136,7 +145,10 @@ mod tests {
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term_names(TermOp::Div, Some("phi"), "U", Scheme::QUICK);
 
-        let term = fvm::div(surface_scalar("phi", si::MASS_FLUX), vol_scalar("U", si::VELOCITY));
+        let term = fvm::div(
+            surface_scalar("phi", si::MASS_FLUX),
+            vol_scalar("U", si::VELOCITY),
+        );
         assert_eq!(registry.scheme_for(&term), Scheme::QUICK);
     }
 }

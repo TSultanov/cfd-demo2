@@ -1,10 +1,10 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::units::{si, UnitDim};
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {
@@ -77,7 +77,10 @@ fn build_poisson_system() -> EquationSystem {
 fn build_heat_system(alpha: f64) -> EquationSystem {
     let phi = vol_scalar("phi", si::DIMENSIONLESS);
     let eqn = fvm::ddt(phi)
-        + fvm::laplacian(Coefficient::constant_unit(alpha, UnitDim::new(0, 2, -1)), phi);
+        + fvm::laplacian(
+            Coefficient::constant_unit(alpha, UnitDim::new(0, 2, -1)),
+            phi,
+        );
     let mut system = EquationSystem::new();
     system.add_equation(eqn.eqn(phi));
     system
@@ -216,7 +219,8 @@ where
 
                         let owner_diag = diag[owner];
                         let neighbor_diag = diag[neighbor];
-                        let owner_off = row_entry_index(&row_offsets, &col_indices, owner, neighbor);
+                        let owner_off =
+                            row_entry_index(&row_offsets, &col_indices, owner, neighbor);
                         let neighbor_off =
                             row_entry_index(&row_offsets, &col_indices, neighbor, owner);
 
@@ -277,8 +281,7 @@ fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
     assert!(
         stats.converged,
         "CG did not converge (iters {}, residual {:.3e})",
-        stats.iterations,
-        stats.residual
+        stats.iterations, stats.residual
     );
     let solution = pollster::block_on(solver.get_linear_solution()).expect("solution read");
     let solution = solution.iter().map(|v| *v as f64).collect();
@@ -316,11 +319,7 @@ fn laplace_linear_solution_matches() {
 
     let (matrix, rhs) = assemble_scalar_system(&mesh, &system, 1.0, None, None, boundary_value);
     let (solution, _) = solve_system(&mesh, &matrix, &rhs);
-    let expected: Vec<f64> = mesh
-        .cell_cx
-        .iter()
-        .map(|&x| a + b * x)
-        .collect();
+    let expected: Vec<f64> = mesh.cell_cx.iter().map(|&x| a + b * x).collect();
 
     let rms = rms_error(&solution, &expected);
     let max = max_error(&solution, &expected);
@@ -339,20 +338,10 @@ fn poisson_quadratic_solution_matches() {
     };
 
     let source: Vec<f64> = mesh.cell_cx.iter().map(|_| 2.0).collect();
-    let (matrix, rhs) = assemble_scalar_system(
-        &mesh,
-        &system,
-        1.0,
-        None,
-        Some(&source),
-        boundary_value,
-    );
+    let (matrix, rhs) =
+        assemble_scalar_system(&mesh, &system, 1.0, None, Some(&source), boundary_value);
     let (solution, _) = solve_system(&mesh, &matrix, &rhs);
-    let expected: Vec<f64> = mesh
-        .cell_cx
-        .iter()
-        .map(|&x| x * (1.0 - x))
-        .collect();
+    let expected: Vec<f64> = mesh.cell_cx.iter().map(|&x| x * (1.0 - x)).collect();
 
     let rms = rms_error(&solution, &expected);
     let max = max_error(&solution, &expected);

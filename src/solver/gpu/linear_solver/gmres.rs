@@ -90,8 +90,6 @@ impl GmresState {
         self.y.fill(0.0);
     }
 
-
-
     /// Solve upper triangular system H * y = g for the current basis size
     pub fn solve_triangular(&mut self) {
         let m = self.max_restart;
@@ -111,7 +109,6 @@ impl GmresState {
             }
         }
     }
-
 }
 
 impl GpuSolver {
@@ -124,8 +121,6 @@ impl GpuSolver {
             .await;
         bytemuck::cast_slice(&raw).to_vec()
     }
-
-
 
     /// Scale a GPU vector: v = alpha * v
     pub fn scale_vector(&self, v: &wgpu::Buffer, alpha: f32, n: u32) {

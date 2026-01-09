@@ -15,7 +15,11 @@ pub(crate) struct GpuRuntimeCommon {
 }
 
 impl GpuRuntimeCommon {
-    pub async fn new(mesh: &Mesh, device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+    pub async fn new(
+        mesh: &Mesh,
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    ) -> Self {
         let context = GpuContext::new(device, queue).await;
         let num_cells = mesh.cell_cx.len() as u32;
         let num_faces = mesh.face_owner.len() as u32;
@@ -32,7 +36,12 @@ impl GpuRuntimeCommon {
         }
     }
 
-    pub async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64, label: &'static str) -> Vec<u8> {
+    pub async fn read_buffer(
+        &self,
+        buffer: &wgpu::Buffer,
+        size: u64,
+        label: &'static str,
+    ) -> Vec<u8> {
         crate::solver::gpu::readback::read_buffer_cached(
             &self.context,
             &self.readback_cache,

@@ -1,9 +1,9 @@
-use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
+use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use image::{Rgb, RgbImage};
 use nalgebra::{Point2, Vector2};
 use std::env;
@@ -180,8 +180,7 @@ fn point_in_poly(px: f64, py: f64, poly: &[[f64; 2]]) -> bool {
         let yi = poly[i][1];
         let xj = poly[j][0];
         let yj = poly[j][1];
-        let crosses = (yi > py) != (yj > py)
-            && px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi;
+        let crosses = (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi;
         if crosses {
             inside = !inside;
         }
@@ -202,13 +201,7 @@ fn colormap_sequential(t: f64) -> Rgb<u8> {
     Rgb([(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8])
 }
 
-fn save_scalar_image(
-    path: &PathBuf,
-    mesh: &Mesh,
-    values: &[f64],
-    width: usize,
-    height: usize,
-) {
+fn save_scalar_image(path: &PathBuf, mesh: &Mesh, values: &[f64], width: usize, height: usize) {
     let mut min_val = f64::INFINITY;
     let mut max_val = f64::NEG_INFINITY;
     for &val in values {
@@ -416,7 +409,8 @@ fn low_mach_equivalence_vortex_street() {
     comp.set_viscosity(nu);
     comp.set_inlet_velocity(u_in);
     comp.set_alpha_u(alpha_u as f32);
-    comp.set_precond_model(precond_model).expect("precond model");
+    comp.set_precond_model(precond_model)
+        .expect("precond model");
     comp.set_precond_theta_floor(precond_theta_floor as f32)
         .expect("theta floor");
     comp.set_nonconverged_relax(nonconv_relax as f32)
@@ -608,7 +602,11 @@ fn low_mach_equivalence_vortex_street() {
 
     assert!(std_incomp > 1e-4, "incompressible probe std too low");
     assert!(std_comp > 1e-5, "compressible probe std too low");
-    assert!(rel_rms < 0.6, "relative RMS difference {:.3} too large", rel_rms);
+    assert!(
+        rel_rms < 0.6,
+        "relative RMS difference {:.3} too large",
+        rel_rms
+    );
     assert!(
         checker_comp < checker_max,
         "checkerboarding metric {:.3} exceeds {:.3}",

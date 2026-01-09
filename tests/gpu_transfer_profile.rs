@@ -1,3 +1,5 @@
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::incompressible_momentum_model;
 /// Comprehensive GPU-CPU Communication Profiling Test
 ///
 /// This test measures where time is spent during GPU solver execution, specifically:
@@ -10,10 +12,8 @@
 /// The goal is to identify bottlenecks and opportunities for GPU offloading.
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::profiling::ProfileCategory;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
 use std::time::Instant;
 
@@ -77,7 +77,9 @@ fn test_gpu_transfer_profile() {
         solver.initialize_history();
 
         // Enable detailed profiling
-        solver.enable_detailed_profiling(true).expect("profiling enable");
+        solver
+            .enable_detailed_profiling(true)
+            .expect("profiling enable");
         solver.start_profiling_session().expect("profiling start");
 
         println!("Starting profiled solver run...\n");
@@ -117,9 +119,7 @@ fn test_gpu_transfer_profile() {
         println!("  Average time per step: {:?}", avg_step_time);
 
         // Print detailed profiling report
-        solver
-            .print_profiling_report()
-            .expect("profiling report");
+        solver.print_profiling_report().expect("profiling report");
 
         // Additional analysis
         println!("\n");
@@ -344,7 +344,9 @@ fn test_gpu_transfer_profile_scaling() {
             solver.set_u(&u_init);
             solver.initialize_history();
 
-            solver.enable_detailed_profiling(true).expect("profiling enable");
+            solver
+                .enable_detailed_profiling(true)
+                .expect("profiling enable");
             solver.start_profiling_session().expect("profiling start");
 
             let num_steps = 3;

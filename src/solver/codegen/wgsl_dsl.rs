@@ -20,7 +20,11 @@ pub fn smoothstep(edge0: impl Into<Expr>, edge1: impl Into<Expr>, x: impl Into<E
     Expr::call_named("smoothstep", vec![edge0.into(), edge1.into(), x.into()])
 }
 
-pub fn select(false_value: impl Into<Expr>, true_value: impl Into<Expr>, condition: impl Into<Expr>) -> Expr {
+pub fn select(
+    false_value: impl Into<Expr>,
+    true_value: impl Into<Expr>,
+    condition: impl Into<Expr>,
+) -> Expr {
     Expr::call_named(
         "select",
         vec![false_value.into(), true_value.into(), condition.into()],
@@ -310,7 +314,11 @@ mod tests {
         let stmt = var_typed_expr("normal", Type::Custom("Vector2".to_string()), None);
         assert!(matches!(stmt, Stmt::Var { .. }));
 
-        let stmt = assign_op_expr(AssignOp::Add, Expr::ident("diag_u"), Expr::ident("coeff_time"));
+        let stmt = assign_op_expr(
+            AssignOp::Add,
+            Expr::ident("diag_u"),
+            Expr::ident("coeff_time"),
+        );
         assert!(matches!(stmt, Stmt::AssignOp { .. }));
     }
 
@@ -356,10 +364,7 @@ mod tests {
 
     #[test]
     fn dsl_builds_common_builtin_calls() {
-        assert_eq!(
-            max("a", "b").to_string(),
-            "max(a, b)"
-        );
+        assert_eq!(max("a", "b").to_string(), "max(a, b)");
         assert_eq!(
             smoothstep(0.0, 1.0, "x").to_string(),
             "smoothstep(0.0, 1.0, x)"

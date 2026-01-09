@@ -1,8 +1,8 @@
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
 use std::time::Instant;
 
@@ -50,7 +50,9 @@ fn test_gpu_profile() {
         solver.set_u(&u_init);
 
         // Use the detailed ProfilingStats as the single source of truth
-        solver.enable_detailed_profiling(true).expect("profiling enable");
+        solver
+            .enable_detailed_profiling(true)
+            .expect("profiling enable");
         solver.start_profiling_session().expect("profiling start");
 
         println!("Starting profiling...");

@@ -1,6 +1,6 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::modules::graph::{GpuComputeModule, ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::graph::ModuleGraphTimings;
+use crate::solver::gpu::modules::graph::{GpuComputeModule, ModuleGraph, RuntimeDims};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphExecMode {

@@ -1,8 +1,8 @@
-use cfd2::solver::options::TimeScheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};
+use cfd2::solver::options::TimeScheme;
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {
@@ -75,9 +75,7 @@ fn gpu_unified_solver_runs_generic_heat_step() {
         .iter()
         .map(|&x| (std::f64::consts::PI * x).sin())
         .collect();
-    solver
-        .set_field_scalar("phi", &phi_old)
-        .expect("set field");
+    solver.set_field_scalar("phi", &phi_old).expect("set field");
 
     solver.step();
 
@@ -129,9 +127,7 @@ fn gpu_unified_solver_runs_generic_heat_step_neumann() {
         .iter()
         .map(|&x| (std::f64::consts::PI * x).cos())
         .collect();
-    solver
-        .set_field_scalar("phi", &phi_old)
-        .expect("set field");
+    solver.set_field_scalar("phi", &phi_old).expect("set field");
 
     solver.step();
 
@@ -147,5 +143,10 @@ fn gpu_unified_solver_runs_generic_heat_step_neumann() {
         sum += diff * diff;
     }
     let rms = (sum / phi_new.len() as f64).sqrt();
-    assert!(rms < 3e-2, "rms error {:.3e} (expected factor {:.6})", rms, factor);
+    assert!(
+        rms < 3e-2,
+        "rms error {:.3e} (expected factor {:.6})",
+        rms,
+        factor
+    );
 }

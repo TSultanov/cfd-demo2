@@ -97,7 +97,8 @@ impl CompressiblePlanResources {
         let n = self.num_unknowns;
         let num_cells = self.num_cells;
 
-        let (b_diag_u, b_diag_v, b_diag_p) = CompressibleKrylovModule::create_diag_buffers(device, n);
+        let (b_diag_u, b_diag_v, b_diag_p) =
+            CompressibleKrylovModule::create_diag_buffers(device, n);
 
         let matrix = LinearSystemView {
             ports: self.system_ports,

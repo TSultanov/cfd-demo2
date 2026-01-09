@@ -13,7 +13,7 @@ One **model-driven** GPU solver pipeline with:
 - The solver entrypoint is unified (`GpuUnifiedSolver`), but there are still **three plan families** under the hood: incompressible (`GpuSolver`), compressible (`CompressiblePlanResources`), and generic coupled (`GpuGenericCoupledSolver`).
 - Lowering is routed through `src/solver/gpu/lowering/mod.rs`, and both solver config and the caller-provided `ModelSpec` are now passed into plan construction.
 - Orchestration is increasingly plan-driven (`ExecutionPlan`/`ModuleGraph`), and shared helpers are replacing per-plan boilerplate.
-- `ModelGpuProgramSpec` + `GpuProgramPlan` now exist and are used for **generic coupled** models (first adopter of the “universal plan runtime” idea).
+- `ModelGpuProgramSpec` + `GpuProgramPlan` now exist and are used for **generic coupled** models (first adopter of the “universal plan runtime” idea), including state-buffer access and state writes via the spec.
 
 ## Assessment (Are We Approaching The Goal?)
 - Yes: the public surface is unified, config flows into lowering, and the runtime is moving toward module-graph execution with shared Krylov/FGMRES helpers.

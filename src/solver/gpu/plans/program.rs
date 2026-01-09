@@ -18,7 +18,10 @@ pub(crate) type ProgramParamHandler =
     fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
-pub(crate) type ProgramUsizeFn = fn(&GpuProgramPlan) -> usize;
+pub(crate) type ProgramStateBufferFn =
+    for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
+pub(crate) type ProgramWriteStateFn =
+    fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
 pub(crate) type ProgramSetLinearSystemFn =
     fn(&GpuProgramPlan, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String>;
 pub(crate) type ProgramSolveLinearSystemFn =
@@ -101,7 +104,8 @@ pub(crate) struct ModelGpuProgramSpec {
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,
-    pub state_buffer_index: ProgramUsizeFn,
+    pub state_buffer: ProgramStateBufferFn,
+    pub write_state_bytes: ProgramWriteStateFn,
     pub step: Arc<ProgramExecutionPlan>,
     pub initialize_history: Option<ProgramInitRun>,
     pub params: HashMap<PlanParam, ProgramParamHandler>,
@@ -112,7 +116,6 @@ pub(crate) struct GpuProgramPlan {
     pub model: ModelSpec,
     pub context: GpuContext,
     pub profiling_stats: Arc<ProfilingStats>,
-    pub state_buffers: Vec<wgpu::Buffer>,
     pub staging_cache: StagingBufferCache,
     pub resources: ProgramResources,
     pub spec: ModelGpuProgramSpec,
@@ -124,7 +127,6 @@ impl GpuProgramPlan {
         model: ModelSpec,
         context: GpuContext,
         profiling_stats: Arc<ProfilingStats>,
-        state_buffers: Vec<wgpu::Buffer>,
         resources: ProgramResources,
         spec: ModelGpuProgramSpec,
     ) -> Self {
@@ -132,7 +134,6 @@ impl GpuProgramPlan {
             model,
             context,
             profiling_stats,
-            state_buffers,
             staging_cache: StagingBufferCache::default(),
             resources,
             spec,
@@ -153,10 +154,6 @@ impl GpuProgramPlan {
         handler(self, value)
     }
 
-    pub fn active_state_buffer(&self) -> &wgpu::Buffer {
-        let idx = (self.spec.state_buffer_index)(self);
-        &self.state_buffers[idx]
-    }
 }
 
 impl GpuPlanInstance for GpuProgramPlan {
@@ -173,7 +170,7 @@ impl GpuPlanInstance for GpuProgramPlan {
     }
 
     fn state_buffer(&self) -> &wgpu::Buffer {
-        self.active_state_buffer()
+        (self.spec.state_buffer)(self)
     }
 
     fn profiling_stats(&self) -> Arc<ProfilingStats> {
@@ -185,10 +182,7 @@ impl GpuPlanInstance for GpuProgramPlan {
     }
 
     fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        for buf in &self.state_buffers {
-            self.context.queue.write_buffer(buf, 0, bytes);
-        }
-        Ok(())
+        (self.spec.write_state_bytes)(self, bytes)
     }
 
     fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {

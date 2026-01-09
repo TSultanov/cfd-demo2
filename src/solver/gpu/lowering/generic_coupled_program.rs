@@ -42,6 +42,7 @@ fn ping_pong_indices(i: usize) -> (usize, usize, usize) {
 
 struct GenericCoupledProgramResources {
     runtime: GpuScalarRuntime,
+    state_buffers: Vec<wgpu::Buffer>,
     kernels: GenericCoupledKernelsModule,
     assembly_graph: ModuleGraph<GenericCoupledKernelsModule>,
     update_graph: ModuleGraph<GenericCoupledKernelsModule>,
@@ -82,10 +83,17 @@ fn spec_dt(plan: &GpuProgramPlan) -> f32 {
     res(plan).runtime.constants.dt
 }
 
-fn spec_state_buffer_index(plan: &GpuProgramPlan) -> usize {
+fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
     let step = res(plan).kernels.step_index();
     let (idx_state, _, _) = ping_pong_indices(step);
-    idx_state
+    &res(plan).state_buffers[idx_state]
+}
+
+fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
+    for buf in &res(plan).state_buffers {
+        plan.context.queue.write_buffer(buf, 0, bytes);
+    }
+    Ok(())
 }
 
 fn host_prepare_step(plan: &mut GpuProgramPlan) {
@@ -412,6 +420,7 @@ pub(crate) async fn lower_generic_coupled_program(
 
         let resources = GenericCoupledProgramResources {
             runtime,
+            state_buffers,
             kernels,
             assembly_graph: build_assembly_graph(),
             update_graph: build_update_graph(),
@@ -454,7 +463,8 @@ pub(crate) async fn lower_generic_coupled_program(
             num_cells: spec_num_cells,
             time: spec_time,
             dt: spec_dt,
-            state_buffer_index: spec_state_buffer_index,
+            state_buffer: spec_state_buffer,
+            write_state_bytes: spec_write_state_bytes,
             step,
             initialize_history: None,
             params,
@@ -469,7 +479,6 @@ pub(crate) async fn lower_generic_coupled_program(
             model,
             context,
             profiling_stats,
-            state_buffers,
             program_resources,
             spec,
         );

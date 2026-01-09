@@ -438,6 +438,10 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             "compressible_apply",
             gen_dir.join("compressible_apply.wgsl"),
         ),
+        (
+            "compressible_update",
+            gen_dir.join("compressible_update.wgsl"),
+        ),
         ("prepare_coupled", gen_dir.join("prepare_coupled.wgsl")),
         (
             "update_fields_from_coupled",

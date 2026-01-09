@@ -1,14 +1,13 @@
-pub mod compressible_kernels;
 pub mod compressible_krylov;
 pub mod compressible_lowering;
 pub mod constants;
 pub mod coupled_schur;
 pub mod generic_coupled_kernels;
 pub mod graph;
-pub mod incompressible_kernels;
 pub mod krylov_precond;
 pub mod krylov_solve;
 pub mod linear_system;
+pub mod model_kernels;
 pub mod model_lowerer;
 pub mod ports;
 pub mod scalar_cg;

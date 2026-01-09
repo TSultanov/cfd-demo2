@@ -7,7 +7,7 @@ use crate::solver::mesh::Mesh;
 use std::sync::Mutex;
 
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
-use crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule;
+use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::model::ModelSpec;
 
 use super::runtime_common::GpuRuntimeCommon;
@@ -47,7 +47,7 @@ impl GpuSolver {
         let fields_res =
             fields::create_field_bind_groups(&common.context.device, field_buffers, &bgl_fields);
 
-        let incompressible_kernels = IncompressibleKernelsModule::new(
+        let kernels = ModelKernelsModule::new_incompressible(
             &common.context.device,
             &common.mesh,
             &fields_res,
@@ -62,7 +62,7 @@ impl GpuSolver {
             fields: fields_res,
             preconditioner: PreconditionerType::Jacobi,
             scheme_needs_gradients: false,
-            incompressible_kernels,
+            kernels,
 
             num_nonzeros: linear_res.num_nonzeros,
 

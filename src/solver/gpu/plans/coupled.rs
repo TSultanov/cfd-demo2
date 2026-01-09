@@ -16,60 +16,53 @@
 // - b_u is the momentum source term
 
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode};
-use crate::solver::gpu::modules::incompressible_kernels::{
-    IncompressibleBindGroups, IncompressiblePipeline,
+use crate::solver::gpu::modules::model_kernels::{
+    KernelBindGroups, KernelPipeline, ModelKernelsModule,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
+use crate::solver::model::KernelKind;
 
 impl GpuSolver {
-    pub(crate) fn build_coupled_init_prepare_graph(
-    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
-    {
+    pub(crate) fn build_coupled_init_prepare_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:init_prepare",
-            pipeline: IncompressiblePipeline::PrepareCoupled,
-            bind: IncompressibleBindGroups::MeshFieldsSolver,
+            pipeline: KernelPipeline::Kernel(KernelKind::PrepareCoupled),
+            bind: KernelBindGroups::MeshFieldsSolver,
             dispatch: DispatchKind::Cells,
         })])
     }
 
-    pub(crate) fn build_coupled_prepare_assembly_graph(
-    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
-    {
+    pub(crate) fn build_coupled_prepare_assembly_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![
             ModuleNode::Compute(ComputeSpec {
                 label: "coupled:prepare",
-                pipeline: IncompressiblePipeline::PrepareCoupled,
-                bind: IncompressibleBindGroups::MeshFieldsSolver,
+                pipeline: KernelPipeline::Kernel(KernelKind::PrepareCoupled),
+                bind: KernelBindGroups::MeshFieldsSolver,
                 dispatch: DispatchKind::Cells,
             }),
             ModuleNode::Compute(ComputeSpec {
                 label: "coupled:assembly_merged",
-                pipeline: IncompressiblePipeline::CoupledAssemblyMerged,
-                bind: IncompressibleBindGroups::MeshFieldsSolver,
+                pipeline: KernelPipeline::Kernel(KernelKind::CoupledAssembly),
+                bind: KernelBindGroups::MeshFieldsSolver,
                 dispatch: DispatchKind::Cells,
             }),
         ])
     }
 
-    pub(crate) fn build_coupled_assembly_graph(
-    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
-    {
+    pub(crate) fn build_coupled_assembly_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:assembly_merged",
-            pipeline: IncompressiblePipeline::CoupledAssemblyMerged,
-            bind: IncompressibleBindGroups::MeshFieldsSolver,
+            pipeline: KernelPipeline::Kernel(KernelKind::CoupledAssembly),
+            bind: KernelBindGroups::MeshFieldsSolver,
             dispatch: DispatchKind::Cells,
         })])
     }
 
-    pub(crate) fn build_coupled_update_graph(
-    ) -> ModuleGraph<crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule>
-    {
+    pub(crate) fn build_coupled_update_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:update_fields_max_diff",
-            pipeline: IncompressiblePipeline::UpdateFieldsFromCoupled,
-            bind: IncompressibleBindGroups::UpdateFieldsSolution,
+            pipeline: KernelPipeline::Kernel(KernelKind::UpdateFieldsFromCoupled),
+            bind: KernelBindGroups::UpdateFieldsSolution,
             dispatch: DispatchKind::Cells,
         })])
     }

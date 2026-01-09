@@ -170,7 +170,7 @@ pub(in crate::solver::gpu::lowering) fn coupled_graph_init_prepare_run(
     run_module_graph(
         &solver.coupled_init_prepare_graph,
         context,
-        &solver.incompressible_kernels,
+        &solver.kernels,
         coupled_runtime(plan),
         mode,
     )
@@ -185,7 +185,7 @@ pub(in crate::solver::gpu::lowering) fn coupled_graph_prepare_assembly_run(
     run_module_graph(
         &solver.coupled_prepare_assembly_graph,
         context,
-        &solver.incompressible_kernels,
+        &solver.kernels,
         coupled_runtime(plan),
         mode,
     )
@@ -200,7 +200,7 @@ pub(in crate::solver::gpu::lowering) fn coupled_graph_assembly_run(
     run_module_graph(
         &solver.coupled_assembly_graph,
         context,
-        &solver.incompressible_kernels,
+        &solver.kernels,
         coupled_runtime(plan),
         mode,
     )
@@ -215,7 +215,7 @@ pub(in crate::solver::gpu::lowering) fn coupled_graph_update_run(
     run_module_graph(
         &solver.coupled_update_graph,
         context,
-        &solver.incompressible_kernels,
+        &solver.kernels,
         coupled_runtime(plan),
         mode,
     )

@@ -1,23 +1,28 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
-use crate::solver::gpu::lowering::templates::incompressible_coupled::*;
-use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ProgramOps, ProgramResources, ProgramSetParamFallback, ProgramStepStatsFn,
-};
+use crate::solver::gpu::plans::program::GpuProgramPlan;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
-use crate::solver::mesh::Mesh;
-use crate::solver::model::ModelSpec;
-use std::sync::Arc;
 
-struct IncompressibleProgramResources {
+pub(in crate::solver::gpu::lowering) struct IncompressibleProgramResources {
     plan: GpuSolver,
     coupled_outer_iter: usize,
     coupled_continue: bool,
     coupled_prev_residual_u: f64,
     coupled_prev_residual_p: f64,
+}
+
+impl IncompressibleProgramResources {
+    pub(in crate::solver::gpu::lowering) fn new(plan: GpuSolver) -> Self {
+        Self {
+            plan,
+            coupled_outer_iter: 0,
+            coupled_continue: true,
+            coupled_prev_residual_u: f64::MAX,
+            coupled_prev_residual_p: f64::MAX,
+        }
+    }
 }
 
 impl PlanLinearSystemDebug for IncompressibleProgramResources {
@@ -59,30 +64,33 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GpuSolver {
     &mut wrap_mut(plan).plan
 }
 
-fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
+pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
     res(plan).num_cells
 }
 
-fn spec_time(plan: &GpuProgramPlan) -> f32 {
+pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
     res(plan).constants.time
 }
 
-fn spec_dt(plan: &GpuProgramPlan) -> f32 {
+pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
     res(plan).constants.dt
 }
 
-fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
+pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
     &res(plan).b_state
 }
 
-fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
+pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
+    plan: &GpuProgramPlan,
+    bytes: &[u8],
+) -> Result<(), String> {
     for buf in &res(plan).state_buffers {
         plan.context.queue.write_buffer(buf, 0, bytes);
     }
     Ok(())
 }
 
-fn has_coupled_resources(plan: &GpuProgramPlan) -> bool {
+pub(in crate::solver::gpu::lowering) fn has_coupled_resources(plan: &GpuProgramPlan) -> bool {
     res(plan).coupled_resources.is_some()
 }
 
@@ -94,7 +102,7 @@ fn coupled_runtime(plan: &GpuProgramPlan) -> crate::solver::gpu::modules::graph:
     }
 }
 
-fn coupled_graph_init_prepare_run(
+pub(in crate::solver::gpu::lowering) fn coupled_graph_init_prepare_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -109,7 +117,7 @@ fn coupled_graph_init_prepare_run(
     )
 }
 
-fn coupled_graph_prepare_assembly_run(
+pub(in crate::solver::gpu::lowering) fn coupled_graph_prepare_assembly_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -124,7 +132,7 @@ fn coupled_graph_prepare_assembly_run(
     )
 }
 
-fn coupled_graph_assembly_run(
+pub(in crate::solver::gpu::lowering) fn coupled_graph_assembly_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -139,7 +147,7 @@ fn coupled_graph_assembly_run(
     )
 }
 
-fn coupled_graph_update_run(
+pub(in crate::solver::gpu::lowering) fn coupled_graph_update_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -154,21 +162,21 @@ fn coupled_graph_update_run(
     )
 }
 
-fn coupled_needs_prepare(plan: &GpuProgramPlan) -> bool {
+pub(in crate::solver::gpu::lowering) fn coupled_needs_prepare(plan: &GpuProgramPlan) -> bool {
     let wrap = wrap(plan);
     wrap.coupled_outer_iter > 0 || res(plan).scheme_needs_gradients
 }
 
-fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
+pub(in crate::solver::gpu::lowering) fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
     let solver = res(plan);
     (solver.n_outer_correctors.max(10)) as usize
 }
 
-fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
+pub(in crate::solver::gpu::lowering) fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
     wrap(plan).coupled_continue
 }
 
-fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
     let wrap = wrap_mut(plan);
     let solver = &mut wrap.plan;
 
@@ -225,7 +233,7 @@ fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
     solver.update_constants();
 }
 
-fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     let wrap = wrap_mut(plan);
     let iter = wrap.coupled_outer_iter;
     let solver = &mut wrap.plan;
@@ -235,7 +243,7 @@ fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     }
 }
 
-fn host_coupled_solve(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_coupled_solve(plan: &mut GpuProgramPlan) {
     let solver = &mut wrap_mut(plan).plan;
     let stats = solver.solve_coupled_system();
     solver.coupled_last_linear_stats = stats;
@@ -245,7 +253,7 @@ fn host_coupled_solve(plan: &mut GpuProgramPlan) {
     }
 }
 
-fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
     let wrap = wrap_mut(plan);
     let iter = wrap.coupled_outer_iter;
     let solver = &mut wrap.plan;
@@ -262,7 +270,9 @@ fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
         .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
 }
 
-fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_coupled_convergence_and_advance(
+    plan: &mut GpuProgramPlan,
+) {
     let wrap = wrap_mut(plan);
     let solver = &mut wrap.plan;
     let iter = wrap.coupled_outer_iter;
@@ -341,11 +351,11 @@ fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
     wrap.coupled_outer_iter += 1;
 }
 
-fn init_history(plan: &GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn init_history(plan: &GpuProgramPlan) {
     res(plan).initialize_history();
 }
 
-fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
+pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
     let solver = res(plan);
     PlanStepStats {
         should_stop: Some(solver.should_stop),
@@ -361,7 +371,7 @@ fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
     }
 }
 
-fn set_param_fallback(
+pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     plan: &mut GpuProgramPlan,
     param: PlanParam,
     value: PlanParamValue,
@@ -424,12 +434,14 @@ fn set_param_fallback(
     }
 }
 
-fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug> {
+pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
+    plan: &mut GpuProgramPlan,
+) -> Option<&mut dyn PlanLinearSystemDebug> {
     Some(plan.resources.get_mut::<IncompressibleProgramResources>()?
         as &mut dyn PlanLinearSystemDebug)
 }
 
-fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
     let solver = res_mut(plan);
     if solver.coupled_resources.is_none() {
         return;
@@ -446,85 +458,4 @@ fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
         .context
         .device
         .poll(wgpu::PollType::wait_indefinitely());
-}
-
-pub(crate) async fn lower_parts(
-    mesh: &Mesh,
-    model: ModelSpec,
-    device: Option<wgpu::Device>,
-    queue: Option<wgpu::Queue>,
-) -> Result<LoweredProgramParts, String> {
-    let plan = GpuSolver::new(mesh, model.clone(), device, queue).await?;
-
-    let context = crate::solver::gpu::context::GpuContext {
-        device: plan.common.context.device.clone(),
-        queue: plan.common.context.queue.clone(),
-    };
-    let profiling_stats = Arc::clone(&plan.common.profiling_stats);
-
-    let mut resources = ProgramResources::new();
-    resources.insert(IncompressibleProgramResources {
-        plan,
-        coupled_outer_iter: 0,
-        coupled_continue: true,
-        coupled_prev_residual_u: f64::MAX,
-        coupled_prev_residual_p: f64::MAX,
-    });
-
-    let mut ops = ProgramOps::new();
-    ops.graph.insert(
-        G_COUPLED_PREPARE_ASSEMBLY,
-        coupled_graph_prepare_assembly_run as _,
-    );
-    ops.graph
-        .insert(G_COUPLED_ASSEMBLY, coupled_graph_assembly_run as _);
-    ops.graph
-        .insert(G_COUPLED_UPDATE, coupled_graph_update_run as _);
-    ops.graph
-        .insert(G_COUPLED_INIT_PREPARE, coupled_graph_init_prepare_run as _);
-
-    ops.host
-        .insert(H_COUPLED_BEGIN_STEP, host_coupled_begin_step as _);
-    ops.host
-        .insert(H_COUPLED_BEFORE_ITER, host_coupled_before_iter as _);
-    ops.host.insert(H_COUPLED_SOLVE, host_coupled_solve as _);
-    ops.host
-        .insert(H_COUPLED_CLEAR_MAX_DIFF, host_coupled_clear_max_diff as _);
-    ops.host.insert(
-        H_COUPLED_CONVERGENCE_ADVANCE,
-        host_coupled_convergence_and_advance as _,
-    );
-    ops.host
-        .insert(H_COUPLED_FINALIZE_STEP, host_coupled_finalize_step as _);
-
-    ops.cond
-        .insert(C_HAS_COUPLED_RESOURCES, has_coupled_resources as _);
-    ops.cond
-        .insert(C_COUPLED_NEEDS_PREPARE, coupled_needs_prepare as _);
-    ops.cond
-        .insert(C_COUPLED_SHOULD_CONTINUE, coupled_should_continue as _);
-
-    ops.count
-        .insert(N_COUPLED_MAX_ITERS, coupled_max_iters as _);
-
-    Ok(LoweredProgramParts {
-        model,
-        context,
-        profiling_stats,
-        resources,
-        spec: ModelGpuProgramSpecParts {
-            ops,
-            num_cells: spec_num_cells,
-            time: spec_time,
-            dt: spec_dt,
-            state_buffer: spec_state_buffer,
-            write_state_bytes: spec_write_state_bytes,
-            initialize_history: Some(init_history),
-            params: std::collections::HashMap::new(),
-            set_param_fallback: Some(set_param_fallback as ProgramSetParamFallback),
-            step_stats: Some(step_stats as ProgramStepStatsFn),
-            step_with_stats: None,
-            linear_debug: Some(linear_debug_provider),
-        },
-    })
 }

@@ -1,24 +1,26 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
-use crate::solver::gpu::lowering::templates::compressible::*;
-use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ProgramOps, ProgramResources, ProgramSetParamFallback, ProgramStepStatsFn,
-    ProgramStepWithStatsFn,
-};
+use crate::solver::gpu::plans::program::GpuProgramPlan;
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::mesh::Mesh;
-use crate::solver::model::ModelSpec;
 use std::env;
-use std::sync::Arc;
 
-struct CompressibleProgramResources {
+pub(in crate::solver::gpu::lowering) struct CompressibleProgramResources {
     plan: CompressiblePlanResources,
     implicit_outer_idx: usize,
     implicit_stats: Vec<LinearSolverStats>,
+}
+
+impl CompressibleProgramResources {
+    pub(in crate::solver::gpu::lowering) fn new(plan: CompressiblePlanResources) -> Self {
+        Self {
+            plan,
+            implicit_outer_idx: 0,
+            implicit_stats: Vec::new(),
+        }
+    }
 }
 
 impl PlanLinearSystemDebug for CompressibleProgramResources {
@@ -62,38 +64,41 @@ fn res_wrap_mut(plan: &mut GpuProgramPlan) -> &mut CompressibleProgramResources 
         .expect("missing CompressibleProgramResources")
 }
 
-fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
+pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
     res(plan).num_cells
 }
 
-fn spec_time(plan: &GpuProgramPlan) -> f32 {
+pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
     res(plan).constants.time
 }
 
-fn spec_dt(plan: &GpuProgramPlan) -> f32 {
+pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
     res(plan).constants.dt
 }
 
-fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
+pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
     &res(plan).b_state
 }
 
-fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
+pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
+    plan: &GpuProgramPlan,
+    bytes: &[u8],
+) -> Result<(), String> {
     res(plan).write_state_bytes(bytes);
     Ok(())
 }
 
-fn should_use_explicit(plan: &GpuProgramPlan) -> bool {
+pub(in crate::solver::gpu::lowering) fn should_use_explicit(plan: &GpuProgramPlan) -> bool {
     res(plan).should_use_explicit()
 }
 
-fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
     let solver = res_mut(plan);
     solver.advance_ping_pong_and_time();
     solver.pre_step_copy();
 }
 
-fn explicit_graph_run(
+pub(in crate::solver::gpu::lowering) fn explicit_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -108,15 +113,15 @@ fn explicit_graph_run(
     )
 }
 
-fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
     res_mut(plan).finalize_dt_old();
 }
 
-fn implicit_outer_iters(plan: &GpuProgramPlan) -> usize {
+pub(in crate::solver::gpu::lowering) fn implicit_outer_iters(plan: &GpuProgramPlan) -> usize {
     res(plan).outer_iters
 }
 
-fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
     let solver = res_mut(plan);
     solver.advance_ping_pong_and_time();
     solver.pre_step_copy();
@@ -140,7 +145,7 @@ fn env_f32(name: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
-fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {
     let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
     let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
     let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
@@ -158,7 +163,7 @@ fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {
     res_mut(plan).implicit_set_iteration_params(tol, retry_tol, max_restart, retry_restart);
 }
 
-fn implicit_grad_assembly_graph_run(
+pub(in crate::solver::gpu::lowering) fn implicit_grad_assembly_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -173,17 +178,17 @@ fn implicit_grad_assembly_graph_run(
     )
 }
 
-fn host_implicit_solve_fgmres(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_solve_fgmres(plan: &mut GpuProgramPlan) {
     res_mut(plan).implicit_solve_fgmres();
 }
 
-fn host_implicit_record_stats(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_record_stats(plan: &mut GpuProgramPlan) {
     let stats = res(plan).implicit_last_stats();
     let wrap = res_wrap_mut(plan);
     wrap.implicit_stats.push(stats);
 }
 
-fn implicit_snapshot_run(
+pub(in crate::solver::gpu::lowering) fn implicit_snapshot_run(
     plan: &GpuProgramPlan,
     _context: &crate::solver::gpu::context::GpuContext,
     _mode: GraphExecMode,
@@ -193,11 +198,13 @@ fn implicit_snapshot_run(
     (start.elapsed().as_secs_f64(), None)
 }
 
-fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_set_alpha_for_apply(
+    plan: &mut GpuProgramPlan,
+) {
     res_mut(plan).implicit_set_alpha_for_apply();
 }
 
-fn implicit_apply_graph_run(
+pub(in crate::solver::gpu::lowering) fn implicit_apply_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -212,15 +219,15 @@ fn implicit_apply_graph_run(
     )
 }
 
-fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
     res_mut(plan).implicit_restore_alpha();
 }
 
-fn host_implicit_advance_outer_idx(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_advance_outer_idx(plan: &mut GpuProgramPlan) {
     res_wrap_mut(plan).implicit_outer_idx += 1;
 }
 
-fn primitive_update_graph_run(
+pub(in crate::solver::gpu::lowering) fn primitive_update_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -235,19 +242,21 @@ fn primitive_update_graph_run(
     )
 }
 
-fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
     res_mut(plan).finalize_dt_old();
 }
 
-fn init_history(plan: &GpuProgramPlan) {
+pub(in crate::solver::gpu::lowering) fn init_history(plan: &GpuProgramPlan) {
     res(plan).initialize_history();
 }
 
-fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {
+pub(in crate::solver::gpu::lowering) fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {
     PlanStepStats::default()
 }
 
-fn step_with_stats(plan: &mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String> {
+pub(in crate::solver::gpu::lowering) fn step_with_stats(
+    plan: &mut GpuProgramPlan,
+) -> Result<Vec<LinearSolverStats>, String> {
     if should_use_explicit(plan) {
         plan.step();
         Ok(Vec::new())
@@ -257,7 +266,7 @@ fn step_with_stats(plan: &mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, 
     }
 }
 
-fn set_param_fallback(
+pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     plan: &mut GpuProgramPlan,
     param: PlanParam,
     value: PlanParamValue,
@@ -324,93 +333,8 @@ fn set_param_fallback(
     }
 }
 
-fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug> {
+pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
+    plan: &mut GpuProgramPlan,
+) -> Option<&mut dyn PlanLinearSystemDebug> {
     Some(plan.resources.get_mut::<CompressibleProgramResources>()? as &mut dyn PlanLinearSystemDebug)
-}
-
-pub(crate) async fn lower_parts(
-    mesh: &Mesh,
-    model: ModelSpec,
-    device: Option<wgpu::Device>,
-    queue: Option<wgpu::Queue>,
-) -> Result<LoweredProgramParts, String> {
-    let plan = CompressiblePlanResources::new(mesh, model.clone(), device, queue).await?;
-
-    let context = crate::solver::gpu::context::GpuContext {
-        device: plan.common.context.device.clone(),
-        queue: plan.common.context.queue.clone(),
-    };
-    let profiling_stats = Arc::clone(&plan.common.profiling_stats);
-
-    let mut resources = ProgramResources::new();
-    resources.insert(CompressibleProgramResources {
-        plan,
-        implicit_outer_idx: 0,
-        implicit_stats: Vec::new(),
-    });
-
-    let mut ops = ProgramOps::new();
-    ops.graph.insert(G_EXPLICIT_GRAPH, explicit_graph_run as _);
-    ops.graph.insert(
-        G_IMPLICIT_GRAD_ASSEMBLY,
-        implicit_grad_assembly_graph_run as _,
-    );
-    ops.graph
-        .insert(G_IMPLICIT_SNAPSHOT, implicit_snapshot_run as _);
-    ops.graph
-        .insert(G_IMPLICIT_APPLY, implicit_apply_graph_run as _);
-    ops.graph
-        .insert(G_PRIMITIVE_UPDATE, primitive_update_graph_run as _);
-
-    ops.host
-        .insert(H_EXPLICIT_PREPARE, host_explicit_prepare as _);
-    ops.host
-        .insert(H_EXPLICIT_FINALIZE, host_explicit_finalize as _);
-    ops.host
-        .insert(H_IMPLICIT_PREPARE, host_implicit_prepare as _);
-    ops.host.insert(
-        H_IMPLICIT_SET_ITER_PARAMS,
-        host_implicit_set_iter_params as _,
-    );
-    ops.host
-        .insert(H_IMPLICIT_SOLVE_FGMRES, host_implicit_solve_fgmres as _);
-    ops.host
-        .insert(H_IMPLICIT_RECORD_STATS, host_implicit_record_stats as _);
-    ops.host
-        .insert(H_IMPLICIT_SET_ALPHA, host_implicit_set_alpha_for_apply as _);
-    ops.host
-        .insert(H_IMPLICIT_RESTORE_ALPHA, host_implicit_restore_alpha as _);
-    ops.host.insert(
-        H_IMPLICIT_ADVANCE_OUTER_IDX,
-        host_implicit_advance_outer_idx as _,
-    );
-    ops.host
-        .insert(H_IMPLICIT_FINALIZE, host_implicit_finalize as _);
-
-    ops.cond
-        .insert(C_SHOULD_USE_EXPLICIT, should_use_explicit as _);
-
-    ops.count
-        .insert(N_IMPLICIT_OUTER_ITERS, implicit_outer_iters as _);
-
-    Ok(LoweredProgramParts {
-        model,
-        context,
-        profiling_stats,
-        resources,
-        spec: ModelGpuProgramSpecParts {
-            ops,
-            num_cells: spec_num_cells,
-            time: spec_time,
-            dt: spec_dt,
-            state_buffer: spec_state_buffer,
-            write_state_bytes: spec_write_state_bytes,
-            initialize_history: Some(init_history),
-            params: std::collections::HashMap::new(),
-            set_param_fallback: Some(set_param_fallback as ProgramSetParamFallback),
-            step_stats: Some(step_stats as ProgramStepStatsFn),
-            step_with_stats: Some(step_with_stats as ProgramStepWithStatsFn),
-            linear_debug: Some(linear_debug_provider),
-        },
-    })
 }

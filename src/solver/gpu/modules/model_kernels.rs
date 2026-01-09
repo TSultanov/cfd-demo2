@@ -1,4 +1,3 @@
-use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
 use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
@@ -16,7 +15,6 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KernelPipeline {
     Kernel(KernelKind),
-    CompressibleExplicitUpdate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,6 +63,7 @@ impl ModelKernelsModule {
         for kind in [
             KernelKind::CompressibleAssembly,
             KernelKind::CompressibleApply,
+            KernelKind::CompressibleExplicitUpdate,
             KernelKind::CompressibleGradients,
             KernelKind::CompressibleFluxKt,
             KernelKind::CompressibleUpdate,
@@ -76,11 +75,6 @@ impl ModelKernelsModule {
                 (source.create_pipeline)(device),
             );
         }
-        pipelines.insert(
-            KernelPipeline::CompressibleExplicitUpdate,
-            explicit_update::compute::create_main_pipeline_embed_source(device),
-        );
-
         let pipeline_assembly =
             &pipelines[&KernelPipeline::Kernel(KernelKind::CompressibleAssembly)];
         let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelKind::CompressibleApply)];
@@ -372,6 +366,7 @@ impl ModelKernelsModule {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_step_index(&mut self, idx: usize) {
         self.state_step_index.store(idx % 3, Ordering::Relaxed);
     }

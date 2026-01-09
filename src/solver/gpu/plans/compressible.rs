@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphExecMode};
 use crate::solver::gpu::init::compressible_fields::{
@@ -6,6 +8,7 @@ use crate::solver::gpu::init::compressible_fields::{
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
+
 use crate::solver::gpu::modules::model_kernels::{
     KernelBindGroups, KernelPipeline, ModelKernelsModule,
 };
@@ -216,7 +219,7 @@ impl CompressiblePlanResources {
         nodes.push(ModuleNode::Compute(
             crate::solver::gpu::modules::graph::ComputeSpec {
                 label: "compressible:explicit_update",
-                pipeline: KernelPipeline::CompressibleExplicitUpdate,
+                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleExplicitUpdate),
                 bind: KernelBindGroups::MeshFields,
                 dispatch: DispatchKind::Cells,
             },

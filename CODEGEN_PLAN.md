@@ -22,6 +22,7 @@ One **model-driven** GPU solver pipeline with:
 - Solver-family resource containers (`GpuSolver`, `CompressiblePlanResources`, `GenericCoupledProgramResources`) still own most pipelines/bind groups and dictate wiring.
 - Kernel lookup is unified and build-generated, but it still relies on build-time tables (i.e. not yet derived automatically from scheme expansion / `KernelPlan`).
 - Scheme expansion and aux-pass discovery are not yet driving required buffers/kernels/schedule end-to-end.
+- Scheme expansion now influences generic-coupled gradient bindings, but runtime lowering still assumes a worst-case scheme (SOU) rather than deriving it from the actual solver config.
 
 ## Recently Implemented
 - Single template-driven lowering entrypoint: `src/solver/gpu/lowering/model_driven.rs`.
@@ -49,6 +50,9 @@ One **model-driven** GPU solver pipeline with:
   - `build.rs` generates `kernel_registry_map.rs` with complete `KernelKind -> (shader, pipeline, bindings)` mapping.
   - `kernel_registry.rs` now uses `generated::kernel_entry(kind)` eliminating all hand-written match statements for non-generic kernels.
   - Generic coupled kernels remain model-id-based via `generic_coupled_pair(model_id)`.
+- Scheme-driven gradients for generic coupled:
+  - Codegen uses `expand_schemes` to decide whether `GenericCoupledAssembly` needs gradient bindings.
+  - Runtime lowering allocates/binds `grad_state` when gradients are required (currently conservatively assuming SOU).
 
 ## Next Steps (Prioritized)
 1. **Make op dispatch truly module-owned (beyond Phase 2)**
@@ -67,12 +71,13 @@ One **model-driven** GPU solver pipeline with:
    - Endgame: generate specialized kernel sets per (temporal scheme + spatial scheme) choice, each with its own optimized memory layout, rather than a single generic layout + `constants.scheme/time_scheme` runtime switching.
 
 4. **Spatial/temporal scheme pluggability (end-to-end)**
-   - Use scheme expansion (`expand_schemes`) to drive:
-     - required aux buffers (e.g. gradients),
-     - required aux passes,
-     - required kernel variants,
-     - schedule structure (not just runtime `constants.scheme`).
-   - Stop using “scheme implies gradients” as an ad-hoc per-plan heuristic; make it a lowering-time contract.
+  - Use scheme expansion (`expand_schemes`) to drive:
+    - required aux buffers (e.g. gradients),
+    - required aux passes,
+    - required kernel variants,
+    - schedule structure (not just runtime `constants.scheme`).
+  - Stop using “scheme implies gradients” as an ad-hoc per-plan heuristic; make it a lowering-time contract.
+  - Replace generic-coupled “assume SOU” resource allocation with config-derived schemes (so Upwind runs don’t allocate gradient resources).
 
 5. **Linear solver + preconditioner pluggability (end-to-end)**
    - Unify the FGMRES “driver” logic (restart loop, residual checks, timing) into a shared module so coupled/compressible don’t diverge.

@@ -31,6 +31,7 @@ One **model-driven** GPU solver pipeline with:
 - Solver configuration (advection/time scheme, preconditioner) is now applied during lowering (`PlanInitConfig`) rather than being wired in `UnifiedSolver::new`.
 - Coupled unknown counts and FGMRES sizing are derived from `ModelSpec` (no plan-family sizing/debug hooks).
 - Graph execution boilerplate is reduced via a shared `run_module_graph(...)` helper used by plans.
+- Compressible plan construction now uses the provided `ModelSpec` (instead of silently using a baked-in default model).
 
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.

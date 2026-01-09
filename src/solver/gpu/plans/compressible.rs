@@ -3,7 +3,6 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{
     run_module_graph, ExecutionPlan, GraphExecMode, GraphNode, PlanNode,
 };
-use crate::solver::gpu::model_defaults::default_compressible_model;
 use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
@@ -18,6 +17,7 @@ use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
+use crate::solver::model::ModelSpec;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
@@ -126,6 +126,7 @@ pub(crate) struct CompressiblePlanResources {
     pub common: GpuRuntimeCommon,
     pub num_cells: u32,
     pub num_faces: u32,
+    pub model: ModelSpec,
     pub num_unknowns: u32,
     pub state_step_index: usize,
     pub state_buffers: Vec<wgpu::Buffer>,
@@ -415,7 +416,7 @@ impl CompressiblePlanResources {
     fn update_needs_gradients(&mut self) {
         let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
         let registry = SchemeRegistry::new(scheme);
-        self.needs_gradients = expand_schemes(&default_compressible_model().system, &registry)
+        self.needs_gradients = expand_schemes(&self.model.system, &registry)
             .map(|expansion| expansion.needs_gradients())
             .unwrap_or(true);
     }
@@ -431,22 +432,32 @@ impl CompressiblePlanResources {
 
     pub async fn new(
         mesh: &Mesh,
+        model: ModelSpec,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let common = GpuRuntimeCommon::new(mesh, device, queue).await;
         let profile = CompressibleProfile::new();
 
-        let model = default_compressible_model();
         let unknowns_per_cell = model.system.unknowns_per_cell();
         let layout = &model.state_layout;
         let offsets = CompressibleOffsets {
             stride: layout.stride(),
-            rho: layout.offset_for("rho").expect("rho offset missing"),
-            rho_u: layout.offset_for("rho_u").expect("rho_u offset missing"),
-            rho_e: layout.offset_for("rho_e").expect("rho_e offset missing"),
-            p: layout.offset_for("p").expect("p offset missing"),
-            u: layout.offset_for("u").expect("u offset missing"),
+            rho: layout
+                .offset_for("rho")
+                .ok_or_else(|| "compressible model missing state field 'rho'".to_string())?,
+            rho_u: layout
+                .offset_for("rho_u")
+                .ok_or_else(|| "compressible model missing state field 'rho_u'".to_string())?,
+            rho_e: layout
+                .offset_for("rho_e")
+                .ok_or_else(|| "compressible model missing state field 'rho_e'".to_string())?,
+            p: layout
+                .offset_for("p")
+                .ok_or_else(|| "compressible model missing state field 'p'".to_string())?,
+            u: layout
+                .offset_for("u")
+                .ok_or_else(|| "compressible model missing state field 'u'".to_string())?,
         };
 
         let lowered = CompressibleLowered::lower(
@@ -489,6 +500,7 @@ impl CompressiblePlanResources {
             common,
             num_cells,
             num_faces,
+            model,
             num_unknowns,
             state_step_index: 0,
             state_buffers: fields_res.state_buffers,
@@ -539,7 +551,7 @@ impl CompressiblePlanResources {
         }
         ;
         solver.update_needs_gradients();
-        solver
+        Ok(solver)
     }
 
     pub fn initialize_history(&self) {

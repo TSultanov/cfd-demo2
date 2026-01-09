@@ -19,7 +19,6 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{
     run_module_graph, ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode,
 };
-use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::incompressible_kernels::{IncompressibleBindGroups, IncompressiblePipeline};
 use crate::solver::gpu::profiling::ProfileCategory;
@@ -448,7 +447,7 @@ impl GpuSolver {
                     0,
                 );
                 let res = self.coupled_resources.as_ref().unwrap();
-                let unknowns_per_cell = default_incompressible_model().system.unknowns_per_cell();
+                let unknowns_per_cell = self.model.system.unknowns_per_cell();
 
                 // Read diagonal entries (sample first few) - DEBUG READS
                 let read_start = Instant::now();

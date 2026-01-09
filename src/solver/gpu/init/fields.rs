@@ -1,5 +1,4 @@
 use crate::solver::gpu::structs::GpuConstants;
-use crate::solver::gpu::model_defaults::default_incompressible_model;
 use wgpu::util::DeviceExt;
 
 /// Buffers-only resources (created before pipelines)
@@ -36,8 +35,12 @@ pub struct FieldResources {
 }
 
 /// Create only the buffers (before pipelines are created)
-pub fn init_field_buffers(device: &wgpu::Device, num_cells: u32, num_faces: u32) -> FieldBuffers {
-    let state_stride = default_incompressible_model().state_layout.stride();
+pub fn init_field_buffers(
+    device: &wgpu::Device,
+    num_cells: u32,
+    num_faces: u32,
+    state_stride: u32,
+) -> FieldBuffers {
     let zero_state = vec![0.0f32; num_cells as usize * state_stride as usize];
 
     let b_state = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

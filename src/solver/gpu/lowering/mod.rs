@@ -27,12 +27,13 @@ impl ModelLowerer for IncompressibleLowerer {
     fn lower<'a>(
         &'a self,
         mesh: &'a Mesh,
-        _model: &'a ModelSpec,
+        model: &'a ModelSpec,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> PlanFuture<'a, Result<Box<dyn GpuPlanInstance>, String>> {
         Box::pin(async move {
-            Ok(Box::new(GpuSolver::new(mesh, device, queue).await) as Box<dyn GpuPlanInstance>)
+            let plan = GpuSolver::new(mesh, model.clone(), device, queue).await?;
+            Ok(Box::new(plan) as Box<dyn GpuPlanInstance>)
         })
     }
 }

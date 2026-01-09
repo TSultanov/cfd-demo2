@@ -7,7 +7,6 @@ use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::init::scalars;
-use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
@@ -208,6 +207,7 @@ pub fn init_linear_solver(
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
+    unknowns_per_cell: u32,
 ) -> LinearSolverResources {
     let scalar = init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
     let row_offsets = scalar_row_offsets.to_vec();
@@ -221,6 +221,7 @@ pub fn init_linear_solver(
         &scalar.b_matrix_values,
         &row_offsets,
         &col_indices,
+        unknowns_per_cell,
     );
 
     let scalar_cg = build_scalar_cg(device, num_cells, &scalar);
@@ -243,9 +244,9 @@ fn init_coupled_resources(
     b_scalar_matrix_values: &wgpu::Buffer,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
+    unknowns_per_cell: u32,
 ) -> CoupledSolverResources {
     // 1. Compute Coupled CSR Structure
-    let unknowns_per_cell = default_incompressible_model().system.unknowns_per_cell();
     debug_assert_eq!(
         unknowns_per_cell, 3,
         "incompressible coupled solver currently assumes 2x velocity + pressure"

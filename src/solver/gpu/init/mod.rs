@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::modules::incompressible_kernels::IncompressibleKernelsModule;
+use crate::solver::model::ModelSpec;
 
 use super::runtime_common::GpuRuntimeCommon;
 use super::structs::{GpuSolver, PreconditionerType};
@@ -15,16 +16,20 @@ use super::structs::{GpuSolver, PreconditionerType};
 impl GpuSolver {
     pub async fn new(
         mesh: &Mesh,
+        model: ModelSpec,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let common = GpuRuntimeCommon::new(mesh, device, queue).await;
 
         let num_cells = common.num_cells;
         let num_faces = common.num_faces;
+        let state_stride = model.state_layout.stride();
+        let unknowns_per_cell = model.system.unknowns_per_cell();
 
         // 2. Initialize Field Buffers (phase 1 - before pipelines)
-        let field_buffers = fields::init_field_buffers(&common.context.device, num_cells, num_faces);
+        let field_buffers =
+            fields::init_field_buffers(&common.context.device, num_cells, num_faces, state_stride);
 
         // 3. Initialize Linear Solver
         let linear_res = linear_solver::init_linear_solver(
@@ -32,6 +37,7 @@ impl GpuSolver {
             num_cells,
             &common.mesh.row_offsets,
             &common.mesh.col_indices,
+            unknowns_per_cell,
         );
 
         // 5. Create fields bind groups (phase 2)
@@ -50,6 +56,7 @@ impl GpuSolver {
 
         let mut solver = Self {
             common,
+            model,
 
             // Fields (consolidated FluidState buffers)
             b_state: fields_res.b_state,
@@ -95,7 +102,7 @@ impl GpuSolver {
             scalar_cg: linear_res.scalar_cg,
         };
         solver.update_needs_gradients();
-        solver
+        Ok(solver)
     }
 }
 pub mod compressible_fields;

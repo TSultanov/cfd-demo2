@@ -25,7 +25,6 @@ use crate::solver::gpu::linear_solver::fgmres::{
     write_iter_params, FgmresSolveOnceConfig, FgmresPrecondBindings, FgmresWorkspace, IterParams,
     RawFgmresParams,
 };
-use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::profiling::ProfileCategory;
 use crate::solver::gpu::structs::{
     GpuSolver, LinearSolverStats, PreconditionerParams,
@@ -40,7 +39,7 @@ impl GpuSolver {
         self.coupled_resources
             .as_ref()
             .map(|res| res.num_unknowns)
-            .unwrap_or(self.num_cells * default_incompressible_model().system.unknowns_per_cell())
+            .unwrap_or(self.num_cells * self.model.system.unknowns_per_cell())
     }
 
     fn ensure_fgmres_resources(&mut self, max_restart: usize) {

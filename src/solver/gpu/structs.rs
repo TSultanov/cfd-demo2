@@ -8,6 +8,7 @@ use super::modules::graph::ModuleGraph;
 use bytemuck::{Pod, Zeroable};
 use std::cell::RefCell;
 use std::sync::Mutex;
+use crate::solver::model::ModelSpec;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {
@@ -151,6 +152,7 @@ impl Default for PreconditionerParams {
 
 pub(crate) struct GpuSolver {
     pub common: GpuRuntimeCommon,
+    pub model: ModelSpec,
 
     // Field buffers (consolidated FluidState)
     pub b_state: wgpu::Buffer,            // Current FluidState (read/write)

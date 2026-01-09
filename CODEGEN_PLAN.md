@@ -32,6 +32,7 @@ One **model-driven** GPU solver pipeline with:
 - Coupled unknown counts and FGMRES sizing are derived from `ModelSpec` (no plan-family sizing/debug hooks).
 - Graph execution boilerplate is reduced via a shared `run_module_graph(...)` helper used by plans.
 - Compressible plan construction now uses the provided `ModelSpec` (instead of silently using a baked-in default model).
+- Incompressible plan construction now uses the provided `ModelSpec` (state stride + unknowns per cell are derived from the model during init, instead of using default model globals).
 
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.

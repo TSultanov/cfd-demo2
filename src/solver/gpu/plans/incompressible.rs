@@ -2,7 +2,6 @@
 use std::sync::Arc;
 
 use super::coupled_fgmres::FgmresResources;
-use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::plans::plan_instance::{
     GpuPlanInstance, PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParam,
     PlanParamValue, PlanStepStats,
@@ -16,13 +15,13 @@ impl GpuSolver {
     pub(crate) fn update_needs_gradients(&mut self) {
         let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
         let registry = SchemeRegistry::new(scheme);
-        self.scheme_needs_gradients = expand_schemes(&default_incompressible_model().system, &registry)
+        self.scheme_needs_gradients = expand_schemes(&self.model.system, &registry)
             .map(|expansion| expansion.needs_gradients())
             .unwrap_or(true);
     }
 
     pub fn set_u(&self, u: &[(f64, f64)]) {
-        let layout = &default_incompressible_model().state_layout;
+        let layout = &self.model.state_layout;
         let stride = layout.stride() as usize;
         let u_offset = layout.offset_for("U").unwrap_or(0) as usize;
         let mut state = vec![0.0f32; self.num_cells as usize * stride];
@@ -38,7 +37,7 @@ impl GpuSolver {
     }
 
     pub fn set_p(&self, p: &[f64]) {
-        let layout = &default_incompressible_model().state_layout;
+        let layout = &self.model.state_layout;
         let stride = layout.stride() as usize;
         let p_offset = layout.offset_for("p").unwrap_or(0) as usize;
         let mut state = vec![0.0f32; self.num_cells as usize * stride];
@@ -114,7 +113,7 @@ impl GpuSolver {
     }
 
     pub async fn get_u(&self) -> Vec<(f64, f64)> {
-        let layout = &default_incompressible_model().state_layout;
+        let layout = &self.model.state_layout;
         let stride = layout.stride() as usize;
         let u_offset = layout.offset_for("U").unwrap_or(0) as usize;
         let data = self
@@ -130,7 +129,7 @@ impl GpuSolver {
     }
 
     pub async fn get_p(&self) -> Vec<f64> {
-        let layout = &default_incompressible_model().state_layout;
+        let layout = &self.model.state_layout;
         let stride = layout.stride() as usize;
         let p_offset = layout.offset_for("p").unwrap_or(0) as usize;
         let data = self
@@ -143,7 +142,7 @@ impl GpuSolver {
     }
 
     pub async fn get_d_p(&self) -> Vec<f64> {
-        let layout = &default_incompressible_model().state_layout;
+        let layout = &self.model.state_layout;
         let stride = layout.stride() as usize;
         let dp_offset = layout.offset_for("d_p").unwrap_or(0) as usize;
         let data = self
@@ -215,7 +214,7 @@ impl GpuSolver {
                     label: Some("Initialize History Encoder"),
                 });
 
-        let stride = default_incompressible_model().state_layout.stride() as u64;
+        let stride = self.model.state_layout.stride() as u64;
         let state_size = (self.num_cells as u64) * stride * 4;
 
         // Copy state to state_old

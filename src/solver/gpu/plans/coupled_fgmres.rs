@@ -102,102 +102,6 @@ impl GpuSolver {
         resources
     }
 
-    fn write_scalars(&self, fgmres: &FgmresResources, scalars: &[f32]) {
-        let start = Instant::now();
-        let core = fgmres
-            .fgmres
-            .core(&self.common.context.device, &self.common.context.queue);
-        crate::solver::gpu::linear_solver::fgmres::write_scalars(&core, scalars);
-        let bytes = (scalars.len() * 4) as u64;
-        self.common.profiling_stats.record_location(
-            "write_scalars",
-            ProfileCategory::GpuWrite,
-            start.elapsed(),
-            bytes,
-        );
-    }
-
-    fn basis_binding<'a>(
-        &self,
-        fgmres: &'a FgmresResources,
-        idx: usize,
-    ) -> wgpu::BindingResource<'a> {
-        fgmres.fgmres.basis_binding(idx)
-    }
-
-    fn create_vector_bind_group<'a>(
-        &self,
-        fgmres: &FgmresResources,
-        x: wgpu::BindingResource<'a>,
-        y: wgpu::BindingResource<'a>,
-        z: wgpu::BindingResource<'a>,
-        label: &str,
-    ) -> wgpu::BindGroup {
-        let start = Instant::now();
-        let bg = fgmres
-            .fgmres
-            .create_vector_bind_group(&self.common.context.device, x, y, z, label);
-        self.common.profiling_stats.record_location(
-            "create_vector_bind_group",
-            ProfileCategory::CpuCompute,
-            start.elapsed(),
-            0,
-        );
-        bg
-    }
-
-    fn dispatch_vector_pipeline_profiled(
-        &self,
-        pipeline: &wgpu::ComputePipeline,
-        fgmres: &FgmresResources,
-        vector_bg: &wgpu::BindGroup,
-        dispatch: (u32, u32),
-        label: &str,
-    ) {
-        let start = Instant::now();
-        let (dispatch_x, dispatch_y) = dispatch;
-        let core = fgmres
-            .fgmres
-            .core(&self.common.context.device, &self.common.context.queue);
-        crate::solver::gpu::linear_solver::fgmres::dispatch_vector_pipeline(
-            &core,
-            pipeline,
-            vector_bg,
-            dispatch_x,
-            dispatch_y,
-            label,
-        );
-        self.common.profiling_stats.record_location(
-            label,
-            ProfileCategory::GpuDispatch,
-            start.elapsed(),
-            0,
-        );
-    }
-
-    fn scale_vector_in_place<'a>(
-        &self,
-        fgmres: &'a FgmresResources,
-        buffer: wgpu::BindingResource<'a>,
-        dispatch: (u32, u32),
-        label: &str,
-    ) {
-        let vector_bg = self.create_vector_bind_group(
-            fgmres,
-            fgmres.fgmres.temp_buffer().as_entire_binding(),
-            buffer,
-            fgmres.fgmres.dot_partial_buffer().as_entire_binding(),
-            label,
-        );
-        self.dispatch_vector_pipeline_profiled(
-            fgmres.fgmres.pipeline_scale_in_place(),
-            fgmres,
-            &vector_bg,
-            dispatch,
-            label,
-        );
-    }
-
     /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
     pub fn solve_coupled_fgmres(&mut self) -> LinearSolverStats {
         let start_time = Instant::now();
@@ -331,7 +235,7 @@ impl GpuSolver {
             let norm = fgmres.fgmres.compute_residual_norm_into(
                 &core,
                 system,
-                self.basis_binding(&fgmres, 0),
+                fgmres.fgmres.basis_binding(0),
                 "FGMRES Residual",
             );
             self.common.profiling_stats.record_location(
@@ -362,13 +266,26 @@ impl GpuSolver {
         }
 
         // Normalize V_0
-        self.write_scalars(&fgmres, &[1.0 / residual_norm]);
-        self.scale_vector_in_place(
-            &fgmres,
-            self.basis_binding(&fgmres, 0),
-            grids.dofs,
-            "FGMRES Normalize V0",
-        ); // Initialize g on GPU
+        {
+            let start = Instant::now();
+            let core = fgmres
+                .fgmres
+                .core(&self.common.context.device, &self.common.context.queue);
+            fgmres.fgmres.scale_in_place(
+                &core,
+                fgmres.fgmres.basis_binding(0),
+                1.0 / residual_norm,
+                "FGMRES Normalize V0",
+            );
+            self.common.profiling_stats.record_location(
+                "fgmres:scale_in_place",
+                ProfileCategory::GpuDispatch,
+                start.elapsed(),
+                0,
+            );
+        }
+
+        // Initialize g on GPU
         let g_init_write_start = Instant::now();
         fgmres.fgmres.write_g0(&self.common.context.queue, residual_norm);
         self.common.profiling_stats.record_location(
@@ -454,7 +371,7 @@ impl GpuSolver {
                 let norm = fgmres.fgmres.compute_residual_norm_into(
                     &core,
                     system,
-                    self.basis_binding(&fgmres, 0),
+                    fgmres.fgmres.basis_binding(0),
                     "FGMRES Residual",
                 );
                 self.common.profiling_stats.record_location(
@@ -498,13 +415,24 @@ impl GpuSolver {
                 break;
             }
 
-            self.write_scalars(&fgmres, &[1.0 / residual_norm]);
-            self.scale_vector_in_place(
-                &fgmres,
-                self.basis_binding(&fgmres, 0),
-                grids.dofs,
-                "FGMRES Restart Normalize",
-            );
+            {
+                let start = Instant::now();
+                let core = fgmres
+                    .fgmres
+                    .core(&self.common.context.device, &self.common.context.queue);
+                fgmres.fgmres.scale_in_place(
+                    &core,
+                    fgmres.fgmres.basis_binding(0),
+                    1.0 / residual_norm,
+                    "FGMRES Restart Normalize",
+                );
+                self.common.profiling_stats.record_location(
+                    "fgmres:scale_in_place",
+                    ProfileCategory::GpuDispatch,
+                    start.elapsed(),
+                    0,
+                );
+            }
 
             // Stagnation detection
             let improvement = (prev_resid_norm - residual_norm) / prev_resid_norm;

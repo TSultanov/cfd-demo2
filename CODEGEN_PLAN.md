@@ -19,6 +19,7 @@ One **model-driven** GPU solver pipeline with:
 - Scalar CG runtime wiring is centralized in `init_scalar_cg` to avoid per-plan buffer/pipeline plumbing.
 - Coupled FGMRES now reuses shared `fgmres` dispatch helpers (less plan-specific boilerplate).
 - FGMRES restart/init steps (g init, aux clears, basis0 normalization) are centralized on `FgmresWorkspace`.
+- Coupled FGMRES no longer has plan-local scale/normalize helpers; vector scaling is exposed as `FgmresWorkspace::scale_in_place` and used directly.
 - Krylov/FGMRES dispatch grid sizing is centralized (`DispatchGrids::for_sizes`), reducing per-plan workgroup math.
 - Residual computation for restarting FGMRES (`r = b - A x`) is centralized on `FgmresWorkspace`.
 - `GpuPlanInstance` is universal and configured via typed `PlanParam`/`PlanParamValue` and queried via `PlanCapability` (no downcasts).
@@ -35,7 +36,7 @@ One **model-driven** GPU solver pipeline with:
 ## Next Milestones (Ordered)
 1. **Finish tightening the plan surface**
    - Keep `GpuPlanInstance` minimal (time/state I/O + stepping + param setting).
-   - Move remaining debug/inspection hooks behind explicit debug modules/ports (still capability-gated), so `plan_instance.rs` does not accumulate plan-family APIs.
+   - Audit `src/solver/gpu/plans/plan_instance.rs` and remove/replace plan-family-only methods; move debug/inspection behind explicit debug modules/ports (still capability-gated), so `plan_instance.rs` does not accumulate per-plan APIs.
 2. **Single model-driven lowerer**
    - Introduce a shared `ModelLowerer` that produces a `ModelGpuProgramSpec` from `ModelSpec` + `SolverConfig` (ports, module list, execution plan, sizing).
    - Keep “generated-per-model WGSL” but unify the Rust-side binding/dispatch wiring and remove solver-family-specific lowerer/compile paths.

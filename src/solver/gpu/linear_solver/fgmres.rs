@@ -1016,22 +1016,39 @@ impl FgmresWorkspace {
             &format!("{label_prefix} basis0 copy"),
         );
 
-        write_scalars(core, &[inv_norm]);
-        let basis0 = self.basis_binding(0);
-        let scale_bg = self.create_vector_bind_group(
+        self.scale_in_place(
+            core,
+            self.basis_binding(0),
+            inv_norm,
+            &format!("{label_prefix} basis0 normalize"),
+        );
+    }
+
+    pub fn scale_in_place<'a>(
+        &'a self,
+        core: &FgmresCore<'a>,
+        y: wgpu::BindingResource<'a>,
+        scalar: f32,
+        label: &str,
+    ) {
+        let workgroups = workgroups_for_size(self.n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+
+        write_scalars(core, &[scalar]);
+        let bg = self.create_vector_bind_group(
             core.device,
             self.w_buffer().as_entire_binding(),
-            basis0,
+            y,
             self.temp_buffer().as_entire_binding(),
-            &format!("{label_prefix} basis0 normalize BG"),
+            &format!("{label} BG"),
         );
         dispatch_vector_pipeline(
             core,
             self.pipeline_scale_in_place(),
-            &scale_bg,
+            &bg,
             dispatch_x,
             dispatch_y,
-            &format!("{label_prefix} basis0 normalize"),
+            label,
         );
     }
 

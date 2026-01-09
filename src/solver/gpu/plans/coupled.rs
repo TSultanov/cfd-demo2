@@ -16,7 +16,9 @@
 // - b_u is the momentum source term
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode};
+use crate::solver::gpu::execution_plan::{
+    run_module_graph, ExecutionPlan, GraphExecMode, GraphNode, HostNode, PlanNode,
+};
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::incompressible_kernels::{IncompressibleBindGroups, IncompressiblePipeline};
@@ -61,19 +63,13 @@ fn coupled_run_graph_init_prepare(
     context: &GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-    let runtime = coupled_runtime(solver);
-    let graph = coupled_graph_init_prepare(solver);
-    match mode {
-        GraphExecMode::SingleSubmit => {
-            let start = std::time::Instant::now();
-            graph.execute(context, &solver.incompressible_kernels, runtime);
-            (start.elapsed().as_secs_f64(), None)
-        }
-        GraphExecMode::SplitTimed => {
-            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
-            (timings.total_seconds, None)
-        }
-    }
+    run_module_graph(
+        coupled_graph_init_prepare(solver),
+        context,
+        &solver.incompressible_kernels,
+        coupled_runtime(solver),
+        mode,
+    )
 }
 
 fn coupled_run_graph_prepare_assembly(
@@ -81,19 +77,13 @@ fn coupled_run_graph_prepare_assembly(
     context: &GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-    let runtime = coupled_runtime(solver);
-    let graph = coupled_graph_prepare_assembly(solver);
-    match mode {
-        GraphExecMode::SingleSubmit => {
-            let start = std::time::Instant::now();
-            graph.execute(context, &solver.incompressible_kernels, runtime);
-            (start.elapsed().as_secs_f64(), None)
-        }
-        GraphExecMode::SplitTimed => {
-            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
-            (timings.total_seconds, None)
-        }
-    }
+    run_module_graph(
+        coupled_graph_prepare_assembly(solver),
+        context,
+        &solver.incompressible_kernels,
+        coupled_runtime(solver),
+        mode,
+    )
 }
 
 fn coupled_run_graph_assembly(
@@ -101,19 +91,13 @@ fn coupled_run_graph_assembly(
     context: &GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-    let runtime = coupled_runtime(solver);
-    let graph = coupled_graph_assembly(solver);
-    match mode {
-        GraphExecMode::SingleSubmit => {
-            let start = std::time::Instant::now();
-            graph.execute(context, &solver.incompressible_kernels, runtime);
-            (start.elapsed().as_secs_f64(), None)
-        }
-        GraphExecMode::SplitTimed => {
-            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
-            (timings.total_seconds, None)
-        }
-    }
+    run_module_graph(
+        coupled_graph_assembly(solver),
+        context,
+        &solver.incompressible_kernels,
+        coupled_runtime(solver),
+        mode,
+    )
 }
 
 fn coupled_run_graph_update(
@@ -121,19 +105,13 @@ fn coupled_run_graph_update(
     context: &GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-    let runtime = coupled_runtime(solver);
-    let graph = coupled_graph_update(solver);
-    match mode {
-        GraphExecMode::SingleSubmit => {
-            let start = std::time::Instant::now();
-            graph.execute(context, &solver.incompressible_kernels, runtime);
-            (start.elapsed().as_secs_f64(), None)
-        }
-        GraphExecMode::SplitTimed => {
-            let timings = graph.execute_split_timed(context, &solver.incompressible_kernels, runtime);
-            (timings.total_seconds, None)
-        }
-    }
+    run_module_graph(
+        coupled_graph_update(solver),
+        context,
+        &solver.incompressible_kernels,
+        coupled_runtime(solver),
+        mode,
+    )
 }
 
 impl GpuSolver {

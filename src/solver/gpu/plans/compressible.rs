@@ -1,6 +1,8 @@
 use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
+use crate::solver::gpu::execution_plan::{
+    run_module_graph, ExecutionPlan, GraphExecMode, GraphNode, PlanNode,
+};
 use crate::solver::gpu::model_defaults::default_compressible_model;
 use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
@@ -258,24 +260,16 @@ impl CompressiblePlanResources {
         mode: GraphExecMode,
     ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
         let graph = CompressiblePlanResources::implicit_grad_assembly_module_graph(solver);
-        let runtime = RuntimeDims {
-            num_cells: solver.num_cells,
-            num_faces: solver.num_faces,
-        };
-        match mode {
-            GraphExecMode::SingleSubmit => {
-                let start = std::time::Instant::now();
-                graph.execute(context, &solver.kernels, runtime);
-                (start.elapsed().as_secs_f64(), None)
-            }
-            GraphExecMode::SplitTimed => {
-                let detail = graph.execute_split_timed(context, &solver.kernels, runtime);
-                (
-                    detail.total_seconds,
-                    Some(crate::solver::gpu::execution_plan::GraphDetail::Module(detail)),
-                )
-            }
-        }
+        run_module_graph(
+            graph,
+            context,
+            &solver.kernels,
+            RuntimeDims {
+                num_cells: solver.num_cells,
+                num_faces: solver.num_faces,
+            },
+            mode,
+        )
     }
 
     fn implicit_iter_plan_snapshot_run(
@@ -331,25 +325,16 @@ impl CompressiblePlanResources {
         context: &GpuContext,
         mode: GraphExecMode,
     ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-        let graph = &solver.implicit_apply_module_graph;
-        let runtime = RuntimeDims {
-            num_cells: solver.num_cells,
-            num_faces: solver.num_faces,
-        };
-        match mode {
-            GraphExecMode::SingleSubmit => {
-                let start = std::time::Instant::now();
-                graph.execute(context, &solver.kernels, runtime);
-                (start.elapsed().as_secs_f64(), None)
-            }
-            GraphExecMode::SplitTimed => {
-                let detail = graph.execute_split_timed(context, &solver.kernels, runtime);
-                (
-                    detail.total_seconds,
-                    Some(crate::solver::gpu::execution_plan::GraphDetail::Module(detail)),
-                )
-            }
-        }
+        run_module_graph(
+            &solver.implicit_apply_module_graph,
+            context,
+            &solver.kernels,
+            RuntimeDims {
+                num_cells: solver.num_cells,
+                num_faces: solver.num_faces,
+            },
+            mode,
+        )
     }
 
     fn implicit_host_solve_fgmres(solver: &mut CompressiblePlanResources) {

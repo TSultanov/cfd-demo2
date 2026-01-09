@@ -1,6 +1,6 @@
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
+use crate::solver::gpu::execution_plan::{run_module_graph, ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
 use crate::solver::gpu::plans::plan_instance::{
     GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
@@ -136,23 +136,13 @@ impl GpuGenericCoupledSolver {
         context: &GpuContext,
         mode: GraphExecMode,
     ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-        let runtime = solver.runtime_dims();
-        match mode {
-            GraphExecMode::SingleSubmit => {
-                let start = std::time::Instant::now();
-                solver.assembly_graph.execute(context, &solver.kernels, runtime);
-                (start.elapsed().as_secs_f64(), None)
-            }
-            GraphExecMode::SplitTimed => {
-                let detail = solver
-                    .assembly_graph
-                    .execute_split_timed(context, &solver.kernels, runtime);
-                (
-                    detail.total_seconds,
-                    Some(crate::solver::gpu::execution_plan::GraphDetail::Module(detail)),
-                )
-            }
-        }
+        run_module_graph(
+            &solver.assembly_graph,
+            context,
+            &solver.kernels,
+            solver.runtime_dims(),
+            mode,
+        )
     }
 
     fn update_graph_run(
@@ -160,23 +150,13 @@ impl GpuGenericCoupledSolver {
         context: &GpuContext,
         mode: GraphExecMode,
     ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-        let runtime = solver.runtime_dims();
-        match mode {
-            GraphExecMode::SingleSubmit => {
-                let start = std::time::Instant::now();
-                solver.update_graph.execute(context, &solver.kernels, runtime);
-                (start.elapsed().as_secs_f64(), None)
-            }
-            GraphExecMode::SplitTimed => {
-                let detail = solver
-                    .update_graph
-                    .execute_split_timed(context, &solver.kernels, runtime);
-                (
-                    detail.total_seconds,
-                    Some(crate::solver::gpu::execution_plan::GraphDetail::Module(detail)),
-                )
-            }
-        }
+        run_module_graph(
+            &solver.update_graph,
+            context,
+            &solver.kernels,
+            solver.runtime_dims(),
+            mode,
+        )
     }
 
     pub async fn new(

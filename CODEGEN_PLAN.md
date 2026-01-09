@@ -33,6 +33,7 @@ One **model-driven** GPU solver pipeline with:
 1. **Finish module-owned resources (beyond state/constants)**
    - Move remaining solver-owned buffers (linear solver scratch, flux/gradient buffers, BC tables, etc.) behind module boundaries with explicit `PortSpace` contracts.
    - Introduce a small time-integration module that owns history rotation + `dt/dt_old/time` semantics so host ops stop doing manual book-keeping.
+     - Fix `dt_old` semantics: it should always represent the **previous step's** `dt` and be updated by the temporal scheme, not by ad-hoc heuristics in constants writes.
 2. **Generate kernel bindings + dispatch**
    - Emit binding metadata alongside WGSL (ports/resources per bind group) and add a generic bind-group builder.
    - Replace string-based per-model kernel selection with a generated registry (`ModelSpec.id` + kernel kind -> pipeline/bind builders).

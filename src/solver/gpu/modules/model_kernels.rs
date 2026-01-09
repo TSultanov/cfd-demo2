@@ -1,8 +1,4 @@
 use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
-use crate::solver::gpu::bindings::generated::{
-    coupled_assembly_merged as generated_coupled_assembly,
-    prepare_coupled as generated_prepare_coupled, update_fields_from_coupled as generated_update_fields,
-};
 use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
@@ -288,18 +284,18 @@ impl ModelKernelsModule {
         coupled: &CoupledSolverResources,
     ) -> Self {
         let mut pipelines = HashMap::new();
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::PrepareCoupled),
-            generated_prepare_coupled::compute::create_main_pipeline_embed_source(device),
-        );
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::CoupledAssembly),
-            generated_coupled_assembly::compute::create_main_pipeline_embed_source(device),
-        );
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::UpdateFieldsFromCoupled),
-            generated_update_fields::compute::create_main_pipeline_embed_source(device),
-        );
+        for kind in [
+            KernelKind::PrepareCoupled,
+            KernelKind::CoupledAssembly,
+            KernelKind::UpdateFieldsFromCoupled,
+        ] {
+            let source = kernel_registry::kernel_source("incompressible_momentum", kind)
+                .unwrap_or_else(|err| panic!("missing kernel source for {kind:?}: {err}"));
+            pipelines.insert(
+                KernelPipeline::Kernel(kind),
+                (source.create_pipeline)(device),
+            );
+        }
 
         let pipeline_prepare = &pipelines[&KernelPipeline::Kernel(KernelKind::PrepareCoupled)];
         let pipeline_update =

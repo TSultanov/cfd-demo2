@@ -15,7 +15,7 @@ One **model-driven** GPU solver pipeline with:
 - Solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources only (not part of the plan API).
 - One unified lowering entrypoint: `src/solver/gpu/lowering/mod.rs` `lower_program(...)`.
 - Program runtime supports control flow (`If`, `Repeat`, `While`) + graph dispatch + host nodes.
-- Program schedules no longer embed function pointers: control-flow nodes and actions reference IDs resolved via `ModelGpuProgramSpec` tables (`graph_ops`, `host_ops`, `cond_ops`, `count_ops`).
+- Program schedules no longer embed function pointers: control-flow nodes and actions reference IDs resolved via `ModelGpuProgramSpec.ops: ProgramOps`.
 - Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes).
 - Incompressible coupled stepping is expressed as a program schedule (graphs + host nodes + outer-loop control flow).
 - Legacy per-family step loops (`step_with_stats`/`step_coupled_impl`) were removed; solver-family structs now exist only as internal resource containers + helpers.
@@ -34,7 +34,6 @@ One **model-driven** GPU solver pipeline with:
 
 ## Next Steps (Prioritized)
 1. **Make lowering truly model-driven**
-   - Immediate: split `ModelGpuProgramSpec` into `ProgramSpec` (data-only schedule) + `ProgramOps` (dispatch tables), to make schedule generation independent of runtime callbacks.
    - Introduce a first-class `ProgramSpec` data model (IDs + structure only, no fn pointers) that can be **generated per model** (build-time) from `ModelSpec::kernel_plan()` + solver config.
    - Target: per-family builders become thin “resource providers”; the schedule comes from the generated `ProgramSpec`.
    - Follow-up: replace per-model fn-pointer registries with shared “op kinds” (typed enums) and module-owned dispatch.

@@ -1,4 +1,4 @@
-use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
@@ -159,12 +159,12 @@ pub(in crate::solver::gpu::lowering) fn explicit_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let solver = res(plan);
-    run_module_graph(
-        solver.explicit_graph(),
+    solver.graphs.run_explicit(
         context,
         &solver.kernels,
         solver.runtime_dims(),
         mode,
+        solver.needs_gradients,
     )
 }
 
@@ -224,12 +224,12 @@ pub(in crate::solver::gpu::lowering) fn implicit_grad_assembly_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let solver = res(plan);
-    run_module_graph(
-        solver.implicit_grad_assembly_graph(),
+    solver.graphs.run_implicit_grad_assembly(
         context,
         &solver.kernels,
         solver.runtime_dims(),
         mode,
+        solver.needs_gradients,
     )
 }
 
@@ -265,8 +265,7 @@ pub(in crate::solver::gpu::lowering) fn implicit_apply_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let solver = res(plan);
-    run_module_graph(
-        solver.implicit_apply_graph(),
+    solver.graphs.run_implicit_apply(
         context,
         &solver.kernels,
         solver.runtime_dims(),
@@ -288,8 +287,7 @@ pub(in crate::solver::gpu::lowering) fn primitive_update_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let solver = res(plan);
-    run_module_graph(
-        solver.primitive_update_graph(),
+    solver.graphs.run_primitive_update(
         context,
         &solver.kernels,
         solver.runtime_dims(),

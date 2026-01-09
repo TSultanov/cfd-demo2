@@ -1,28 +1,26 @@
 #![allow(dead_code)]
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{run_module_graph, GraphExecMode};
+use crate::solver::gpu::execution_plan::GraphExecMode;
 use crate::solver::gpu::init::compressible_fields::{
     create_compressible_field_bind_groups, CompressibleFieldResources,
 };
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
-use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
+use crate::solver::gpu::modules::graph::RuntimeDims;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 
-use crate::solver::gpu::modules::model_kernels::{
-    KernelBindGroups, KernelPipeline, ModelKernelsModule,
-};
+use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::plans::compressible_fgmres::{
     CompressibleLinearSolver, LinearTopology,
 };
+use crate::solver::gpu::plans::compressible_graphs::CompressibleGraphs;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
-use crate::solver::model::KernelKind;
 use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
@@ -139,6 +137,7 @@ pub(crate) struct CompressiblePlanResources {
     pub port_space: PortSpace,
     pub kernels: ModelKernelsModule,
     pub linear_solver: CompressibleLinearSolver,
+    pub graphs: CompressibleGraphs,
     pub outer_iters: usize,
     pub nonconverged_relax: f32,
     pub(crate) scalar_row_offsets: Vec<u32>,
@@ -148,13 +147,7 @@ pub(crate) struct CompressiblePlanResources {
     implicit_base_alpha_u: f32,
     profile: CompressibleProfile,
     offsets: CompressibleOffsets,
-    needs_gradients: bool,
-    explicit_module_graph: ModuleGraph<ModelKernelsModule>,
-    explicit_module_graph_first_order: ModuleGraph<ModelKernelsModule>,
-    implicit_grad_assembly_module_graph: ModuleGraph<ModelKernelsModule>,
-    implicit_assembly_module_graph_first_order: ModuleGraph<ModelKernelsModule>,
-    implicit_apply_module_graph: ModuleGraph<ModelKernelsModule>,
-    primitive_update_module_graph: ModuleGraph<ModelKernelsModule>,
+    pub(crate) needs_gradients: bool,
     pub(crate) time_integration: TimeIntegrationModule,
 }
 
@@ -193,154 +186,6 @@ impl CompressiblePlanResources {
         self.common.context.queue.submit(Some(encoder.finish()));
     }
 
-    fn build_explicit_module_graph(include_gradients: bool) -> ModuleGraph<ModelKernelsModule> {
-        let mut nodes = Vec::new();
-        if include_gradients {
-            nodes.push(ModuleNode::Compute(
-                crate::solver::gpu::modules::graph::ComputeSpec {
-                    label: "compressible:gradients",
-                    pipeline: KernelPipeline::Kernel(KernelKind::CompressibleGradients),
-                    bind: KernelBindGroups::MeshFields,
-                    dispatch: DispatchKind::Cells,
-                },
-            ));
-        }
-        nodes.push(ModuleNode::Compute(
-            crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:flux_kt",
-                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleFluxKt),
-                bind: KernelBindGroups::MeshFields,
-                dispatch: DispatchKind::Faces,
-            },
-        ));
-        nodes.push(ModuleNode::Compute(
-            crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:explicit_update",
-                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleExplicitUpdate),
-                bind: KernelBindGroups::MeshFields,
-                dispatch: DispatchKind::Cells,
-            },
-        ));
-        nodes.push(ModuleNode::Compute(
-            crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:primitive_update",
-                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleUpdate),
-                bind: KernelBindGroups::FieldsOnly,
-                dispatch: DispatchKind::Cells,
-            },
-        ));
-        ModuleGraph::new(nodes)
-    }
-
-    fn build_implicit_grad_assembly_module_graph(
-        include_gradients: bool,
-    ) -> ModuleGraph<ModelKernelsModule> {
-        let mut nodes = Vec::new();
-        if include_gradients {
-            nodes.push(ModuleNode::Compute(
-                crate::solver::gpu::modules::graph::ComputeSpec {
-                    label: "compressible:gradients",
-                    pipeline: KernelPipeline::Kernel(KernelKind::CompressibleGradients),
-                    bind: KernelBindGroups::MeshFields,
-                    dispatch: DispatchKind::Cells,
-                },
-            ));
-        }
-        nodes.push(ModuleNode::Compute(
-            crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:assembly",
-                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleAssembly),
-                bind: KernelBindGroups::MeshFieldsSolver,
-                dispatch: DispatchKind::Cells,
-            },
-        ));
-        ModuleGraph::new(nodes)
-    }
-
-    fn implicit_grad_assembly_module_graph(
-        solver: &CompressiblePlanResources,
-    ) -> &ModuleGraph<ModelKernelsModule> {
-        if solver.needs_gradients {
-            &solver.implicit_grad_assembly_module_graph
-        } else {
-            &solver.implicit_assembly_module_graph_first_order
-        }
-    }
-
-    fn implicit_iter_plan_grad_assembly_run(
-        solver: &CompressiblePlanResources,
-        context: &GpuContext,
-        mode: GraphExecMode,
-    ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-        let graph = CompressiblePlanResources::implicit_grad_assembly_module_graph(solver);
-        run_module_graph(
-            graph,
-            context,
-            &solver.kernels,
-            RuntimeDims {
-                num_cells: solver.num_cells,
-                num_faces: solver.num_faces,
-            },
-            mode,
-        )
-    }
-
-    fn implicit_iter_plan_snapshot_run(
-        solver: &CompressiblePlanResources,
-        context: &GpuContext,
-        mode: GraphExecMode,
-    ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-        match mode {
-            GraphExecMode::SingleSubmit => {
-                let start = std::time::Instant::now();
-                let mut encoder =
-                    context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("compressible:implicit_snapshot"),
-                        });
-                encoder.copy_buffer_to_buffer(
-                    solver.fields.state.state(),
-                    0,
-                    &solver.fields.b_state_iter,
-                    0,
-                    solver.state_size_bytes(),
-                );
-                context.queue.submit(Some(encoder.finish()));
-                (start.elapsed().as_secs_f64(), None)
-            }
-            GraphExecMode::SplitTimed => {
-                let start = std::time::Instant::now();
-                let mut encoder =
-                    context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("compressible:implicit_snapshot"),
-                        });
-                encoder.copy_buffer_to_buffer(
-                    solver.fields.state.state(),
-                    0,
-                    &solver.fields.b_state_iter,
-                    0,
-                    solver.state_size_bytes(),
-                );
-                context.queue.submit(Some(encoder.finish()));
-                (start.elapsed().as_secs_f64(), None)
-            }
-        }
-    }
-
-    fn build_implicit_apply_module_graph() -> ModuleGraph<ModelKernelsModule> {
-        ModuleGraph::new(vec![ModuleNode::Compute(
-            crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:apply",
-                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleApply),
-                bind: KernelBindGroups::ApplyFieldsSolver,
-                dispatch: DispatchKind::Cells,
-            },
-        )])
-    }
-
     fn update_needs_gradients(&mut self) {
         let scheme =
             Scheme::from_gpu_id(self.fields.constants.values().scheme).unwrap_or(Scheme::Upwind);
@@ -348,17 +193,6 @@ impl CompressiblePlanResources {
         self.needs_gradients = expand_schemes(&self.model.system, &registry)
             .map(|expansion| expansion.needs_gradients())
             .unwrap_or(true);
-    }
-
-    fn build_primitive_update_module_graph() -> ModuleGraph<ModelKernelsModule> {
-        ModuleGraph::new(vec![ModuleNode::Compute(
-            crate::solver::gpu::modules::graph::ComputeSpec {
-                label: "compressible:primitive_update",
-                pipeline: KernelPipeline::Kernel(KernelKind::CompressibleUpdate),
-                bind: KernelBindGroups::FieldsOnly,
-                dispatch: DispatchKind::Cells,
-            },
-        )])
     }
 
     pub async fn new(
@@ -441,6 +275,7 @@ impl CompressiblePlanResources {
             port_space,
             kernels,
             linear_solver: CompressibleLinearSolver::new(),
+            graphs: CompressibleGraphs::new(),
             outer_iters: 1,
             nonconverged_relax: 0.5,
             scalar_row_offsets: lowered.scalar_row_offsets,
@@ -451,17 +286,6 @@ impl CompressiblePlanResources {
             profile,
             offsets,
             needs_gradients: false,
-            explicit_module_graph: CompressiblePlanResources::build_explicit_module_graph(true),
-            explicit_module_graph_first_order:
-                CompressiblePlanResources::build_explicit_module_graph(false),
-            implicit_grad_assembly_module_graph:
-                CompressiblePlanResources::build_implicit_grad_assembly_module_graph(true),
-            implicit_assembly_module_graph_first_order:
-                CompressiblePlanResources::build_implicit_grad_assembly_module_graph(false),
-            implicit_apply_module_graph:
-                CompressiblePlanResources::build_implicit_apply_module_graph(),
-            primitive_update_module_graph:
-                CompressiblePlanResources::build_primitive_update_module_graph(),
             time_integration: TimeIntegrationModule::new(),
         };
         solver.update_needs_gradients();
@@ -633,30 +457,6 @@ impl CompressiblePlanResources {
         }
     }
 
-    pub(crate) fn explicit_graph(&self) -> &ModuleGraph<ModelKernelsModule> {
-        if self.needs_gradients {
-            &self.explicit_module_graph
-        } else {
-            &self.explicit_module_graph_first_order
-        }
-    }
-
-    pub(crate) fn implicit_grad_assembly_graph(&self) -> &ModuleGraph<ModelKernelsModule> {
-        if self.needs_gradients {
-            &self.implicit_grad_assembly_module_graph
-        } else {
-            &self.implicit_assembly_module_graph_first_order
-        }
-    }
-
-    pub(crate) fn implicit_apply_graph(&self) -> &ModuleGraph<ModelKernelsModule> {
-        &self.implicit_apply_module_graph
-    }
-
-    pub(crate) fn primitive_update_graph(&self) -> &ModuleGraph<ModelKernelsModule> {
-        &self.primitive_update_module_graph
-    }
-
     pub(crate) fn advance_ping_pong_and_time(&mut self) {
         self.fields.state.advance();
         self.time_integration.prepare_step(
@@ -708,8 +508,8 @@ impl CompressiblePlanResources {
         if !iter_stats.converged {
             let retry_stats = self.linear_solver.solve(
                 &self.common.context,
-            &self.common.readback_cache,
-            &self.common.profiling_stats,
+                &self.common.readback_cache,
+                &self.common.profiling_stats,
                 self.num_unknowns,
                 self.num_cells,
                 self.system_ports,
@@ -724,7 +524,6 @@ impl CompressiblePlanResources {
                 iter_stats = retry_stats;
             }
         }
-        // self.linear_solver.last_stats is already updated by solve()
     }
 
     pub(crate) fn implicit_last_stats(&self) -> LinearSolverStats {

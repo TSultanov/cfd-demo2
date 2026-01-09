@@ -11,19 +11,17 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(crate) type ProgramGraphRun = fn(&GpuProgramPlan, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>);
+pub(crate) type ProgramGraphRun =
+    fn(&GpuProgramPlan, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>);
 pub(crate) type ProgramHostRun = fn(&mut GpuProgramPlan);
 pub(crate) type ProgramInitRun = fn(&GpuProgramPlan);
-pub(crate) type ProgramParamHandler =
-    fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
+pub(crate) type ProgramParamHandler = fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramSetParamFallback =
     fn(&mut GpuProgramPlan, PlanParam, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
-pub(crate) type ProgramStateBufferFn =
-    for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
-pub(crate) type ProgramWriteStateFn =
-    fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
+pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
+pub(crate) type ProgramWriteStateFn = fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
 pub(crate) type ProgramStepStatsFn = fn(&GpuProgramPlan) -> PlanStepStats;
 pub(crate) type ProgramStepWithStatsFn =
     fn(&mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String>;
@@ -35,6 +33,12 @@ pub(crate) struct ProgramGraphId(pub u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramHostId(pub u16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ProgramCondId(pub u16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ProgramCountId(pub u16);
 
 pub(crate) struct ProgramResources {
     by_type: HashMap<TypeId, Box<dyn Any + Send>>,
@@ -80,19 +84,19 @@ pub(crate) enum ProgramNode {
     },
     If {
         label: &'static str,
-        cond: fn(&GpuProgramPlan) -> bool,
+        cond: ProgramCondId,
         then_plan: Arc<ProgramExecutionPlan>,
         else_plan: Option<Arc<ProgramExecutionPlan>>,
     },
     Repeat {
         label: &'static str,
-        times: fn(&GpuProgramPlan) -> usize,
+        times: ProgramCountId,
         body: Arc<ProgramExecutionPlan>,
     },
     While {
         label: &'static str,
-        max_iters: fn(&GpuProgramPlan) -> usize,
-        cond: fn(&GpuProgramPlan) -> bool,
+        max_iters: ProgramCountId,
+        cond: ProgramCondId,
         body: Arc<ProgramExecutionPlan>,
     },
 }
@@ -133,6 +137,12 @@ impl ProgramExecutionPlan {
                     else_plan,
                     ..
                 } => {
+                    let cond = plan
+                        .spec
+                        .cond_ops
+                        .get(cond)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
                     if cond(&*plan) {
                         then_plan.execute(plan);
                     } else if let Some(else_plan) = else_plan {
@@ -140,6 +150,12 @@ impl ProgramExecutionPlan {
                     }
                 }
                 ProgramNode::Repeat { times, body, .. } => {
+                    let times = plan
+                        .spec
+                        .count_ops
+                        .get(times)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing count op for id={times:?}"));
                     for _ in 0..times(&*plan) {
                         body.execute(plan);
                     }
@@ -150,6 +166,18 @@ impl ProgramExecutionPlan {
                     body,
                     ..
                 } => {
+                    let max_iters = plan
+                        .spec
+                        .count_ops
+                        .get(max_iters)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing count op for id={max_iters:?}"));
+                    let cond = plan
+                        .spec
+                        .cond_ops
+                        .get(cond)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
                     for _ in 0..max_iters(&*plan) {
                         if !cond(&*plan) {
                             break;
@@ -165,6 +193,8 @@ impl ProgramExecutionPlan {
 pub(crate) struct ModelGpuProgramSpec {
     pub graph_ops: HashMap<ProgramGraphId, ProgramGraphRun>,
     pub host_ops: HashMap<ProgramHostId, ProgramHostRun>,
+    pub cond_ops: HashMap<ProgramCondId, fn(&GpuProgramPlan) -> bool>,
+    pub count_ops: HashMap<ProgramCountId, fn(&GpuProgramPlan) -> usize>,
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,

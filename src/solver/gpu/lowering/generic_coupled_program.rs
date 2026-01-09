@@ -1,8 +1,10 @@
-use crate::solver::gpu::execution_plan::{run_module_graph, GraphExecMode, GraphDetail};
+use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
 };
-use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
+use crate::solver::gpu::modules::graph::{
+    ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
+};
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
@@ -92,11 +94,17 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                 n, self.runtime.common.num_cells
             ));
         }
-        Ok(self.runtime.solve_linear_system_cg_with_size(n, max_iters, tol))
+        Ok(self
+            .runtime
+            .solve_linear_system_cg_with_size(n, max_iters, tol))
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-        Box::pin(async move { self.runtime.get_linear_solution(self.runtime.common.num_cells).await })
+        Box::pin(async move {
+            self.runtime
+                .get_linear_solution(self.runtime.common.num_cells)
+                .await
+        })
     }
 }
 
@@ -171,13 +179,7 @@ fn update_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
-    run_module_graph(
-        &r.update_graph,
-        context,
-        &r.kernels,
-        r.runtime_dims(),
-        mode,
-    )
+    run_module_graph(&r.update_graph, context, &r.kernels, r.runtime_dims(), mode)
 }
 
 fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
@@ -275,29 +277,60 @@ pub(crate) async fn lower_generic_coupled_program(
         let pipeline_update = gen_update::compute::create_main_pipeline_embed_source(device);
 
         let bg_mesh = {
-            let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+            let bgl =
+                device.create_bind_group_layout(&gen_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
             create_bind_group!(
                 device,
                 "GenericCoupled: mesh bind group",
                 &bgl,
-                gen_assembly::WgpuBindGroup0Entries::new(gen_assembly::WgpuBindGroup0EntriesParams {
-                    face_owner: runtime.common.mesh.b_face_owner.as_entire_buffer_binding(),
-                    face_neighbor: runtime.common.mesh.b_face_neighbor.as_entire_buffer_binding(),
-                    face_areas: runtime.common.mesh.b_face_areas.as_entire_buffer_binding(),
-                    face_normals: runtime.common.mesh.b_face_normals.as_entire_buffer_binding(),
-                    face_centers: runtime.common.mesh.b_face_centers.as_entire_buffer_binding(),
-                    cell_centers: runtime.common.mesh.b_cell_centers.as_entire_buffer_binding(),
-                    cell_vols: runtime.common.mesh.b_cell_vols.as_entire_buffer_binding(),
-                    cell_face_offsets: runtime.common.mesh.b_cell_face_offsets.as_entire_buffer_binding(),
-                    cell_faces: runtime.common.mesh.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: runtime
-                        .common
-                        .mesh
-                        .b_cell_face_matrix_indices
-                        .as_entire_buffer_binding(),
-                    diagonal_indices: runtime.common.mesh.b_diagonal_indices.as_entire_buffer_binding(),
-                    face_boundary: runtime.common.mesh.b_face_boundary.as_entire_buffer_binding(),
-                })
+                gen_assembly::WgpuBindGroup0Entries::new(
+                    gen_assembly::WgpuBindGroup0EntriesParams {
+                        face_owner: runtime.common.mesh.b_face_owner.as_entire_buffer_binding(),
+                        face_neighbor: runtime
+                            .common
+                            .mesh
+                            .b_face_neighbor
+                            .as_entire_buffer_binding(),
+                        face_areas: runtime.common.mesh.b_face_areas.as_entire_buffer_binding(),
+                        face_normals: runtime
+                            .common
+                            .mesh
+                            .b_face_normals
+                            .as_entire_buffer_binding(),
+                        face_centers: runtime
+                            .common
+                            .mesh
+                            .b_face_centers
+                            .as_entire_buffer_binding(),
+                        cell_centers: runtime
+                            .common
+                            .mesh
+                            .b_cell_centers
+                            .as_entire_buffer_binding(),
+                        cell_vols: runtime.common.mesh.b_cell_vols.as_entire_buffer_binding(),
+                        cell_face_offsets: runtime
+                            .common
+                            .mesh
+                            .b_cell_face_offsets
+                            .as_entire_buffer_binding(),
+                        cell_faces: runtime.common.mesh.b_cell_faces.as_entire_buffer_binding(),
+                        cell_face_matrix_indices: runtime
+                            .common
+                            .mesh
+                            .b_cell_face_matrix_indices
+                            .as_entire_buffer_binding(),
+                        diagonal_indices: runtime
+                            .common
+                            .mesh
+                            .b_diagonal_indices
+                            .as_entire_buffer_binding(),
+                        face_boundary: runtime
+                            .common
+                            .mesh
+                            .b_face_boundary
+                            .as_entire_buffer_binding(),
+                    }
+                )
             )
         };
 
@@ -318,7 +351,8 @@ pub(crate) async fn lower_generic_coupled_program(
             .collect::<Vec<_>>();
 
         let bg_fields_ping_pong = {
-            let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+            let bgl =
+                device.create_bind_group_layout(&gen_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
             let mut out = Vec::new();
             for i in 0..3 {
                 let (idx_state, idx_old, idx_old_old) = ping_pong_indices(i);
@@ -326,19 +360,22 @@ pub(crate) async fn lower_generic_coupled_program(
                     device,
                     &format!("GenericCoupled assembly fields bind group {i}"),
                     &bgl,
-                    gen_assembly::WgpuBindGroup1Entries::new(gen_assembly::WgpuBindGroup1EntriesParams {
-                        state: state_buffers[idx_state].as_entire_buffer_binding(),
-                        state_old: state_buffers[idx_old].as_entire_buffer_binding(),
-                        state_old_old: state_buffers[idx_old_old].as_entire_buffer_binding(),
-                        constants: runtime.b_constants.as_entire_buffer_binding(),
-                    })
+                    gen_assembly::WgpuBindGroup1Entries::new(
+                        gen_assembly::WgpuBindGroup1EntriesParams {
+                            state: state_buffers[idx_state].as_entire_buffer_binding(),
+                            state_old: state_buffers[idx_old].as_entire_buffer_binding(),
+                            state_old_old: state_buffers[idx_old_old].as_entire_buffer_binding(),
+                            constants: runtime.b_constants.as_entire_buffer_binding(),
+                        }
+                    )
                 ));
             }
             out
         };
 
         let bg_update_state_ping_pong = {
-            let bgl = device.create_bind_group_layout(&gen_update::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+            let bgl =
+                device.create_bind_group_layout(&gen_update::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
             let mut out = Vec::new();
             for i in 0..3 {
                 let (idx_state, _, _) = ping_pong_indices(i);
@@ -346,17 +383,20 @@ pub(crate) async fn lower_generic_coupled_program(
                     device,
                     &format!("GenericCoupled update state bind group {i}"),
                     &bgl,
-                    gen_update::WgpuBindGroup0Entries::new(gen_update::WgpuBindGroup0EntriesParams {
-                        state: state_buffers[idx_state].as_entire_buffer_binding(),
-                        constants: runtime.b_constants.as_entire_buffer_binding(),
-                    })
+                    gen_update::WgpuBindGroup0Entries::new(
+                        gen_update::WgpuBindGroup0EntriesParams {
+                            state: state_buffers[idx_state].as_entire_buffer_binding(),
+                            constants: runtime.b_constants.as_entire_buffer_binding(),
+                        }
+                    )
                 ));
             }
             out
         };
 
         let bg_update_solution = {
-            let bgl = device.create_bind_group_layout(&gen_update::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
+            let bgl =
+                device.create_bind_group_layout(&gen_update::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
             create_bind_group!(
                 device,
                 "GenericCoupled update solution bind group",
@@ -371,25 +411,28 @@ pub(crate) async fn lower_generic_coupled_program(
         };
 
         let bg_solver = {
-            let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
+            let bgl =
+                device.create_bind_group_layout(&gen_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
             create_bind_group!(
                 device,
                 "GenericCoupled assembly solver bind group",
                 &bgl,
-                gen_assembly::WgpuBindGroup2Entries::new(gen_assembly::WgpuBindGroup2EntriesParams {
-                    matrix_values: runtime
-                        .linear_port_space
-                        .buffer(runtime.linear_ports.values)
-                        .as_entire_buffer_binding(),
-                    rhs: runtime
-                        .linear_port_space
-                        .buffer(runtime.linear_ports.rhs)
-                        .as_entire_buffer_binding(),
-                    scalar_row_offsets: runtime
-                        .linear_port_space
-                        .buffer(runtime.linear_ports.row_offsets)
-                        .as_entire_buffer_binding(),
-                })
+                gen_assembly::WgpuBindGroup2Entries::new(
+                    gen_assembly::WgpuBindGroup2EntriesParams {
+                        matrix_values: runtime
+                            .linear_port_space
+                            .buffer(runtime.linear_ports.values)
+                            .as_entire_buffer_binding(),
+                        rhs: runtime
+                            .linear_port_space
+                            .buffer(runtime.linear_ports.rhs)
+                            .as_entire_buffer_binding(),
+                        scalar_row_offsets: runtime
+                            .linear_port_space
+                            .buffer(runtime.linear_ports.row_offsets)
+                            .as_entire_buffer_binding(),
+                    }
+                )
             )
         };
 
@@ -410,15 +453,18 @@ pub(crate) async fn lower_generic_coupled_program(
         });
 
         let bg_bc = {
-            let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup3::LAYOUT_DESCRIPTOR);
+            let bgl =
+                device.create_bind_group_layout(&gen_assembly::WgpuBindGroup3::LAYOUT_DESCRIPTOR);
             create_bind_group!(
                 device,
                 "GenericCoupled BC bind group",
                 &bgl,
-                gen_assembly::WgpuBindGroup3Entries::new(gen_assembly::WgpuBindGroup3EntriesParams {
-                    bc_kind: b_bc_kind.as_entire_buffer_binding(),
-                    bc_value: b_bc_value.as_entire_buffer_binding(),
-                })
+                gen_assembly::WgpuBindGroup3Entries::new(
+                    gen_assembly::WgpuBindGroup3EntriesParams {
+                        bc_kind: b_bc_kind.as_entire_buffer_binding(),
+                        bc_value: b_bc_value.as_entire_buffer_binding(),
+                    }
+                )
             )
         };
 
@@ -457,7 +503,10 @@ pub(crate) async fn lower_generic_coupled_program(
         params.insert(PlanParam::AdvectionScheme, param_advection_scheme as _);
         params.insert(PlanParam::TimeScheme, param_time_scheme as _);
         params.insert(PlanParam::Preconditioner, param_preconditioner as _);
-        params.insert(PlanParam::DetailedProfilingEnabled, param_detailed_profiling as _);
+        params.insert(
+            PlanParam::DetailedProfilingEnabled,
+            param_detailed_profiling as _,
+        );
 
         let mut graph_ops = std::collections::HashMap::new();
         graph_ops.insert(G_ASSEMBLY, assembly_graph_run as _);
@@ -466,6 +515,9 @@ pub(crate) async fn lower_generic_coupled_program(
         let mut host_ops = std::collections::HashMap::new();
         host_ops.insert(H_PREPARE, host_prepare_step as _);
         host_ops.insert(H_SOLVE, host_solve_linear_system as _);
+
+        let cond_ops = std::collections::HashMap::new();
+        let count_ops = std::collections::HashMap::new();
 
         let step = std::sync::Arc::new(ProgramExecutionPlan::new(vec![
             ProgramNode::Host {
@@ -491,6 +543,8 @@ pub(crate) async fn lower_generic_coupled_program(
         let spec = ModelGpuProgramSpec {
             graph_ops,
             host_ops,
+            cond_ops,
+            count_ops,
             num_cells: spec_num_cells,
             time: spec_time,
             dt: spec_dt,
@@ -505,13 +559,7 @@ pub(crate) async fn lower_generic_coupled_program(
             linear_debug: Some(linear_debug_provider),
         };
 
-        let plan = GpuProgramPlan::new(
-            model,
-            context,
-            profiling_stats,
-            program_resources,
-            spec,
-        );
+        let plan = GpuProgramPlan::new(model, context, profiling_stats, program_resources, spec);
         Ok(plan)
     })
 }

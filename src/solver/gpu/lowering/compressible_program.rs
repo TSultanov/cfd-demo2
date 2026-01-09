@@ -1,12 +1,13 @@
+use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramGraphId, ProgramHostId,
-    ProgramNode, ProgramResources, ProgramSetParamFallback, ProgramStepStatsFn, ProgramStepWithStatsFn,
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramExecutionPlan,
+    ProgramGraphId, ProgramHostId, ProgramNode, ProgramResources, ProgramSetParamFallback,
+    ProgramStepStatsFn, ProgramStepWithStatsFn,
 };
-use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
@@ -323,11 +324,7 @@ fn set_param_fallback(
 }
 
 fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug> {
-    Some(
-        plan.resources
-            .get_mut::<CompressibleProgramResources>()?
-            as &mut dyn PlanLinearSystemDebug,
-    )
+    Some(plan.resources.get_mut::<CompressibleProgramResources>()? as &mut dyn PlanLinearSystemDebug)
 }
 
 const G_EXPLICIT_GRAPH: ProgramGraphId = ProgramGraphId(0);
@@ -346,6 +343,9 @@ const H_IMPLICIT_SET_ALPHA: ProgramHostId = ProgramHostId(6);
 const H_IMPLICIT_RESTORE_ALPHA: ProgramHostId = ProgramHostId(7);
 const H_IMPLICIT_ADVANCE_OUTER_IDX: ProgramHostId = ProgramHostId(8);
 const H_IMPLICIT_FINALIZE: ProgramHostId = ProgramHostId(9);
+
+const C_SHOULD_USE_EXPLICIT: ProgramCondId = ProgramCondId(0);
+const N_IMPLICIT_OUTER_ITERS: ProgramCountId = ProgramCountId(0);
 
 pub(crate) async fn lower_compressible_program(
     mesh: &Mesh,
@@ -370,7 +370,10 @@ pub(crate) async fn lower_compressible_program(
 
     let mut graph_ops = std::collections::HashMap::new();
     graph_ops.insert(G_EXPLICIT_GRAPH, explicit_graph_run as _);
-    graph_ops.insert(G_IMPLICIT_GRAD_ASSEMBLY, implicit_grad_assembly_graph_run as _);
+    graph_ops.insert(
+        G_IMPLICIT_GRAD_ASSEMBLY,
+        implicit_grad_assembly_graph_run as _,
+    );
     graph_ops.insert(G_IMPLICIT_SNAPSHOT, implicit_snapshot_run as _);
     graph_ops.insert(G_IMPLICIT_APPLY, implicit_apply_graph_run as _);
     graph_ops.insert(G_PRIMITIVE_UPDATE, primitive_update_graph_run as _);
@@ -379,13 +382,25 @@ pub(crate) async fn lower_compressible_program(
     host_ops.insert(H_EXPLICIT_PREPARE, host_explicit_prepare as _);
     host_ops.insert(H_EXPLICIT_FINALIZE, host_explicit_finalize as _);
     host_ops.insert(H_IMPLICIT_PREPARE, host_implicit_prepare as _);
-    host_ops.insert(H_IMPLICIT_SET_ITER_PARAMS, host_implicit_set_iter_params as _);
+    host_ops.insert(
+        H_IMPLICIT_SET_ITER_PARAMS,
+        host_implicit_set_iter_params as _,
+    );
     host_ops.insert(H_IMPLICIT_SOLVE_FGMRES, host_implicit_solve_fgmres as _);
     host_ops.insert(H_IMPLICIT_RECORD_STATS, host_implicit_record_stats as _);
     host_ops.insert(H_IMPLICIT_SET_ALPHA, host_implicit_set_alpha_for_apply as _);
     host_ops.insert(H_IMPLICIT_RESTORE_ALPHA, host_implicit_restore_alpha as _);
-    host_ops.insert(H_IMPLICIT_ADVANCE_OUTER_IDX, host_implicit_advance_outer_idx as _);
+    host_ops.insert(
+        H_IMPLICIT_ADVANCE_OUTER_IDX,
+        host_implicit_advance_outer_idx as _,
+    );
     host_ops.insert(H_IMPLICIT_FINALIZE, host_implicit_finalize as _);
+
+    let mut cond_ops = std::collections::HashMap::new();
+    cond_ops.insert(C_SHOULD_USE_EXPLICIT, should_use_explicit as _);
+
+    let mut count_ops = std::collections::HashMap::new();
+    count_ops.insert(N_IMPLICIT_OUTER_ITERS, implicit_outer_iters as _);
 
     let explicit_plan = Arc::new(ProgramExecutionPlan::new(vec![
         ProgramNode::Host {
@@ -452,7 +467,7 @@ pub(crate) async fn lower_compressible_program(
         },
         ProgramNode::Repeat {
             label: "compressible:implicit_outer_loop",
-            times: implicit_outer_iters,
+            times: N_IMPLICIT_OUTER_ITERS,
             body: implicit_iter_body,
         },
         ProgramNode::Graph {
@@ -468,7 +483,7 @@ pub(crate) async fn lower_compressible_program(
 
     let step = Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::If {
         label: "compressible:select_step_path",
-        cond: should_use_explicit,
+        cond: C_SHOULD_USE_EXPLICIT,
         then_plan: explicit_plan,
         else_plan: Some(implicit_plan),
     }]));
@@ -476,6 +491,8 @@ pub(crate) async fn lower_compressible_program(
     let spec = ModelGpuProgramSpec {
         graph_ops,
         host_ops,
+        cond_ops,
+        count_ops,
         num_cells: spec_num_cells,
         time: spec_time,
         dt: spec_dt,

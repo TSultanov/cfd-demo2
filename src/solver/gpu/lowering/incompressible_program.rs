@@ -1,11 +1,12 @@
+use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramGraphId, ProgramHostId,
-    ProgramNode, ProgramResources, ProgramSetParamFallback, ProgramStepStatsFn,
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramExecutionPlan,
+    ProgramGraphId, ProgramHostId, ProgramNode, ProgramResources, ProgramSetParamFallback,
+    ProgramStepStatsFn,
 };
-use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
@@ -316,16 +317,14 @@ fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
             let rel_u = if wrap.coupled_prev_residual_u.is_finite()
                 && wrap.coupled_prev_residual_u.abs() > 1e-14
             {
-                ((max_diff_u - wrap.coupled_prev_residual_u) / wrap.coupled_prev_residual_u)
-                    .abs()
+                ((max_diff_u - wrap.coupled_prev_residual_u) / wrap.coupled_prev_residual_u).abs()
             } else {
                 f64::INFINITY
             };
             let rel_p = if wrap.coupled_prev_residual_p.is_finite()
                 && wrap.coupled_prev_residual_p.abs() > 1e-14
             {
-                ((max_diff_p - wrap.coupled_prev_residual_p) / wrap.coupled_prev_residual_p)
-                    .abs()
+                ((max_diff_p - wrap.coupled_prev_residual_p) / wrap.coupled_prev_residual_p).abs()
             } else {
                 f64::INFINITY
             };
@@ -426,11 +425,8 @@ fn set_param_fallback(
 }
 
 fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug> {
-    Some(
-        plan.resources
-            .get_mut::<IncompressibleProgramResources>()?
-            as &mut dyn PlanLinearSystemDebug,
-    )
+    Some(plan.resources.get_mut::<IncompressibleProgramResources>()?
+        as &mut dyn PlanLinearSystemDebug)
 }
 
 const G_COUPLED_PREPARE_ASSEMBLY: ProgramGraphId = ProgramGraphId(0);
@@ -444,6 +440,12 @@ const H_COUPLED_SOLVE: ProgramHostId = ProgramHostId(2);
 const H_COUPLED_CLEAR_MAX_DIFF: ProgramHostId = ProgramHostId(3);
 const H_COUPLED_CONVERGENCE_ADVANCE: ProgramHostId = ProgramHostId(4);
 const H_COUPLED_FINALIZE_STEP: ProgramHostId = ProgramHostId(5);
+
+const C_HAS_COUPLED_RESOURCES: ProgramCondId = ProgramCondId(0);
+const C_COUPLED_NEEDS_PREPARE: ProgramCondId = ProgramCondId(1);
+const C_COUPLED_SHOULD_CONTINUE: ProgramCondId = ProgramCondId(2);
+
+const N_COUPLED_MAX_ITERS: ProgramCountId = ProgramCountId(0);
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
     let solver = res_mut(plan);
@@ -488,7 +490,10 @@ pub(crate) async fn lower_incompressible_program(
     });
 
     let mut graph_ops = std::collections::HashMap::new();
-    graph_ops.insert(G_COUPLED_PREPARE_ASSEMBLY, coupled_graph_prepare_assembly_run as _);
+    graph_ops.insert(
+        G_COUPLED_PREPARE_ASSEMBLY,
+        coupled_graph_prepare_assembly_run as _,
+    );
     graph_ops.insert(G_COUPLED_ASSEMBLY, coupled_graph_assembly_run as _);
     graph_ops.insert(G_COUPLED_UPDATE, coupled_graph_update_run as _);
     graph_ops.insert(G_COUPLED_INIT_PREPARE, coupled_graph_init_prepare_run as _);
@@ -504,6 +509,14 @@ pub(crate) async fn lower_incompressible_program(
     );
     host_ops.insert(H_COUPLED_FINALIZE_STEP, host_coupled_finalize_step as _);
 
+    let mut cond_ops = std::collections::HashMap::new();
+    cond_ops.insert(C_HAS_COUPLED_RESOURCES, has_coupled_resources as _);
+    cond_ops.insert(C_COUPLED_NEEDS_PREPARE, coupled_needs_prepare as _);
+    cond_ops.insert(C_COUPLED_SHOULD_CONTINUE, coupled_should_continue as _);
+
+    let mut count_ops = std::collections::HashMap::new();
+    count_ops.insert(N_COUPLED_MAX_ITERS, coupled_max_iters as _);
+
     let coupled_iter_body = Arc::new(ProgramExecutionPlan::new(vec![
         ProgramNode::Host {
             label: "incompressible:coupled_before_iter",
@@ -511,17 +524,19 @@ pub(crate) async fn lower_incompressible_program(
         },
         ProgramNode::If {
             label: "incompressible:coupled_prepare_or_assembly",
-            cond: coupled_needs_prepare,
+            cond: C_COUPLED_NEEDS_PREPARE,
             then_plan: Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::Graph {
                 label: "incompressible:coupled_prepare_assembly",
                 id: G_COUPLED_PREPARE_ASSEMBLY,
                 mode: GraphExecMode::SingleSubmit,
             }])),
-            else_plan: Some(Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::Graph {
-                label: "incompressible:coupled_assembly",
-                id: G_COUPLED_ASSEMBLY,
-                mode: GraphExecMode::SingleSubmit,
-            }]))),
+            else_plan: Some(Arc::new(ProgramExecutionPlan::new(vec![
+                ProgramNode::Graph {
+                    label: "incompressible:coupled_assembly",
+                    id: G_COUPLED_ASSEMBLY,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+            ]))),
         },
         ProgramNode::Host {
             label: "incompressible:coupled_solve",
@@ -554,8 +569,8 @@ pub(crate) async fn lower_incompressible_program(
         },
         ProgramNode::While {
             label: "incompressible:coupled_outer_loop",
-            max_iters: coupled_max_iters,
-            cond: coupled_should_continue,
+            max_iters: N_COUPLED_MAX_ITERS,
+            cond: C_COUPLED_SHOULD_CONTINUE,
             body: coupled_iter_body,
         },
         ProgramNode::Host {
@@ -566,7 +581,7 @@ pub(crate) async fn lower_incompressible_program(
 
     let step = Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::If {
         label: "incompressible:step",
-        cond: has_coupled_resources,
+        cond: C_HAS_COUPLED_RESOURCES,
         then_plan: coupled_step,
         else_plan: None,
     }]));
@@ -574,6 +589,8 @@ pub(crate) async fn lower_incompressible_program(
     let spec = ModelGpuProgramSpec {
         graph_ops,
         host_ops,
+        cond_ops,
+        count_ops,
         num_cells: spec_num_cells,
         time: spec_time,
         dt: spec_dt,

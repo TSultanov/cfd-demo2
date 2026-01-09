@@ -11,15 +11,16 @@ One **model-driven** GPU solver pipeline with:
 
 ## Status (Reality Check)
 - Runtime orchestration is largely unified via `GpuProgramPlan` + `ProgramSpec`, and lowering now routes through a single entrypoint (`src/solver/gpu/lowering/model_driven.rs`) with template schedules in `src/solver/gpu/lowering/templates.rs`.
-- Op dispatch is now **registry-capable**: lowering builds a `ProgramOpRegistry` via per-model `register_ops(...)`, and wraps the existing per-family dispatcher with `HybridProgramOpDispatcher`.
-- Codegen emits WGSL at build time, and Rust-side pipeline/bind-group wiring is starting to become metadata-driven (build-generated binding metadata + generic bind-group builder), but many modules still own bespoke resource-resolution glue.
+- Op dispatch is now **registry-only**: lowering builds a `ProgramOpRegistry` via per-model `register_ops(...)`, validates that every `ProgramSpecNode` has a handler, and runs directly through the registry (no legacy/hybrid fallback).
+- Codegen emits WGSL at build time, and Rust-side pipeline/bind-group wiring is becoming metadata-driven (build-generated binding metadata + generic bind-group builder), but many modules still own bespoke resource-resolution glue.
 - Several critical kernels are still handwritten WGSL (`src/solver/gpu/shaders/*.wgsl`), including solver-family-specific ones (`compressible_*`, `schur_precond`).
-- Time integration semantics are closer to consistent (`dt_old` is now advanced at step finalization), but time bookkeeping is still distributed across multiple host ops and plans.
+- Kernel lookup is now unified via `kernel_registry::kernel_source(model_id, KernelKind)` (generated shader strings + binding metadata + pipeline constructors), and multiple pipelines now consume it directly.
+- Time integration semantics are now centralized via `TimeIntegrationModule` (`time/dt/dt_old/step_count`) so host ops/plans stop doing ad-hoc bookkeeping.
 
 ## Main Blockers
-- Op dispatch is still **structured by solver family** (`GraphOpKind`/`HostOpKind` enums and per-family resource containers). The registry exists, but we still rely on legacy per-family dispatchers as a fallback and there is no composable “module registry” yet.
+- Op dispatch is still **structured by solver family** (`GraphOpKind`/`HostOpKind` enums and per-family resource containers). The registry exists and is validated, but we still lack a composable “module registry” and module-owned op IDs.
 - Solver-family resource containers (`GpuSolver`, `CompressiblePlanResources`, `GenericCoupledProgramResources`) still own most pipelines/bind groups and dictate wiring.
-- Kernel selection is now generated/registered for generic-coupled per-model kernels, but there is not yet a single global registry keyed by `(ModelSpec.id, KernelKind)` that covers all codegen-emitted kernels.
+- Kernel lookup is unified at runtime, but the non-generic portions are still wired via a hand-written `match` (not fully generated from codegen output).
 - Scheme expansion and aux-pass discovery are not yet driving required buffers/kernels/schedule end-to-end.
 
 ## Recently Implemented
@@ -27,34 +28,36 @@ One **model-driven** GPU solver pipeline with:
 - Centralized schedules + typed op kinds: `src/solver/gpu/lowering/templates.rs`.
 - Removed per-family lowering entrypoints (`lower_parts`); model-specific code is now runtime hooks/providers only.
 - Phase 1 op-dispatch registry refactor:
-  - `ProgramOpRegistry` + `HybridProgramOpDispatcher` in `src/solver/gpu/plans/program.rs`.
+  - `ProgramOpRegistry` in `src/solver/gpu/plans/program.rs`.
   - Per-model `register_ops(...)` in `src/solver/gpu/lowering/models/*`.
-  - Lowering wires the hybrid dispatcher in `src/solver/gpu/lowering/model_driven.rs`.
+  - Lowering wires the registry in `src/solver/gpu/lowering/model_driven.rs`.
+- Phase 2 op-dispatch unification:
+  - `ProgramSpec` validation (missing handler detection) and removal of legacy/hybrid fallback.
+  - Unit tests covering validation behavior.
 - Introduced shared GPU resource modules for solver state and constants:
   - `PingPongState` (triple-buffer + shared step index) and `ConstantsModule` (CPU copy + uniform buffer).
   - Compressible/incompressible/generic-coupled paths now share the same state+constants abstraction (no per-family ping-pong bookkeeping).
-- Time integration fixes:
-  - `ConstantsModule::set_dt` no longer mutates `dt_old` after the first step; `dt_old` is advanced at step finalization.
-  - Generic-coupled template now finalizes `dt_old` each step.
+- Time integration module:
+  - `TimeIntegrationModule` owns `time/dt/dt_old/step_count` and updates `ConstantsModule`.
+  - All solver families now advance time at step prepare and rotate `dt_old` at step finalization through the module.
 - Linear-solver/preconditioner pluggability groundwork:
   - `FgmresPreconditionerModule::prepare(...)` hook (default no-op) so preconditioners can own their “build” phase.
-- Generated kernel registry + binding metadata (build time):
-  - Generic-coupled lowering now uses a build-generated per-model kernel registry (no string-based dispatch/macros).
+- Unified kernel lookup + binding metadata (build time):
+  - `kernel_registry::kernel_source(model_id, KernelKind)` provides shader + pipeline + binding metadata for generated kernels.
   - Bind groups can now be constructed from build-generated WGSL binding metadata via `src/solver/gpu/wgsl_reflect.rs`.
 
 ## Next Steps (Prioritized)
-1. **Make op dispatch truly module-owned (Phase 2)**
-   - End the “fallback” era: add a validation step that ensures every `ProgramSpecNode` op kind is registered (then remove the legacy dispatcher fallback).
+1. **Make op dispatch truly module-owned (beyond Phase 2)**
    - Replace global `GraphOpKind`/`HostOpKind` enums with module-owned IDs (newtypes or namespaced IDs) so adding a module doesn’t require editing a central enum.
    - Introduce a small `ModuleRegistry` concept (composition): modules register ops *and* declare what resources/ports they provide.
+   - (Optional) generate op IDs and registrations from codegen output to reduce central wiring.
 
-2. **Finish module-owned resources (beyond state/constants)**
+2. **Finish module-owned resources (beyond state/constants/time)**
    - Move remaining solver-owned buffers (linear solver scratch, flux/gradient buffers, BC tables, etc.) behind module boundaries with explicit `PortSpace` contracts.
-   - Introduce a small time-integration module that owns history rotation + `dt/dt_old/time` semantics so host ops stop doing manual book-keeping.
-     - Target invariant: `dt_old` always equals the previous step’s `dt`, and only the temporal scheme updates it.
+   - Extend `TimeIntegrationModule` to cover restart/init + scheme-specific history rotation (e.g. BDF2 bootstrap) without duplicating time advancement.
 
 3. **Expand registry-driven kernel wiring**
-   - Expand the kernel registry from “generic-coupled (assembly/update)” to “all kernels in `KernelPlan`”, keyed by `(ModelSpec.id, KernelKind)` (or a stable `KernelId` derived from model + scheme config).
+   - Generate the `KernelKind -> KernelSource` mapping from codegen output (eliminate the remaining hand-written `match`).
    - Extend binding metadata from `{group, binding, name}` to explicit `PortSpace`/resource contracts so modules can resolve resources without string matching.
    - Endgame: generate specialized kernel sets per (temporal scheme + spatial scheme) choice, each with its own optimized memory layout, rather than a single generic layout + `constants.scheme/time_scheme` runtime switching.
 

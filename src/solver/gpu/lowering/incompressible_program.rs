@@ -3,9 +3,9 @@ use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramExecutionPlan,
-    ProgramGraphId, ProgramHostId, ProgramNode, ProgramOps, ProgramResources,
-    ProgramSetParamFallback, ProgramStepStatsFn,
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramGraphId,
+    ProgramHostId, ProgramOps, ProgramResources, ProgramSetParamFallback, ProgramSpecBuilder,
+    ProgramSpecNode, ProgramStepStatsFn,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::mesh::Mesh;
@@ -525,74 +525,95 @@ pub(crate) async fn lower_incompressible_program(
     ops.count
         .insert(N_COUPLED_MAX_ITERS, coupled_max_iters as _);
 
-    let coupled_iter_body = Arc::new(ProgramExecutionPlan::new(vec![
-        ProgramNode::Host {
+    let mut program = ProgramSpecBuilder::new();
+    let root = program.root();
+    let coupled_iter_block = program.new_block();
+    let coupled_prepare_block = program.new_block();
+    let coupled_assembly_block = program.new_block();
+    let coupled_step_block = program.new_block();
+
+    program.push(
+        coupled_prepare_block,
+        ProgramSpecNode::Graph {
+            label: "incompressible:coupled_prepare_assembly",
+            id: G_COUPLED_PREPARE_ASSEMBLY,
+            mode: GraphExecMode::SingleSubmit,
+        },
+    );
+    program.push(
+        coupled_assembly_block,
+        ProgramSpecNode::Graph {
+            label: "incompressible:coupled_assembly",
+            id: G_COUPLED_ASSEMBLY,
+            mode: GraphExecMode::SingleSubmit,
+        },
+    );
+
+    for node in [
+        ProgramSpecNode::Host {
             label: "incompressible:coupled_before_iter",
             id: H_COUPLED_BEFORE_ITER,
         },
-        ProgramNode::If {
+        ProgramSpecNode::If {
             label: "incompressible:coupled_prepare_or_assembly",
             cond: C_COUPLED_NEEDS_PREPARE,
-            then_plan: Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::Graph {
-                label: "incompressible:coupled_prepare_assembly",
-                id: G_COUPLED_PREPARE_ASSEMBLY,
-                mode: GraphExecMode::SingleSubmit,
-            }])),
-            else_plan: Some(Arc::new(ProgramExecutionPlan::new(vec![
-                ProgramNode::Graph {
-                    label: "incompressible:coupled_assembly",
-                    id: G_COUPLED_ASSEMBLY,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-            ]))),
+            then_block: coupled_prepare_block,
+            else_block: Some(coupled_assembly_block),
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "incompressible:coupled_solve",
             id: H_COUPLED_SOLVE,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "incompressible:coupled_clear_max_diff",
             id: H_COUPLED_CLEAR_MAX_DIFF,
         },
-        ProgramNode::Graph {
+        ProgramSpecNode::Graph {
             label: "incompressible:coupled_update_fields_max_diff",
             id: G_COUPLED_UPDATE,
             mode: GraphExecMode::SingleSubmit,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "incompressible:coupled_convergence_and_advance",
             id: H_COUPLED_CONVERGENCE_ADVANCE,
         },
-    ]));
+    ] {
+        program.push(coupled_iter_block, node);
+    }
 
-    let coupled_step = Arc::new(ProgramExecutionPlan::new(vec![
-        ProgramNode::Host {
+    for node in [
+        ProgramSpecNode::Host {
             label: "incompressible:coupled_begin_step",
             id: H_COUPLED_BEGIN_STEP,
         },
-        ProgramNode::Graph {
+        ProgramSpecNode::Graph {
             label: "incompressible:coupled_init_prepare",
             id: G_COUPLED_INIT_PREPARE,
             mode: GraphExecMode::SingleSubmit,
         },
-        ProgramNode::While {
+        ProgramSpecNode::While {
             label: "incompressible:coupled_outer_loop",
             max_iters: N_COUPLED_MAX_ITERS,
             cond: C_COUPLED_SHOULD_CONTINUE,
-            body: coupled_iter_body,
+            body: coupled_iter_block,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "incompressible:coupled_finalize_step",
             id: H_COUPLED_FINALIZE_STEP,
         },
-    ]));
+    ] {
+        program.push(coupled_step_block, node);
+    }
 
-    let step = Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::If {
-        label: "incompressible:step",
-        cond: C_HAS_COUPLED_RESOURCES,
-        then_plan: coupled_step,
-        else_plan: None,
-    }]));
+    program.push(
+        root,
+        ProgramSpecNode::If {
+            label: "incompressible:step",
+            cond: C_HAS_COUPLED_RESOURCES,
+            then_block: coupled_step_block,
+            else_block: None,
+        },
+    );
 
     let spec = ModelGpuProgramSpec {
         ops,
@@ -601,7 +622,7 @@ pub(crate) async fn lower_incompressible_program(
         dt: spec_dt,
         state_buffer: spec_state_buffer,
         write_state_bytes: spec_write_state_bytes,
-        step,
+        program: program.build(),
         initialize_history: Some(init_history),
         params: std::collections::HashMap::new(),
         set_param_fallback: Some(set_param_fallback as ProgramSetParamFallback),

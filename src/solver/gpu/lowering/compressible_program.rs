@@ -4,9 +4,9 @@ use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramExecutionPlan,
-    ProgramGraphId, ProgramHostId, ProgramNode, ProgramOps, ProgramResources,
-    ProgramSetParamFallback, ProgramStepStatsFn, ProgramStepWithStatsFn,
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramGraphId,
+    ProgramHostId, ProgramOps, ProgramResources, ProgramSetParamFallback, ProgramSpecBuilder,
+    ProgramSpecNode, ProgramStepStatsFn, ProgramStepWithStatsFn,
 };
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::mesh::Mesh;
@@ -412,91 +412,119 @@ pub(crate) async fn lower_compressible_program(
     ops.count
         .insert(N_IMPLICIT_OUTER_ITERS, implicit_outer_iters as _);
 
-    let explicit_plan = Arc::new(ProgramExecutionPlan::new(vec![
-        ProgramNode::Host {
+    let mut program = ProgramSpecBuilder::new();
+    let root = program.root();
+    let explicit_block = program.new_block();
+    let implicit_iter_block = program.new_block();
+    let implicit_block = program.new_block();
+
+    program.push(
+        explicit_block,
+        ProgramSpecNode::Host {
             label: "compressible:explicit_prepare",
             id: H_EXPLICIT_PREPARE,
         },
-        ProgramNode::Graph {
+    );
+    program.push(
+        explicit_block,
+        ProgramSpecNode::Graph {
             label: "compressible:explicit_graph",
             id: G_EXPLICIT_GRAPH,
             mode: GraphExecMode::SplitTimed,
         },
-        ProgramNode::Host {
+    );
+    program.push(
+        explicit_block,
+        ProgramSpecNode::Host {
             label: "compressible:explicit_finalize",
             id: H_EXPLICIT_FINALIZE,
         },
-    ]));
+    );
 
-    let implicit_iter_body = Arc::new(ProgramExecutionPlan::new(vec![
-        ProgramNode::Host {
+    for node in [
+        ProgramSpecNode::Host {
             label: "compressible:implicit_set_iter_params",
             id: H_IMPLICIT_SET_ITER_PARAMS,
         },
-        ProgramNode::Graph {
+        ProgramSpecNode::Graph {
             label: "compressible:implicit_grad_assembly",
             id: G_IMPLICIT_GRAD_ASSEMBLY,
             mode: GraphExecMode::SplitTimed,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "compressible:implicit_fgmres",
             id: H_IMPLICIT_SOLVE_FGMRES,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "compressible:implicit_record_stats",
             id: H_IMPLICIT_RECORD_STATS,
         },
-        ProgramNode::Graph {
+        ProgramSpecNode::Graph {
             label: "compressible:implicit_snapshot",
             id: G_IMPLICIT_SNAPSHOT,
             mode: GraphExecMode::SingleSubmit,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "compressible:implicit_set_alpha",
             id: H_IMPLICIT_SET_ALPHA,
         },
-        ProgramNode::Graph {
+        ProgramSpecNode::Graph {
             label: "compressible:implicit_apply",
             id: G_IMPLICIT_APPLY,
             mode: GraphExecMode::SingleSubmit,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "compressible:implicit_restore_alpha",
             id: H_IMPLICIT_RESTORE_ALPHA,
         },
-        ProgramNode::Host {
+        ProgramSpecNode::Host {
             label: "compressible:implicit_outer_idx_inc",
             id: H_IMPLICIT_ADVANCE_OUTER_IDX,
         },
-    ]));
+    ] {
+        program.push(implicit_iter_block, node);
+    }
 
-    let implicit_plan = Arc::new(ProgramExecutionPlan::new(vec![
-        ProgramNode::Host {
+    program.push(
+        implicit_block,
+        ProgramSpecNode::Host {
             label: "compressible:implicit_prepare",
             id: H_IMPLICIT_PREPARE,
         },
-        ProgramNode::Repeat {
+    );
+    program.push(
+        implicit_block,
+        ProgramSpecNode::Repeat {
             label: "compressible:implicit_outer_loop",
             times: N_IMPLICIT_OUTER_ITERS,
-            body: implicit_iter_body,
+            body: implicit_iter_block,
         },
-        ProgramNode::Graph {
+    );
+    program.push(
+        implicit_block,
+        ProgramSpecNode::Graph {
             label: "compressible:primitive_update",
             id: G_PRIMITIVE_UPDATE,
             mode: GraphExecMode::SingleSubmit,
         },
-        ProgramNode::Host {
+    );
+    program.push(
+        implicit_block,
+        ProgramSpecNode::Host {
             label: "compressible:implicit_finalize",
             id: H_IMPLICIT_FINALIZE,
         },
-    ]));
+    );
 
-    let step = Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::If {
-        label: "compressible:select_step_path",
-        cond: C_SHOULD_USE_EXPLICIT,
-        then_plan: explicit_plan,
-        else_plan: Some(implicit_plan),
-    }]));
+    program.push(
+        root,
+        ProgramSpecNode::If {
+            label: "compressible:select_step_path",
+            cond: C_SHOULD_USE_EXPLICIT,
+            then_block: explicit_block,
+            else_block: Some(implicit_block),
+        },
+    );
 
     let spec = ModelGpuProgramSpec {
         ops,
@@ -505,7 +533,7 @@ pub(crate) async fn lower_compressible_program(
         dt: spec_dt,
         state_buffer: spec_state_buffer,
         write_state_bytes: spec_write_state_bytes,
-        step,
+        program: program.build(),
         initialize_history: Some(init_history),
         params: std::collections::HashMap::new(),
         set_param_fallback: Some(set_param_fallback as ProgramSetParamFallback),

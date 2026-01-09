@@ -15,7 +15,7 @@ One **model-driven** GPU solver pipeline with:
 - Solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources only (not part of the plan API).
 - One unified lowering entrypoint: `src/solver/gpu/lowering/mod.rs` `lower_program(...)`.
 - Program runtime supports control flow (`If`, `Repeat`, `While`) + graph dispatch + host nodes.
-- Program schedules no longer embed function pointers: control-flow nodes and actions reference IDs resolved via `ModelGpuProgramSpec.ops: ProgramOps`.
+- Program schedule is now a data-only IR: `ProgramSpec` (blocks + ID nodes), interpreted by `GpuProgramPlan` and backed by `ModelGpuProgramSpec.ops: ProgramOps`.
 - Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes).
 - Incompressible coupled stepping is expressed as a program schedule (graphs + host nodes + outer-loop control flow).
 - Legacy per-family step loops (`step_with_stats`/`step_coupled_impl`) were removed; solver-family structs now exist only as internal resource containers + helpers.
@@ -25,7 +25,7 @@ One **model-driven** GPU solver pipeline with:
 - Not yet: we still have solver-family resource containers and solver-family kernel binding/dispatch wiring. Generated WGSL exists, but the Rust-side binding/plumbing is not model-driven.
 
 ## Remaining Gaps (Concrete)
-- `ModelGpuProgramSpec` still relies on per-model dispatch tables (IDs -> fn pointers) over solver-family containers rather than a first-class “ports + module graph + dispatch plan” spec.
+- `ModelGpuProgramSpec.ops` still relies on per-model dispatch tables (IDs -> fn pointers) over solver-family containers rather than typed “op kinds” implemented by modules.
 - Lowering still has per-family program builders (`compressible_program.rs` / `incompressible_program.rs` / `generic_coupled_program.rs`); schedules are handwritten rather than derived from `ModelSpec` + config.
 - Kernel wiring is still largely handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering), especially for generated-per-model kernels.
 - “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
@@ -34,9 +34,9 @@ One **model-driven** GPU solver pipeline with:
 
 ## Next Steps (Prioritized)
 1. **Make lowering truly model-driven**
-   - Introduce a first-class `ProgramSpec` data model (IDs + structure only, no fn pointers) that can be **generated per model** (build-time) from `ModelSpec::kernel_plan()` + solver config.
-   - Target: per-family builders become thin “resource providers”; the schedule comes from the generated `ProgramSpec`.
-   - Follow-up: replace per-model fn-pointer registries with shared “op kinds” (typed enums) and module-owned dispatch.
+   - Generate `ProgramSpec` per model (build-time) from `ModelSpec::kernel_plan()` + solver config.
+   - Target: per-family builders become thin “resource providers”; schedule/aux passes come from generated `ProgramSpec`.
+   - Replace per-model fn-pointer registries with shared “op kinds” (typed enums) and module-owned dispatch.
 2. **Elevate “first-class modules”**
    - Krylov / preconditioners / AMG become pluggable modules with explicit ports and self-owned resources.
    - Replace solver-family resource containers with module-owned resources reachable only through ports.

@@ -42,6 +42,9 @@ pub(crate) struct ProgramCondId(pub u16);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramCountId(pub u16);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ProgramBlockId(pub u16);
+
 pub(crate) struct ProgramOps {
     pub graph: HashMap<ProgramGraphId, ProgramGraphRun>,
     pub host: HashMap<ProgramHostId, ProgramHostRun>,
@@ -57,6 +60,97 @@ impl ProgramOps {
             cond: HashMap::new(),
             count: HashMap::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ProgramSpecNode {
+    Graph {
+        label: &'static str,
+        id: ProgramGraphId,
+        mode: GraphExecMode,
+    },
+    Host {
+        label: &'static str,
+        id: ProgramHostId,
+    },
+    If {
+        label: &'static str,
+        cond: ProgramCondId,
+        then_block: ProgramBlockId,
+        else_block: Option<ProgramBlockId>,
+    },
+    Repeat {
+        label: &'static str,
+        times: ProgramCountId,
+        body: ProgramBlockId,
+    },
+    While {
+        label: &'static str,
+        max_iters: ProgramCountId,
+        cond: ProgramCondId,
+        body: ProgramBlockId,
+    },
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ProgramBlock {
+    pub nodes: Vec<ProgramSpecNode>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProgramSpec {
+    pub root: ProgramBlockId,
+    pub blocks: Vec<ProgramBlock>,
+}
+
+impl ProgramSpec {
+    pub fn root() -> Self {
+        Self {
+            root: ProgramBlockId(0),
+            blocks: vec![ProgramBlock::default()],
+        }
+    }
+
+    pub fn block(&self, id: ProgramBlockId) -> &ProgramBlock {
+        self.blocks
+            .get(id.0 as usize)
+            .unwrap_or_else(|| panic!("missing program block for id={id:?}"))
+    }
+}
+
+pub(crate) struct ProgramSpecBuilder {
+    spec: ProgramSpec,
+}
+
+impl ProgramSpecBuilder {
+    pub fn new() -> Self {
+        Self {
+            spec: ProgramSpec::root(),
+        }
+    }
+
+    pub fn root(&self) -> ProgramBlockId {
+        self.spec.root
+    }
+
+    pub fn new_block(&mut self) -> ProgramBlockId {
+        let id = ProgramBlockId(self.spec.blocks.len() as u16);
+        self.spec.blocks.push(ProgramBlock::default());
+        id
+    }
+
+    pub fn push(&mut self, block: ProgramBlockId, node: ProgramSpecNode) {
+        self.spec
+            .blocks
+            .get_mut(block.0 as usize)
+            .unwrap_or_else(|| panic!("missing program block for id={block:?}"))
+            .nodes
+            .push(node);
+    }
+
+    pub fn build(self) -> ProgramSpec {
+        self.spec
     }
 }
 
@@ -92,130 +186,6 @@ impl ProgramResources {
     }
 }
 
-pub(crate) enum ProgramNode {
-    Graph {
-        label: &'static str,
-        id: ProgramGraphId,
-        mode: GraphExecMode,
-    },
-    Host {
-        label: &'static str,
-        id: ProgramHostId,
-    },
-    If {
-        label: &'static str,
-        cond: ProgramCondId,
-        then_plan: Arc<ProgramExecutionPlan>,
-        else_plan: Option<Arc<ProgramExecutionPlan>>,
-    },
-    Repeat {
-        label: &'static str,
-        times: ProgramCountId,
-        body: Arc<ProgramExecutionPlan>,
-    },
-    While {
-        label: &'static str,
-        max_iters: ProgramCountId,
-        cond: ProgramCondId,
-        body: Arc<ProgramExecutionPlan>,
-    },
-}
-
-pub(crate) struct ProgramExecutionPlan {
-    nodes: Vec<ProgramNode>,
-}
-
-impl ProgramExecutionPlan {
-    pub fn new(nodes: Vec<ProgramNode>) -> Self {
-        Self { nodes }
-    }
-
-    pub fn execute(&self, plan: &mut GpuProgramPlan) {
-        for node in &self.nodes {
-            match node {
-                ProgramNode::Graph { id, mode, .. } => {
-                    let run = plan
-                        .spec
-                        .ops
-                        .graph
-                        .get(id)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing graph op for id={id:?}"));
-                    let _ = run(&*plan, &plan.context, *mode);
-                }
-                ProgramNode::Host { id, .. } => {
-                    let run = plan
-                        .spec
-                        .ops
-                        .host
-                        .get(id)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing host op for id={id:?}"));
-                    run(plan)
-                }
-                ProgramNode::If {
-                    cond,
-                    then_plan,
-                    else_plan,
-                    ..
-                } => {
-                    let cond = plan
-                        .spec
-                        .ops
-                        .cond
-                        .get(cond)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
-                    if cond(&*plan) {
-                        then_plan.execute(plan);
-                    } else if let Some(else_plan) = else_plan {
-                        else_plan.execute(plan);
-                    }
-                }
-                ProgramNode::Repeat { times, body, .. } => {
-                    let times = plan
-                        .spec
-                        .ops
-                        .count
-                        .get(times)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing count op for id={times:?}"));
-                    for _ in 0..times(&*plan) {
-                        body.execute(plan);
-                    }
-                }
-                ProgramNode::While {
-                    max_iters,
-                    cond,
-                    body,
-                    ..
-                } => {
-                    let max_iters = plan
-                        .spec
-                        .ops
-                        .count
-                        .get(max_iters)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing count op for id={max_iters:?}"));
-                    let cond = plan
-                        .spec
-                        .ops
-                        .cond
-                        .get(cond)
-                        .copied()
-                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
-                    for _ in 0..max_iters(&*plan) {
-                        if !cond(&*plan) {
-                            break;
-                        }
-                        body.execute(plan);
-                    }
-                }
-            }
-        }
-    }
-}
-
 pub(crate) struct ModelGpuProgramSpec {
     pub ops: ProgramOps,
     pub num_cells: ProgramU32Fn,
@@ -223,7 +193,7 @@ pub(crate) struct ModelGpuProgramSpec {
     pub dt: ProgramF32Fn,
     pub state_buffer: ProgramStateBufferFn,
     pub write_state_bytes: ProgramWriteStateFn,
-    pub step: Arc<ProgramExecutionPlan>,
+    pub program: ProgramSpec,
     pub initialize_history: Option<ProgramInitRun>,
     pub params: HashMap<PlanParam, ProgramParamHandler>,
     pub set_param_fallback: Option<ProgramSetParamFallback>,
@@ -351,8 +321,7 @@ impl GpuProgramPlan {
     }
 
     pub fn step(&mut self) {
-        let step = Arc::clone(&self.spec.step);
-        step.execute(self);
+        self.execute_block(self.spec.program.root);
     }
 
     pub fn initialize_history(&self) {
@@ -373,5 +342,91 @@ impl GpuProgramPlan {
             )
             .await
         })
+    }
+
+    fn execute_block(&mut self, block: ProgramBlockId) {
+        let nodes = self.spec.program.block(block).nodes.clone();
+        for node in nodes {
+            match node {
+                ProgramSpecNode::Graph { id, mode, .. } => {
+                    let run = self
+                        .spec
+                        .ops
+                        .graph
+                        .get(&id)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing graph op for id={id:?}"));
+                    let _ = run(&*self, &self.context, mode);
+                }
+                ProgramSpecNode::Host { id, .. } => {
+                    let run = self
+                        .spec
+                        .ops
+                        .host
+                        .get(&id)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing host op for id={id:?}"));
+                    run(self)
+                }
+                ProgramSpecNode::If {
+                    cond,
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    let cond = self
+                        .spec
+                        .ops
+                        .cond
+                        .get(&cond)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
+                    if cond(&*self) {
+                        self.execute_block(then_block);
+                    } else if let Some(else_block) = else_block {
+                        self.execute_block(else_block);
+                    }
+                }
+                ProgramSpecNode::Repeat { times, body, .. } => {
+                    let times = self
+                        .spec
+                        .ops
+                        .count
+                        .get(&times)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing count op for id={times:?}"));
+                    for _ in 0..times(&*self) {
+                        self.execute_block(body);
+                    }
+                }
+                ProgramSpecNode::While {
+                    max_iters,
+                    cond,
+                    body,
+                    ..
+                } => {
+                    let max_iters = self
+                        .spec
+                        .ops
+                        .count
+                        .get(&max_iters)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing count op for id={max_iters:?}"));
+                    let cond = self
+                        .spec
+                        .ops
+                        .cond
+                        .get(&cond)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
+                    for _ in 0..max_iters(&*self) {
+                        if !cond(&*self) {
+                            break;
+                        }
+                        self.execute_block(body);
+                    }
+                }
+            }
+        }
     }
 }

@@ -9,8 +9,8 @@ use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramGraphId, ProgramHostId,
-    ProgramNode, ProgramOps,
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramGraphId, ProgramHostId, ProgramOps,
+    ProgramSpecBuilder, ProgramSpecNode,
 };
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -515,26 +515,30 @@ pub(crate) async fn lower_generic_coupled_program(
         ops.host.insert(H_PREPARE, host_prepare_step as _);
         ops.host.insert(H_SOLVE, host_solve_linear_system as _);
 
-        let step = std::sync::Arc::new(ProgramExecutionPlan::new(vec![
-            ProgramNode::Host {
+        let mut program = ProgramSpecBuilder::new();
+        let root = program.root();
+        for node in [
+            ProgramSpecNode::Host {
                 label: "generic_coupled:prepare",
                 id: H_PREPARE,
             },
-            ProgramNode::Graph {
+            ProgramSpecNode::Graph {
                 label: "generic_coupled:assembly",
                 id: G_ASSEMBLY,
                 mode: GraphExecMode::SplitTimed,
             },
-            ProgramNode::Host {
+            ProgramSpecNode::Host {
                 label: "generic_coupled:solve",
                 id: H_SOLVE,
             },
-            ProgramNode::Graph {
+            ProgramSpecNode::Graph {
                 label: "generic_coupled:update",
                 id: G_UPDATE,
                 mode: GraphExecMode::SingleSubmit,
             },
-        ]));
+        ] {
+            program.push(root, node);
+        }
 
         let spec = ModelGpuProgramSpec {
             ops,
@@ -543,7 +547,7 @@ pub(crate) async fn lower_generic_coupled_program(
             dt: spec_dt,
             state_buffer: spec_state_buffer,
             write_state_bytes: spec_write_state_bytes,
-            step,
+            program: program.build(),
             initialize_history: None,
             params,
             set_param_fallback: None,

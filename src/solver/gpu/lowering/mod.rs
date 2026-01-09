@@ -3,7 +3,7 @@ use crate::solver::gpu::plans::program::GpuProgramPlan;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 
-mod kernel_registry;
+pub(crate) mod kernel_registry;
 mod model_driven;
 mod models;
 mod templates;

@@ -439,10 +439,31 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             gen_dir.join("compressible_apply.wgsl"),
         ),
         (
+            "compressible_flux_kt",
+            gen_dir.join("compressible_flux_kt.wgsl"),
+        ),
+        (
+            "compressible_gradients",
+            gen_dir.join("compressible_gradients.wgsl"),
+        ),
+        (
             "compressible_update",
             gen_dir.join("compressible_update.wgsl"),
         ),
+        (
+            "coupled_assembly_merged",
+            gen_dir.join("coupled_assembly_merged.wgsl"),
+        ),
+        ("flux_rhie_chow", gen_dir.join("flux_rhie_chow.wgsl")),
+        (
+            "generic_coupled_apply",
+            gen_dir.join("generic_coupled_apply.wgsl"),
+        ),
         ("prepare_coupled", gen_dir.join("prepare_coupled.wgsl")),
+        (
+            "pressure_assembly",
+            gen_dir.join("pressure_assembly.wgsl"),
+        ),
         (
             "update_fields_from_coupled",
             gen_dir.join("update_fields_from_coupled.wgsl"),

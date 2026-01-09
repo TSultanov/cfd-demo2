@@ -1,4 +1,5 @@
 use super::async_buffer::AsyncScalarReader;
+use super::init::fields::FieldResources;
 use super::modules::graph::ModuleGraph;
 use super::modules::incompressible_kernels::IncompressibleKernelsModule;
 use super::modules::linear_system::LinearSystemPorts;
@@ -154,19 +155,9 @@ pub(crate) struct GpuSolver {
     pub common: GpuRuntimeCommon,
     pub model: ModelSpec,
 
-    // Field buffers (consolidated FluidState)
-    pub b_state: wgpu::Buffer,            // Current FluidState (read/write)
-    pub b_state_old: wgpu::Buffer,        // Previous timestep FluidState (read)
-    pub b_state_old_old: wgpu::Buffer,    // Two timesteps ago FluidState (read, for BDF2)
-    pub state_buffers: Vec<wgpu::Buffer>, // Pool of 3 buffers for ping-pong
-    pub state_step_index: usize,          // Current step index for ping-pong
-
-    pub b_fluxes: wgpu::Buffer, // Face-based mass fluxes (per face)
+    pub fields: FieldResources,
 
     pub num_nonzeros: u32,
-
-    // Constants
-    pub b_constants: wgpu::Buffer,
 
     // Incompressible/coupled physics compute module (pipelines + bind groups)
     pub incompressible_kernels: IncompressibleKernelsModule,
@@ -174,7 +165,6 @@ pub(crate) struct GpuSolver {
     pub num_cells: u32,
     pub num_faces: u32,
 
-    pub constants: GpuConstants,
     pub preconditioner: PreconditionerType,
     pub scheme_needs_gradients: bool,
 

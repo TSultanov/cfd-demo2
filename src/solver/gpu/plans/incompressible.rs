@@ -10,7 +10,8 @@ use crate::solver::scheme::Scheme;
 
 impl GpuSolver {
     pub(crate) fn update_needs_gradients(&mut self) {
-        let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
+        let scheme =
+            Scheme::from_gpu_id(self.fields.constants.values().scheme).unwrap_or(Scheme::Upwind);
         let registry = SchemeRegistry::new(scheme);
         self.scheme_needs_gradients = expand_schemes(&self.model.system, &registry)
             .map(|expansion| expansion.needs_gradients())
@@ -27,10 +28,11 @@ impl GpuSolver {
             state[base] = ux as f32;
             state[base + 1] = uy as f32;
         }
-        self.common
-            .context
-            .queue
-            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&state));
+        self.common.context.queue.write_buffer(
+            self.fields.state.state(),
+            0,
+            bytemuck::cast_slice(&state),
+        );
     }
 
     pub fn set_p(&self, p: &[f64]) {
@@ -41,61 +43,80 @@ impl GpuSolver {
         for (i, &pval) in p.iter().enumerate() {
             state[i * stride + p_offset] = pval as f32;
         }
-        self.common
-            .context
-            .queue
-            .write_buffer(&self.b_state, 0, bytemuck::cast_slice(&state));
+        self.common.context.queue.write_buffer(
+            self.fields.state.state(),
+            0,
+            bytemuck::cast_slice(&state),
+        );
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        if self.constants.time <= 0.0 {
-            self.constants.dt_old = dt;
-        } else {
-            self.constants.dt_old = self.constants.dt;
-        }
-        self.constants.dt = dt;
-        self.update_constants();
+        self.fields.constants.set_dt(&self.common.context.queue, dt);
     }
 
     pub fn set_viscosity(&mut self, mu: f32) {
-        self.constants.viscosity = mu;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.viscosity = mu;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_alpha_p(&mut self, alpha_p: f32) {
-        self.constants.alpha_p = alpha_p;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.alpha_p = alpha_p;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_alpha_u(&mut self, alpha_u: f32) {
-        self.constants.alpha_u = alpha_u;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.alpha_u = alpha_u;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_density(&mut self, rho: f32) {
-        self.constants.density = rho;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.density = rho;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_scheme(&mut self, scheme: u32) {
-        self.constants.scheme = scheme;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.scheme = scheme;
+        }
+        self.fields.constants.write(&self.common.context.queue);
         self.update_needs_gradients();
     }
 
     pub fn set_time_scheme(&mut self, scheme: u32) {
-        self.constants.time_scheme = scheme;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.time_scheme = scheme;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_inlet_velocity(&mut self, velocity: f32) {
-        self.constants.inlet_velocity = velocity;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.inlet_velocity = velocity;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_ramp_time(&mut self, time: f32) {
-        self.constants.ramp_time = time;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.ramp_time = time;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_precond_type(
@@ -105,20 +126,15 @@ impl GpuSolver {
         self.preconditioner = precond_type;
     }
 
-    pub fn update_constants(&self) {
-        self.common.context.queue.write_buffer(
-            &self.b_constants,
-            0,
-            bytemuck::bytes_of(&self.constants),
-        );
-    }
-
     pub async fn get_u(&self) -> Vec<(f64, f64)> {
         let layout = &self.model.state_layout;
         let stride = layout.stride() as usize;
         let u_offset = layout.offset_for("U").unwrap_or(0) as usize;
         let data = self
-            .read_buffer(&self.b_state, (self.num_cells as u64) * stride as u64 * 4)
+            .read_buffer(
+                self.fields.state.state(),
+                (self.num_cells as u64) * stride as u64 * 4,
+            )
             .await;
         let state: &[f32] = bytemuck::cast_slice(&data);
         (0..self.num_cells as usize)
@@ -134,7 +150,10 @@ impl GpuSolver {
         let stride = layout.stride() as usize;
         let p_offset = layout.offset_for("p").unwrap_or(0) as usize;
         let data = self
-            .read_buffer(&self.b_state, (self.num_cells as u64) * stride as u64 * 4)
+            .read_buffer(
+                self.fields.state.state(),
+                (self.num_cells as u64) * stride as u64 * 4,
+            )
             .await;
         let state: &[f32] = bytemuck::cast_slice(&data);
         (0..self.num_cells as usize)
@@ -147,7 +166,10 @@ impl GpuSolver {
         let stride = layout.stride() as usize;
         let dp_offset = layout.offset_for("d_p").unwrap_or(0) as usize;
         let data = self
-            .read_buffer(&self.b_state, (self.num_cells as u64) * stride as u64 * 4)
+            .read_buffer(
+                self.fields.state.state(),
+                (self.num_cells as u64) * stride as u64 * 4,
+            )
             .await;
         let state: &[f32] = bytemuck::cast_slice(&data);
         (0..self.num_cells as usize)
@@ -214,10 +236,22 @@ impl GpuSolver {
         let state_size = (self.num_cells as u64) * stride * 4;
 
         // Copy state to state_old
-        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old, 0, state_size);
+        encoder.copy_buffer_to_buffer(
+            self.fields.state.state(),
+            0,
+            self.fields.state.state_old(),
+            0,
+            state_size,
+        );
 
         // Copy state to state_old_old
-        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old_old, 0, state_size);
+        encoder.copy_buffer_to_buffer(
+            self.fields.state.state(),
+            0,
+            self.fields.state.state_old_old(),
+            0,
+            state_size,
+        );
 
         self.common.context.queue.submit(Some(encoder.finish()));
     }
@@ -269,14 +303,12 @@ impl GpuSolver {
         );
 
         // Fields (consolidated FluidState buffers)
-        record(self, "fields:state", &self.b_state);
-        record(self, "fields:state_old", &self.b_state_old);
-        record(self, "fields:state_old_old", &self.b_state_old_old);
-        for (i, buf) in self.state_buffers.iter().enumerate() {
-            record(self, &format!("fields:state_buffer_{}", i), buf);
-        }
-        record(self, "fields:fluxes", &self.b_fluxes);
-        record(self, "fields:constants", &self.b_constants);
+        let state_buffers = self.fields.state.buffers();
+        record(self, "fields:state", &state_buffers[0]);
+        record(self, "fields:state_old", &state_buffers[1]);
+        record(self, "fields:state_old_old", &state_buffers[2]);
+        record(self, "fields:fluxes", &self.fields.b_fluxes);
+        record(self, "fields:constants", self.fields.constants.buffer());
 
         // Matrix / linear solver
         record(

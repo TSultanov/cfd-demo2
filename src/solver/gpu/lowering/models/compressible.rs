@@ -5,7 +5,7 @@ use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GraphOpKind, GpuProgramPlan, HostOpKind, ProgramOpDispatcher,
+    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
 };
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::env;
@@ -101,7 +101,9 @@ impl ProgramOpDispatcher for CompressibleOpDispatcher {
             HostOpKind::CompressibleImplicitRecordStats => host_implicit_record_stats(plan),
             HostOpKind::CompressibleImplicitSetAlpha => host_implicit_set_alpha_for_apply(plan),
             HostOpKind::CompressibleImplicitRestoreAlpha => host_implicit_restore_alpha(plan),
-            HostOpKind::CompressibleImplicitAdvanceOuterIdx => host_implicit_advance_outer_idx(plan),
+            HostOpKind::CompressibleImplicitAdvanceOuterIdx => {
+                host_implicit_advance_outer_idx(plan)
+            }
             HostOpKind::CompressibleImplicitFinalize => host_implicit_finalize(plan),
             other => unreachable!("compressible host op not supported: {other:?}"),
         }
@@ -127,15 +129,15 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).constants.time
+    res(plan).fields.constants.values().time
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).constants.dt
+    res(plan).fields.constants.values().dt
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    &res(plan).b_state
+    res(plan).fields.state.state()
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(

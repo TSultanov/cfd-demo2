@@ -1,37 +1,25 @@
+use crate::solver::gpu::modules::constants::ConstantsModule;
+use crate::solver::gpu::modules::state::PingPongState;
 use crate::solver::gpu::structs::GpuConstants;
 use wgpu::util::DeviceExt;
 
 /// Buffers-only resources (created before pipelines)
 pub struct FieldBuffers {
-    pub b_state: wgpu::Buffer,
-    pub b_state_old: wgpu::Buffer,
-    pub b_state_old_old: wgpu::Buffer,
-    pub state_buffers: Vec<wgpu::Buffer>,
+    pub state: PingPongState,
     pub b_fluxes: wgpu::Buffer,
-    pub b_constants: wgpu::Buffer,
-    pub constants: GpuConstants,
+    pub constants: ConstantsModule,
 }
 
 /// Full field resources including bind groups (created after pipelines)
 pub struct FieldResources {
-    /// Current fluid state buffer (read/write)
-    pub b_state: wgpu::Buffer,
-    /// Previous timestep fluid state buffer (read)
-    pub b_state_old: wgpu::Buffer,
-    /// Two timesteps ago fluid state buffer (read, for BDF2)
-    pub b_state_old_old: wgpu::Buffer,
-    /// Pool of 3 state buffers for ping-pong time stepping
-    pub state_buffers: Vec<wgpu::Buffer>,
+    pub state: PingPongState,
     /// Face-based mass fluxes (per face, not per cell)
     pub b_fluxes: wgpu::Buffer,
-    /// Simulation constants (uniform buffer)
-    pub b_constants: wgpu::Buffer,
     /// Main fields bind group
     pub bg_fields: wgpu::BindGroup,
     /// Ping-pong bind groups for time stepping
     pub bg_fields_ping_pong: Vec<wgpu::BindGroup>,
-    /// Simulation constants (CPU-side copy)
-    pub constants: GpuConstants,
+    pub constants: ConstantsModule,
 }
 
 /// Create only the buffers (before pipelines are created)
@@ -94,26 +82,11 @@ pub fn init_field_buffers(
         inlet_velocity: 1.0,
         ramp_time: 0.1,
     };
-    let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Constants Buffer"),
-        contents: bytemuck::bytes_of(&constants),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
-    // Store buffers for ping-pong (but cloning doesn't actually clone GPU memory)
-    let state_buffers = vec![
-        b_state.clone(),
-        b_state_old.clone(),
-        b_state_old_old.clone(),
-    ];
+    let constants = ConstantsModule::new(device, constants, "Incompressible Constants Buffer");
 
     FieldBuffers {
-        b_state,
-        b_state_old,
-        b_state_old_old,
-        state_buffers,
+        state: PingPongState::new([b_state, b_state_old, b_state_old_old]),
         b_fluxes,
-        b_constants,
         constants,
     }
 }
@@ -144,15 +117,15 @@ pub fn create_field_bind_groups(
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: buffers.state_buffers[idx_state].as_entire_binding(),
+                    resource: buffers.state.buffers()[idx_state].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: buffers.state_buffers[idx_old].as_entire_binding(),
+                    resource: buffers.state.buffers()[idx_old].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: buffers.state_buffers[idx_old_old].as_entire_binding(),
+                    resource: buffers.state.buffers()[idx_old_old].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -160,7 +133,7 @@ pub fn create_field_bind_groups(
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: buffers.b_constants.as_entire_binding(),
+                    resource: buffers.constants.buffer().as_entire_binding(),
                 },
             ],
         });
@@ -170,12 +143,8 @@ pub fn create_field_bind_groups(
     let bg_fields = bg_fields_ping_pong[0].clone();
 
     FieldResources {
-        b_state: buffers.b_state,
-        b_state_old: buffers.b_state_old,
-        b_state_old_old: buffers.b_state_old_old,
-        state_buffers: buffers.state_buffers,
+        state: buffers.state,
         b_fluxes: buffers.b_fluxes,
-        b_constants: buffers.b_constants,
         bg_fields,
         bg_fields_ping_pong,
         constants: buffers.constants,

@@ -1,6 +1,8 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphExecMode};
-use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
+use crate::solver::gpu::init::compressible_fields::{
+    create_compressible_field_bind_groups, CompressibleFieldResources,
+};
 use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::modules::compressible_kernels::{
     CompressibleBindGroups, CompressiblePipeline,
@@ -12,9 +14,7 @@ use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
-use crate::solver::gpu::structs::{
-    GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType,
-};
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::ModelSpec;
@@ -126,21 +126,7 @@ pub(crate) struct CompressiblePlanResources {
     pub num_faces: u32,
     pub model: ModelSpec,
     pub num_unknowns: u32,
-    pub state_step_index: usize,
-    pub state_buffers: Vec<wgpu::Buffer>,
-    pub b_state: wgpu::Buffer,
-    pub b_state_old: wgpu::Buffer,
-    pub b_state_old_old: wgpu::Buffer,
-    pub b_state_iter: wgpu::Buffer,
-    pub b_fluxes: wgpu::Buffer,
-    pub b_grad_rho: wgpu::Buffer,
-    pub b_grad_rho_u_x: wgpu::Buffer,
-    pub b_grad_rho_u_y: wgpu::Buffer,
-    pub b_grad_rho_e: wgpu::Buffer,
-    pub b_constants: wgpu::Buffer,
-    pub b_low_mach_params: wgpu::Buffer,
-    pub constants: GpuConstants,
-    pub low_mach_params: GpuLowMachParams,
+    pub fields: CompressibleFieldResources,
     pub preconditioner: PreconditionerType,
     pub system_ports: LinearSystemPorts,
     pub scalar_row_offsets_port: Port<BufU32>,
@@ -188,8 +174,20 @@ impl CompressiblePlanResources {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("compressible:pre_step_copy"),
                 });
-        encoder.copy_buffer_to_buffer(&self.b_state_old, 0, &self.b_state, 0, size);
-        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_iter, 0, size);
+        encoder.copy_buffer_to_buffer(
+            self.fields.state.state_old(),
+            0,
+            self.fields.state.state(),
+            0,
+            size,
+        );
+        encoder.copy_buffer_to_buffer(
+            self.fields.state.state(),
+            0,
+            &self.fields.b_state_iter,
+            0,
+            size,
+        );
         self.common.context.queue.submit(Some(encoder.finish()));
     }
 
@@ -302,9 +300,9 @@ impl CompressiblePlanResources {
                             label: Some("compressible:implicit_snapshot"),
                         });
                 encoder.copy_buffer_to_buffer(
-                    &solver.b_state,
+                    solver.fields.state.state(),
                     0,
-                    &solver.b_state_iter,
+                    &solver.fields.b_state_iter,
                     0,
                     solver.state_size_bytes(),
                 );
@@ -320,9 +318,9 @@ impl CompressiblePlanResources {
                             label: Some("compressible:implicit_snapshot"),
                         });
                 encoder.copy_buffer_to_buffer(
-                    &solver.b_state,
+                    solver.fields.state.state(),
                     0,
-                    &solver.b_state_iter,
+                    &solver.fields.b_state_iter,
                     0,
                     solver.state_size_bytes(),
                 );
@@ -344,7 +342,8 @@ impl CompressiblePlanResources {
     }
 
     fn update_needs_gradients(&mut self) {
-        let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
+        let scheme =
+            Scheme::from_gpu_id(self.fields.constants.values().scheme).unwrap_or(Scheme::Upwind);
         let registry = SchemeRegistry::new(scheme);
         self.needs_gradients = expand_schemes(&self.model.system, &registry)
             .map(|expansion| expansion.needs_gradients())
@@ -421,6 +420,7 @@ impl CompressiblePlanResources {
             &common.context.device,
             &common.mesh,
             &fields_res,
+            fields_res.state.step_handle(),
             &lowered.ports,
             lowered.system_ports,
             lowered.scalar_row_offsets_port,
@@ -434,21 +434,7 @@ impl CompressiblePlanResources {
             num_faces,
             model,
             num_unknowns,
-            state_step_index: 0,
-            state_buffers: fields_res.state_buffers,
-            b_state: fields_res.b_state,
-            b_state_old: fields_res.b_state_old,
-            b_state_old_old: fields_res.b_state_old_old,
-            b_state_iter: fields_res.b_state_iter,
-            b_fluxes: fields_res.b_fluxes,
-            b_grad_rho: fields_res.b_grad_rho,
-            b_grad_rho_u_x: fields_res.b_grad_rho_u_x,
-            b_grad_rho_u_y: fields_res.b_grad_rho_u_y,
-            b_grad_rho_e: fields_res.b_grad_rho_e,
-            b_constants: fields_res.b_constants,
-            constants: fields_res.constants,
-            b_low_mach_params: fields_res.b_low_mach_params,
-            low_mach_params: fields_res.low_mach_params,
+            fields: fields_res,
             preconditioner: PreconditionerType::Jacobi,
             system_ports: lowered.system_ports,
             scalar_row_offsets_port: lowered.scalar_row_offsets_port,
@@ -495,50 +481,74 @@ impl CompressiblePlanResources {
                     label: Some("Compressible Initialize History Encoder"),
                 });
         let state_size = self.num_cells as u64 * self.offsets.stride as u64 * 4;
-        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old, 0, state_size);
-        encoder.copy_buffer_to_buffer(&self.b_state, 0, &self.b_state_old_old, 0, state_size);
+        encoder.copy_buffer_to_buffer(
+            self.fields.state.state(),
+            0,
+            self.fields.state.state_old(),
+            0,
+            state_size,
+        );
+        encoder.copy_buffer_to_buffer(
+            self.fields.state.state(),
+            0,
+            self.fields.state.state_old_old(),
+            0,
+            state_size,
+        );
         self.common.context.queue.submit(Some(encoder.finish()));
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        if self.constants.time <= 0.0 {
-            self.constants.dt_old = dt;
-        } else {
-            self.constants.dt_old = self.constants.dt;
-        }
-        self.constants.dt = dt;
-        self.update_constants();
+        self.fields.constants.set_dt(&self.common.context.queue, dt);
     }
 
     pub fn set_dtau(&mut self, dtau: f32) {
-        self.constants.dtau = dtau;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.dtau = dtau;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_viscosity(&mut self, mu: f32) {
-        self.constants.viscosity = mu;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.viscosity = mu;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_time_scheme(&mut self, scheme: u32) {
-        self.constants.time_scheme = scheme;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.time_scheme = scheme;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_inlet_velocity(&mut self, velocity: f32) {
-        self.constants.inlet_velocity = velocity;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.inlet_velocity = velocity;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_scheme(&mut self, scheme: u32) {
-        self.constants.scheme = scheme;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.scheme = scheme;
+        }
+        self.fields.constants.write(&self.common.context.queue);
         self.update_needs_gradients();
     }
 
     pub fn set_alpha_u(&mut self, alpha_u: f32) {
-        self.constants.alpha_u = alpha_u;
-        self.update_constants();
+        {
+            let values = self.fields.constants.values_mut();
+            values.alpha_u = alpha_u;
+        }
+        self.fields.constants.write(&self.common.context.queue);
     }
 
     pub fn set_precond_type(&mut self, precond_type: PreconditionerType) {
@@ -546,12 +556,12 @@ impl CompressiblePlanResources {
     }
 
     pub fn set_precond_model(&mut self, model: u32) {
-        self.low_mach_params.model = model;
+        self.fields.low_mach_params.model = model;
         self.update_low_mach_params();
     }
 
     pub fn set_precond_theta_floor(&mut self, floor: f32) {
-        self.low_mach_params.theta_floor = floor;
+        self.fields.low_mach_params.theta_floor = floor;
         self.update_low_mach_params();
     }
 
@@ -612,7 +622,8 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) fn should_use_explicit(&self) -> bool {
-        self.constants.time_scheme == 0 && self.constants.dtau <= 0.0
+        let constants = self.fields.constants.values();
+        constants.time_scheme == 0 && constants.dtau <= 0.0
     }
 
     pub(crate) fn runtime_dims(&self) -> RuntimeDims {
@@ -647,20 +658,14 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) fn advance_ping_pong_and_time(&mut self) {
-        self.state_step_index = (self.state_step_index + 1) % 3;
-        self.kernels.set_step_index(self.state_step_index);
-
-        let (idx_state, idx_old, idx_old_old) = ping_pong_indices(self.state_step_index);
-        self.b_state = self.state_buffers[idx_state].clone();
-        self.b_state_old = self.state_buffers[idx_old].clone();
-        self.b_state_old_old = self.state_buffers[idx_old_old].clone();
-
-        self.constants.time += self.constants.dt;
-        self.update_constants();
+        self.fields.state.advance();
+        self.fields
+            .constants
+            .advance_time(&self.common.context.queue);
     }
 
     pub(crate) fn implicit_set_base_alpha(&mut self) {
-        self.implicit_base_alpha_u = self.constants.alpha_u;
+        self.implicit_base_alpha_u = self.fields.constants.values().alpha_u;
     }
 
     pub(crate) fn implicit_set_iteration_params(
@@ -702,9 +707,9 @@ impl CompressiblePlanResources {
                     label: Some("compressible:implicit_snapshot"),
                 });
         encoder.copy_buffer_to_buffer(
-            &self.b_state,
+            self.fields.state.state(),
             0,
-            &self.b_state_iter,
+            &self.fields.b_state_iter,
             0,
             self.state_size_bytes(),
         );
@@ -717,22 +722,29 @@ impl CompressiblePlanResources {
         } else {
             self.implicit_base_alpha_u * self.nonconverged_relax
         };
-        if (self.constants.alpha_u - apply_alpha).abs() > 1e-6 {
-            self.constants.alpha_u = apply_alpha;
-            self.update_constants();
+        if (self.fields.constants.values().alpha_u - apply_alpha).abs() > 1e-6 {
+            {
+                let values = self.fields.constants.values_mut();
+                values.alpha_u = apply_alpha;
+            }
+            self.fields.constants.write(&self.common.context.queue);
         }
     }
 
     pub(crate) fn implicit_restore_alpha(&mut self) {
-        if (self.constants.alpha_u - self.implicit_base_alpha_u).abs() > 1e-6 {
-            self.constants.alpha_u = self.implicit_base_alpha_u;
-            self.update_constants();
+        if (self.fields.constants.values().alpha_u - self.implicit_base_alpha_u).abs() > 1e-6 {
+            {
+                let values = self.fields.constants.values_mut();
+                values.alpha_u = self.implicit_base_alpha_u;
+            }
+            self.fields.constants.write(&self.common.context.queue);
         }
     }
 
     pub(crate) fn finalize_dt_old(&mut self) {
-        self.constants.dt_old = self.constants.dt;
-        self.update_constants();
+        self.fields
+            .constants
+            .finalize_dt_old(&self.common.context.queue);
     }
 
     pub async fn get_rho(&self) -> Vec<f64> {
@@ -765,25 +777,19 @@ impl CompressiblePlanResources {
             .collect()
     }
 
-    pub(crate) fn update_constants(&self) {
-        self.common.context.queue.write_buffer(
-            &self.b_constants,
-            0,
-            bytemuck::bytes_of(&self.constants),
-        );
-    }
-
     fn update_low_mach_params(&self) {
         self.common.context.queue.write_buffer(
-            &self.b_low_mach_params,
+            &self.fields.b_low_mach_params,
             0,
-            bytemuck::bytes_of(&self.low_mach_params),
+            bytemuck::bytes_of(&self.fields.low_mach_params),
         );
     }
 
     async fn read_state(&self) -> Vec<f32> {
         let byte_count = self.num_cells as u64 * self.offsets.stride as u64 * 4;
-        let raw = self.read_buffer(&self.b_state, byte_count).await;
+        let raw = self
+            .read_buffer(self.fields.state.state(), byte_count)
+            .await;
         cast_slice(&raw).to_vec()
     }
 
@@ -799,16 +805,15 @@ impl CompressiblePlanResources {
     }
 
     fn write_state_all(&self, state: &[f32]) {
-        let bytes = cast_slice(state);
-        for buffer in &self.state_buffers {
-            self.common.context.queue.write_buffer(buffer, 0, bytes);
-        }
+        self.fields
+            .state
+            .write_all(&self.common.context.queue, cast_slice(state));
     }
 
     pub(crate) fn write_state_bytes(&self, bytes: &[u8]) {
-        for buffer in &self.state_buffers {
-            self.common.context.queue.write_buffer(buffer, 0, bytes);
-        }
+        self.fields
+            .state
+            .write_all(&self.common.context.queue, bytes);
     }
 }
 
@@ -834,15 +839,6 @@ fn env_f32(name: &str, default: f32) -> f32 {
         .ok()
         .and_then(|val| val.parse().ok())
         .unwrap_or(default)
-}
-
-fn ping_pong_indices(step_index: usize) -> (usize, usize, usize) {
-    match step_index {
-        0 => (0, 1, 2),
-        1 => (2, 0, 1),
-        2 => (1, 2, 0),
-        _ => (0, 1, 2),
-    }
 }
 
 impl PlanLinearSystemDebug for CompressiblePlanResources {

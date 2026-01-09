@@ -381,10 +381,7 @@ impl GpuProgramPlan {
         for node in nodes {
             match node {
                 ProgramSpecNode::Graph { kind, mode, .. } => {
-                    let _ = self
-                        .spec
-                        .ops
-                        .run_graph(kind, &*self, &self.context, mode);
+                    let _ = self.spec.ops.run_graph(kind, &*self, &self.context, mode);
                 }
                 ProgramSpecNode::Host { kind, .. } => {
                     let ops = Arc::clone(&self.spec.ops);

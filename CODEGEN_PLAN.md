@@ -25,11 +25,14 @@ One **model-driven** GPU solver pipeline with:
 - Centralized schedules + typed op kinds: `src/solver/gpu/lowering/templates.rs`.
 - Removed per-family lowering entrypoints (`lower_parts`); model-specific code is now runtime hooks/providers only.
 - Replaced fn-pointer op registries with typed op kinds + dispatcher (`GraphOpKind`/`HostOpKind`/`CondOpKind`/`CountOpKind` + `ProgramOpDispatcher`).
+- Introduced shared GPU resource modules for solver state and constants:
+  - `PingPongState` (triple-buffer + shared step index) and `ConstantsModule` (CPU copy + uniform buffer).
+  - Compressible/incompressible/generic-coupled paths now share the same state+constants abstraction (no per-family ping-pong bookkeeping).
 
 ## Next Steps (Prioritized)
-1. **Make resources module-owned and family-agnostic**
-   - Move pipelines/bind groups/buffers out of `GpuSolver` / `*PlanResources` into modules with explicit `PortSpace` contracts.
-   - Standardize ping-pong state, linear-system ports, and time integration as shared modules.
+1. **Finish module-owned resources (beyond state/constants)**
+   - Move remaining solver-owned buffers (linear solver scratch, flux/gradient buffers, BC tables, etc.) behind module boundaries with explicit `PortSpace` contracts.
+   - Introduce a small time-integration module that owns history rotation + `dt/dt_old/time` semantics so host ops stop doing manual book-keeping.
 2. **Generate kernel bindings + dispatch**
    - Emit binding metadata alongside WGSL (ports/resources per bind group) and add a generic bind-group builder.
    - Replace string-based per-model kernel selection with a generated registry (`ModelSpec.id` + kernel kind -> pipeline/bind builders).

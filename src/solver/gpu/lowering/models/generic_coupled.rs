@@ -6,18 +6,17 @@ use crate::solver::gpu::modules::generic_coupled_kernels::{
 use crate::solver::gpu::modules::graph::{
     ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
 };
-use crate::solver::gpu::plans::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug, PlanParamValue,
-};
+use crate::solver::gpu::modules::state::PingPongState;
+use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GraphOpKind, GpuProgramPlan, HostOpKind, ProgramOpDispatcher,
+    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
 };
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
 
 pub(in crate::solver::gpu::lowering) struct GenericCoupledProgramResources {
     runtime: GpuScalarRuntime,
-    state_buffers: Vec<wgpu::Buffer>,
+    state: PingPongState,
     kernels: GenericCoupledKernelsModule,
     assembly_graph: ModuleGraph<GenericCoupledKernelsModule>,
     update_graph: ModuleGraph<GenericCoupledKernelsModule>,
@@ -28,14 +27,14 @@ pub(in crate::solver::gpu::lowering) struct GenericCoupledProgramResources {
 impl GenericCoupledProgramResources {
     pub(in crate::solver::gpu::lowering) fn new(
         runtime: GpuScalarRuntime,
-        state_buffers: Vec<wgpu::Buffer>,
+        state: PingPongState,
         kernels: GenericCoupledKernelsModule,
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
     ) -> Self {
         Self {
             runtime,
-            state_buffers,
+            state,
             kernels,
             assembly_graph: build_assembly_graph(),
             update_graph: build_update_graph(),
@@ -131,47 +130,33 @@ impl ProgramOpDispatcher for GenericCoupledOpDispatcher {
     }
 }
 
-fn ping_pong_indices(i: usize) -> (usize, usize, usize) {
-    match i {
-        0 => (0, 1, 2),
-        1 => (2, 0, 1),
-        2 => (1, 2, 0),
-        _ => (0, 1, 2),
-    }
-}
-
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
     res(plan).runtime.common.num_cells
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).runtime.constants.time
+    res(plan).runtime.constants.values().time
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).runtime.constants.dt
+    res(plan).runtime.constants.values().dt
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    let step = res(plan).kernels.step_index();
-    let (idx_state, _, _) = ping_pong_indices(step);
-    &res(plan).state_buffers[idx_state]
+    res(plan).state.state()
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     plan: &GpuProgramPlan,
     bytes: &[u8],
 ) -> Result<(), String> {
-    for buf in &res(plan).state_buffers {
-        plan.context.queue.write_buffer(buf, 0, bytes);
-    }
+    res(plan).state.write_all(&plan.context.queue, bytes);
     Ok(())
 }
 
 pub(in crate::solver::gpu::lowering) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     let r = res_mut(plan);
-    let next = r.kernels.step_index() + 1;
-    r.kernels.set_step_index(next);
+    r.state.advance();
     r.runtime.advance_time();
 }
 

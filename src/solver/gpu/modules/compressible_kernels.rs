@@ -10,6 +10,8 @@ use crate::solver::gpu::init::mesh::MeshResources;
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
 use super::linear_system::{LinearSystemPorts, LinearSystemView};
 use super::ports::{BufU32, Port, PortSpace};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub enum CompressiblePipeline {
@@ -30,7 +32,7 @@ pub enum CompressibleBindGroups {
 }
 
 pub struct CompressibleKernelsModule {
-    state_step_index: usize,
+    state_step_index: Arc<AtomicUsize>,
 
     bg_mesh: wgpu::BindGroup,
     bg_fields_ping_pong: Vec<wgpu::BindGroup>,
@@ -51,6 +53,7 @@ impl CompressibleKernelsModule {
         device: &wgpu::Device,
         mesh: &MeshResources,
         fields: &CompressibleFieldResources,
+        state_step_index: Arc<AtomicUsize>,
         port_space: &PortSpace,
         system_ports: LinearSystemPorts,
         scalar_row_offsets: Port<BufU32>,
@@ -129,12 +132,13 @@ impl CompressibleKernelsModule {
                 layout: &apply_fields_layout,
                 entries: &generated_apply::WgpuBindGroup0Entries::new(
                     generated_apply::WgpuBindGroup0EntriesParams {
-                        state: fields.state_buffers[idx_state].as_entire_buffer_binding(),
-                        state_old: fields.state_buffers[idx_old].as_entire_buffer_binding(),
-                        state_old_old: fields.state_buffers[idx_old_old].as_entire_buffer_binding(),
+                        state: fields.state.buffers()[idx_state].as_entire_buffer_binding(),
+                        state_old: fields.state.buffers()[idx_old].as_entire_buffer_binding(),
+                        state_old_old: fields.state.buffers()[idx_old_old]
+                            .as_entire_buffer_binding(),
                         state_iter: fields.b_state_iter.as_entire_buffer_binding(),
                         fluxes: fields.b_fluxes.as_entire_buffer_binding(),
-                        constants: fields.b_constants.as_entire_buffer_binding(),
+                        constants: fields.constants.buffer().as_entire_buffer_binding(),
                         grad_rho: fields.b_grad_rho.as_entire_buffer_binding(),
                         grad_rho_u_x: fields.b_grad_rho_u_x.as_entire_buffer_binding(),
                         grad_rho_u_y: fields.b_grad_rho_u_y.as_entire_buffer_binding(),
@@ -161,7 +165,7 @@ impl CompressibleKernelsModule {
         });
 
         Self {
-            state_step_index: 0,
+            state_step_index,
             bg_mesh,
             bg_fields_ping_pong,
             bg_apply_fields_ping_pong,
@@ -177,7 +181,7 @@ impl CompressibleKernelsModule {
     }
 
     pub fn set_step_index(&mut self, idx: usize) {
-        self.state_step_index = idx % 3;
+        self.state_step_index.store(idx % 3, Ordering::Relaxed);
     }
 
     pub fn bg_mesh(&self) -> &wgpu::BindGroup {
@@ -185,11 +189,13 @@ impl CompressibleKernelsModule {
     }
 
     pub fn bg_fields(&self) -> &wgpu::BindGroup {
-        &self.bg_fields_ping_pong[self.state_step_index]
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self.bg_fields_ping_pong[idx]
     }
 
     pub fn bg_apply_fields(&self) -> &wgpu::BindGroup {
-        &self.bg_apply_fields_ping_pong[self.state_step_index]
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self.bg_apply_fields_ping_pong[idx]
     }
 
     pub fn bg_solver(&self) -> &wgpu::BindGroup {

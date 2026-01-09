@@ -4,7 +4,7 @@ use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GraphOpKind, GpuProgramPlan, HostOpKind, ProgramOpDispatcher,
+    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 
@@ -84,7 +84,9 @@ impl ProgramOpDispatcher for IncompressibleOpDispatcher {
             GraphOpKind::IncompressibleCoupledAssembly => {
                 coupled_graph_assembly_run(plan, context, mode)
             }
-            GraphOpKind::IncompressibleCoupledUpdate => coupled_graph_update_run(plan, context, mode),
+            GraphOpKind::IncompressibleCoupledUpdate => {
+                coupled_graph_update_run(plan, context, mode)
+            }
             GraphOpKind::IncompressibleCoupledInitPrepare => {
                 coupled_graph_init_prepare_run(plan, context, mode)
             }
@@ -128,24 +130,22 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).constants.time
+    res(plan).fields.constants.values().time
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).constants.dt
+    res(plan).fields.constants.values().dt
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    &res(plan).b_state
+    res(plan).fields.state.state()
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     plan: &GpuProgramPlan,
     bytes: &[u8],
 ) -> Result<(), String> {
-    for buf in &res(plan).state_buffers {
-        plan.context.queue.write_buffer(buf, 0, bytes);
-    }
+    res(plan).fields.state.write_all(&plan.context.queue, bytes);
     Ok(())
 }
 
@@ -255,41 +255,15 @@ pub(in crate::solver::gpu::lowering) fn host_coupled_begin_step(plan: &mut GpuPr
         res.async_scalar_reader.borrow_mut().reset();
     }
 
-    // Ping-pong rotation.
-    solver.state_step_index = (solver.state_step_index + 1) % 3;
-
-    // Update module ping-pong selection (bind groups are owned by the module).
-    solver
-        .incompressible_kernels
-        .set_step_index(solver.state_step_index);
-
-    // Update buffer references.
-    let idx_state = match solver.state_step_index {
-        0 => 0,
-        1 => 2,
-        2 => 1,
-        _ => 0,
-    };
-    let idx_state_old = match solver.state_step_index {
-        0 => 1,
-        1 => 0,
-        2 => 2,
-        _ => 0,
-    };
-    let idx_state_old_old = match solver.state_step_index {
-        0 => 2,
-        1 => 1,
-        2 => 0,
-        _ => 0,
-    };
-
-    solver.b_state = solver.state_buffers[idx_state].clone();
-    solver.b_state_old = solver.state_buffers[idx_state_old].clone();
-    solver.b_state_old_old = solver.state_buffers[idx_state_old_old].clone();
+    // Ping-pong rotation (shared with kernels via PingPongState handle).
+    solver.fields.state.advance();
 
     // Initialize fluxes and d_p (and gradients) expects `component = 0`.
-    solver.constants.component = 0;
-    solver.update_constants();
+    {
+        let values = solver.fields.constants.values_mut();
+        values.component = 0;
+    }
+    solver.fields.constants.write(&solver.common.context.queue);
 }
 
 pub(in crate::solver::gpu::lowering) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
@@ -297,8 +271,11 @@ pub(in crate::solver::gpu::lowering) fn host_coupled_before_iter(plan: &mut GpuP
     let iter = wrap.coupled_outer_iter;
     let solver = &mut wrap.plan;
     if iter > 0 {
-        solver.constants.component = 0;
-        solver.update_constants();
+        {
+            let values = solver.fields.constants.values_mut();
+            values.component = 0;
+        }
+        solver.fields.constants.write(&solver.common.context.queue);
     }
 }
 
@@ -506,9 +483,12 @@ pub(in crate::solver::gpu::lowering) fn host_coupled_finalize_step(plan: &mut Gp
         return;
     }
 
-    solver.constants.time += solver.constants.dt;
-    solver.constants.dt_old = solver.constants.dt;
-    solver.update_constants();
+    {
+        let values = solver.fields.constants.values_mut();
+        values.time += values.dt;
+        values.dt_old = values.dt;
+    }
+    solver.fields.constants.write(&solver.common.context.queue);
 
     solver.check_evolution();
 

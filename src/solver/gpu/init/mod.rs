@@ -51,6 +51,7 @@ impl GpuSolver {
             &common.context.device,
             &common.mesh,
             &fields_res,
+            fields_res.state.step_handle(),
             &linear_res.coupled_resources,
         );
 
@@ -58,15 +59,7 @@ impl GpuSolver {
             common,
             model,
 
-            // Fields (consolidated FluidState buffers)
-            b_state: fields_res.b_state,
-            b_state_old: fields_res.b_state_old,
-            b_state_old_old: fields_res.b_state_old_old,
-            state_buffers: fields_res.state_buffers,
-            state_step_index: 0,
-            b_fluxes: fields_res.b_fluxes,
-            b_constants: fields_res.b_constants,
-            constants: fields_res.constants,
+            fields: fields_res,
             preconditioner: PreconditionerType::Jacobi,
             scheme_needs_gradients: false,
             incompressible_kernels,

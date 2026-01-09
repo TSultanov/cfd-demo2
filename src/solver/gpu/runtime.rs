@@ -1,18 +1,17 @@
 use crate::solver::gpu::init::linear_solver;
+use crate::solver::gpu::modules::constants::ConstantsModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
-use wgpu::util::DeviceExt;
 
 pub(crate) struct GpuScalarRuntime {
     pub common: GpuRuntimeCommon,
     pub num_nonzeros: u32,
 
-    pub b_constants: wgpu::Buffer,
-    pub constants: GpuConstants,
+    pub constants: ConstantsModule,
 
     pub linear_ports: LinearSystemPorts,
     pub linear_port_space: PortSpace,
@@ -35,21 +34,15 @@ impl GpuScalarRuntime {
             &common.mesh.col_indices,
         );
 
-        let constants = default_constants();
-        let b_constants =
-            common
-                .context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Constants Buffer"),
-                    contents: bytemuck::bytes_of(&constants),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+        let constants = ConstantsModule::new(
+            &common.context.device,
+            default_constants(),
+            "Scalar Runtime Constants Buffer",
+        );
 
         Self {
             common,
             num_nonzeros: cg.num_nonzeros,
-            b_constants,
             constants,
             linear_ports: cg.ports,
             linear_port_space: cg.port_space,
@@ -58,36 +51,31 @@ impl GpuScalarRuntime {
     }
 
     pub fn update_constants(&self) {
-        self.common.context.queue.write_buffer(
-            &self.b_constants,
-            0,
-            bytemuck::bytes_of(&self.constants),
-        );
+        self.constants.write(&self.common.context.queue);
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        if self.constants.time <= 0.0 {
-            self.constants.dt_old = dt;
-        } else {
-            self.constants.dt_old = self.constants.dt;
-        }
-        self.constants.dt = dt;
-        self.update_constants();
+        self.constants.set_dt(&self.common.context.queue, dt);
     }
 
     pub fn set_scheme(&mut self, scheme: u32) {
-        self.constants.scheme = scheme;
+        {
+            let values = self.constants.values_mut();
+            values.scheme = scheme;
+        }
         self.update_constants();
     }
 
     pub fn set_time_scheme(&mut self, scheme: u32) {
-        self.constants.time_scheme = scheme;
+        {
+            let values = self.constants.values_mut();
+            values.time_scheme = scheme;
+        }
         self.update_constants();
     }
 
     pub fn advance_time(&mut self) {
-        self.constants.time += self.constants.dt;
-        self.update_constants();
+        self.constants.advance_time(&self.common.context.queue);
     }
 
     pub fn solve_linear_system_cg_with_size(

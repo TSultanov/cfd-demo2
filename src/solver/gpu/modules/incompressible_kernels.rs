@@ -6,6 +6,8 @@ use crate::solver::gpu::bindings::generated::{
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::structs::CoupledSolverResources;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
 
@@ -23,7 +25,7 @@ pub enum IncompressibleBindGroups {
 }
 
 pub struct IncompressibleKernelsModule {
-    state_step_index: usize,
+    state_step_index: Arc<AtomicUsize>,
 
     bg_mesh: wgpu::BindGroup,
     bg_fields_ping_pong: Vec<wgpu::BindGroup>,
@@ -42,6 +44,7 @@ impl IncompressibleKernelsModule {
         device: &wgpu::Device,
         mesh: &MeshResources,
         fields: &FieldResources,
+        state_step_index: Arc<AtomicUsize>,
         coupled: &CoupledSolverResources,
     ) -> Self {
         let pipeline_prepare_coupled =
@@ -99,12 +102,13 @@ impl IncompressibleKernelsModule {
                         layout: &bgl,
                         entries: &generated_update_fields::WgpuBindGroup0Entries::new(
                             generated_update_fields::WgpuBindGroup0EntriesParams {
-                                state: fields.state_buffers[idx_state].as_entire_buffer_binding(),
-                                state_old: fields.state_buffers[idx_old].as_entire_buffer_binding(),
-                                state_old_old: fields.state_buffers[idx_old_old]
+                                state: fields.state.buffers()[idx_state].as_entire_buffer_binding(),
+                                state_old: fields.state.buffers()[idx_old]
+                                    .as_entire_buffer_binding(),
+                                state_old_old: fields.state.buffers()[idx_old_old]
                                     .as_entire_buffer_binding(),
                                 fluxes: fields.b_fluxes.as_entire_buffer_binding(),
-                                constants: fields.b_constants.as_entire_buffer_binding(),
+                                constants: fields.constants.buffer().as_entire_buffer_binding(),
                             },
                         )
                         .into_array(),
@@ -117,7 +121,7 @@ impl IncompressibleKernelsModule {
         let bg_update_solution = coupled.bg_coupled_solution.clone();
 
         Self {
-            state_step_index: 0,
+            state_step_index,
             bg_mesh,
             bg_fields_ping_pong,
             bg_solver,
@@ -130,15 +134,17 @@ impl IncompressibleKernelsModule {
     }
 
     pub fn set_step_index(&mut self, idx: usize) {
-        self.state_step_index = idx % 3;
+        self.state_step_index.store(idx % 3, Ordering::Relaxed);
     }
 
     fn bg_fields(&self) -> &wgpu::BindGroup {
-        &self.bg_fields_ping_pong[self.state_step_index]
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self.bg_fields_ping_pong[idx]
     }
 
     fn bg_update_fields(&self) -> &wgpu::BindGroup {
-        &self.bg_update_fields_ping_pong[self.state_step_index]
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self.bg_update_fields_ping_pong[idx]
     }
 
     fn bind_mesh_fields_solver(&self, pass: &mut wgpu::ComputePass) {

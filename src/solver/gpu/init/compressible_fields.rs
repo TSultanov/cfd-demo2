@@ -1,3 +1,5 @@
+use crate::solver::gpu::modules::constants::ConstantsModule;
+use crate::solver::gpu::modules::state::PingPongState;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams};
 use wgpu::util::DeviceExt;
 
@@ -9,39 +11,31 @@ pub struct PackedStateConfig {
 
 /// Buffers-only resources for compressible packed-state fields.
 pub struct CompressibleFieldBuffers {
-    pub b_state: wgpu::Buffer,
-    pub b_state_old: wgpu::Buffer,
-    pub b_state_old_old: wgpu::Buffer,
+    pub state: PingPongState,
     pub b_state_iter: wgpu::Buffer,
-    pub state_buffers: Vec<wgpu::Buffer>,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_rho: wgpu::Buffer,
     pub b_grad_rho_u_x: wgpu::Buffer,
     pub b_grad_rho_u_y: wgpu::Buffer,
     pub b_grad_rho_e: wgpu::Buffer,
-    pub b_constants: wgpu::Buffer,
     pub b_low_mach_params: wgpu::Buffer,
-    pub constants: GpuConstants,
+    pub constants: ConstantsModule,
     pub low_mach_params: GpuLowMachParams,
 }
 
 /// Full field resources including bind groups (created after pipelines).
 pub struct CompressibleFieldResources {
-    pub b_state: wgpu::Buffer,
-    pub b_state_old: wgpu::Buffer,
-    pub b_state_old_old: wgpu::Buffer,
+    pub state: PingPongState,
     pub b_state_iter: wgpu::Buffer,
-    pub state_buffers: Vec<wgpu::Buffer>,
     pub b_fluxes: wgpu::Buffer,
     pub b_grad_rho: wgpu::Buffer,
     pub b_grad_rho_u_x: wgpu::Buffer,
     pub b_grad_rho_u_y: wgpu::Buffer,
     pub b_grad_rho_e: wgpu::Buffer,
-    pub b_constants: wgpu::Buffer,
     pub b_low_mach_params: wgpu::Buffer,
     pub bg_fields: wgpu::BindGroup,
     pub bg_fields_ping_pong: Vec<wgpu::BindGroup>,
-    pub constants: GpuConstants,
+    pub constants: ConstantsModule,
     pub low_mach_params: GpuLowMachParams,
 }
 
@@ -133,11 +127,7 @@ pub fn init_compressible_field_buffers(
         inlet_velocity: 0.0,
         ramp_time: 0.0,
     };
-    let b_constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Compressible Constants Buffer"),
-        contents: bytemuck::bytes_of(&constants),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let constants = ConstantsModule::new(device, constants, "Compressible Constants Buffer");
 
     let low_mach_params = GpuLowMachParams::default();
     let b_low_mach_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -146,24 +136,16 @@ pub fn init_compressible_field_buffers(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    let state_buffers = vec![
-        b_state.clone(),
-        b_state_old.clone(),
-        b_state_old_old.clone(),
-    ];
+    let state = PingPongState::new([b_state, b_state_old, b_state_old_old]);
 
     CompressibleFieldBuffers {
-        b_state,
-        b_state_old,
-        b_state_old_old,
+        state,
         b_state_iter,
-        state_buffers,
         b_fluxes,
         b_grad_rho,
         b_grad_rho_u_x,
         b_grad_rho_u_y,
         b_grad_rho_e,
-        b_constants,
         b_low_mach_params,
         constants,
         low_mach_params,
@@ -191,15 +173,15 @@ pub fn create_compressible_field_bind_groups(
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: buffers.state_buffers[idx_state].as_entire_binding(),
+                    resource: buffers.state.buffers()[idx_state].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: buffers.state_buffers[idx_old].as_entire_binding(),
+                    resource: buffers.state.buffers()[idx_old].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: buffers.state_buffers[idx_old_old].as_entire_binding(),
+                    resource: buffers.state.buffers()[idx_old_old].as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -207,7 +189,7 @@ pub fn create_compressible_field_bind_groups(
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: buffers.b_constants.as_entire_binding(),
+                    resource: buffers.constants.buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
@@ -241,17 +223,13 @@ pub fn create_compressible_field_bind_groups(
     let bg_fields = bg_fields_ping_pong[0].clone();
 
     CompressibleFieldResources {
-        b_state: buffers.b_state,
-        b_state_old: buffers.b_state_old,
-        b_state_old_old: buffers.b_state_old_old,
+        state: buffers.state,
         b_state_iter: buffers.b_state_iter,
-        state_buffers: buffers.state_buffers,
         b_fluxes: buffers.b_fluxes,
         b_grad_rho: buffers.b_grad_rho,
         b_grad_rho_u_x: buffers.b_grad_rho_u_x,
         b_grad_rho_u_y: buffers.b_grad_rho_u_y,
         b_grad_rho_e: buffers.b_grad_rho_e,
-        b_constants: buffers.b_constants,
         b_low_mach_params: buffers.b_low_mach_params,
         bg_fields,
         bg_fields_ping_pong,

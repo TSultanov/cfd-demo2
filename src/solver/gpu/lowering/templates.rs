@@ -95,8 +95,7 @@ pub(crate) mod compressible {
         HostOpKind::CompressibleImplicitAdvanceOuterIdx;
     pub(crate) const H_IMPLICIT_FINALIZE: HostOpKind = HostOpKind::CompressibleImplicitFinalize;
 
-    pub(crate) const C_SHOULD_USE_EXPLICIT: CondOpKind =
-        CondOpKind::CompressibleShouldUseExplicit;
+    pub(crate) const C_SHOULD_USE_EXPLICIT: CondOpKind = CondOpKind::CompressibleShouldUseExplicit;
     pub(crate) const N_IMPLICIT_OUTER_ITERS: CountOpKind =
         CountOpKind::CompressibleImplicitOuterIters;
 
@@ -229,8 +228,7 @@ pub(crate) mod incompressible_coupled {
     pub(crate) const G_COUPLED_INIT_PREPARE: GraphOpKind =
         GraphOpKind::IncompressibleCoupledInitPrepare;
 
-    pub(crate) const H_COUPLED_BEGIN_STEP: HostOpKind =
-        HostOpKind::IncompressibleCoupledBeginStep;
+    pub(crate) const H_COUPLED_BEGIN_STEP: HostOpKind = HostOpKind::IncompressibleCoupledBeginStep;
     pub(crate) const H_COUPLED_BEFORE_ITER: HostOpKind =
         HostOpKind::IncompressibleCoupledBeforeIter;
     pub(crate) const H_COUPLED_SOLVE: HostOpKind = HostOpKind::IncompressibleCoupledSolve;

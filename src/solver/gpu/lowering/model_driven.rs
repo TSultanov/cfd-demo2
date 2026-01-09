@@ -102,7 +102,9 @@ async fn lower_parts_for_template(
             let profiling_stats = std::sync::Arc::clone(&plan.common.profiling_stats);
 
             let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::compressible::CompressibleProgramResources::new(plan));
+            resources.insert(models::compressible::CompressibleProgramResources::new(
+                plan,
+            ));
 
             let ops = std::sync::Arc::new(models::compressible::CompressibleOpDispatcher);
 
@@ -139,7 +141,9 @@ async fn lower_parts_for_template(
             let profiling_stats = std::sync::Arc::clone(&plan.common.profiling_stats);
 
             let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::incompressible::IncompressibleProgramResources::new(plan));
+            resources.insert(models::incompressible::IncompressibleProgramResources::new(
+                plan,
+            ));
 
             let ops = std::sync::Arc::new(models::incompressible::IncompressibleOpDispatcher);
 
@@ -186,31 +190,74 @@ async fn lower_parts_for_template(
                     gen_update::compute::create_main_pipeline_embed_source(device);
 
                 let bg_mesh = {
-                    let bgl = device.create_bind_group_layout(
-                        &gen_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-                    );
+                    let bgl = device
+                        .create_bind_group_layout(&gen_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
                     create_bind_group!(
                         device,
                         "GenericCoupled: mesh bind group",
                         &bgl,
                         gen_assembly::WgpuBindGroup0Entries::new(
                             gen_assembly::WgpuBindGroup0EntriesParams {
-                                face_owner: runtime.common.mesh.b_face_owner.as_entire_buffer_binding(),
-                                face_neighbor: runtime.common.mesh.b_face_neighbor.as_entire_buffer_binding(),
-                                face_areas: runtime.common.mesh.b_face_areas.as_entire_buffer_binding(),
-                                face_normals: runtime.common.mesh.b_face_normals.as_entire_buffer_binding(),
-                                face_centers: runtime.common.mesh.b_face_centers.as_entire_buffer_binding(),
-                                cell_centers: runtime.common.mesh.b_cell_centers.as_entire_buffer_binding(),
-                                cell_vols: runtime.common.mesh.b_cell_vols.as_entire_buffer_binding(),
-                                cell_face_offsets: runtime.common.mesh.b_cell_face_offsets.as_entire_buffer_binding(),
-                                cell_faces: runtime.common.mesh.b_cell_faces.as_entire_buffer_binding(),
+                                face_owner: runtime
+                                    .common
+                                    .mesh
+                                    .b_face_owner
+                                    .as_entire_buffer_binding(),
+                                face_neighbor: runtime
+                                    .common
+                                    .mesh
+                                    .b_face_neighbor
+                                    .as_entire_buffer_binding(),
+                                face_areas: runtime
+                                    .common
+                                    .mesh
+                                    .b_face_areas
+                                    .as_entire_buffer_binding(),
+                                face_normals: runtime
+                                    .common
+                                    .mesh
+                                    .b_face_normals
+                                    .as_entire_buffer_binding(),
+                                face_centers: runtime
+                                    .common
+                                    .mesh
+                                    .b_face_centers
+                                    .as_entire_buffer_binding(),
+                                cell_centers: runtime
+                                    .common
+                                    .mesh
+                                    .b_cell_centers
+                                    .as_entire_buffer_binding(),
+                                cell_vols: runtime
+                                    .common
+                                    .mesh
+                                    .b_cell_vols
+                                    .as_entire_buffer_binding(),
+                                cell_face_offsets: runtime
+                                    .common
+                                    .mesh
+                                    .b_cell_face_offsets
+                                    .as_entire_buffer_binding(),
+                                cell_faces: runtime
+                                    .common
+                                    .mesh
+                                    .b_cell_faces
+                                    .as_entire_buffer_binding(),
                                 cell_face_matrix_indices: runtime
                                     .common
                                     .mesh
                                     .b_cell_face_matrix_indices
                                     .as_entire_buffer_binding(),
-                                diagonal_indices: runtime.common.mesh.b_diagonal_indices.as_entire_buffer_binding(),
-                                face_boundary: runtime.common.mesh.b_face_boundary.as_entire_buffer_binding(),
+                                diagonal_indices: runtime
+                                    .common
+                                    .mesh
+                                    .b_diagonal_indices
+                                    .as_entire_buffer_binding(),
+                                face_boundary: runtime
+                                    .common
+                                    .mesh
+                                    .b_face_boundary
+                                    .as_entire_buffer_binding(),
                             }
                         )
                     )
@@ -220,35 +267,51 @@ async fn lower_parts_for_template(
                 let num_cells = runtime.common.num_cells as usize;
                 let zero_state = vec![0.0f32; num_cells * stride];
 
-                let state_buffers = (0..3)
-                    .map(|i| {
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some(&format!("GenericCoupled state buffer {i}")),
-                            contents: cast_slice(&zero_state),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        })
-                    })
-                    .collect::<Vec<_>>();
+                let state = crate::solver::gpu::modules::state::PingPongState::new([
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("GenericCoupled state buffer 0"),
+                        contents: cast_slice(&zero_state),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    }),
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("GenericCoupled state buffer 1"),
+                        contents: cast_slice(&zero_state),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    }),
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("GenericCoupled state buffer 2"),
+                        contents: cast_slice(&zero_state),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    }),
+                ]);
 
                 let bg_fields_ping_pong = {
-                    let bgl = device.create_bind_group_layout(
-                        &gen_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
-                    );
+                    let bgl = device
+                        .create_bind_group_layout(&gen_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
                     let mut out = Vec::new();
                     for i in 0..3 {
-                        let (idx_state, idx_old, idx_old_old) = ping_pong_indices(i);
+                        let (idx_state, idx_old, idx_old_old) =
+                            crate::solver::gpu::modules::state::ping_pong_indices(i);
                         out.push(create_bind_group!(
                             device,
                             &format!("GenericCoupled assembly fields bind group {i}"),
                             &bgl,
                             gen_assembly::WgpuBindGroup1Entries::new(
                                 gen_assembly::WgpuBindGroup1EntriesParams {
-                                    state: state_buffers[idx_state].as_entire_buffer_binding(),
-                                    state_old: state_buffers[idx_old].as_entire_buffer_binding(),
-                                    state_old_old: state_buffers[idx_old_old].as_entire_buffer_binding(),
-                                    constants: runtime.b_constants.as_entire_buffer_binding(),
+                                    state: state.buffers()[idx_state].as_entire_buffer_binding(),
+                                    state_old: state.buffers()[idx_old].as_entire_buffer_binding(),
+                                    state_old_old: state.buffers()[idx_old_old]
+                                        .as_entire_buffer_binding(),
+                                    constants: runtime
+                                        .constants
+                                        .buffer()
+                                        .as_entire_buffer_binding(),
                                 }
                             )
                         ));
@@ -257,20 +320,23 @@ async fn lower_parts_for_template(
                 };
 
                 let bg_update_state_ping_pong = {
-                    let bgl = device.create_bind_group_layout(
-                        &gen_update::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-                    );
+                    let bgl = device
+                        .create_bind_group_layout(&gen_update::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
                     let mut out = Vec::new();
                     for i in 0..3 {
-                        let (idx_state, _, _) = ping_pong_indices(i);
+                        let (idx_state, _, _) =
+                            crate::solver::gpu::modules::state::ping_pong_indices(i);
                         out.push(create_bind_group!(
                             device,
                             &format!("GenericCoupled update state bind group {i}"),
                             &bgl,
                             gen_update::WgpuBindGroup0Entries::new(
                                 gen_update::WgpuBindGroup0EntriesParams {
-                                    state: state_buffers[idx_state].as_entire_buffer_binding(),
-                                    constants: runtime.b_constants.as_entire_buffer_binding(),
+                                    state: state.buffers()[idx_state].as_entire_buffer_binding(),
+                                    constants: runtime
+                                        .constants
+                                        .buffer()
+                                        .as_entire_buffer_binding(),
                                 }
                             )
                         ));
@@ -279,9 +345,8 @@ async fn lower_parts_for_template(
                 };
 
                 let bg_update_solution = {
-                    let bgl = device.create_bind_group_layout(
-                        &gen_update::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
-                    );
+                    let bgl = device
+                        .create_bind_group_layout(&gen_update::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
                     create_bind_group!(
                         device,
                         "GenericCoupled update solution bind group",
@@ -298,9 +363,8 @@ async fn lower_parts_for_template(
                 };
 
                 let bg_solver = {
-                    let bgl = device.create_bind_group_layout(
-                        &gen_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR,
-                    );
+                    let bgl = device
+                        .create_bind_group_layout(&gen_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
                     create_bind_group!(
                         device,
                         "GenericCoupled assembly solver bind group",
@@ -341,9 +405,8 @@ async fn lower_parts_for_template(
                 });
 
                 let bg_bc = {
-                    let bgl = device.create_bind_group_layout(
-                        &gen_assembly::WgpuBindGroup3::LAYOUT_DESCRIPTOR,
-                    );
+                    let bgl = device
+                        .create_bind_group_layout(&gen_assembly::WgpuBindGroup3::LAYOUT_DESCRIPTOR);
                     create_bind_group!(
                         device,
                         "GenericCoupled BC bind group",
@@ -358,6 +421,7 @@ async fn lower_parts_for_template(
                 };
 
                 let kernels = crate::solver::gpu::modules::generic_coupled_kernels::GenericCoupledKernelsModule::new(
+                    state.step_handle(),
                     bg_mesh,
                     bg_fields_ping_pong,
                     bg_solver,
@@ -375,13 +439,11 @@ async fn lower_parts_for_template(
                 let profiling_stats = std::sync::Arc::clone(&runtime.common.profiling_stats);
 
                 let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-                resources.insert(models::generic_coupled::GenericCoupledProgramResources::new(
-                    runtime,
-                    state_buffers,
-                    kernels,
-                    b_bc_kind,
-                    b_bc_value,
-                ));
+                resources.insert(
+                    models::generic_coupled::GenericCoupledProgramResources::new(
+                        runtime, state, kernels, b_bc_kind, b_bc_value,
+                    ),
+                );
 
                 let mut params = HashMap::new();
                 params.insert(PlanParam::Dt, models::generic_coupled::param_dt as _);
@@ -426,14 +488,5 @@ async fn lower_parts_for_template(
                 })
             })
         }
-    }
-}
-
-fn ping_pong_indices(i: usize) -> (usize, usize, usize) {
-    match i {
-        0 => (0, 1, 2),
-        1 => (2, 0, 1),
-        2 => (1, 2, 0),
-        _ => (0, 1, 2),
     }
 }

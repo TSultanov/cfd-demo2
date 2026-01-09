@@ -1,4 +1,6 @@
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub enum GenericCoupledPipeline {
@@ -13,7 +15,7 @@ pub enum GenericCoupledBindGroups {
 }
 
 pub struct GenericCoupledKernelsModule {
-    state_step_index: usize,
+    state_step_index: Arc<AtomicUsize>,
 
     bg_mesh: wgpu::BindGroup,
     bg_fields_ping_pong: Vec<wgpu::BindGroup>,
@@ -29,6 +31,7 @@ pub struct GenericCoupledKernelsModule {
 
 impl GenericCoupledKernelsModule {
     pub fn new(
+        state_step_index: Arc<AtomicUsize>,
         bg_mesh: wgpu::BindGroup,
         bg_fields_ping_pong: Vec<wgpu::BindGroup>,
         bg_solver: wgpu::BindGroup,
@@ -39,7 +42,7 @@ impl GenericCoupledKernelsModule {
         pipeline_update: wgpu::ComputePipeline,
     ) -> Self {
         Self {
-            state_step_index: 0,
+            state_step_index,
             bg_mesh,
             bg_fields_ping_pong,
             bg_solver,
@@ -52,19 +55,21 @@ impl GenericCoupledKernelsModule {
     }
 
     pub fn step_index(&self) -> usize {
-        self.state_step_index
+        self.state_step_index.load(Ordering::Relaxed) % 3
     }
 
     pub fn set_step_index(&mut self, idx: usize) {
-        self.state_step_index = idx % 3;
+        self.state_step_index.store(idx % 3, Ordering::Relaxed);
     }
 
     fn bg_fields(&self) -> &wgpu::BindGroup {
-        &self.bg_fields_ping_pong[self.state_step_index]
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self.bg_fields_ping_pong[idx]
     }
 
     fn bg_update_state(&self) -> &wgpu::BindGroup {
-        &self.bg_update_state_ping_pong[self.state_step_index]
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self.bg_update_state_ping_pong[idx]
     }
 
     fn bind_assembly(&self, pass: &mut wgpu::ComputePass) {

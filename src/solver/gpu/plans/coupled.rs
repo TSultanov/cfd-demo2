@@ -79,7 +79,8 @@ impl GpuSolver {
 
         // Read velocity field to check for evolution and variance
         // This involves a GPU->CPU read, so it has some overhead.
-        let u_data = pollster::block_on(self.read_buffer_f32(&self.b_state, self.num_cells * 8)); // FluidState is 8 f32s = 32 bytes
+        let u_data =
+            pollster::block_on(self.read_buffer_f32(self.fields.state.state(), self.num_cells * 8)); // FluidState is 8 f32s = 32 bytes
 
         // 1. Calculate Variance
         let mut sum_u = 0.0;

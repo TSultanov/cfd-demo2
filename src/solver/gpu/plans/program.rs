@@ -1,7 +1,7 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
+    GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
@@ -16,24 +16,19 @@ pub(crate) type ProgramHostRun = fn(&mut GpuProgramPlan);
 pub(crate) type ProgramInitRun = fn(&GpuProgramPlan);
 pub(crate) type ProgramParamHandler =
     fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
+pub(crate) type ProgramSetParamFallback =
+    fn(&mut GpuProgramPlan, PlanParam, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
 pub(crate) type ProgramStateBufferFn =
     for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
 pub(crate) type ProgramWriteStateFn =
     fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
-pub(crate) type ProgramSetLinearSystemFn =
-    fn(&GpuProgramPlan, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String>;
-pub(crate) type ProgramSolveLinearSystemFn =
-    fn(&mut GpuProgramPlan, n: u32, max_iters: u32, tol: f32) -> Result<LinearSolverStats, String>;
-pub(crate) type ProgramGetLinearSolutionFn =
-    for<'a> fn(&'a GpuProgramPlan) -> PlanFuture<'a, Result<Vec<f32>, String>>;
-
-pub(crate) struct ProgramLinearDebug {
-    pub set_linear_system: ProgramSetLinearSystemFn,
-    pub solve_linear_system_with_size: ProgramSolveLinearSystemFn,
-    pub get_linear_solution: ProgramGetLinearSolutionFn,
-}
+pub(crate) type ProgramStepStatsFn = fn(&GpuProgramPlan) -> PlanStepStats;
+pub(crate) type ProgramStepWithStatsFn =
+    fn(&mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String>;
+pub(crate) type ProgramLinearDebugProvider =
+    fn(&mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug>;
 
 pub(crate) struct ProgramResources {
     by_type: HashMap<TypeId, Box<dyn Any + Send>>,
@@ -109,7 +104,10 @@ pub(crate) struct ModelGpuProgramSpec {
     pub step: Arc<ProgramExecutionPlan>,
     pub initialize_history: Option<ProgramInitRun>,
     pub params: HashMap<PlanParam, ProgramParamHandler>,
-    pub linear_debug: Option<ProgramLinearDebug>,
+    pub set_param_fallback: Option<ProgramSetParamFallback>,
+    pub step_stats: Option<ProgramStepStatsFn>,
+    pub step_with_stats: Option<ProgramStepWithStatsFn>,
+    pub linear_debug: Option<ProgramLinearDebugProvider>,
 }
 
 pub(crate) struct GpuProgramPlan {
@@ -146,12 +144,13 @@ impl GpuProgramPlan {
         param: PlanParam,
         value: PlanParamValue,
     ) -> Result<(), String> {
-        let handler = *self
-            .spec
-            .params
-            .get(&param)
-            .ok_or_else(|| "parameter is not supported by this plan".to_string())?;
-        handler(self, value)
+        if let Some(handler) = self.spec.params.get(&param).copied() {
+            return handler(self, value);
+        }
+        if let Some(fallback) = self.spec.set_param_fallback {
+            return fallback(self, param, value);
+        }
+        Err("parameter is not supported by this plan".into())
     }
 
 }
@@ -185,7 +184,18 @@ impl GpuPlanInstance for GpuProgramPlan {
         (self.spec.write_state_bytes)(self, bytes)
     }
 
+    fn step_stats(&self) -> PlanStepStats {
+        if let Some(stats) = self.spec.step_stats {
+            stats(self)
+        } else {
+            PlanStepStats::default()
+        }
+    }
+
     fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        if let Some(step) = self.spec.step_with_stats {
+            return step(self);
+        }
         self.last_linear_stats = LinearSolverStats::default();
         self.step();
         Ok(if self.last_linear_stats.iterations > 0 {
@@ -196,8 +206,8 @@ impl GpuPlanInstance for GpuProgramPlan {
     }
 
     fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
-        self.spec.linear_debug.as_ref()?;
-        Some(self)
+        let provider = self.spec.linear_debug?;
+        provider(self)
     }
 
     fn step(&mut self) {
@@ -223,42 +233,5 @@ impl GpuPlanInstance for GpuProgramPlan {
             )
             .await
         })
-    }
-}
-
-impl PlanLinearSystemDebug for GpuProgramPlan {
-    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        let debug = self
-            .spec
-            .linear_debug
-            .as_ref()
-            .ok_or_else(|| "linear system debug not supported by this plan".to_string())?;
-        (debug.set_linear_system)(self, matrix_values, rhs)
-    }
-
-    fn solve_linear_system_with_size(
-        &mut self,
-        n: u32,
-        max_iters: u32,
-        tol: f32,
-    ) -> Result<LinearSolverStats, String> {
-        let debug = self
-            .spec
-            .linear_debug
-            .as_ref()
-            .ok_or_else(|| "linear system debug not supported by this plan".to_string())?;
-        (debug.solve_linear_system_with_size)(self, n, max_iters, tol)
-    }
-
-    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-        let debug = match self.spec.linear_debug.as_ref() {
-            Some(debug) => debug,
-            None => {
-                return Box::pin(async {
-                    Err("linear system debug not supported by this plan".into())
-                })
-            }
-        };
-        (debug.get_linear_solution)(self)
     }
 }

@@ -3,8 +3,8 @@ use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
 };
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
-use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture, PlanParam, PlanParamValue};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramLinearDebug, ProgramNode};
+use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramNode};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
@@ -56,6 +56,31 @@ impl GenericCoupledProgramResources {
             num_cells: self.runtime.common.num_cells,
             num_faces: 0,
         }
+    }
+}
+
+impl PlanLinearSystemDebug for GenericCoupledProgramResources {
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        self.runtime.set_linear_system(matrix_values, rhs)
+    }
+
+    fn solve_linear_system_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String> {
+        if n != self.runtime.common.num_cells {
+            return Err(format!(
+                "requested solve size {} does not match num_cells {}",
+                n, self.runtime.common.num_cells
+            ));
+        }
+        Ok(self.runtime.solve_linear_system_cg_with_size(n, max_iters, tol))
+    }
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move { self.runtime.get_linear_solution(self.runtime.common.num_cells).await })
     }
 }
 
@@ -182,35 +207,8 @@ fn param_detailed_profiling(
     Ok(())
 }
 
-fn debug_set_linear_system(
-    plan: &GpuProgramPlan,
-    matrix_values: &[f32],
-    rhs: &[f32],
-) -> Result<(), String> {
-    res(plan).runtime.set_linear_system(matrix_values, rhs)
-}
-
-fn debug_solve_linear_system_with_size(
-    plan: &mut GpuProgramPlan,
-    n: u32,
-    max_iters: u32,
-    tol: f32,
-) -> Result<LinearSolverStats, String> {
-    let r = res(plan);
-    if n != r.runtime.common.num_cells {
-        return Err(format!(
-            "requested solve size {} does not match num_cells {}",
-            n, r.runtime.common.num_cells
-        ));
-    }
-    Ok(r.runtime.solve_linear_system_cg_with_size(n, max_iters, tol))
-}
-
-fn debug_get_linear_solution(plan: &GpuProgramPlan) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-    Box::pin(async move {
-        let n = res(plan).runtime.common.num_cells;
-        res(plan).runtime.get_linear_solution(n).await
-    })
+fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug> {
+    Some(res_mut(plan) as &mut dyn PlanLinearSystemDebug)
 }
 
 fn build_assembly_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
@@ -468,11 +466,10 @@ pub(crate) async fn lower_generic_coupled_program(
             step,
             initialize_history: None,
             params,
-            linear_debug: Some(ProgramLinearDebug {
-                set_linear_system: debug_set_linear_system,
-                solve_linear_system_with_size: debug_solve_linear_system_with_size,
-                get_linear_solution: debug_get_linear_solution,
-            }),
+            set_param_fallback: None,
+            step_stats: None,
+            step_with_stats: None,
+            linear_debug: Some(linear_debug_provider),
         };
 
         let plan = GpuProgramPlan::new(

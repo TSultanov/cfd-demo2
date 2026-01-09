@@ -1,10 +1,10 @@
-use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture, PlanInitConfig, PlanParam, PlanParamValue};
-use crate::solver::gpu::structs::GpuSolver;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
 
 mod generic_coupled_program;
+mod compressible_program;
+mod incompressible_program;
 
 pub(crate) trait ModelLowerer: Send + Sync {
     fn can_lower(&self, model: &ModelSpec) -> bool;
@@ -33,8 +33,7 @@ impl ModelLowerer for IncompressibleLowerer {
         queue: Option<wgpu::Queue>,
     ) -> PlanFuture<'a, Result<Box<dyn GpuPlanInstance>, String>> {
         Box::pin(async move {
-            let plan = GpuSolver::new(mesh, model.clone(), device, queue).await?;
-            Ok(Box::new(plan) as Box<dyn GpuPlanInstance>)
+            incompressible_program::lower_incompressible_program(mesh, model.clone(), device, queue).await
         })
     }
 }
@@ -54,8 +53,7 @@ impl ModelLowerer for CompressibleLowerer {
         queue: Option<wgpu::Queue>,
     ) -> PlanFuture<'a, Result<Box<dyn GpuPlanInstance>, String>> {
         Box::pin(async move {
-            let plan = CompressiblePlanResources::new(mesh, model.clone(), device, queue).await?;
-            Ok(Box::new(plan) as Box<dyn GpuPlanInstance>)
+            compressible_program::lower_compressible_program(mesh, model.clone(), device, queue).await
         })
     }
 }

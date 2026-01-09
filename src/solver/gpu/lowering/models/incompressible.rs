@@ -5,6 +5,7 @@ use crate::solver::gpu::plans::plan_instance::{
 };
 use crate::solver::gpu::plans::program::{
     CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
+    ProgramOpRegistry,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 
@@ -68,6 +69,60 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GpuSolver {
 }
 
 pub(in crate::solver::gpu::lowering) struct IncompressibleOpDispatcher;
+
+pub(in crate::solver::gpu::lowering) fn register_ops(
+    registry: &mut ProgramOpRegistry,
+) -> Result<(), String> {
+    registry.register_graph(
+        GraphOpKind::IncompressibleCoupledInitPrepare,
+        coupled_graph_init_prepare_run,
+    )?;
+    registry.register_graph(
+        GraphOpKind::IncompressibleCoupledPrepareAssembly,
+        coupled_graph_prepare_assembly_run,
+    )?;
+    registry.register_graph(
+        GraphOpKind::IncompressibleCoupledAssembly,
+        coupled_graph_assembly_run,
+    )?;
+    registry.register_graph(
+        GraphOpKind::IncompressibleCoupledUpdate,
+        coupled_graph_update_run,
+    )?;
+
+    registry.register_host(HostOpKind::IncompressibleCoupledBeginStep, host_coupled_begin_step)?;
+    registry.register_host(
+        HostOpKind::IncompressibleCoupledBeforeIter,
+        host_coupled_before_iter,
+    )?;
+    registry.register_host(HostOpKind::IncompressibleCoupledSolve, host_coupled_solve)?;
+    registry.register_host(
+        HostOpKind::IncompressibleCoupledClearMaxDiff,
+        host_coupled_clear_max_diff,
+    )?;
+    registry.register_host(
+        HostOpKind::IncompressibleCoupledConvergenceAdvance,
+        host_coupled_convergence_and_advance,
+    )?;
+    registry.register_host(
+        HostOpKind::IncompressibleCoupledFinalizeStep,
+        host_coupled_finalize_step,
+    )?;
+
+    registry.register_cond(CondOpKind::IncompressibleHasCoupledResources, has_coupled_resources)?;
+    registry.register_cond(
+        CondOpKind::IncompressibleCoupledNeedsPrepare,
+        coupled_needs_prepare,
+    )?;
+    registry.register_cond(
+        CondOpKind::IncompressibleCoupledShouldContinue,
+        coupled_should_continue,
+    )?;
+
+    registry.register_count(CountOpKind::IncompressibleCoupledMaxIters, coupled_max_iters)?;
+
+    Ok(())
+}
 
 impl ProgramOpDispatcher for IncompressibleOpDispatcher {
     fn run_graph(

@@ -10,6 +10,7 @@ use crate::solver::gpu::modules::state::PingPongState;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{
     CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
+    ProgramOpRegistry,
 };
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -97,6 +98,18 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
 }
 
 pub(in crate::solver::gpu::lowering) struct GenericCoupledOpDispatcher;
+
+pub(in crate::solver::gpu::lowering) fn register_ops(
+    registry: &mut ProgramOpRegistry,
+) -> Result<(), String> {
+    registry.register_graph(GraphOpKind::GenericCoupledScalarAssembly, assembly_graph_run)?;
+    registry.register_graph(GraphOpKind::GenericCoupledScalarUpdate, update_graph_run)?;
+
+    registry.register_host(HostOpKind::GenericCoupledScalarPrepare, host_prepare_step)?;
+    registry.register_host(HostOpKind::GenericCoupledScalarSolve, host_solve_linear_system)?;
+
+    Ok(())
+}
 
 impl ProgramOpDispatcher for GenericCoupledOpDispatcher {
     fn run_graph(

@@ -6,6 +6,7 @@ use crate::solver::gpu::plans::plan_instance::{
 };
 use crate::solver::gpu::plans::program::{
     CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
+    ProgramOpRegistry,
 };
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::env;
@@ -68,6 +69,59 @@ fn res_wrap_mut(plan: &mut GpuProgramPlan) -> &mut CompressibleProgramResources 
 }
 
 pub(in crate::solver::gpu::lowering) struct CompressibleOpDispatcher;
+
+pub(in crate::solver::gpu::lowering) fn register_ops(
+    registry: &mut ProgramOpRegistry,
+) -> Result<(), String> {
+    registry.register_graph(GraphOpKind::CompressibleExplicitGraph, explicit_graph_run)?;
+    registry.register_graph(
+        GraphOpKind::CompressibleImplicitGradAssembly,
+        implicit_grad_assembly_graph_run,
+    )?;
+    registry.register_graph(GraphOpKind::CompressibleImplicitSnapshot, implicit_snapshot_run)?;
+    registry.register_graph(GraphOpKind::CompressibleImplicitApply, implicit_apply_graph_run)?;
+    registry.register_graph(
+        GraphOpKind::CompressiblePrimitiveUpdate,
+        primitive_update_graph_run,
+    )?;
+
+    registry.register_host(HostOpKind::CompressibleExplicitPrepare, host_explicit_prepare)?;
+    registry.register_host(HostOpKind::CompressibleExplicitFinalize, host_explicit_finalize)?;
+    registry.register_host(HostOpKind::CompressibleImplicitPrepare, host_implicit_prepare)?;
+    registry.register_host(
+        HostOpKind::CompressibleImplicitSetIterParams,
+        host_implicit_set_iter_params,
+    )?;
+    registry.register_host(
+        HostOpKind::CompressibleImplicitSolveFgmres,
+        host_implicit_solve_fgmres,
+    )?;
+    registry.register_host(
+        HostOpKind::CompressibleImplicitRecordStats,
+        host_implicit_record_stats,
+    )?;
+    registry.register_host(
+        HostOpKind::CompressibleImplicitSetAlpha,
+        host_implicit_set_alpha_for_apply,
+    )?;
+    registry.register_host(
+        HostOpKind::CompressibleImplicitRestoreAlpha,
+        host_implicit_restore_alpha,
+    )?;
+    registry.register_host(
+        HostOpKind::CompressibleImplicitAdvanceOuterIdx,
+        host_implicit_advance_outer_idx,
+    )?;
+    registry.register_host(HostOpKind::CompressibleImplicitFinalize, host_implicit_finalize)?;
+
+    registry.register_cond(CondOpKind::CompressibleShouldUseExplicit, should_use_explicit)?;
+    registry.register_count(
+        CountOpKind::CompressibleImplicitOuterIters,
+        implicit_outer_iters,
+    )?;
+
+    Ok(())
+}
 
 impl ProgramOpDispatcher for CompressibleOpDispatcher {
     fn run_graph(

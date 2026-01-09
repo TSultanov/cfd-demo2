@@ -92,6 +92,106 @@ pub(crate) trait ProgramOpDispatcher {
     fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize;
 }
 
+pub(crate) type GraphOpHandler =
+    fn(&GpuProgramPlan, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>);
+pub(crate) type HostOpHandler = fn(&mut GpuProgramPlan);
+pub(crate) type CondOpHandler = fn(&GpuProgramPlan) -> bool;
+pub(crate) type CountOpHandler = fn(&GpuProgramPlan) -> usize;
+
+#[derive(Default)]
+pub(crate) struct ProgramOpRegistry {
+    graph: HashMap<GraphOpKind, GraphOpHandler>,
+    host: HashMap<HostOpKind, HostOpHandler>,
+    cond: HashMap<CondOpKind, CondOpHandler>,
+    count: HashMap<CountOpKind, CountOpHandler>,
+}
+
+impl ProgramOpRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register_graph(&mut self, kind: GraphOpKind, handler: GraphOpHandler) -> Result<(), String> {
+        if self.graph.insert(kind, handler).is_some() {
+            return Err(format!("graph op already registered: {kind:?}"));
+        }
+        Ok(())
+    }
+
+    pub fn register_host(&mut self, kind: HostOpKind, handler: HostOpHandler) -> Result<(), String> {
+        if self.host.insert(kind, handler).is_some() {
+            return Err(format!("host op already registered: {kind:?}"));
+        }
+        Ok(())
+    }
+
+    pub fn register_cond(&mut self, kind: CondOpKind, handler: CondOpHandler) -> Result<(), String> {
+        if self.cond.insert(kind, handler).is_some() {
+            return Err(format!("cond op already registered: {kind:?}"));
+        }
+        Ok(())
+    }
+
+    pub fn register_count(
+        &mut self,
+        kind: CountOpKind,
+        handler: CountOpHandler,
+    ) -> Result<(), String> {
+        if self.count.insert(kind, handler).is_some() {
+            return Err(format!("count op already registered: {kind:?}"));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct HybridProgramOpDispatcher {
+    registry: ProgramOpRegistry,
+    legacy: Arc<dyn ProgramOpDispatcher + Send + Sync>,
+}
+
+impl HybridProgramOpDispatcher {
+    pub fn new(registry: ProgramOpRegistry, legacy: Arc<dyn ProgramOpDispatcher + Send + Sync>) -> Self {
+        Self { registry, legacy }
+    }
+}
+
+impl ProgramOpDispatcher for HybridProgramOpDispatcher {
+    fn run_graph(
+        &self,
+        kind: GraphOpKind,
+        plan: &GpuProgramPlan,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<GraphDetail>) {
+        if let Some(handler) = self.registry.graph.get(&kind).copied() {
+            return handler(plan, context, mode);
+        }
+        self.legacy.run_graph(kind, plan, context, mode)
+    }
+
+    fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan) {
+        if let Some(handler) = self.registry.host.get(&kind).copied() {
+            handler(plan);
+            return;
+        }
+        self.legacy.run_host(kind, plan);
+    }
+
+    fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool {
+        if let Some(handler) = self.registry.cond.get(&kind).copied() {
+            return handler(plan);
+        }
+        self.legacy.eval_cond(kind, plan)
+    }
+
+    fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize {
+        if let Some(handler) = self.registry.count.get(&kind).copied() {
+            return handler(plan);
+        }
+        self.legacy.eval_count(kind, plan)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramBlockId(pub u16);
 

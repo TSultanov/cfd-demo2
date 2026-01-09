@@ -1,10 +1,8 @@
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
-use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::scheme::Scheme;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
 pub(crate) type PlanFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
@@ -83,59 +81,4 @@ pub(crate) trait PlanLinearSystemDebug: Send {
     ) -> Result<LinearSolverStats, String>;
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>>;
-}
-
-pub(crate) trait GpuPlanInstance: Send {
-    fn num_cells(&self) -> u32;
-    fn time(&self) -> f32;
-    fn dt(&self) -> f32;
-    fn state_buffer(&self) -> &wgpu::Buffer;
-
-    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String>;
-
-    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String>;
-
-    fn step_stats(&self) -> PlanStepStats {
-        PlanStepStats::default()
-    }
-
-    fn perform(&self, action: PlanAction) -> Result<(), String> {
-        let stats = self.profiling_stats();
-        match action {
-            PlanAction::StartProfilingSession => {
-                stats.start_session();
-                Ok(())
-            }
-            PlanAction::EndProfilingSession => {
-                stats.end_session();
-                Ok(())
-            }
-            PlanAction::PrintProfilingReport => {
-                stats.print_report();
-                Ok(())
-            }
-        }
-    }
-
-    fn profiling_stats(&self) -> Arc<ProfilingStats>;
-
-    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        self.step();
-        let stats = self.step_stats();
-        if let Some((a, b, c)) = stats.linear_stats {
-            Ok(vec![a, b, c])
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
-    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
-        None
-    }
-
-    fn step(&mut self);
-
-    fn initialize_history(&self);
-
-    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>>;
 }

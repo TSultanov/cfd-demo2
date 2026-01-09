@@ -1,7 +1,7 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
+    PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
@@ -200,38 +200,35 @@ impl GpuProgramPlan {
         Err("parameter is not supported by this plan".into())
     }
 
-}
-
-impl GpuPlanInstance for GpuProgramPlan {
-    fn num_cells(&self) -> u32 {
+    pub fn num_cells(&self) -> u32 {
         (self.spec.num_cells)(self)
     }
 
-    fn time(&self) -> f32 {
+    pub fn time(&self) -> f32 {
         (self.spec.time)(self)
     }
 
-    fn dt(&self) -> f32 {
+    pub fn dt(&self) -> f32 {
         (self.spec.dt)(self)
     }
 
-    fn state_buffer(&self) -> &wgpu::Buffer {
+    pub fn state_buffer(&self) -> &wgpu::Buffer {
         (self.spec.state_buffer)(self)
     }
 
-    fn profiling_stats(&self) -> Arc<ProfilingStats> {
+    pub fn profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.profiling_stats)
     }
 
-    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
+    pub fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
         self.set_supported_param(param, value)
     }
 
-    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+    pub fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
         (self.spec.write_state_bytes)(self, bytes)
     }
 
-    fn step_stats(&self) -> PlanStepStats {
+    pub fn step_stats(&self) -> PlanStepStats {
         if let Some(stats) = self.spec.step_stats {
             stats(self)
         } else {
@@ -239,7 +236,24 @@ impl GpuPlanInstance for GpuProgramPlan {
         }
     }
 
-    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+    pub fn perform(&self, action: PlanAction) -> Result<(), String> {
+        match action {
+            PlanAction::StartProfilingSession => {
+                self.profiling_stats.start_session();
+                Ok(())
+            }
+            PlanAction::EndProfilingSession => {
+                self.profiling_stats.end_session();
+                Ok(())
+            }
+            PlanAction::PrintProfilingReport => {
+                self.profiling_stats.print_report();
+                Ok(())
+            }
+        }
+    }
+
+    pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
         if let Some(step) = self.spec.step_with_stats {
             return step(self);
         }
@@ -256,23 +270,23 @@ impl GpuPlanInstance for GpuProgramPlan {
         })
     }
 
-    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
+    pub fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
         let provider = self.spec.linear_debug?;
         provider(self)
     }
 
-    fn step(&mut self) {
+    pub fn step(&mut self) {
         let step = Arc::clone(&self.spec.step);
         step.execute(self);
     }
 
-    fn initialize_history(&self) {
+    pub fn initialize_history(&self) {
         if let Some(init) = self.spec.initialize_history {
             init(self);
         }
     }
 
-    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
+    pub fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
         Box::pin(async move {
             read_buffer_cached(
                 &self.context,

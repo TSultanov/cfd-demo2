@@ -3,7 +3,9 @@ use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
 };
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
-use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::{
+    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
+};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramNode};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -245,7 +247,7 @@ pub(crate) async fn lower_generic_coupled_program(
     model: ModelSpec,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
-) -> Result<Box<dyn GpuPlanInstance>, String> {
+) -> Result<GpuProgramPlan, String> {
     let coupled_stride = model.system.unknowns_per_cell();
     if coupled_stride != 1 {
         return Err(format!(
@@ -491,6 +493,6 @@ pub(crate) async fn lower_generic_coupled_program(
             program_resources,
             spec,
         );
-        Ok(Box::new(plan) as Box<dyn GpuPlanInstance>)
+        Ok(plan)
     })
 }

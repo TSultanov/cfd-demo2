@@ -1,5 +1,5 @@
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
+    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
     GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramNode, ProgramResources,
@@ -457,7 +457,7 @@ pub(crate) async fn lower_incompressible_program(
     model: ModelSpec,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
-) -> Result<Box<dyn GpuPlanInstance>, String> {
+) -> Result<GpuProgramPlan, String> {
     let plan = GpuSolver::new(mesh, model.clone(), device, queue).await?;
 
     let context = crate::solver::gpu::context::GpuContext {
@@ -557,11 +557,11 @@ pub(crate) async fn lower_incompressible_program(
         linear_debug: Some(linear_debug_provider),
     };
 
-    Ok(Box::new(GpuProgramPlan::new(
+    Ok(GpuProgramPlan::new(
         model,
         context,
         profiling_stats,
         resources,
         spec,
-    )))
+    ))
 }

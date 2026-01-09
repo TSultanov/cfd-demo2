@@ -1,4 +1,5 @@
-use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanInitConfig, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::program::GpuProgramPlan;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
 
@@ -11,7 +12,7 @@ async fn lower_program(
     model: &ModelSpec,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
-) -> Result<Box<dyn GpuPlanInstance>, String> {
+) -> Result<GpuProgramPlan, String> {
     match &model.fields {
         ModelFields::Incompressible(_) => {
             incompressible_program::lower_incompressible_program(mesh, model.clone(), device, queue)
@@ -34,7 +35,7 @@ pub(crate) async fn lower_plan_instance(
     config: PlanInitConfig,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
-) -> Result<Box<dyn GpuPlanInstance>, String> {
+) -> Result<GpuProgramPlan, String> {
     let mut plan = lower_program(mesh, model, device, queue).await?;
     plan.set_param(
         PlanParam::AdvectionScheme,

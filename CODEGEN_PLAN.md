@@ -11,7 +11,8 @@ One **model-driven** GPU solver pipeline with:
 
 ## Current State
 - One unified runtime plan type: `GpuProgramPlan` + `ModelGpuProgramSpec`.
-- `GpuPlanInstance` is implemented only by `GpuProgramPlan`; solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources.
+- `build_plan_instance(...)` returns a concrete `GpuProgramPlan` (no dyn plan layer).
+- Solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources only (not part of the plan API).
 - One unified lowering entrypoint: `src/solver/gpu/lowering/mod.rs` `lower_program(...)`.
 - Program runtime supports control flow (`If`, `Repeat`, `While`) + graph dispatch + host nodes.
 - Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes).
@@ -28,22 +29,22 @@ One **model-driven** GPU solver pipeline with:
 - Kernel wiring is still largely handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering), especially for generated-per-model kernels.
 - “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
 - Generic coupled remains intentionally incomplete (limited terms/BCs), and scheme expansion is not yet driving required auxiliary passes automatically.
-- `src/solver/gpu/plans/plan_instance.rs` still exposes a “kitchen sink” interface; several methods/params only make sense for some plan instances. This should become a minimal, universally meaningful interface with optional capabilities expressed via `ModelGpuProgramSpec`.
+- Plan configuration is still driven by a global `PlanParam` enum and a handful of ad-hoc host callbacks; this should become a typed config/update path derived from `ModelSpec` and module capabilities.
 
 ## Next Steps (Prioritized)
-1. **Normalize plan instance interfaces**
-   - Shrink `GpuPlanInstance` to a minimal universally meaningful surface (time/dt/state IO + stepping).
-   - Express optional capabilities (history init, profiling hooks, linear debug, step stats) via `ModelGpuProgramSpec` / capability traits rather than mandatory methods/params.
-2. **Make lowering truly model-driven**
+1. **Make lowering truly model-driven**
    - Introduce a small “program spec IR” (schedule + module-graph composition + ports) that can be **generated per model**.
-   - Target: removing the per-family handwritten program builders and using one generic `lower_program(...)` path for all models.
-3. **Elevate “first-class modules”**
+   - Target: remove per-family handwritten program builders and use one generic `lower_program(...)` path for all models.
+2. **Elevate “first-class modules”**
    - Krylov / preconditioners / AMG become pluggable modules with explicit ports and self-owned resources.
-4. **Reduce handwritten kernel plumbing (incremental)**
+   - Replace solver-family resource containers with module-owned resources reachable only through ports.
+3. **Reduce handwritten kernel plumbing (incremental)**
    - Add small shared helpers/macros to reduce bind-group/pipeline boilerplate in existing builders (start with `generic_coupled_program.rs`).
    - Then move bind-group/pipeline construction toward “generated bindings + generic port wiring” so model-specific code becomes mostly “declare ports + compose module graphs”.
-5. **Drive scheme expansion end-to-end**
+4. **Drive scheme expansion end-to-end**
    - Scheme selection expands to required auxiliary passes (gradients/reconstruction/history) for arbitrary fields/models.
+5. **Replace `PlanParam` with typed config updates**
+   - Replace `PlanParam/PlanParamValue` with typed `SolverConfigDelta` (and/or module-specific deltas) generated from `ModelSpec` + module capabilities.
 
 ## Decisions (Locked In)
 - **Generated-per-model WGSL** stays (no runtime compilation/reflection).

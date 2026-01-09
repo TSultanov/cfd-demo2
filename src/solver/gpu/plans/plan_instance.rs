@@ -76,10 +76,6 @@ pub enum PlanAction {
 pub enum PlanCapability {
     /// Plan supports setting/solving/reading a linear system via the debug hooks.
     LinearSystemDebug,
-    /// Plan exposes the notion of "coupled unknowns" for its linear system.
-    CoupledUnknowns,
-    /// Plan can report FGMRES sizing information.
-    FgmresSizing,
 }
 
 pub(crate) trait PlanLinearSystemDebug: Send {
@@ -93,14 +89,6 @@ pub(crate) trait PlanLinearSystemDebug: Send {
     ) -> Result<LinearSolverStats, String>;
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>>;
-}
-
-pub(crate) trait PlanCoupledUnknowns: Send {
-    fn coupled_unknowns(&self) -> Result<u32, String>;
-}
-
-pub(crate) trait PlanFgmresSizing: Send {
-    fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String>;
 }
 
 pub(crate) trait GpuPlanInstance: Send {
@@ -152,14 +140,6 @@ pub(crate) trait GpuPlanInstance: Send {
     }
 
     fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
-        None
-    }
-
-    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
-        None
-    }
-
-    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
         None
     }
 

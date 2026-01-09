@@ -10,8 +10,7 @@ use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, 
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanCapability, PlanCoupledUnknowns, PlanFgmresSizing,
-    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
+    GpuPlanInstance, PlanCapability, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
@@ -949,8 +948,6 @@ impl GpuPlanInstance for CompressiblePlanResources {
     fn supports(&self, capability: PlanCapability) -> bool {
         match capability {
             PlanCapability::LinearSystemDebug => true,
-            PlanCapability::CoupledUnknowns => true,
-            PlanCapability::FgmresSizing => true,
         }
     }
 
@@ -1033,14 +1030,6 @@ impl GpuPlanInstance for CompressiblePlanResources {
         Some(self)
     }
 
-    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
-        Some(self)
-    }
-
-    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
-        Some(self)
-    }
-
     fn step(&mut self) {
         crate::solver::gpu::plans::compressible::plan::step(self);
     }
@@ -1108,22 +1097,6 @@ impl PlanLinearSystemDebug for CompressiblePlanResources {
                 )
                 .await;
             Ok(bytemuck::cast_slice(&raw).to_vec())
-        })
-    }
-}
-
-impl PlanCoupledUnknowns for CompressiblePlanResources {
-    fn coupled_unknowns(&self) -> Result<u32, String> {
-        Ok(self.num_unknowns)
-    }
-}
-
-impl PlanFgmresSizing for CompressiblePlanResources {
-    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
-        let n = self.num_unknowns;
-        Ok(FgmresSizing {
-            num_unknowns: n,
-            num_dot_groups: (n + 63) / 64,
         })
     }
 }

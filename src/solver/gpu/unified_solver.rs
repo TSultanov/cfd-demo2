@@ -458,18 +458,17 @@ impl GpuUnifiedSolver {
         debug.get_linear_solution().await
     }
 
-    pub fn coupled_unknowns(&mut self) -> Result<u32, String> {
-        let Some(debug) = self.plan.coupled_unknowns_debug() else {
-            return Err("plan does not expose coupled unknown count".into());
-        };
-        debug.coupled_unknowns()
+    pub fn coupled_unknowns(&self) -> Result<u32, String> {
+        Ok(self.num_cells() * self.model.system.unknowns_per_cell())
     }
 
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
-        let Some(debug) = self.plan.fgmres_sizing_debug() else {
-            return Err("plan does not support FGMRES sizing query".into());
-        };
-        debug.fgmres_sizing(max_restart)
+        let _ = max_restart;
+        let n = self.coupled_unknowns()?;
+        Ok(FgmresSizing {
+            num_unknowns: n,
+            num_dot_groups: (n + 63) / 64,
+        })
     }
 
     fn set_field_vec2_any(&mut self, fields: &[&str], values: &[(f64, f64)]) -> Result<(), String> {

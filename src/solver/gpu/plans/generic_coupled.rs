@@ -2,8 +2,7 @@ use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanCapability, PlanCoupledUnknowns, PlanFgmresSizing,
-    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
+    GpuPlanInstance, PlanCapability, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -482,8 +481,6 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
     fn supports(&self, capability: PlanCapability) -> bool {
         match capability {
             PlanCapability::LinearSystemDebug => true,
-            PlanCapability::CoupledUnknowns => true,
-            PlanCapability::FgmresSizing => true,
         }
     }
 
@@ -543,14 +540,6 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
     fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
         Some(self)
     }
-
-    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
-        Some(self)
-    }
-
-    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
-        Some(self)
-    }
 }
 
 impl PlanLinearSystemDebug for GpuGenericCoupledSolver {
@@ -580,22 +569,6 @@ impl PlanLinearSystemDebug for GpuGenericCoupledSolver {
             self.runtime
                 .get_linear_solution(self.runtime.common.num_cells)
                 .await
-        })
-    }
-}
-
-impl PlanCoupledUnknowns for GpuGenericCoupledSolver {
-    fn coupled_unknowns(&self) -> Result<u32, String> {
-        Ok(self.runtime.common.num_cells)
-    }
-}
-
-impl PlanFgmresSizing for GpuGenericCoupledSolver {
-    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
-        let n = self.runtime.common.num_cells;
-        Ok(FgmresSizing {
-            num_unknowns: n,
-            num_dot_groups: (n + 63) / 64,
         })
     }
 }

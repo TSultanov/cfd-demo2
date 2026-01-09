@@ -19,6 +19,7 @@ One **model-driven** GPU solver pipeline with:
 - **Unified Lowering:** Lowering routes through `src/solver/gpu/lowering/model_driven.rs`.
 - **Shared State & Constants:** `PingPongState` and `ConstantsModule` used across solver families.
 - **Kernel Lookup:** Unified via `kernel_registry::kernel_source`.
+- **Linear Solver:** FGMRES logic extracted into generic `solve_fgmres` in `src/solver/gpu/modules/linear_solver.rs`, decoupling algorithm from resource management.
 - **Codegen:** Emits WGSL at build time.
 
 ## Main Blockers
@@ -44,8 +45,9 @@ One **model-driven** GPU solver pipeline with:
    - Remove "scheme implies gradients" heuristics; make it a strict lowering-time contract.
 
 4. **Linear Solver & Preconditioner Pluggability**
-   - Genericize `CompressibleLinearSolver` to be a shared `LinearSolverModule` usable by other solvers (or at least share the FGMRES driver logic more formally).
-   - Move solver selection to a typed registry/factory.
+   - [x] Extract FGMRES driver logic to `LinearSolverModule` (done).
+   - [ ] Genericize `CompressibleLinearSolver` to be a shared `LinearSolverModule` usable by other solvers.
+   - [ ] Move solver selection to a typed registry/factory.
 
 5. **Eliminate Handwritten WGSL**
    - Migrate solver-family-specific shaders (`compressible_*`, `schur_precond`) into the codegen WGSL pipeline.

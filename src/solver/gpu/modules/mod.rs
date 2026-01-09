@@ -6,6 +6,7 @@ pub mod generic_coupled_kernels;
 pub mod graph;
 pub mod krylov_precond;
 pub mod krylov_solve;
+pub mod linear_solver;
 pub mod linear_system;
 pub mod model_kernels;
 pub mod model_lowerer;

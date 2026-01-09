@@ -1,20 +1,16 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
-use crate::solver::gpu::linear_solver::fgmres::{
-    write_params, FgmresPrecondBindings, FgmresSolveOnceConfig, FgmresWorkspace, IterParams,
-    RawFgmresParams,
-};
+use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::modules::compressible_krylov::{
     CompressibleKrylovModule, CompressibleKrylovPreconditionerKind,
 };
 use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
-use crate::solver::gpu::modules::krylov_precond::KrylovDispatch;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
 use crate::solver::gpu::modules::ports::PortSpace;
-use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
-use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use std::collections::HashMap;
 
 pub type CompressibleFgmresResources = KrylovSolveModule<CompressibleKrylovModule>;
@@ -56,7 +52,8 @@ impl CompressibleLinearSolver {
             None => true,
         };
         if rebuild {
-            let resources = self.init_resources(context, n, num_cells, ports, port_space, max_restart);
+            let resources =
+                self.init_resources(context, n, num_cells, ports, port_space, max_restart);
             self.resources = Some(resources);
         }
     }
@@ -194,138 +191,45 @@ impl CompressibleLinearSolver {
         max_restart: usize,
         tol: f32,
     ) -> LinearSolverStats {
-        let start = std::time::Instant::now();
         self.ensure_resources(context, n, num_cells, ports, port_space, max_restart);
-        
+
         let precond_kind = CompressibleKrylovPreconditionerKind::select(
             preconditioner,
             env_flag("CFD2_COMP_AMG", false),
             env_flag("CFD2_COMP_BLOCK_PRECOND", true),
         );
         if precond_kind == CompressibleKrylovPreconditionerKind::Amg {
-            pollster::block_on(self.ensure_amg_resources(context, staging_cache, profiling, ports, port_space, topology));
+            pollster::block_on(self.ensure_amg_resources(
+                context,
+                staging_cache,
+                profiling,
+                ports,
+                port_space,
+                topology,
+            ));
         }
 
-        let Some(mut fgmres) = self.resources.take() else {
+        let Some(fgmres) = self.resources.as_mut() else {
             return LinearSolverStats::default();
         };
         fgmres.precond.set_kind(precond_kind);
 
-        let stats = 'stats: {
-            let KrylovDispatch {
-                grids: dispatch,
-                dofs_dispatch_x_threads,
-                ..
-            } = DispatchGrids::for_sizes(n, num_cells);
-
-            let system = LinearSystemView {
+        self.last_stats = crate::solver::gpu::modules::linear_solver::solve_fgmres(
+            context,
+            fgmres,
+            LinearSystemView {
                 ports,
                 space: port_space,
-            };
-            self.zero_buffer(context, system.x(), n);
-
-            let tol_abs = 1e-6f32;
-            let rhs_norm = fgmres.rhs_norm(context, system, n);
-            if rhs_norm <= tol_abs {
-                let stats = LinearSolverStats {
-                    iterations: 0,
-                    residual: rhs_norm,
-                    converged: true,
-                    diverged: false,
-                    time: start.elapsed(),
-                };
-                if std::env::var("CFD2_DEBUG_FGMRES").ok().as_deref() == Some("1") {
-                    eprintln!(
-                        "fgmres: iters=0 rhs_norm={:.3e} residual={:.3e} converged=true",
-                        rhs_norm, rhs_norm
-                    );
-                }
-                break 'stats stats;
-            }
-
-            let params = RawFgmresParams {
-                n,
-                num_cells,
-                num_iters: 0,
-                omega: 1.0,
-                dispatch_x: dofs_dispatch_x_threads,
-                max_restart: fgmres.fgmres.max_restart() as u32,
-                column_offset: 0,
-                _pad3: 0,
-            };
-            let core = fgmres
-                .fgmres
-                .core(&context.device, &context.queue);
-            write_params(&core, &params);
-            fgmres.precond.prepare(
-                &context.device,
-                &context.queue,
-                &fgmres.fgmres,
-                system.rhs().as_entire_binding(),
-                dispatch.cells,
-            );
-
-            let iter_params = IterParams {
-                current_idx: 0,
-                max_restart: fgmres.fgmres.max_restart() as u32,
-                _pad1: 0,
-                _pad2: 0,
-            };
-
-            fgmres.fgmres.clear_restart_aux(&core);
-            fgmres.fgmres.write_g0(&context.queue, rhs_norm);
-            fgmres.fgmres.init_basis0_from_vector_normalized(
-                &core,
-                system.rhs().as_entire_binding(),
-                1.0 / rhs_norm,
-                "Compressible FGMRES",
-            );
-
-            // Solve (single restart) using the shared GPU FGMRES core.
-            let solve = fgmres.solve_once(
-                context,
-                system,
-                rhs_norm,
-                params,
-                iter_params,
-                FgmresSolveOnceConfig {
-                    tol_rel: tol,
-                    tol_abs,
-                    reset_x_before_update: true,
-                },
-                dispatch,
-                "Compressible FGMRES Preconditioner",
-            );
-            let basis_size = solve.basis_size;
-            let final_residual = solve.residual_est;
-            let converged = solve.converged;
-
-            let stats = LinearSolverStats {
-                iterations: basis_size as u32,
-                residual: final_residual,
-                converged,
-                diverged: false,
-                time: start.elapsed(),
-            };
-            if std::env::var("CFD2_DEBUG_FGMRES").ok().as_deref() == Some("1") {
-                eprintln!(
-                    "fgmres: iters={} rhs_norm={:.3e} residual={:.3e} converged={}",
-                    stats.iterations, rhs_norm, stats.residual, stats.converged
-                );
-            }
-            break 'stats stats;
-        };
-
-        self.resources = Some(fgmres);
-        self.last_stats = stats;
-        stats
-    }
-
-    fn zero_buffer(&self, context: &GpuContext, buffer: &wgpu::Buffer, n: u32) {
-        let zeros = vec![0.0f32; n as usize];
-        context
-            .queue
-            .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
+            },
+            n,
+            num_cells,
+            DispatchGrids::for_sizes(n, num_cells),
+            max_restart,
+            tol,
+            1e-20, // tol_abs
+            "Compressible FGMRES Preconditioner",
+        );
+        self.last_stats
     }
 }
 

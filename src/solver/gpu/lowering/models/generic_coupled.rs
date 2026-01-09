@@ -13,7 +13,7 @@ use crate::solver::gpu::structs::LinearSolverStats;
 
 use crate::solver::gpu::lowering::templates::generic_coupled_scalar as op_ids;
 
-pub(in crate::solver::gpu::lowering) struct GenericCoupledProgramResources {
+pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuScalarRuntime,
     state: PingPongState,
     kernels: GenericCoupledKernelsModule,
@@ -25,7 +25,7 @@ pub(in crate::solver::gpu::lowering) struct GenericCoupledProgramResources {
 }
 
 impl GenericCoupledProgramResources {
-    pub(in crate::solver::gpu::lowering) fn new(
+    pub(crate) fn new(
         runtime: GpuScalarRuntime,
         state: PingPongState,
         kernels: GenericCoupledKernelsModule,
@@ -98,68 +98,59 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
         .expect("missing GenericCoupledProgramResources")
 }
 
-pub(in crate::solver::gpu::lowering) fn register_ops(
-    registry: &mut ProgramOpRegistry,
-) -> Result<(), String> {
+pub(crate) fn register_ops(registry: &mut ProgramOpRegistry) -> Result<(), String> {
     registry.register_graph(op_ids::G_ASSEMBLY, assembly_graph_run)?;
     registry.register_graph(op_ids::G_UPDATE, update_graph_run)?;
 
     registry.register_host(op_ids::H_PREPARE, host_prepare_step)?;
     registry.register_host(op_ids::H_SOLVE, host_solve_linear_system)?;
-    registry.register_host(
-        op_ids::H_FINALIZE,
-        host_finalize_step,
-    )?;
+    registry.register_host(op_ids::H_FINALIZE, host_finalize_step)?;
 
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
+pub(crate) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
     res(plan).runtime.common.num_cells
 }
 
-pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
+pub(crate) fn spec_time(plan: &GpuProgramPlan) -> f32 {
     res(plan).runtime.time_integration.time as f32
 }
 
-pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
+pub(crate) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
     res(plan).runtime.time_integration.dt
 }
 
-pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
+pub(crate) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
     res(plan).state.state()
 }
 
-pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
-    plan: &GpuProgramPlan,
-    bytes: &[u8],
-) -> Result<(), String> {
+pub(crate) fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
     res(plan).state.write_all(&plan.context.queue, bytes);
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn host_prepare_step(plan: &mut GpuProgramPlan) {
+pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     let r = res_mut(plan);
     r.state.advance();
     r.runtime.advance_time();
 }
 
-pub(in crate::solver::gpu::lowering) fn host_finalize_step(plan: &mut GpuProgramPlan) {
+pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
-    r.runtime.time_integration.finalize_step(
-        &mut r.runtime.constants,
-        &queue,
-    );
+    r.runtime
+        .time_integration
+        .finalize_step(&mut r.runtime.constants, &queue);
 }
 
-pub(in crate::solver::gpu::lowering) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
+pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     let r = res(plan);
     let stats = r.runtime.solve_linear_system_cg(400, 1e-6);
     plan.last_linear_stats = stats;
 }
 
-pub(in crate::solver::gpu::lowering) fn assembly_graph_run(
+pub(crate) fn assembly_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -174,7 +165,7 @@ pub(in crate::solver::gpu::lowering) fn assembly_graph_run(
     )
 }
 
-pub(in crate::solver::gpu::lowering) fn update_graph_run(
+pub(crate) fn update_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
@@ -183,10 +174,7 @@ pub(in crate::solver::gpu::lowering) fn update_graph_run(
     run_module_graph(&r.update_graph, context, &r.kernels, r.runtime_dims(), mode)
 }
 
-pub(in crate::solver::gpu::lowering) fn param_dt(
-    plan: &mut GpuProgramPlan,
-    value: PlanParamValue,
-) -> Result<(), String> {
+pub(crate) fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
     let PlanParamValue::F32(dt) = value else {
         return Err("invalid value type".into());
     };
@@ -194,7 +182,7 @@ pub(in crate::solver::gpu::lowering) fn param_dt(
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn param_advection_scheme(
+pub(crate) fn param_advection_scheme(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,
 ) -> Result<(), String> {
@@ -205,7 +193,7 @@ pub(in crate::solver::gpu::lowering) fn param_advection_scheme(
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn param_time_scheme(
+pub(crate) fn param_time_scheme(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,
 ) -> Result<(), String> {
@@ -216,14 +204,14 @@ pub(in crate::solver::gpu::lowering) fn param_time_scheme(
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn param_preconditioner(
+pub(crate) fn param_preconditioner(
     _plan: &mut GpuProgramPlan,
     _value: PlanParamValue,
 ) -> Result<(), String> {
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn param_detailed_profiling(
+pub(crate) fn param_detailed_profiling(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,
 ) -> Result<(), String> {
@@ -238,7 +226,7 @@ pub(in crate::solver::gpu::lowering) fn param_detailed_profiling(
     Ok(())
 }
 
-pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
+pub(crate) fn linear_debug_provider(
     plan: &mut GpuProgramPlan,
 ) -> Option<&mut dyn PlanLinearSystemDebug> {
     Some(res_mut(plan) as &mut dyn PlanLinearSystemDebug)

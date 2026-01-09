@@ -5,9 +5,9 @@ use crate::solver::model::ModelSpec;
 
 pub(crate) mod kernel_registry;
 mod model_driven;
-mod models;
+pub(crate) mod models;
 mod templates;
-mod types;
+pub(crate) mod types;
 
 pub(crate) async fn lower_plan_instance(
     mesh: &Mesh,

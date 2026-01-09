@@ -11,6 +11,17 @@ use crate::solver::model::ModelSpec;
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
+macro_rules! create_bind_group {
+    ($device:expr, $label:expr, $layout:expr, $entries:expr) => {{
+        let entries = $entries.into_array();
+        $device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some($label),
+            layout: $layout,
+            entries: &entries,
+        })
+    }};
+}
+
 macro_rules! with_generic_coupled_kernels {
     ($model_id:expr, |$gen_assembly:ident, $gen_update:ident| $body:block) => {{
         match $model_id {
@@ -254,27 +265,29 @@ pub(crate) async fn lower_generic_coupled_program(
 
         let bg_mesh = {
             let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GenericCoupled: mesh bind group"),
-                layout: &bgl,
-                entries: &gen_assembly::WgpuBindGroup0Entries::new(
-                    gen_assembly::WgpuBindGroup0EntriesParams {
-                        face_owner: runtime.common.mesh.b_face_owner.as_entire_buffer_binding(),
-                        face_neighbor: runtime.common.mesh.b_face_neighbor.as_entire_buffer_binding(),
-                        face_areas: runtime.common.mesh.b_face_areas.as_entire_buffer_binding(),
-                        face_normals: runtime.common.mesh.b_face_normals.as_entire_buffer_binding(),
-                        face_centers: runtime.common.mesh.b_face_centers.as_entire_buffer_binding(),
-                        cell_centers: runtime.common.mesh.b_cell_centers.as_entire_buffer_binding(),
-                        cell_vols: runtime.common.mesh.b_cell_vols.as_entire_buffer_binding(),
-                        cell_face_offsets: runtime.common.mesh.b_cell_face_offsets.as_entire_buffer_binding(),
-                        cell_faces: runtime.common.mesh.b_cell_faces.as_entire_buffer_binding(),
-                        cell_face_matrix_indices: runtime.common.mesh.b_cell_face_matrix_indices.as_entire_buffer_binding(),
-                        diagonal_indices: runtime.common.mesh.b_diagonal_indices.as_entire_buffer_binding(),
-                        face_boundary: runtime.common.mesh.b_face_boundary.as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            })
+            create_bind_group!(
+                device,
+                "GenericCoupled: mesh bind group",
+                &bgl,
+                gen_assembly::WgpuBindGroup0Entries::new(gen_assembly::WgpuBindGroup0EntriesParams {
+                    face_owner: runtime.common.mesh.b_face_owner.as_entire_buffer_binding(),
+                    face_neighbor: runtime.common.mesh.b_face_neighbor.as_entire_buffer_binding(),
+                    face_areas: runtime.common.mesh.b_face_areas.as_entire_buffer_binding(),
+                    face_normals: runtime.common.mesh.b_face_normals.as_entire_buffer_binding(),
+                    face_centers: runtime.common.mesh.b_face_centers.as_entire_buffer_binding(),
+                    cell_centers: runtime.common.mesh.b_cell_centers.as_entire_buffer_binding(),
+                    cell_vols: runtime.common.mesh.b_cell_vols.as_entire_buffer_binding(),
+                    cell_face_offsets: runtime.common.mesh.b_cell_face_offsets.as_entire_buffer_binding(),
+                    cell_faces: runtime.common.mesh.b_cell_faces.as_entire_buffer_binding(),
+                    cell_face_matrix_indices: runtime
+                        .common
+                        .mesh
+                        .b_cell_face_matrix_indices
+                        .as_entire_buffer_binding(),
+                    diagonal_indices: runtime.common.mesh.b_diagonal_indices.as_entire_buffer_binding(),
+                    face_boundary: runtime.common.mesh.b_face_boundary.as_entire_buffer_binding(),
+                })
+            )
         };
 
         let stride = model.state_layout.stride() as usize;
@@ -298,19 +311,17 @@ pub(crate) async fn lower_generic_coupled_program(
             let mut out = Vec::new();
             for i in 0..3 {
                 let (idx_state, idx_old, idx_old_old) = ping_pong_indices(i);
-                out.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("GenericCoupled assembly fields bind group {i}")),
-                    layout: &bgl,
-                    entries: &gen_assembly::WgpuBindGroup1Entries::new(
-                        gen_assembly::WgpuBindGroup1EntriesParams {
-                            state: state_buffers[idx_state].as_entire_buffer_binding(),
-                            state_old: state_buffers[idx_old].as_entire_buffer_binding(),
-                            state_old_old: state_buffers[idx_old_old].as_entire_buffer_binding(),
-                            constants: runtime.b_constants.as_entire_buffer_binding(),
-                        },
-                    )
-                    .into_array(),
-                }));
+                out.push(create_bind_group!(
+                    device,
+                    &format!("GenericCoupled assembly fields bind group {i}"),
+                    &bgl,
+                    gen_assembly::WgpuBindGroup1Entries::new(gen_assembly::WgpuBindGroup1EntriesParams {
+                        state: state_buffers[idx_state].as_entire_buffer_binding(),
+                        state_old: state_buffers[idx_old].as_entire_buffer_binding(),
+                        state_old_old: state_buffers[idx_old_old].as_entire_buffer_binding(),
+                        constants: runtime.b_constants.as_entire_buffer_binding(),
+                    })
+                ));
             }
             out
         };
@@ -320,52 +331,55 @@ pub(crate) async fn lower_generic_coupled_program(
             let mut out = Vec::new();
             for i in 0..3 {
                 let (idx_state, _, _) = ping_pong_indices(i);
-                out.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("GenericCoupled update state bind group {i}")),
-                    layout: &bgl,
-                    entries: &gen_update::WgpuBindGroup0Entries::new(
-                        gen_update::WgpuBindGroup0EntriesParams {
-                            state: state_buffers[idx_state].as_entire_buffer_binding(),
-                            constants: runtime.b_constants.as_entire_buffer_binding(),
-                        },
-                    )
-                    .into_array(),
-                }));
+                out.push(create_bind_group!(
+                    device,
+                    &format!("GenericCoupled update state bind group {i}"),
+                    &bgl,
+                    gen_update::WgpuBindGroup0Entries::new(gen_update::WgpuBindGroup0EntriesParams {
+                        state: state_buffers[idx_state].as_entire_buffer_binding(),
+                        constants: runtime.b_constants.as_entire_buffer_binding(),
+                    })
+                ));
             }
             out
         };
 
         let bg_update_solution = {
             let bgl = device.create_bind_group_layout(&gen_update::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GenericCoupled update solution bind group"),
-                layout: &bgl,
-                entries: &gen_update::WgpuBindGroup1Entries::new(
-                    gen_update::WgpuBindGroup1EntriesParams {
-                        x: runtime
-                            .linear_port_space
-                            .buffer(runtime.linear_ports.x)
-                            .as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            })
+            create_bind_group!(
+                device,
+                "GenericCoupled update solution bind group",
+                &bgl,
+                gen_update::WgpuBindGroup1Entries::new(gen_update::WgpuBindGroup1EntriesParams {
+                    x: runtime
+                        .linear_port_space
+                        .buffer(runtime.linear_ports.x)
+                        .as_entire_buffer_binding(),
+                })
+            )
         };
 
         let bg_solver = {
             let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GenericCoupled assembly solver bind group"),
-                layout: &bgl,
-                entries: &gen_assembly::WgpuBindGroup2Entries::new(
-                    gen_assembly::WgpuBindGroup2EntriesParams {
-                        matrix_values: runtime.linear_port_space.buffer(runtime.linear_ports.values).as_entire_buffer_binding(),
-                        rhs: runtime.linear_port_space.buffer(runtime.linear_ports.rhs).as_entire_buffer_binding(),
-                        scalar_row_offsets: runtime.linear_port_space.buffer(runtime.linear_ports.row_offsets).as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            })
+            create_bind_group!(
+                device,
+                "GenericCoupled assembly solver bind group",
+                &bgl,
+                gen_assembly::WgpuBindGroup2Entries::new(gen_assembly::WgpuBindGroup2EntriesParams {
+                    matrix_values: runtime
+                        .linear_port_space
+                        .buffer(runtime.linear_ports.values)
+                        .as_entire_buffer_binding(),
+                    rhs: runtime
+                        .linear_port_space
+                        .buffer(runtime.linear_ports.rhs)
+                        .as_entire_buffer_binding(),
+                    scalar_row_offsets: runtime
+                        .linear_port_space
+                        .buffer(runtime.linear_ports.row_offsets)
+                        .as_entire_buffer_binding(),
+                })
+            )
         };
 
         let (bc_kind, bc_value) = model
@@ -386,17 +400,15 @@ pub(crate) async fn lower_generic_coupled_program(
 
         let bg_bc = {
             let bgl = device.create_bind_group_layout(&gen_assembly::WgpuBindGroup3::LAYOUT_DESCRIPTOR);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GenericCoupled BC bind group"),
-                layout: &bgl,
-                entries: &gen_assembly::WgpuBindGroup3Entries::new(
-                    gen_assembly::WgpuBindGroup3EntriesParams {
-                        bc_kind: b_bc_kind.as_entire_buffer_binding(),
-                        bc_value: b_bc_value.as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
-            })
+            create_bind_group!(
+                device,
+                "GenericCoupled BC bind group",
+                &bgl,
+                gen_assembly::WgpuBindGroup3Entries::new(gen_assembly::WgpuBindGroup3EntriesParams {
+                    bc_kind: b_bc_kind.as_entire_buffer_binding(),
+                    bc_value: b_bc_value.as_entire_buffer_binding(),
+                })
+            )
         };
 
         let kernels = GenericCoupledKernelsModule::new(

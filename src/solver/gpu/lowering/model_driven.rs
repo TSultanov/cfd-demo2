@@ -1,7 +1,7 @@
 use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, HybridProgramOpDispatcher, ProgramOpRegistry};
 use crate::solver::mesh::Mesh;
-use crate::solver::model::ModelSpec;
+use crate::solver::model::{KernelKind, ModelSpec};
 use std::collections::HashMap;
 
 use super::kernel_registry;
@@ -159,12 +159,13 @@ async fn lower_parts_for_template(
 
             let device = &runtime.common.context.device;
 
-            let sources = kernel_registry::generic_coupled_sources(model.id)?;
-            let assembly_bindings = sources.assembly.bindings;
-            let update_bindings = sources.update.bindings;
+            let assembly = kernel_registry::kernel_source(model.id, KernelKind::GenericCoupledAssembly)?;
+            let update = kernel_registry::kernel_source(model.id, KernelKind::GenericCoupledUpdate)?;
+            let assembly_bindings = assembly.bindings;
+            let update_bindings = update.bindings;
 
-            let pipeline_assembly = (sources.assembly.create_pipeline)(device);
-            let pipeline_update = (sources.update.create_pipeline)(device);
+            let pipeline_assembly = (assembly.create_pipeline)(device);
+            let pipeline_update = (update.create_pipeline)(device);
 
             let bg_mesh = {
                 let bgl = pipeline_assembly.get_bind_group_layout(0);

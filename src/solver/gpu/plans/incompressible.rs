@@ -169,11 +169,6 @@ impl GpuSolver {
         bytemuck::cast_slice(&data).to_vec()
     }
 
-    /// Perform a single timestep of the coupled solver
-    pub fn step(&mut self) {
-        self.step_coupled();
-    }
-
     /// Get a reference to the detailed profiling statistics
     pub fn get_profiling_stats(&self) -> Arc<ProfilingStats> {
         Arc::clone(&self.common.profiling_stats)

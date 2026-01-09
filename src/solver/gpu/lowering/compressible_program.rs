@@ -81,10 +81,6 @@ fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), Str
     Ok(())
 }
 
-fn host_step(plan: &mut GpuProgramPlan) {
-    res_mut(plan).step();
-}
-
 fn should_use_explicit(plan: &GpuProgramPlan) -> bool {
     res(plan).should_use_explicit()
 }

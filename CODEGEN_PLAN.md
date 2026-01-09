@@ -14,8 +14,9 @@ One **model-driven** GPU solver pipeline with:
 - `GpuPlanInstance` is implemented only by `GpuProgramPlan`; solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources.
 - One unified lowering entrypoint: `src/solver/gpu/lowering/mod.rs` `lower_program(...)`.
 - Program runtime supports control flow (`If`, `Repeat`, `While`) + graph dispatch + host nodes.
-- Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes), not legacy `step_with_stats()`.
-- Incompressible coupled stepping is expressed as a program schedule (graphs + host nodes + outer-loop control flow), not legacy `step_coupled_impl()`.
+- Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes).
+- Incompressible coupled stepping is expressed as a program schedule (graphs + host nodes + outer-loop control flow).
+- Legacy per-family step loops (`step_with_stats`/`step_coupled_impl`) were removed; solver-family structs now exist only as internal resource containers + helpers.
 
 ## Assessment (Are We Approaching The Goal?)
 - Yes: the public surface is unified, config flows into lowering, and the runtime is moving toward module-graph execution with shared Krylov/FGMRES helpers.
@@ -23,6 +24,7 @@ One **model-driven** GPU solver pipeline with:
 
 ## Remaining Gaps (Concrete)
 - `ModelGpuProgramSpec` is still mostly **function-pointer glue** over solver-family containers rather than a first-class “ports + module graph + dispatch plan” spec.
+- Lowering still has per-family program builders (`compressible_program.rs` / `incompressible_program.rs` / `generic_coupled_program.rs`); schedules are handwritten rather than derived from `ModelSpec` + config.
 - Kernel wiring is still handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering).
 - “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
 - Generic coupled remains intentionally incomplete (limited terms/BCs), and scheme expansion is not yet driving required auxiliary passes automatically.
@@ -32,8 +34,9 @@ One **model-driven** GPU solver pipeline with:
 1. **Normalize plan instance interfaces**
    - Shrink `GpuPlanInstance` to a minimal universally meaningful surface (time/dt/state IO + stepping).
    - Express optional capabilities (history init, profiling hooks, linear debug, step stats) via `ModelGpuProgramSpec` / capability traits rather than mandatory methods/params.
-2. **Delete migrated legacy plan types**
-   - Once incompressible/compressible schedules live in specs, remove `GpuSolver`/`CompressiblePlanResources` as `GpuPlanInstance` implementations (keep only as internal lowered resources/modules).
+2. **Make lowering truly model-driven**
+   - Introduce a small “program spec IR” (schedule + module-graph composition + ports) that can be **generated per model**.
+   - Target: removing the per-family handwritten program builders and using one generic `lower_program(...)` path for all models.
 3. **Elevate “first-class modules”**
    - Krylov / preconditioners / AMG become pluggable modules with explicit ports and self-owned resources.
 4. **Reduce handwritten kernel plumbing**

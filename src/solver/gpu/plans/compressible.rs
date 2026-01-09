@@ -1,8 +1,6 @@
 use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::{
-    run_module_graph, ExecutionPlan, GraphExecMode, GraphNode, PlanNode,
-};
+use crate::solver::gpu::execution_plan::{run_module_graph, GraphExecMode};
 use crate::solver::gpu::modules::compressible_kernels::CompressibleKernelsModule;
 use crate::solver::gpu::init::compressible_fields::create_compressible_field_bind_groups;
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
@@ -317,98 +315,6 @@ impl CompressiblePlanResources {
         })])
     }
 
-    fn implicit_iter_plan_apply_run(
-        solver: &CompressiblePlanResources,
-        context: &GpuContext,
-        mode: GraphExecMode,
-    ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
-        run_module_graph(
-            &solver.implicit_apply_module_graph,
-            context,
-            &solver.kernels,
-            RuntimeDims {
-                num_cells: solver.num_cells,
-                num_faces: solver.num_faces,
-            },
-            mode,
-        )
-    }
-
-    fn implicit_host_solve_fgmres(solver: &mut CompressiblePlanResources) {
-        let mut iter_stats =
-            solver.solve_compressible_fgmres(solver.implicit_max_restart, solver.implicit_tol);
-        if !iter_stats.converged {
-            let retry_stats = solver.solve_compressible_fgmres(
-                solver.implicit_retry_restart,
-                solver.implicit_retry_tol,
-            );
-            if retry_stats.converged || retry_stats.residual < iter_stats.residual {
-                iter_stats = retry_stats;
-            }
-        }
-        solver.implicit_last_stats = iter_stats;
-    }
-
-    fn implicit_host_set_alpha_for_apply(solver: &mut CompressiblePlanResources) {
-        let apply_alpha = if solver.implicit_last_stats.converged {
-            solver.implicit_base_alpha_u
-        } else {
-            solver.implicit_base_alpha_u * solver.nonconverged_relax
-        };
-        if (solver.constants.alpha_u - apply_alpha).abs() > 1e-6 {
-            solver.constants.alpha_u = apply_alpha;
-            solver.update_constants();
-        }
-    }
-
-    fn implicit_host_restore_alpha(solver: &mut CompressiblePlanResources) {
-        if (solver.constants.alpha_u - solver.implicit_base_alpha_u).abs() > 1e-6 {
-            solver.constants.alpha_u = solver.implicit_base_alpha_u;
-            solver.update_constants();
-        }
-    }
-
-    fn build_implicit_iter_plan() -> ExecutionPlan<CompressiblePlanResources> {
-        ExecutionPlan::new(
-            CompressiblePlanResources::context_ref,
-            vec![
-                PlanNode::Graph(GraphNode {
-                    label: "compressible:implicit_grad_assembly",
-                    run: CompressiblePlanResources::implicit_iter_plan_grad_assembly_run,
-                    mode: GraphExecMode::SplitTimed,
-                }),
-                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
-                    label: "compressible:implicit_fgmres",
-                    run: CompressiblePlanResources::implicit_host_solve_fgmres,
-                }),
-                PlanNode::Graph(GraphNode {
-                    label: "compressible:implicit_snapshot",
-                    run: CompressiblePlanResources::implicit_iter_plan_snapshot_run,
-                    mode: GraphExecMode::SingleSubmit,
-                }),
-                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
-                    label: "compressible:implicit_set_alpha",
-                    run: CompressiblePlanResources::implicit_host_set_alpha_for_apply,
-                }),
-                PlanNode::Graph(GraphNode {
-                    label: "compressible:implicit_apply",
-                    run: CompressiblePlanResources::implicit_iter_plan_apply_run,
-                    mode: GraphExecMode::SingleSubmit,
-                }),
-                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
-                    label: "compressible:implicit_restore_alpha",
-                    run: CompressiblePlanResources::implicit_host_restore_alpha,
-                }),
-            ],
-        )
-    }
-
-    fn implicit_iter_plan() -> &'static ExecutionPlan<CompressiblePlanResources> {
-        static PLAN: std::sync::OnceLock<ExecutionPlan<CompressiblePlanResources>> =
-            std::sync::OnceLock::new();
-        PLAN.get_or_init(CompressiblePlanResources::build_implicit_iter_plan)
-    }
-
     fn update_needs_gradients(&mut self) {
         let scheme = Scheme::from_gpu_id(self.constants.scheme).unwrap_or(Scheme::Upwind);
         let registry = SchemeRegistry::new(scheme);
@@ -675,14 +581,6 @@ impl CompressiblePlanResources {
         self.write_state_all(&state);
     }
 
-    pub fn step(&mut self) {
-        plan::step(self);
-    }
-
-    pub fn step_with_stats(&mut self) -> Vec<LinearSolverStats> {
-        plan::step_with_stats(self)
-    }
-
     pub(crate) fn should_use_explicit(&self) -> bool {
         self.constants.time_scheme == 0 && self.constants.dtau <= 0.0
     }
@@ -882,135 +780,6 @@ impl CompressiblePlanResources {
         for buffer in &self.state_buffers {
             self.common.context.queue.write_buffer(buffer, 0, bytes);
         }
-    }
-}
-
-pub(crate) mod plan {
-    use super::*;
-
-    pub(crate) fn step(solver: &mut CompressiblePlanResources) {
-        let _ = step_with_stats(solver);
-    }
-
-    pub(crate) fn step_with_stats(solver: &mut CompressiblePlanResources) -> Vec<LinearSolverStats> {
-        let step_start = std::time::Instant::now();
-
-        solver.state_step_index = (solver.state_step_index + 1) % 3;
-        solver.kernels.set_step_index(solver.state_step_index);
-
-        let (idx_state, idx_old, idx_old_old) = ping_pong_indices(solver.state_step_index);
-        solver.b_state = solver.state_buffers[idx_state].clone();
-        solver.b_state_old = solver.state_buffers[idx_old].clone();
-        solver.b_state_old_old = solver.state_buffers[idx_old_old].clone();
-
-        solver.constants.time += solver.constants.dt;
-        solver.update_constants();
-
-        // Explicit KT update (rhoCentralFoam-like) for transient Euler timestepping.
-        // The implicit FGMRES path is retained for BDF2/pseudo-time (dtau) workflows.
-        let use_explicit = solver.constants.time_scheme == 0 && solver.constants.dtau <= 0.0;
-        if use_explicit {
-            solver.pre_step_copy();
-
-            let runtime = RuntimeDims {
-                num_cells: solver.num_cells,
-                num_faces: solver.num_faces,
-            };
-            let graph = if solver.needs_gradients {
-                &solver.explicit_module_graph
-            } else {
-                &solver.explicit_module_graph_first_order
-            };
-            let timings = graph.execute_split_timed(&solver.common.context, &solver.kernels, runtime);
-
-            let total_secs = step_start.elapsed().as_secs_f64();
-            let grad_secs = timings.seconds_for("compressible:gradients");
-            let flux_secs = timings.seconds_for("compressible:flux_kt");
-            let explicit_update_secs = timings.seconds_for("compressible:explicit_update");
-            let primitive_update_secs = timings.seconds_for("compressible:primitive_update");
-            solver.profile.record(
-                total_secs,
-                grad_secs,
-                flux_secs,
-                0.0,
-                0.0,
-                explicit_update_secs + primitive_update_secs,
-                0,
-            );
-            solver.constants.dt_old = solver.constants.dt;
-            solver.update_constants();
-            return Vec::new();
-        }
-
-        solver.pre_step_copy();
-
-        let base_alpha_u = solver.constants.alpha_u;
-        let mut stats = Vec::with_capacity(solver.outer_iters);
-        let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
-        let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
-        let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
-        let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5).clamp(0.0, 1.0);
-        let max_restart = env_usize("CFD2_COMP_FGMRES_MAX_RESTART", 80).max(1);
-        let retry_restart = env_usize("CFD2_COMP_FGMRES_RETRY_RESTART", 160).max(1);
-        let mut grad_secs = 0.0f64;
-        let mut assembly_secs = 0.0f64;
-        let mut fgmres_secs = 0.0f64;
-        let mut apply_secs = 0.0f64;
-        let mut update_secs = 0.0f64;
-        let mut fgmres_iters = 0u64;
-        solver.implicit_base_alpha_u = base_alpha_u;
-        for outer_idx in 0..solver.outer_iters {
-            let tol = if outer_idx < warm_iters {
-                tol_base * warm_scale
-            } else {
-                tol_base
-            };
-            let retry_tol = (tol * retry_scale).min(tol_base);
-            solver.implicit_tol = tol;
-            solver.implicit_retry_tol = retry_tol;
-            solver.implicit_max_restart = max_restart;
-            solver.implicit_retry_restart = retry_restart;
-
-            let iter_timings = CompressiblePlanResources::implicit_iter_plan().execute(solver);
-            let detail = iter_timings
-                .module_graph_detail("compressible:implicit_grad_assembly")
-                .expect("implicit_grad_assembly timings missing");
-            grad_secs += detail.seconds_for("compressible:gradients");
-            assembly_secs += detail.seconds_for("compressible:assembly");
-
-            fgmres_secs += solver.implicit_last_stats.time.as_secs_f64();
-            fgmres_iters += solver.implicit_last_stats.iterations as u64;
-            stats.push(solver.implicit_last_stats);
-
-            apply_secs += iter_timings.seconds_for("compressible:implicit_snapshot")
-                + iter_timings.seconds_for("compressible:implicit_set_alpha")
-                + iter_timings.seconds_for("compressible:implicit_apply")
-                + iter_timings.seconds_for("compressible:implicit_restore_alpha");
-        }
-
-        let stage_start = std::time::Instant::now();
-        solver.primitive_update_module_graph.execute(
-            &solver.common.context,
-            &solver.kernels,
-            RuntimeDims {
-                num_cells: solver.num_cells,
-                num_faces: solver.num_faces,
-            },
-        );
-        update_secs += stage_start.elapsed().as_secs_f64();
-        let total_secs = step_start.elapsed().as_secs_f64();
-        solver.profile.record(
-            total_secs,
-            grad_secs,
-            assembly_secs,
-            fgmres_secs,
-            apply_secs,
-            update_secs,
-            fgmres_iters,
-        );
-        solver.constants.dt_old = solver.constants.dt;
-        solver.update_constants();
-        stats
     }
 }
 

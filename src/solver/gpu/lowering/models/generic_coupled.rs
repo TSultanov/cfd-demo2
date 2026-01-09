@@ -21,6 +21,7 @@ pub(in crate::solver::gpu::lowering) struct GenericCoupledProgramResources {
     update_graph: ModuleGraph<GenericCoupledKernelsModule>,
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
+    _b_grad_state: Option<wgpu::Buffer>,
 }
 
 impl GenericCoupledProgramResources {
@@ -30,6 +31,7 @@ impl GenericCoupledProgramResources {
         kernels: GenericCoupledKernelsModule,
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
+        b_grad_state: Option<wgpu::Buffer>,
     ) -> Self {
         Self {
             runtime,
@@ -39,6 +41,7 @@ impl GenericCoupledProgramResources {
             update_graph: build_update_graph(),
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
+            _b_grad_state: b_grad_state,
         }
     }
 }

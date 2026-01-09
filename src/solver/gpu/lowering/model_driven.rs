@@ -1,7 +1,9 @@
 use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::mesh::Mesh;
+use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::{KernelKind, ModelSpec};
+use crate::solver::scheme::Scheme;
 use std::collections::HashMap;
 
 use super::kernel_registry;
@@ -149,6 +151,12 @@ async fn lower_parts_for_template(
                 ));
             }
 
+            // Check if gradients are needed (assuming worst-case scheme SOU).
+            let registry = SchemeRegistry::new(Scheme::SecondOrderUpwind);
+            let needs_gradients = expand_schemes(&model.system, &registry)
+                .map(|e| e.needs_gradients())
+                .unwrap_or(false);
+
             let runtime =
                 crate::solver::gpu::runtime::GpuScalarRuntime::new(mesh, device, queue).await;
             runtime.update_constants();
@@ -211,6 +219,17 @@ async fn lower_parts_for_template(
                 }),
             ]);
 
+            let b_grad_state = if needs_gradients {
+                let zero_grad = vec![[0.0f32; 2]; num_cells];
+                Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("GenericCoupled grad_state buffer"),
+                    contents: cast_slice(&zero_grad),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                }))
+            } else {
+                None
+            };
+
             let bg_fields_ping_pong = {
                 let bgl = pipeline_assembly.get_bind_group_layout(1);
                 let mut out = Vec::new();
@@ -237,6 +256,9 @@ async fn lower_parts_for_template(
                                 "constants" => Some(wgpu::BindingResource::Buffer(
                                     runtime.constants.buffer().as_entire_buffer_binding(),
                                 )),
+                                "grad_state" => b_grad_state.as_ref().map(|b| {
+                                    wgpu::BindingResource::Buffer(b.as_entire_buffer_binding())
+                                }),
                                 _ => None,
                             },
                         )?,
@@ -382,7 +404,7 @@ async fn lower_parts_for_template(
             let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
             resources.insert(
                 models::generic_coupled::GenericCoupledProgramResources::new(
-                    runtime, state, kernels, b_bc_kind, b_bc_value,
+                    runtime, state, kernels, b_bc_kind, b_bc_value, b_grad_state,
                 ),
             );
 

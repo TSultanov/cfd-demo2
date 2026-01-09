@@ -39,6 +39,12 @@ mod solver {
                     "/src/solver/model/backend/state_layout.rs"
                 ));
             }
+            pub mod scheme_expansion {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/model/backend/scheme_expansion.rs"
+                ));
+            }
             #[allow(unused_imports)]
             pub use ast::{
                 fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind,
@@ -46,6 +52,8 @@ mod solver {
             };
             #[allow(unused_imports)]
             pub use scheme::{SchemeRegistry, TermKey};
+            #[allow(unused_imports)]
+            pub use scheme_expansion::{expand_schemes, SchemeExpansion};
             #[allow(unused_imports)]
             pub use state_layout::{StateField, StateLayout};
         }

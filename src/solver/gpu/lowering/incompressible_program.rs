@@ -59,23 +59,26 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GpuSolver {
 }
 
 fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
-    res(plan).num_cells()
+    res(plan).num_cells
 }
 
 fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).time()
+    res(plan).constants.time
 }
 
 fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).dt()
+    res(plan).constants.dt
 }
 
 fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    res(plan).state_buffer()
+    &res(plan).b_state
 }
 
 fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
-    res(plan).write_state_bytes(bytes)
+    for buf in &res(plan).state_buffers {
+        plan.context.queue.write_buffer(buf, 0, bytes);
+    }
+    Ok(())
 }
 
 fn has_coupled_resources(plan: &GpuProgramPlan) -> bool {
@@ -344,7 +347,19 @@ fn init_history(plan: &GpuProgramPlan) {
 }
 
 fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
-    res(plan).step_stats()
+    let solver = res(plan);
+    PlanStepStats {
+        should_stop: Some(solver.should_stop),
+        degenerate_count: Some(solver.degenerate_count),
+        outer_iterations: Some(*solver.outer_iterations.lock().unwrap()),
+        outer_residual_u: Some(*solver.outer_residual_u.lock().unwrap()),
+        outer_residual_p: Some(*solver.outer_residual_p.lock().unwrap()),
+        linear_stats: Some((
+            *solver.stats_ux.lock().unwrap(),
+            *solver.stats_uy.lock().unwrap(),
+            *solver.stats_p.lock().unwrap(),
+        )),
+    }
 }
 
 fn set_param_fallback(
@@ -352,7 +367,62 @@ fn set_param_fallback(
     param: PlanParam,
     value: PlanParamValue,
 ) -> Result<(), String> {
-    res_mut(plan).set_param(param, value)
+    let solver = res_mut(plan);
+    match (param, value) {
+        (PlanParam::Dt, PlanParamValue::F32(dt)) => {
+            solver.set_dt(dt);
+            Ok(())
+        }
+        (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
+            solver.set_scheme(scheme.gpu_id());
+            Ok(())
+        }
+        (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
+            solver.set_time_scheme(scheme as u32);
+            Ok(())
+        }
+        (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+            solver.set_precond_type(preconditioner);
+            Ok(())
+        }
+        (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
+            solver.set_viscosity(mu);
+            Ok(())
+        }
+        (PlanParam::Density, PlanParamValue::F32(rho)) => {
+            solver.set_density(rho);
+            Ok(())
+        }
+        (PlanParam::AlphaU, PlanParamValue::F32(alpha)) => {
+            solver.set_alpha_u(alpha);
+            Ok(())
+        }
+        (PlanParam::AlphaP, PlanParamValue::F32(alpha)) => {
+            solver.set_alpha_p(alpha);
+            Ok(())
+        }
+        (PlanParam::InletVelocity, PlanParamValue::F32(velocity)) => {
+            solver.set_inlet_velocity(velocity);
+            Ok(())
+        }
+        (PlanParam::RampTime, PlanParamValue::F32(time)) => {
+            solver.set_ramp_time(time);
+            Ok(())
+        }
+        (PlanParam::IncompressibleOuterCorrectors, PlanParamValue::U32(iters)) => {
+            solver.n_outer_correctors = iters.max(1);
+            Ok(())
+        }
+        (PlanParam::IncompressibleShouldStop, PlanParamValue::Bool(value)) => {
+            solver.should_stop = value;
+            Ok(())
+        }
+        (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
+            solver.enable_detailed_profiling(enable);
+            Ok(())
+        }
+        _ => Err("parameter is not supported by this plan".into()),
+    }
 }
 
 fn linear_debug_provider(plan: &mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug> {

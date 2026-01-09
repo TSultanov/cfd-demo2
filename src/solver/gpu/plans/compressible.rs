@@ -10,10 +10,7 @@ use crate::solver::gpu::modules::compressible_kernels::{CompressibleBindGroups, 
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
-use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
-};
-use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
@@ -22,7 +19,6 @@ use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use std::env;
-use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 struct CompressibleOffsets {
@@ -1048,115 +1044,6 @@ fn ping_pong_indices(step_index: usize) -> (usize, usize, usize) {
         1 => (2, 0, 1),
         2 => (1, 2, 0),
         _ => (0, 1, 2),
-    }
-}
-
-impl GpuPlanInstance for CompressiblePlanResources {
-    fn num_cells(&self) -> u32 {
-        self.num_cells
-    }
-
-    fn time(&self) -> f32 {
-        self.constants.time
-    }
-
-    fn dt(&self) -> f32 {
-        self.constants.dt
-    }
-
-    fn state_buffer(&self) -> &wgpu::Buffer {
-        &self.b_state
-    }
-
-    fn profiling_stats(&self) -> Arc<ProfilingStats> {
-        Arc::clone(&self.common.profiling_stats)
-    }
-
-    fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
-        match (param, value) {
-            (PlanParam::Dt, PlanParamValue::F32(dt)) => {
-                self.set_dt(dt);
-                Ok(())
-            }
-            (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
-                self.set_scheme(scheme.gpu_id());
-                Ok(())
-            }
-            (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
-                self.set_time_scheme(scheme as u32);
-                Ok(())
-            }
-            (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
-                self.set_precond_type(preconditioner);
-                Ok(())
-            }
-            (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
-                self.set_viscosity(mu);
-                Ok(())
-            }
-            (PlanParam::AlphaU, PlanParamValue::F32(alpha)) => {
-                self.set_alpha_u(alpha);
-                Ok(())
-            }
-            (PlanParam::InletVelocity, PlanParamValue::F32(velocity)) => {
-                self.set_inlet_velocity(velocity);
-                Ok(())
-            }
-            (PlanParam::Dtau, PlanParamValue::F32(dtau)) => {
-                self.set_dtau(dtau);
-                Ok(())
-            }
-            (PlanParam::OuterIters, PlanParamValue::Usize(iters)) => {
-                self.set_outer_iters(iters);
-                Ok(())
-            }
-            (PlanParam::LowMachModel, PlanParamValue::LowMachModel(model)) => {
-                self.set_precond_model(model as u32);
-                Ok(())
-            }
-            (PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta)) => {
-                self.set_precond_theta_floor(theta);
-                Ok(())
-            }
-            (PlanParam::NonconvergedRelax, PlanParamValue::F32(relax)) => {
-                self.set_nonconverged_relax(relax);
-                Ok(())
-            }
-            (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
-                if enable {
-                    self.common.profiling_stats.enable();
-                } else {
-                    self.common.profiling_stats.disable();
-                }
-                Ok(())
-            }
-            _ => Err("parameter is not supported by this plan".into()),
-        }
-    }
-
-    fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        CompressiblePlanResources::write_state_bytes(self, bytes);
-        Ok(())
-    }
-
-    fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        Ok(self.step_with_stats())
-    }
-
-    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
-        Some(self)
-    }
-
-    fn step(&mut self) {
-        crate::solver::gpu::plans::compressible::plan::step(self);
-    }
-
-    fn initialize_history(&self) {
-        CompressiblePlanResources::initialize_history(self);
-    }
-
-    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
-        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
     }
 }
 

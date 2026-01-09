@@ -15,6 +15,8 @@ pub(crate) type ProgramGraphRun =
     fn(&GpuProgramPlan, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>);
 pub(crate) type ProgramHostRun = fn(&mut GpuProgramPlan);
 pub(crate) type ProgramInitRun = fn(&GpuProgramPlan);
+pub(crate) type ProgramCondFn = fn(&GpuProgramPlan) -> bool;
+pub(crate) type ProgramCountFn = fn(&GpuProgramPlan) -> usize;
 pub(crate) type ProgramParamHandler = fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramSetParamFallback =
     fn(&mut GpuProgramPlan, PlanParam, PlanParamValue) -> Result<(), String>;
@@ -39,6 +41,24 @@ pub(crate) struct ProgramCondId(pub u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramCountId(pub u16);
+
+pub(crate) struct ProgramOps {
+    pub graph: HashMap<ProgramGraphId, ProgramGraphRun>,
+    pub host: HashMap<ProgramHostId, ProgramHostRun>,
+    pub cond: HashMap<ProgramCondId, ProgramCondFn>,
+    pub count: HashMap<ProgramCountId, ProgramCountFn>,
+}
+
+impl ProgramOps {
+    pub fn new() -> Self {
+        Self {
+            graph: HashMap::new(),
+            host: HashMap::new(),
+            cond: HashMap::new(),
+            count: HashMap::new(),
+        }
+    }
+}
 
 pub(crate) struct ProgramResources {
     by_type: HashMap<TypeId, Box<dyn Any + Send>>,
@@ -116,7 +136,8 @@ impl ProgramExecutionPlan {
                 ProgramNode::Graph { id, mode, .. } => {
                     let run = plan
                         .spec
-                        .graph_ops
+                        .ops
+                        .graph
                         .get(id)
                         .copied()
                         .unwrap_or_else(|| panic!("missing graph op for id={id:?}"));
@@ -125,7 +146,8 @@ impl ProgramExecutionPlan {
                 ProgramNode::Host { id, .. } => {
                     let run = plan
                         .spec
-                        .host_ops
+                        .ops
+                        .host
                         .get(id)
                         .copied()
                         .unwrap_or_else(|| panic!("missing host op for id={id:?}"));
@@ -139,7 +161,8 @@ impl ProgramExecutionPlan {
                 } => {
                     let cond = plan
                         .spec
-                        .cond_ops
+                        .ops
+                        .cond
                         .get(cond)
                         .copied()
                         .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
@@ -152,7 +175,8 @@ impl ProgramExecutionPlan {
                 ProgramNode::Repeat { times, body, .. } => {
                     let times = plan
                         .spec
-                        .count_ops
+                        .ops
+                        .count
                         .get(times)
                         .copied()
                         .unwrap_or_else(|| panic!("missing count op for id={times:?}"));
@@ -168,13 +192,15 @@ impl ProgramExecutionPlan {
                 } => {
                     let max_iters = plan
                         .spec
-                        .count_ops
+                        .ops
+                        .count
                         .get(max_iters)
                         .copied()
                         .unwrap_or_else(|| panic!("missing count op for id={max_iters:?}"));
                     let cond = plan
                         .spec
-                        .cond_ops
+                        .ops
+                        .cond
                         .get(cond)
                         .copied()
                         .unwrap_or_else(|| panic!("missing cond op for id={cond:?}"));
@@ -191,10 +217,7 @@ impl ProgramExecutionPlan {
 }
 
 pub(crate) struct ModelGpuProgramSpec {
-    pub graph_ops: HashMap<ProgramGraphId, ProgramGraphRun>,
-    pub host_ops: HashMap<ProgramHostId, ProgramHostRun>,
-    pub cond_ops: HashMap<ProgramCondId, fn(&GpuProgramPlan) -> bool>,
-    pub count_ops: HashMap<ProgramCountId, fn(&GpuProgramPlan) -> usize>,
+    pub ops: ProgramOps,
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,

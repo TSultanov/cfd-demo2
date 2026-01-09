@@ -10,7 +10,7 @@ use crate::solver::gpu::plans::plan_instance::{
 };
 use crate::solver::gpu::plans::program::{
     GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramGraphId, ProgramHostId,
-    ProgramNode,
+    ProgramNode, ProgramOps,
 };
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -508,16 +508,12 @@ pub(crate) async fn lower_generic_coupled_program(
             param_detailed_profiling as _,
         );
 
-        let mut graph_ops = std::collections::HashMap::new();
-        graph_ops.insert(G_ASSEMBLY, assembly_graph_run as _);
-        graph_ops.insert(G_UPDATE, update_graph_run as _);
+        let mut ops = ProgramOps::new();
+        ops.graph.insert(G_ASSEMBLY, assembly_graph_run as _);
+        ops.graph.insert(G_UPDATE, update_graph_run as _);
 
-        let mut host_ops = std::collections::HashMap::new();
-        host_ops.insert(H_PREPARE, host_prepare_step as _);
-        host_ops.insert(H_SOLVE, host_solve_linear_system as _);
-
-        let cond_ops = std::collections::HashMap::new();
-        let count_ops = std::collections::HashMap::new();
+        ops.host.insert(H_PREPARE, host_prepare_step as _);
+        ops.host.insert(H_SOLVE, host_solve_linear_system as _);
 
         let step = std::sync::Arc::new(ProgramExecutionPlan::new(vec![
             ProgramNode::Host {
@@ -541,10 +537,7 @@ pub(crate) async fn lower_generic_coupled_program(
         ]));
 
         let spec = ModelGpuProgramSpec {
-            graph_ops,
-            host_ops,
-            cond_ops,
-            count_ops,
+            ops,
             num_cells: spec_num_cells,
             time: spec_time,
             dt: spec_dt,

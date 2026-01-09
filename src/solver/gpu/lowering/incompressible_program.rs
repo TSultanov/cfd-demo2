@@ -4,8 +4,8 @@ use crate::solver::gpu::plans::plan_instance::{
 };
 use crate::solver::gpu::plans::program::{
     GpuProgramPlan, ModelGpuProgramSpec, ProgramCondId, ProgramCountId, ProgramExecutionPlan,
-    ProgramGraphId, ProgramHostId, ProgramNode, ProgramResources, ProgramSetParamFallback,
-    ProgramStepStatsFn,
+    ProgramGraphId, ProgramHostId, ProgramNode, ProgramOps, ProgramResources,
+    ProgramSetParamFallback, ProgramStepStatsFn,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::mesh::Mesh;
@@ -489,33 +489,41 @@ pub(crate) async fn lower_incompressible_program(
         coupled_prev_residual_p: f64::MAX,
     });
 
-    let mut graph_ops = std::collections::HashMap::new();
-    graph_ops.insert(
+    let mut ops = ProgramOps::new();
+    ops.graph.insert(
         G_COUPLED_PREPARE_ASSEMBLY,
         coupled_graph_prepare_assembly_run as _,
     );
-    graph_ops.insert(G_COUPLED_ASSEMBLY, coupled_graph_assembly_run as _);
-    graph_ops.insert(G_COUPLED_UPDATE, coupled_graph_update_run as _);
-    graph_ops.insert(G_COUPLED_INIT_PREPARE, coupled_graph_init_prepare_run as _);
+    ops.graph
+        .insert(G_COUPLED_ASSEMBLY, coupled_graph_assembly_run as _);
+    ops.graph
+        .insert(G_COUPLED_UPDATE, coupled_graph_update_run as _);
+    ops.graph
+        .insert(G_COUPLED_INIT_PREPARE, coupled_graph_init_prepare_run as _);
 
-    let mut host_ops = std::collections::HashMap::new();
-    host_ops.insert(H_COUPLED_BEGIN_STEP, host_coupled_begin_step as _);
-    host_ops.insert(H_COUPLED_BEFORE_ITER, host_coupled_before_iter as _);
-    host_ops.insert(H_COUPLED_SOLVE, host_coupled_solve as _);
-    host_ops.insert(H_COUPLED_CLEAR_MAX_DIFF, host_coupled_clear_max_diff as _);
-    host_ops.insert(
+    ops.host
+        .insert(H_COUPLED_BEGIN_STEP, host_coupled_begin_step as _);
+    ops.host
+        .insert(H_COUPLED_BEFORE_ITER, host_coupled_before_iter as _);
+    ops.host.insert(H_COUPLED_SOLVE, host_coupled_solve as _);
+    ops.host
+        .insert(H_COUPLED_CLEAR_MAX_DIFF, host_coupled_clear_max_diff as _);
+    ops.host.insert(
         H_COUPLED_CONVERGENCE_ADVANCE,
         host_coupled_convergence_and_advance as _,
     );
-    host_ops.insert(H_COUPLED_FINALIZE_STEP, host_coupled_finalize_step as _);
+    ops.host
+        .insert(H_COUPLED_FINALIZE_STEP, host_coupled_finalize_step as _);
 
-    let mut cond_ops = std::collections::HashMap::new();
-    cond_ops.insert(C_HAS_COUPLED_RESOURCES, has_coupled_resources as _);
-    cond_ops.insert(C_COUPLED_NEEDS_PREPARE, coupled_needs_prepare as _);
-    cond_ops.insert(C_COUPLED_SHOULD_CONTINUE, coupled_should_continue as _);
+    ops.cond
+        .insert(C_HAS_COUPLED_RESOURCES, has_coupled_resources as _);
+    ops.cond
+        .insert(C_COUPLED_NEEDS_PREPARE, coupled_needs_prepare as _);
+    ops.cond
+        .insert(C_COUPLED_SHOULD_CONTINUE, coupled_should_continue as _);
 
-    let mut count_ops = std::collections::HashMap::new();
-    count_ops.insert(N_COUPLED_MAX_ITERS, coupled_max_iters as _);
+    ops.count
+        .insert(N_COUPLED_MAX_ITERS, coupled_max_iters as _);
 
     let coupled_iter_body = Arc::new(ProgramExecutionPlan::new(vec![
         ProgramNode::Host {
@@ -587,10 +595,7 @@ pub(crate) async fn lower_incompressible_program(
     }]));
 
     let spec = ModelGpuProgramSpec {
-        graph_ops,
-        host_ops,
-        cond_ops,
-        count_ops,
+        ops,
         num_cells: spec_num_cells,
         time: spec_time,
         dt: spec_dt,

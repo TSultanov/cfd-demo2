@@ -40,6 +40,16 @@ impl DispatchGrids {
 /// records work into the caller-provided encoder. The only cross-module coupling
 /// should be via the public `FgmresWorkspace` interface.
 pub trait FgmresPreconditionerModule {
+    fn prepare(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _fgmres: &FgmresWorkspace,
+        _rhs: wgpu::BindingResource<'_>,
+        _dispatch: DispatchGrids,
+    ) {
+    }
+
     fn encode_apply(
         &mut self,
         device: &wgpu::Device,

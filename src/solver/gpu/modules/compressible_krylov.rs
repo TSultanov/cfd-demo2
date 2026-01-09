@@ -381,6 +381,17 @@ impl CompressibleKrylovModule {
 }
 
 impl FgmresPreconditionerModule for CompressibleKrylovModule {
+    fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        fgmres: &FgmresWorkspace,
+        rhs: wgpu::BindingResource<'_>,
+        dispatch: DispatchGrids,
+    ) {
+        CompressibleKrylovModule::prepare(self, device, queue, fgmres, rhs, dispatch.cells);
+    }
+
     fn encode_apply(
         &mut self,
         device: &wgpu::Device,

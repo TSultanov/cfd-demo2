@@ -1,6 +1,7 @@
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanCapability, PlanFuture, PlanParam, PlanParamValue,
+    FgmresSizing, GpuPlanInstance, PlanCapability, PlanCoupledUnknowns, PlanFgmresSizing,
+    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -447,6 +448,20 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
         Box::pin(async move { self.runtime.read_buffer(self.state_buffer(), bytes).await })
     }
 
+    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
+        Some(self)
+    }
+
+    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
+        Some(self)
+    }
+
+    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
+        Some(self)
+    }
+}
+
+impl PlanLinearSystemDebug for GpuGenericCoupledSolver {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         self.runtime.set_linear_system(matrix_values, rhs)
     }
@@ -469,13 +484,21 @@ impl GpuPlanInstance for GpuGenericCoupledSolver {
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-        Box::pin(async move { self.runtime.get_linear_solution(self.runtime.common.num_cells).await })
+        Box::pin(async move {
+            self.runtime
+                .get_linear_solution(self.runtime.common.num_cells)
+                .await
+        })
     }
+}
 
+impl PlanCoupledUnknowns for GpuGenericCoupledSolver {
     fn coupled_unknowns(&self) -> Result<u32, String> {
         Ok(self.runtime.common.num_cells)
     }
+}
 
+impl PlanFgmresSizing for GpuGenericCoupledSolver {
     fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
         let n = self.runtime.common.num_cells;
         Ok(FgmresSizing {

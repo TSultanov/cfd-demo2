@@ -75,6 +75,27 @@ pub enum PlanCapability {
     FgmresSizing,
 }
 
+pub(crate) trait PlanLinearSystemDebug: Send {
+    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String>;
+
+    fn solve_linear_system_with_size(
+        &mut self,
+        n: u32,
+        max_iters: u32,
+        tol: f32,
+    ) -> Result<LinearSolverStats, String>;
+
+    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>>;
+}
+
+pub(crate) trait PlanCoupledUnknowns: Send {
+    fn coupled_unknowns(&self) -> Result<u32, String>;
+}
+
+pub(crate) trait PlanFgmresSizing: Send {
+    fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String>;
+}
+
 pub(crate) trait GpuPlanInstance: Send {
     fn num_cells(&self) -> u32;
     fn time(&self) -> f32;
@@ -123,29 +144,16 @@ pub(crate) trait GpuPlanInstance: Send {
         }
     }
 
-    fn set_linear_system(&self, _matrix_values: &[f32], _rhs: &[f32]) -> Result<(), String> {
-        Err("set_linear_system is not supported by this plan".into())
+    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
+        None
     }
 
-    fn solve_linear_system_with_size(
-        &mut self,
-        _n: u32,
-        _max_iters: u32,
-        _tol: f32,
-    ) -> Result<LinearSolverStats, String> {
-        Err("solve_linear_system_with_size is not supported by this plan".into())
+    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
+        None
     }
 
-    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-        Box::pin(async { Err("get_linear_solution is not supported by this plan".into()) })
-    }
-
-    fn coupled_unknowns(&self) -> Result<u32, String> {
-        Err("coupled_unknowns is not supported by this plan".into())
-    }
-
-    fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
-        Err("fgmres_sizing is not supported by this plan".into())
+    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
+        None
     }
 
     fn step(&mut self);

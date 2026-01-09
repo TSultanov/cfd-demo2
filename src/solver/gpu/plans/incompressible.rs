@@ -4,8 +4,8 @@ use std::sync::Arc;
 use super::coupled_fgmres::FgmresResources;
 use crate::solver::gpu::model_defaults::default_incompressible_model;
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanAction, PlanCapability, PlanFuture, PlanParam, PlanParamValue,
-    PlanStepStats,
+    FgmresSizing, GpuPlanInstance, PlanAction, PlanCapability, PlanCoupledUnknowns, PlanFgmresSizing,
+    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
@@ -490,6 +490,32 @@ impl GpuPlanInstance for GpuSolver {
         self.get_profiling_stats()
     }
 
+    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
+        Some(self)
+    }
+
+    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
+        Some(self)
+    }
+
+    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
+        Some(self)
+    }
+
+    fn step(&mut self) {
+        crate::solver::gpu::plans::coupled::plan::step_coupled(self);
+    }
+
+    fn initialize_history(&self) {
+        GpuSolver::initialize_history(self);
+    }
+
+    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
+        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
+    }
+}
+
+impl PlanLinearSystemDebug for GpuSolver {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         GpuSolver::set_linear_system(self, matrix_values, rhs);
         Ok(())
@@ -507,28 +533,20 @@ impl GpuPlanInstance for GpuSolver {
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
         Box::pin(async move { Ok(GpuSolver::get_linear_solution(self).await) })
     }
+}
 
+impl PlanCoupledUnknowns for GpuSolver {
     fn coupled_unknowns(&self) -> Result<u32, String> {
         Ok(GpuSolver::coupled_unknowns(self))
     }
+}
 
+impl PlanFgmresSizing for GpuSolver {
     fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
         let n = GpuSolver::coupled_unknowns(self);
         Ok(FgmresSizing {
             num_unknowns: n,
             num_dot_groups: crate::solver::gpu::linear_solver::fgmres::workgroups_for_size(n),
         })
-    }
-
-    fn step(&mut self) {
-        crate::solver::gpu::plans::coupled::plan::step_coupled(self);
-    }
-
-    fn initialize_history(&self) {
-        GpuSolver::initialize_history(self);
-    }
-
-    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
-        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
     }
 }

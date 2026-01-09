@@ -433,11 +433,11 @@ impl GpuUnifiedSolver {
             .collect()
     }
 
-    pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        if !self.supports(PlanCapability::LinearSystemDebug) {
+    pub fn set_linear_system(&mut self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
+        let Some(debug) = self.plan.linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
-        }
-        self.plan.set_linear_system(matrix_values, rhs)
+        };
+        debug.set_linear_system(matrix_values, rhs)
     }
 
     pub fn solve_linear_system_with_size(
@@ -446,31 +446,31 @@ impl GpuUnifiedSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        if !self.supports(PlanCapability::LinearSystemDebug) {
+        let Some(debug) = self.plan.linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
-        }
-        self.plan.solve_linear_system_with_size(n, max_iters, tol)
+        };
+        debug.solve_linear_system_with_size(n, max_iters, tol)
     }
 
-    pub async fn get_linear_solution(&self) -> Result<Vec<f32>, String> {
-        if !self.supports(PlanCapability::LinearSystemDebug) {
+    pub async fn get_linear_solution(&mut self) -> Result<Vec<f32>, String> {
+        let Some(debug) = self.plan.linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
-        }
-        self.plan.get_linear_solution().await
+        };
+        debug.get_linear_solution().await
     }
 
-    pub fn coupled_unknowns(&self) -> Result<u32, String> {
-        if !self.supports(PlanCapability::CoupledUnknowns) {
+    pub fn coupled_unknowns(&mut self) -> Result<u32, String> {
+        let Some(debug) = self.plan.coupled_unknowns_debug() else {
             return Err("plan does not expose coupled unknown count".into());
-        }
-        self.plan.coupled_unknowns()
+        };
+        debug.coupled_unknowns()
     }
 
     pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
-        if !self.supports(PlanCapability::FgmresSizing) {
+        let Some(debug) = self.plan.fgmres_sizing_debug() else {
             return Err("plan does not support FGMRES sizing query".into());
-        }
-        self.plan.fgmres_sizing(max_restart)
+        };
+        debug.fgmres_sizing(max_restart)
     }
 
     fn set_field_vec2_any(&mut self, fields: &[&str], values: &[(f64, f64)]) -> Result<(), String> {

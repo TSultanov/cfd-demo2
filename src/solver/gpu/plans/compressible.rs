@@ -10,7 +10,8 @@ use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, ModuleNode, 
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::plans::plan_instance::{
-    FgmresSizing, GpuPlanInstance, PlanCapability, PlanFuture, PlanParam, PlanParamValue,
+    FgmresSizing, GpuPlanInstance, PlanCapability, PlanCoupledUnknowns, PlanFgmresSizing,
+    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
@@ -1028,6 +1029,32 @@ impl GpuPlanInstance for CompressiblePlanResources {
         Ok(self.step_with_stats())
     }
 
+    fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
+        Some(self)
+    }
+
+    fn coupled_unknowns_debug(&mut self) -> Option<&mut dyn PlanCoupledUnknowns> {
+        Some(self)
+    }
+
+    fn fgmres_sizing_debug(&mut self) -> Option<&mut dyn PlanFgmresSizing> {
+        Some(self)
+    }
+
+    fn step(&mut self) {
+        crate::solver::gpu::plans::compressible::plan::step(self);
+    }
+
+    fn initialize_history(&self) {
+        CompressiblePlanResources::initialize_history(self);
+    }
+
+    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
+        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
+    }
+}
+
+impl PlanLinearSystemDebug for CompressiblePlanResources {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         if matrix_values.len() != self.block_col_indices.len() {
             return Err(format!(
@@ -1068,11 +1095,8 @@ impl GpuPlanInstance for CompressiblePlanResources {
                 n, self.num_unknowns
             ));
         }
-        // Compressible uses FGMRES for coupled systems; keep the unified-plan API surface
-        // but use the plan-appropriate Krylov solve under the hood.
         let max_restart = max_iters.min(64) as usize;
-        let stats = self.solve_compressible_fgmres(max_restart, tol);
-        Ok(stats)
+        Ok(self.solve_compressible_fgmres(max_restart, tol))
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
@@ -1086,28 +1110,20 @@ impl GpuPlanInstance for CompressiblePlanResources {
             Ok(bytemuck::cast_slice(&raw).to_vec())
         })
     }
+}
 
+impl PlanCoupledUnknowns for CompressiblePlanResources {
     fn coupled_unknowns(&self) -> Result<u32, String> {
         Ok(self.num_unknowns)
     }
+}
 
+impl PlanFgmresSizing for CompressiblePlanResources {
     fn fgmres_sizing(&mut self, _max_restart: usize) -> Result<FgmresSizing, String> {
         let n = self.num_unknowns;
         Ok(FgmresSizing {
             num_unknowns: n,
             num_dot_groups: (n + 63) / 64,
         })
-    }
-
-    fn step(&mut self) {
-        crate::solver::gpu::plans::compressible::plan::step(self);
-    }
-
-    fn initialize_history(&self) {
-        CompressiblePlanResources::initialize_history(self);
-    }
-
-    fn read_state_bytes(&self, bytes: u64) -> PlanFuture<'_, Vec<u8>> {
-        Box::pin(async move { self.read_buffer(self.state_buffer(), bytes).await })
     }
 }

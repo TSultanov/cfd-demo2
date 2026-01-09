@@ -1,14 +1,12 @@
 use crate::solver::gpu::bindings::compressible_explicit_update as explicit_update;
 use crate::solver::gpu::bindings::generated::{
-    compressible_apply as generated_apply, compressible_assembly as generated_assembly,
-    compressible_flux_kt as generated_flux_kt, compressible_gradients as generated_gradients,
-    compressible_update as generated_update, coupled_assembly_merged as generated_coupled_assembly,
-    prepare_coupled as generated_prepare_coupled,
-    update_fields_from_coupled as generated_update_fields,
+    coupled_assembly_merged as generated_coupled_assembly,
+    prepare_coupled as generated_prepare_coupled, update_fields_from_coupled as generated_update_fields,
 };
 use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
@@ -68,29 +66,23 @@ impl ModelKernelsModule {
         let b_scalar_row_offsets = port_space.buffer(scalar_row_offsets);
 
         let mut pipelines = HashMap::new();
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::CompressibleAssembly),
-            generated_assembly::compute::create_main_pipeline_embed_source(device),
-        );
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::CompressibleApply),
-            generated_apply::compute::create_main_pipeline_embed_source(device),
-        );
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::CompressibleGradients),
-            generated_gradients::compute::create_main_pipeline_embed_source(device),
-        );
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::CompressibleFluxKt),
-            generated_flux_kt::compute::create_main_pipeline_embed_source(device),
-        );
+        for kind in [
+            KernelKind::CompressibleAssembly,
+            KernelKind::CompressibleApply,
+            KernelKind::CompressibleGradients,
+            KernelKind::CompressibleFluxKt,
+            KernelKind::CompressibleUpdate,
+        ] {
+            let source = kernel_registry::kernel_source("compressible", kind)
+                .unwrap_or_else(|err| panic!("missing kernel source for {kind:?}: {err}"));
+            pipelines.insert(
+                KernelPipeline::Kernel(kind),
+                (source.create_pipeline)(device),
+            );
+        }
         pipelines.insert(
             KernelPipeline::CompressibleExplicitUpdate,
             explicit_update::compute::create_main_pipeline_embed_source(device),
-        );
-        pipelines.insert(
-            KernelPipeline::Kernel(KernelKind::CompressibleUpdate),
-            generated_update::compute::create_main_pipeline_embed_source(device),
         );
 
         let pipeline_assembly =

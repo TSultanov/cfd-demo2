@@ -17,18 +17,19 @@ One **model-driven** GPU solver pipeline with:
 
 ## Assessment (Are We Approaching The Goal?)
 - Yes: the public surface is unified, config flows into lowering, and the runtime is moving toward module-graph execution with shared Krylov/FGMRES helpers.
-- Not yet: we still have solver-family resource containers, solver-family kernel binding/dispatch wiring, and multiple lowering/initialization paths. Generated WGSL exists, but the Rust-side binding/plumbing is not model-driven.
+- Not yet: we still have solver-family resource containers and solver-family kernel binding/dispatch wiring. Generated WGSL exists, but the Rust-side binding/plumbing is not model-driven.
 
 ## Remaining Gaps (Concrete)
 - `ModelGpuProgramSpec` exists, but it is mostly **function-pointer glue** over solver-family containers rather than a first-class “ports + module graph + dispatch plan” spec.
 - Kernel wiring is still handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering).
 - “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
-- Incompressible/compressible stepping still happens inside legacy plan code (spec calls `step()`); the runtime does not yet “own” the per-pass schedule for these models.
+- Incompressible stepping still happens inside legacy plan code; the runtime does not yet “own” its per-pass schedule.
+- Compressible explicit stepping is now represented as a program schedule, but the implicit path still calls legacy `step_with_stats()`.
 - Generic coupled remains intentionally incomplete (limited terms/BCs), and scheme expansion is not yet driving required auxiliary passes automatically.
 
 ## Next Steps (Prioritized)
 1. **Make `ModelGpuProgramSpec` a real program spec**
-   - Replace “call legacy `step()`” with explicit per-pass schedules (module graphs + host nodes) in the spec for incompressible and compressible.
+   - Replace remaining “call legacy `step()`/`step_with_stats()`” with explicit per-pass schedules (module graphs + host nodes) in the spec for incompressible and compressible.
    - Goal: the runtime owns pass ordering and dispatch; solver-family code becomes pure “lowering/building modules”, not orchestration.
 2. **Delete migrated legacy plan types**
    - Once incompressible/compressible schedules are moved into specs, delete `GpuSolver`/`CompressiblePlanResources` as `GpuPlanInstance` implementations (keep only as internal lowered resources/modules if still needed).

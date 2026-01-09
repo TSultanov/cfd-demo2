@@ -72,6 +72,17 @@ pub(crate) enum ProgramNode {
         label: &'static str,
         run: ProgramHostRun,
     },
+    If {
+        label: &'static str,
+        cond: fn(&GpuProgramPlan) -> bool,
+        then_plan: Arc<ProgramExecutionPlan>,
+        else_plan: Option<Arc<ProgramExecutionPlan>>,
+    },
+    Repeat {
+        label: &'static str,
+        times: fn(&GpuProgramPlan) -> usize,
+        body: Arc<ProgramExecutionPlan>,
+    },
 }
 
 pub(crate) struct ProgramExecutionPlan {
@@ -90,6 +101,23 @@ impl ProgramExecutionPlan {
                     let _ = run(&*plan, &plan.context, *mode);
                 }
                 ProgramNode::Host { run, .. } => run(plan),
+                ProgramNode::If {
+                    cond,
+                    then_plan,
+                    else_plan,
+                    ..
+                } => {
+                    if cond(&*plan) {
+                        then_plan.execute(plan);
+                    } else if let Some(else_plan) = else_plan {
+                        else_plan.execute(plan);
+                    }
+                }
+                ProgramNode::Repeat { times, body, .. } => {
+                    for _ in 0..times(&*plan) {
+                        body.execute(plan);
+                    }
+                }
             }
         }
     }
@@ -198,6 +226,10 @@ impl GpuPlanInstance for GpuProgramPlan {
         }
         self.last_linear_stats = LinearSolverStats::default();
         self.step();
+        let stats = self.step_stats();
+        if let Some((a, b, c)) = stats.linear_stats {
+            return Ok(vec![a, b, c]);
+        }
         Ok(if self.last_linear_stats.iterations > 0 {
             vec![self.last_linear_stats]
         } else {

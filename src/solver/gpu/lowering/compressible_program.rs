@@ -3,9 +3,10 @@ use crate::solver::gpu::plans::plan_instance::{
     GpuPlanInstance, PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramResources,
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramNode, ProgramResources,
     ProgramSetParamFallback, ProgramStepStatsFn, ProgramStepWithStatsFn,
 };
+use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
@@ -74,6 +75,35 @@ fn host_step(plan: &mut GpuProgramPlan) {
     res_mut(plan).step();
 }
 
+fn should_use_explicit(plan: &GpuProgramPlan) -> bool {
+    res(plan).should_use_explicit()
+}
+
+fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
+    let solver = res_mut(plan);
+    solver.advance_ping_pong_and_time();
+    solver.pre_step_copy();
+}
+
+fn explicit_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    let solver = res(plan);
+    run_module_graph(
+        solver.explicit_graph(),
+        context,
+        &solver.kernels,
+        solver.runtime_dims(),
+        mode,
+    )
+}
+
+fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
+    res_mut(plan).finalize_dt_old();
+}
+
 fn init_history(plan: &GpuProgramPlan) {
     res(plan).initialize_history();
 }
@@ -83,7 +113,12 @@ fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
 }
 
 fn step_with_stats(plan: &mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String> {
-    GpuPlanInstance::step_with_stats(res_mut(plan))
+    if should_use_explicit(plan) {
+        plan.step();
+        Ok(Vec::new())
+    } else {
+        GpuPlanInstance::step_with_stats(res_mut(plan))
+    }
 }
 
 fn set_param_fallback(
@@ -119,12 +154,33 @@ pub(crate) async fn lower_compressible_program(
     let mut resources = ProgramResources::new();
     resources.insert(CompressibleProgramResources { plan });
 
-    let step = Arc::new(ProgramExecutionPlan::new(vec![
-        crate::solver::gpu::plans::program::ProgramNode::Host {
-            label: "compressible:step",
-            run: host_step,
+    let explicit_plan = Arc::new(ProgramExecutionPlan::new(vec![
+        ProgramNode::Host {
+            label: "compressible:explicit_prepare",
+            run: host_explicit_prepare,
+        },
+        ProgramNode::Graph {
+            label: "compressible:explicit_graph",
+            run: explicit_graph_run,
+            mode: GraphExecMode::SplitTimed,
+        },
+        ProgramNode::Host {
+            label: "compressible:explicit_finalize",
+            run: host_explicit_finalize,
         },
     ]));
+
+    let implicit_plan = Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::Host {
+        label: "compressible:implicit_step_legacy",
+        run: host_step,
+    }]));
+
+    let step = Arc::new(ProgramExecutionPlan::new(vec![ProgramNode::If {
+        label: "compressible:select_step_path",
+        cond: should_use_explicit,
+        then_plan: explicit_plan,
+        else_plan: Some(implicit_plan),
+    }]));
 
     let spec = ModelGpuProgramSpec {
         num_cells: spec_num_cells,

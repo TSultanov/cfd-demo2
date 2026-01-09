@@ -181,7 +181,7 @@ impl CompressiblePlanResources {
         self.num_cells as u64 * self.offsets.stride as u64 * 4
     }
 
-    fn pre_step_copy(&self) {
+    pub(crate) fn pre_step_copy(&self) {
         let size = self.state_size_bytes();
         let mut encoder = self
             .common
@@ -687,6 +687,43 @@ impl CompressiblePlanResources {
         plan::step_with_stats(self)
     }
 
+    pub(crate) fn should_use_explicit(&self) -> bool {
+        self.constants.time_scheme == 0 && self.constants.dtau <= 0.0
+    }
+
+    pub(crate) fn runtime_dims(&self) -> RuntimeDims {
+        RuntimeDims {
+            num_cells: self.num_cells,
+            num_faces: self.num_faces,
+        }
+    }
+
+    pub(crate) fn explicit_graph(&self) -> &ModuleGraph<CompressibleKernelsModule> {
+        if self.needs_gradients {
+            &self.explicit_module_graph
+        } else {
+            &self.explicit_module_graph_first_order
+        }
+    }
+
+    pub(crate) fn advance_ping_pong_and_time(&mut self) {
+        self.state_step_index = (self.state_step_index + 1) % 3;
+        self.kernels.set_step_index(self.state_step_index);
+
+        let (idx_state, idx_old, idx_old_old) = ping_pong_indices(self.state_step_index);
+        self.b_state = self.state_buffers[idx_state].clone();
+        self.b_state_old = self.state_buffers[idx_old].clone();
+        self.b_state_old_old = self.state_buffers[idx_old_old].clone();
+
+        self.constants.time += self.constants.dt;
+        self.update_constants();
+    }
+
+    pub(crate) fn finalize_dt_old(&mut self) {
+        self.constants.dt_old = self.constants.dt;
+        self.update_constants();
+    }
+
     pub async fn get_rho(&self) -> Vec<f64> {
         let data = self.read_state().await;
         let stride = self.offsets.stride as usize;
@@ -717,7 +754,7 @@ impl CompressiblePlanResources {
             .collect()
     }
 
-    fn update_constants(&self) {
+    pub(crate) fn update_constants(&self) {
         self.common
             .context
             .queue

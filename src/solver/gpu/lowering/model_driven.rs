@@ -1,5 +1,5 @@
 use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanParamValue};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, HybridProgramOpDispatcher, ProgramOpRegistry};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{KernelKind, ModelSpec};
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ pub(crate) async fn lower_program_model_driven(
     let parts = lower_parts_for_template(template, mesh, model, device, queue).await?;
 
     let program = build_program_spec(template);
-    let spec = parts.spec.into_spec(program);
+    let spec = parts.spec.into_spec(program)?;
     let mut plan = GpuProgramPlan::new(
         parts.model,
         parts.context,
@@ -76,10 +76,8 @@ async fn lower_parts_for_template(
                 plan,
             ));
 
-            let legacy_ops = std::sync::Arc::new(models::compressible::CompressibleOpDispatcher);
-            let mut registry = ProgramOpRegistry::new();
-            models::compressible::register_ops(&mut registry)?;
-            let ops = std::sync::Arc::new(HybridProgramOpDispatcher::new(registry, legacy_ops));
+            let mut ops = ProgramOpRegistry::new();
+            models::compressible::register_ops(&mut ops)?;
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
@@ -118,10 +116,8 @@ async fn lower_parts_for_template(
                 plan,
             ));
 
-            let legacy_ops = std::sync::Arc::new(models::incompressible::IncompressibleOpDispatcher);
-            let mut registry = ProgramOpRegistry::new();
-            models::incompressible::register_ops(&mut registry)?;
-            let ops = std::sync::Arc::new(HybridProgramOpDispatcher::new(registry, legacy_ops));
+            let mut ops = ProgramOpRegistry::new();
+            models::incompressible::register_ops(&mut ops)?;
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
@@ -409,10 +405,8 @@ async fn lower_parts_for_template(
                 models::generic_coupled::param_detailed_profiling as _,
             );
 
-            let legacy_ops = std::sync::Arc::new(models::generic_coupled::GenericCoupledOpDispatcher);
-            let mut registry = ProgramOpRegistry::new();
-            models::generic_coupled::register_ops(&mut registry)?;
-            let ops = std::sync::Arc::new(HybridProgramOpDispatcher::new(registry, legacy_ops));
+            let mut ops = ProgramOpRegistry::new();
+            models::generic_coupled::register_ops(&mut ops)?;
 
             Ok(LoweredProgramParts {
                 model: model.clone(),

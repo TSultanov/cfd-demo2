@@ -2,9 +2,9 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
-    ProgramOpDispatcher, ProgramParamHandler, ProgramResources, ProgramSetParamFallback,
-    ProgramSpec, ProgramStateBufferFn, ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn,
-    ProgramWriteStateFn,
+    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources,
+    ProgramSetParamFallback, ProgramSpec, ProgramStateBufferFn, ProgramStepStatsFn,
+    ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::model::ModelSpec;
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) struct ModelGpuProgramSpecParts {
-    pub ops: Arc<dyn ProgramOpDispatcher + Send + Sync>,
+    pub ops: ProgramOpRegistry,
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,
@@ -27,9 +27,11 @@ pub(crate) struct ModelGpuProgramSpecParts {
 }
 
 impl ModelGpuProgramSpecParts {
-    pub fn into_spec(self, program: ProgramSpec) -> ModelGpuProgramSpec {
-        ModelGpuProgramSpec {
-            ops: self.ops,
+    pub fn into_spec(self, program: ProgramSpec) -> Result<ModelGpuProgramSpec, String> {
+        self.ops.validate_program_spec(&program)?;
+        let ops: Arc<dyn ProgramOpDispatcher + Send + Sync> = Arc::new(self.ops);
+        Ok(ModelGpuProgramSpec {
+            ops,
             num_cells: self.num_cells,
             time: self.time,
             dt: self.dt,
@@ -42,7 +44,7 @@ impl ModelGpuProgramSpecParts {
             step_stats: self.step_stats,
             step_with_stats: self.step_with_stats,
             linear_debug: self.linear_debug,
-        }
+        })
     }
 }
 

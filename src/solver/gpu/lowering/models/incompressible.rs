@@ -1,11 +1,9 @@
-use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
-    ProgramOpRegistry,
+    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpRegistry,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 
@@ -68,8 +66,6 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GpuSolver {
     &mut wrap_mut(plan).plan
 }
 
-pub(in crate::solver::gpu::lowering) struct IncompressibleOpDispatcher;
-
 pub(in crate::solver::gpu::lowering) fn register_ops(
     registry: &mut ProgramOpRegistry,
 ) -> Result<(), String> {
@@ -122,62 +118,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
     registry.register_count(CountOpKind::IncompressibleCoupledMaxIters, coupled_max_iters)?;
 
     Ok(())
-}
-
-impl ProgramOpDispatcher for IncompressibleOpDispatcher {
-    fn run_graph(
-        &self,
-        kind: GraphOpKind,
-        plan: &GpuProgramPlan,
-        context: &GpuContext,
-        mode: GraphExecMode,
-    ) -> (f64, Option<GraphDetail>) {
-        match kind {
-            GraphOpKind::IncompressibleCoupledPrepareAssembly => {
-                coupled_graph_prepare_assembly_run(plan, context, mode)
-            }
-            GraphOpKind::IncompressibleCoupledAssembly => {
-                coupled_graph_assembly_run(plan, context, mode)
-            }
-            GraphOpKind::IncompressibleCoupledUpdate => {
-                coupled_graph_update_run(plan, context, mode)
-            }
-            GraphOpKind::IncompressibleCoupledInitPrepare => {
-                coupled_graph_init_prepare_run(plan, context, mode)
-            }
-            other => unreachable!("incompressible graph op not supported: {other:?}"),
-        }
-    }
-
-    fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan) {
-        match kind {
-            HostOpKind::IncompressibleCoupledBeginStep => host_coupled_begin_step(plan),
-            HostOpKind::IncompressibleCoupledBeforeIter => host_coupled_before_iter(plan),
-            HostOpKind::IncompressibleCoupledSolve => host_coupled_solve(plan),
-            HostOpKind::IncompressibleCoupledClearMaxDiff => host_coupled_clear_max_diff(plan),
-            HostOpKind::IncompressibleCoupledConvergenceAdvance => {
-                host_coupled_convergence_and_advance(plan)
-            }
-            HostOpKind::IncompressibleCoupledFinalizeStep => host_coupled_finalize_step(plan),
-            other => unreachable!("incompressible host op not supported: {other:?}"),
-        }
-    }
-
-    fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool {
-        match kind {
-            CondOpKind::IncompressibleHasCoupledResources => has_coupled_resources(plan),
-            CondOpKind::IncompressibleCoupledNeedsPrepare => coupled_needs_prepare(plan),
-            CondOpKind::IncompressibleCoupledShouldContinue => coupled_should_continue(plan),
-            other => unreachable!("incompressible cond op not supported: {other:?}"),
-        }
-    }
-
-    fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize {
-        match kind {
-            CountOpKind::IncompressibleCoupledMaxIters => coupled_max_iters(plan),
-            other => unreachable!("incompressible count op not supported: {other:?}"),
-        }
-    }
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

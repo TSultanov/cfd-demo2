@@ -1,4 +1,3 @@
-use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
@@ -9,8 +8,7 @@ use crate::solver::gpu::modules::graph::{
 use crate::solver::gpu::modules::state::PingPongState;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
-    ProgramOpRegistry,
+    GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpRegistry,
 };
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -97,8 +95,6 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
         .expect("missing GenericCoupledProgramResources")
 }
 
-pub(in crate::solver::gpu::lowering) struct GenericCoupledOpDispatcher;
-
 pub(in crate::solver::gpu::lowering) fn register_ops(
     registry: &mut ProgramOpRegistry,
 ) -> Result<(), String> {
@@ -113,39 +109,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
     )?;
 
     Ok(())
-}
-
-impl ProgramOpDispatcher for GenericCoupledOpDispatcher {
-    fn run_graph(
-        &self,
-        kind: GraphOpKind,
-        plan: &GpuProgramPlan,
-        context: &GpuContext,
-        mode: GraphExecMode,
-    ) -> (f64, Option<GraphDetail>) {
-        match kind {
-            GraphOpKind::GenericCoupledScalarAssembly => assembly_graph_run(plan, context, mode),
-            GraphOpKind::GenericCoupledScalarUpdate => update_graph_run(plan, context, mode),
-            other => unreachable!("generic coupled graph op not supported: {other:?}"),
-        }
-    }
-
-    fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan) {
-        match kind {
-            HostOpKind::GenericCoupledScalarPrepare => host_prepare_step(plan),
-            HostOpKind::GenericCoupledScalarSolve => host_solve_linear_system(plan),
-            HostOpKind::GenericCoupledScalarFinalizeStep => host_finalize_step(plan),
-            other => unreachable!("generic coupled host op not supported: {other:?}"),
-        }
-    }
-
-    fn eval_cond(&self, kind: CondOpKind, _plan: &GpuProgramPlan) -> bool {
-        unreachable!("generic coupled does not support cond op: {kind:?}")
-    }
-
-    fn eval_count(&self, kind: CountOpKind, _plan: &GpuProgramPlan) -> usize {
-        unreachable!("generic coupled does not support count op: {kind:?}")
-    }
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

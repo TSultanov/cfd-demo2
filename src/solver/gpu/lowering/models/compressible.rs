@@ -1,12 +1,10 @@
-use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{
-    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpDispatcher,
-    ProgramOpRegistry,
+    CondOpKind, CountOpKind, GpuProgramPlan, GraphOpKind, HostOpKind, ProgramOpRegistry,
 };
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::env;
@@ -68,8 +66,6 @@ fn res_wrap_mut(plan: &mut GpuProgramPlan) -> &mut CompressibleProgramResources 
         .expect("missing CompressibleProgramResources")
 }
 
-pub(in crate::solver::gpu::lowering) struct CompressibleOpDispatcher;
-
 pub(in crate::solver::gpu::lowering) fn register_ops(
     registry: &mut ProgramOpRegistry,
 ) -> Result<(), String> {
@@ -121,61 +117,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
     )?;
 
     Ok(())
-}
-
-impl ProgramOpDispatcher for CompressibleOpDispatcher {
-    fn run_graph(
-        &self,
-        kind: GraphOpKind,
-        plan: &GpuProgramPlan,
-        context: &GpuContext,
-        mode: GraphExecMode,
-    ) -> (f64, Option<GraphDetail>) {
-        match kind {
-            GraphOpKind::CompressibleExplicitGraph => explicit_graph_run(plan, context, mode),
-            GraphOpKind::CompressibleImplicitGradAssembly => {
-                implicit_grad_assembly_graph_run(plan, context, mode)
-            }
-            GraphOpKind::CompressibleImplicitSnapshot => implicit_snapshot_run(plan, context, mode),
-            GraphOpKind::CompressibleImplicitApply => implicit_apply_graph_run(plan, context, mode),
-            GraphOpKind::CompressiblePrimitiveUpdate => {
-                primitive_update_graph_run(plan, context, mode)
-            }
-            other => unreachable!("compressible graph op not supported: {other:?}"),
-        }
-    }
-
-    fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan) {
-        match kind {
-            HostOpKind::CompressibleExplicitPrepare => host_explicit_prepare(plan),
-            HostOpKind::CompressibleExplicitFinalize => host_explicit_finalize(plan),
-            HostOpKind::CompressibleImplicitPrepare => host_implicit_prepare(plan),
-            HostOpKind::CompressibleImplicitSetIterParams => host_implicit_set_iter_params(plan),
-            HostOpKind::CompressibleImplicitSolveFgmres => host_implicit_solve_fgmres(plan),
-            HostOpKind::CompressibleImplicitRecordStats => host_implicit_record_stats(plan),
-            HostOpKind::CompressibleImplicitSetAlpha => host_implicit_set_alpha_for_apply(plan),
-            HostOpKind::CompressibleImplicitRestoreAlpha => host_implicit_restore_alpha(plan),
-            HostOpKind::CompressibleImplicitAdvanceOuterIdx => {
-                host_implicit_advance_outer_idx(plan)
-            }
-            HostOpKind::CompressibleImplicitFinalize => host_implicit_finalize(plan),
-            other => unreachable!("compressible host op not supported: {other:?}"),
-        }
-    }
-
-    fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool {
-        match kind {
-            CondOpKind::CompressibleShouldUseExplicit => should_use_explicit(plan),
-            other => unreachable!("compressible cond op not supported: {other:?}"),
-        }
-    }
-
-    fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize {
-        match kind {
-            CountOpKind::CompressibleImplicitOuterIters => implicit_outer_iters(plan),
-            other => unreachable!("compressible count op not supported: {other:?}"),
-        }
-    }
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

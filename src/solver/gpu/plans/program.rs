@@ -8,7 +8,7 @@ use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 pub(crate) type ProgramInitRun = fn(&GpuProgramPlan);
@@ -112,6 +112,105 @@ impl ProgramOpRegistry {
         Self::default()
     }
 
+    pub(crate) fn validate_program_spec(&self, program: &ProgramSpec) -> Result<(), String> {
+        let mut missing = BTreeSet::<String>::new();
+
+        if program
+            .blocks
+            .get(program.root.0 as usize)
+            .is_none()
+        {
+            missing.insert(format!("missing root program block: {:?}", program.root));
+        }
+
+        for (block_idx, block) in program.blocks.iter().enumerate() {
+            for node in &block.nodes {
+                match *node {
+                    ProgramSpecNode::Graph { label, kind, .. } => {
+                        if !self.graph.contains_key(&kind) {
+                            missing.insert(format!(
+                                "missing graph op handler: {kind:?} (node '{label}', block {block_idx})"
+                            ));
+                        }
+                    }
+                    ProgramSpecNode::Host { label, kind } => {
+                        if !self.host.contains_key(&kind) {
+                            missing.insert(format!(
+                                "missing host op handler: {kind:?} (node '{label}', block {block_idx})"
+                            ));
+                        }
+                    }
+                    ProgramSpecNode::If {
+                        label,
+                        cond,
+                        then_block,
+                        else_block,
+                    } => {
+                        if !self.cond.contains_key(&cond) {
+                            missing.insert(format!(
+                                "missing cond op handler: {cond:?} (node '{label}', block {block_idx})"
+                            ));
+                        }
+                        if program.blocks.get(then_block.0 as usize).is_none() {
+                            missing.insert(format!(
+                                "missing ProgramSpec block referenced by node '{label}': then_block={then_block:?}"
+                            ));
+                        }
+                        if let Some(else_block) = else_block {
+                            if program.blocks.get(else_block.0 as usize).is_none() {
+                                missing.insert(format!(
+                                    "missing ProgramSpec block referenced by node '{label}': else_block={else_block:?}"
+                                ));
+                            }
+                        }
+                    }
+                    ProgramSpecNode::Repeat { label, times, body } => {
+                        if !self.count.contains_key(&times) {
+                            missing.insert(format!(
+                                "missing count op handler: {times:?} (node '{label}', block {block_idx})"
+                            ));
+                        }
+                        if program.blocks.get(body.0 as usize).is_none() {
+                            missing.insert(format!(
+                                "missing ProgramSpec block referenced by node '{label}': body={body:?}"
+                            ));
+                        }
+                    }
+                    ProgramSpecNode::While {
+                        label,
+                        max_iters,
+                        cond,
+                        body,
+                    } => {
+                        if !self.count.contains_key(&max_iters) {
+                            missing.insert(format!(
+                                "missing count op handler: {max_iters:?} (node '{label}', block {block_idx})"
+                            ));
+                        }
+                        if !self.cond.contains_key(&cond) {
+                            missing.insert(format!(
+                                "missing cond op handler: {cond:?} (node '{label}', block {block_idx})"
+                            ));
+                        }
+                        if program.blocks.get(body.0 as usize).is_none() {
+                            missing.insert(format!(
+                                "missing ProgramSpec block referenced by node '{label}': body={body:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        if missing.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "ProgramSpec validation failed; missing op handlers:\n- {}",
+            missing.into_iter().collect::<Vec<_>>().join("\n- ")
+        ))
+    }
+
     pub fn register_graph(&mut self, kind: GraphOpKind, handler: GraphOpHandler) -> Result<(), String> {
         if self.graph.insert(kind, handler).is_some() {
             return Err(format!("graph op already registered: {kind:?}"));
@@ -145,18 +244,7 @@ impl ProgramOpRegistry {
     }
 }
 
-pub(crate) struct HybridProgramOpDispatcher {
-    registry: ProgramOpRegistry,
-    legacy: Arc<dyn ProgramOpDispatcher + Send + Sync>,
-}
-
-impl HybridProgramOpDispatcher {
-    pub fn new(registry: ProgramOpRegistry, legacy: Arc<dyn ProgramOpDispatcher + Send + Sync>) -> Self {
-        Self { registry, legacy }
-    }
-}
-
-impl ProgramOpDispatcher for HybridProgramOpDispatcher {
+impl ProgramOpDispatcher for ProgramOpRegistry {
     fn run_graph(
         &self,
         kind: GraphOpKind,
@@ -164,32 +252,39 @@ impl ProgramOpDispatcher for HybridProgramOpDispatcher {
         context: &GpuContext,
         mode: GraphExecMode,
     ) -> (f64, Option<GraphDetail>) {
-        if let Some(handler) = self.registry.graph.get(&kind).copied() {
-            return handler(plan, context, mode);
-        }
-        self.legacy.run_graph(kind, plan, context, mode)
+        let handler = self
+            .graph
+            .get(&kind)
+            .copied()
+            .unwrap_or_else(|| panic!("missing graph op handler registration: {kind:?}"));
+        handler(plan, context, mode)
     }
 
     fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan) {
-        if let Some(handler) = self.registry.host.get(&kind).copied() {
-            handler(plan);
-            return;
-        }
-        self.legacy.run_host(kind, plan);
+        let handler = self
+            .host
+            .get(&kind)
+            .copied()
+            .unwrap_or_else(|| panic!("missing host op handler registration: {kind:?}"));
+        handler(plan);
     }
 
     fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool {
-        if let Some(handler) = self.registry.cond.get(&kind).copied() {
-            return handler(plan);
-        }
-        self.legacy.eval_cond(kind, plan)
+        let handler = self
+            .cond
+            .get(&kind)
+            .copied()
+            .unwrap_or_else(|| panic!("missing cond op handler registration: {kind:?}"));
+        handler(plan)
     }
 
     fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize {
-        if let Some(handler) = self.registry.count.get(&kind).copied() {
-            return handler(plan);
-        }
-        self.legacy.eval_count(kind, plan)
+        let handler = self
+            .count
+            .get(&kind)
+            .copied()
+            .unwrap_or_else(|| panic!("missing count op handler registration: {kind:?}"));
+        handler(plan)
     }
 }
 
@@ -522,5 +617,187 @@ impl GpuProgramPlan {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_graph(
+        _plan: &GpuProgramPlan,
+        _context: &GpuContext,
+        _mode: GraphExecMode,
+    ) -> (f64, Option<GraphDetail>) {
+        (0.0, None)
+    }
+
+    fn dummy_host(_plan: &mut GpuProgramPlan) {}
+
+    fn dummy_cond(_plan: &GpuProgramPlan) -> bool {
+        false
+    }
+
+    fn dummy_count(_plan: &GpuProgramPlan) -> usize {
+        0
+    }
+
+    #[test]
+    fn validate_program_spec_reports_missing_handlers() {
+        let mut builder = ProgramSpecBuilder::new();
+        let root = builder.root();
+        let then_block = builder.new_block();
+        let repeat_block = builder.new_block();
+
+        builder.push(
+            root,
+            ProgramSpecNode::Graph {
+                label: "t:g",
+                kind: GraphOpKind::CompressibleExplicitGraph,
+                mode: GraphExecMode::SingleSubmit,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::Host {
+                label: "t:h",
+                kind: HostOpKind::CompressibleExplicitPrepare,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::If {
+                label: "t:if",
+                cond: CondOpKind::CompressibleShouldUseExplicit,
+                then_block,
+                else_block: None,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::Repeat {
+                label: "t:repeat",
+                times: CountOpKind::CompressibleImplicitOuterIters,
+                body: repeat_block,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::While {
+                label: "t:while",
+                max_iters: CountOpKind::IncompressibleCoupledMaxIters,
+                cond: CondOpKind::IncompressibleCoupledShouldContinue,
+                body: repeat_block,
+            },
+        );
+
+        builder.push(
+            then_block,
+            ProgramSpecNode::Host {
+                label: "t:then:h",
+                kind: HostOpKind::CompressibleExplicitFinalize,
+            },
+        );
+
+        builder.push(
+            repeat_block,
+            ProgramSpecNode::Host {
+                label: "t:repeat:h",
+                kind: HostOpKind::IncompressibleCoupledBeginStep,
+            },
+        );
+
+        let program = builder.build();
+
+        let registry = ProgramOpRegistry::new();
+        let err = registry
+            .validate_program_spec(&program)
+            .expect_err("expected missing handler validation to fail");
+        assert!(err.contains("CompressibleExplicitGraph"));
+        assert!(err.contains("CompressibleExplicitPrepare"));
+        assert!(err.contains("CompressibleShouldUseExplicit"));
+        assert!(err.contains("CompressibleImplicitOuterIters"));
+        assert!(err.contains("IncompressibleCoupledMaxIters"));
+        assert!(err.contains("IncompressibleCoupledShouldContinue"));
+    }
+
+    #[test]
+    fn validate_program_spec_passes_with_complete_registry() -> Result<(), String> {
+        let mut builder = ProgramSpecBuilder::new();
+        let root = builder.root();
+        let then_block = builder.new_block();
+        let repeat_block = builder.new_block();
+
+        builder.push(
+            root,
+            ProgramSpecNode::Graph {
+                label: "t:g",
+                kind: GraphOpKind::CompressibleExplicitGraph,
+                mode: GraphExecMode::SingleSubmit,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::Host {
+                label: "t:h",
+                kind: HostOpKind::CompressibleExplicitPrepare,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::If {
+                label: "t:if",
+                cond: CondOpKind::CompressibleShouldUseExplicit,
+                then_block,
+                else_block: None,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::Repeat {
+                label: "t:repeat",
+                times: CountOpKind::CompressibleImplicitOuterIters,
+                body: repeat_block,
+            },
+        );
+        builder.push(
+            root,
+            ProgramSpecNode::While {
+                label: "t:while",
+                max_iters: CountOpKind::IncompressibleCoupledMaxIters,
+                cond: CondOpKind::IncompressibleCoupledShouldContinue,
+                body: repeat_block,
+            },
+        );
+
+        builder.push(
+            then_block,
+            ProgramSpecNode::Host {
+                label: "t:then:h",
+                kind: HostOpKind::CompressibleExplicitFinalize,
+            },
+        );
+
+        builder.push(
+            repeat_block,
+            ProgramSpecNode::Host {
+                label: "t:repeat:h",
+                kind: HostOpKind::IncompressibleCoupledBeginStep,
+            },
+        );
+
+        let program = builder.build();
+
+        let mut registry = ProgramOpRegistry::new();
+        registry.register_graph(GraphOpKind::CompressibleExplicitGraph, dummy_graph)?;
+        registry.register_host(HostOpKind::CompressibleExplicitPrepare, dummy_host)?;
+        registry.register_host(HostOpKind::CompressibleExplicitFinalize, dummy_host)?;
+        registry.register_host(HostOpKind::IncompressibleCoupledBeginStep, dummy_host)?;
+        registry.register_cond(CondOpKind::CompressibleShouldUseExplicit, dummy_cond)?;
+        registry.register_cond(CondOpKind::IncompressibleCoupledShouldContinue, dummy_cond)?;
+        registry.register_count(CountOpKind::CompressibleImplicitOuterIters, dummy_count)?;
+        registry.register_count(CountOpKind::IncompressibleCoupledMaxIters, dummy_count)?;
+
+        registry.validate_program_spec(&program)
     }
 }

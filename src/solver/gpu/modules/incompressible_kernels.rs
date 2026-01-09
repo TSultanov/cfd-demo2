@@ -6,6 +6,7 @@ use crate::solver::gpu::bindings::generated::{
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::structs::CoupledSolverResources;
+use crate::solver::gpu::wgsl_meta;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -54,64 +55,59 @@ impl IncompressibleKernelsModule {
         let pipeline_update_fields_from_coupled =
             generated_update_fields::compute::create_main_pipeline_embed_source(device);
 
-        let mesh_layout = device.create_bind_group_layout(
-            &generated_prepare_coupled::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-        );
-        let bg_mesh = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Incompressible: mesh bind group"),
-            layout: &mesh_layout,
-            entries: &generated_prepare_coupled::WgpuBindGroup0Entries::new(
-                generated_prepare_coupled::WgpuBindGroup0EntriesParams {
-                    face_owner: mesh.b_face_owner.as_entire_buffer_binding(),
-                    face_neighbor: mesh.b_face_neighbor.as_entire_buffer_binding(),
-                    face_areas: mesh.b_face_areas.as_entire_buffer_binding(),
-                    face_normals: mesh.b_face_normals.as_entire_buffer_binding(),
-                    face_centers: mesh.b_face_centers.as_entire_buffer_binding(),
-                    cell_centers: mesh.b_cell_centers.as_entire_buffer_binding(),
-                    cell_vols: mesh.b_cell_vols.as_entire_buffer_binding(),
-                    cell_face_offsets: mesh.b_cell_face_offsets.as_entire_buffer_binding(),
-                    cell_faces: mesh.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: mesh
-                        .b_cell_face_matrix_indices
-                        .as_entire_buffer_binding(),
-                    diagonal_indices: mesh.b_diagonal_indices.as_entire_buffer_binding(),
-                    face_boundary: mesh.b_face_boundary.as_entire_buffer_binding(),
+        let bg_mesh = {
+            let bgl = pipeline_prepare_coupled.get_bind_group_layout(0);
+            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                "Incompressible: mesh bind group",
+                &bgl,
+                wgsl_meta::PREPARE_COUPLED_BINDINGS,
+                0,
+                |name| {
+                    mesh.buffer_for_binding_name(name)
+                        .map(|buf| wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()))
                 },
             )
-            .into_array(),
-        });
+            .unwrap_or_else(|err| panic!("Incompressible mesh bind group build failed: {err}"))
+        };
 
         let bg_fields_ping_pong = fields.bg_fields_ping_pong.clone();
         let bg_solver = coupled.bg_solver.clone();
 
         let bg_update_fields_ping_pong = {
-            let bgl = device.create_bind_group_layout(
-                &generated_update_fields::WgpuBindGroup0::LAYOUT_DESCRIPTOR,
-            );
+            let bgl = pipeline_update_fields_from_coupled.get_bind_group_layout(0);
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
-                let (idx_state, idx_old, idx_old_old) = match i {
-                    0 => (0, 1, 2),
-                    1 => (2, 0, 1),
-                    2 => (1, 2, 0),
-                    _ => (0, 1, 2),
-                };
+                let (idx_state, idx_old, idx_old_old) =
+                    crate::solver::gpu::modules::state::ping_pong_indices(i);
                 out.push(
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("Incompressible update fields bind group {i}")),
-                        layout: &bgl,
-                        entries: &generated_update_fields::WgpuBindGroup0Entries::new(
-                            generated_update_fields::WgpuBindGroup0EntriesParams {
-                                state: fields.state.buffers()[idx_state].as_entire_buffer_binding(),
-                                state_old: fields.state.buffers()[idx_old]
-                                    .as_entire_buffer_binding(),
-                                state_old_old: fields.state.buffers()[idx_old_old]
-                                    .as_entire_buffer_binding(),
-                                fluxes: fields.b_fluxes.as_entire_buffer_binding(),
-                                constants: fields.constants.buffer().as_entire_buffer_binding(),
-                            },
-                        )
-                        .into_array(),
+                    crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("Incompressible update fields bind group {i}"),
+                        &bgl,
+                        wgsl_meta::UPDATE_FIELDS_FROM_COUPLED_BINDINGS,
+                        0,
+                        |name| match name {
+                            "state" => Some(wgpu::BindingResource::Buffer(
+                                fields.state.buffers()[idx_state].as_entire_buffer_binding(),
+                            )),
+                            "state_old" => Some(wgpu::BindingResource::Buffer(
+                                fields.state.buffers()[idx_old].as_entire_buffer_binding(),
+                            )),
+                            "state_old_old" => Some(wgpu::BindingResource::Buffer(
+                                fields.state.buffers()[idx_old_old].as_entire_buffer_binding(),
+                            )),
+                            "fluxes" => Some(wgpu::BindingResource::Buffer(
+                                fields.b_fluxes.as_entire_buffer_binding(),
+                            )),
+                            "constants" => Some(wgpu::BindingResource::Buffer(
+                                fields.constants.buffer().as_entire_buffer_binding(),
+                            )),
+                            _ => None,
+                        },
+                    )
+                    .unwrap_or_else(|err| {
+                        panic!("Incompressible update-fields bind group build failed: {err}")
                     }),
                 );
             }

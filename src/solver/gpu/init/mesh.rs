@@ -18,6 +18,26 @@ pub struct MeshResources {
     pub col_indices: Vec<u32>,
 }
 
+impl MeshResources {
+    pub fn buffer_for_binding_name(&self, name: &str) -> Option<&wgpu::Buffer> {
+        match name {
+            "face_owner" => Some(&self.b_face_owner),
+            "face_neighbor" => Some(&self.b_face_neighbor),
+            "face_boundary" => Some(&self.b_face_boundary),
+            "face_areas" => Some(&self.b_face_areas),
+            "face_normals" => Some(&self.b_face_normals),
+            "face_centers" => Some(&self.b_face_centers),
+            "cell_centers" => Some(&self.b_cell_centers),
+            "cell_vols" => Some(&self.b_cell_vols),
+            "cell_face_offsets" => Some(&self.b_cell_face_offsets),
+            "cell_faces" => Some(&self.b_cell_faces),
+            "cell_face_matrix_indices" => Some(&self.b_cell_face_matrix_indices),
+            "diagonal_indices" => Some(&self.b_diagonal_indices),
+            _ => None,
+        }
+    }
+}
+
 pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
     let num_cells = mesh.cell_cx.len() as u32;
 

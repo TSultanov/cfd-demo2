@@ -6,6 +6,7 @@ use crate::solver::gpu::bindings::generated::{
 };
 use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
+use crate::solver::gpu::wgsl_meta;
 
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
 use super::linear_system::{LinearSystemPorts, LinearSystemView};
@@ -74,95 +75,117 @@ impl CompressibleKernelsModule {
             explicit_update::compute::create_main_pipeline_embed_source(device);
         let pipeline_update = generated_update::compute::create_main_pipeline_embed_source(device);
 
-        let mesh_layout =
-            device.create_bind_group_layout(&generated_assembly::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-        let bg_mesh = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compressible Mesh Bind Group"),
-            layout: &mesh_layout,
-            entries: &generated_assembly::WgpuBindGroup0Entries::new(
-                generated_assembly::WgpuBindGroup0EntriesParams {
-                    face_owner: mesh.b_face_owner.as_entire_buffer_binding(),
-                    face_neighbor: mesh.b_face_neighbor.as_entire_buffer_binding(),
-                    face_areas: mesh.b_face_areas.as_entire_buffer_binding(),
-                    face_normals: mesh.b_face_normals.as_entire_buffer_binding(),
-                    cell_centers: mesh.b_cell_centers.as_entire_buffer_binding(),
-                    cell_vols: mesh.b_cell_vols.as_entire_buffer_binding(),
-                    cell_face_offsets: mesh.b_cell_face_offsets.as_entire_buffer_binding(),
-                    cell_faces: mesh.b_cell_faces.as_entire_buffer_binding(),
-                    cell_face_matrix_indices: mesh
-                        .b_cell_face_matrix_indices
-                        .as_entire_buffer_binding(),
-                    diagonal_indices: mesh.b_diagonal_indices.as_entire_buffer_binding(),
-                    face_boundary: mesh.b_face_boundary.as_entire_buffer_binding(),
-                    face_centers: mesh.b_face_centers.as_entire_buffer_binding(),
+        let bg_mesh = {
+            let bgl = pipeline_assembly.get_bind_group_layout(0);
+            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                "Compressible Mesh Bind Group",
+                &bgl,
+                wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                0,
+                |name| {
+                    mesh.buffer_for_binding_name(name)
+                        .map(|buf| wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()))
                 },
             )
-            .into_array(),
-        });
+            .unwrap_or_else(|err| panic!("Compressible mesh bind group build failed: {err}"))
+        };
 
         let bg_fields_ping_pong = fields.bg_fields_ping_pong.clone();
 
-        let solver_layout =
-            device.create_bind_group_layout(&generated_assembly::WgpuBindGroup2::LAYOUT_DESCRIPTOR);
-        let bg_solver = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compressible Solver Bind Group"),
-            layout: &solver_layout,
-            entries: &generated_assembly::WgpuBindGroup2Entries::new(
-                generated_assembly::WgpuBindGroup2EntriesParams {
-                    matrix_values: system.values().as_entire_buffer_binding(),
-                    rhs: system.rhs().as_entire_buffer_binding(),
-                    scalar_row_offsets: b_scalar_row_offsets.as_entire_buffer_binding(),
+        let bg_solver = {
+            let bgl = pipeline_assembly.get_bind_group_layout(2);
+            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                "Compressible Solver Bind Group",
+                &bgl,
+                wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                2,
+                |name| match name {
+                    "matrix_values" => Some(wgpu::BindingResource::Buffer(
+                        system.values().as_entire_buffer_binding(),
+                    )),
+                    "rhs" => Some(wgpu::BindingResource::Buffer(
+                        system.rhs().as_entire_buffer_binding(),
+                    )),
+                    "scalar_row_offsets" => Some(wgpu::BindingResource::Buffer(
+                        b_scalar_row_offsets.as_entire_buffer_binding(),
+                    )),
+                    _ => None,
                 },
             )
-            .into_array(),
-        });
+            .unwrap_or_else(|err| panic!("Compressible solver bind group build failed: {err}"))
+        };
 
-        let apply_fields_layout =
-            device.create_bind_group_layout(&generated_apply::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+        let apply_fields_layout = pipeline_apply.get_bind_group_layout(0);
         let mut bg_apply_fields_ping_pong = Vec::new();
         for i in 0..3 {
-            let (idx_state, idx_old, idx_old_old) = match i {
-                0 => (0, 1, 2),
-                1 => (2, 0, 1),
-                2 => (1, 2, 0),
-                _ => (0, 1, 2),
-            };
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("Compressible Apply Fields Bind Group {}", i)),
-                layout: &apply_fields_layout,
-                entries: &generated_apply::WgpuBindGroup0Entries::new(
-                    generated_apply::WgpuBindGroup0EntriesParams {
-                        state: fields.state.buffers()[idx_state].as_entire_buffer_binding(),
-                        state_old: fields.state.buffers()[idx_old].as_entire_buffer_binding(),
-                        state_old_old: fields.state.buffers()[idx_old_old]
-                            .as_entire_buffer_binding(),
-                        state_iter: fields.b_state_iter.as_entire_buffer_binding(),
-                        fluxes: fields.b_fluxes.as_entire_buffer_binding(),
-                        constants: fields.constants.buffer().as_entire_buffer_binding(),
-                        grad_rho: fields.b_grad_rho.as_entire_buffer_binding(),
-                        grad_rho_u_x: fields.b_grad_rho_u_x.as_entire_buffer_binding(),
-                        grad_rho_u_y: fields.b_grad_rho_u_y.as_entire_buffer_binding(),
-                        grad_rho_e: fields.b_grad_rho_e.as_entire_buffer_binding(),
-                        low_mach: fields.b_low_mach_params.as_entire_buffer_binding(),
-                    },
-                )
-                .into_array(),
+            let (idx_state, idx_old, idx_old_old) =
+                crate::solver::gpu::modules::state::ping_pong_indices(i);
+            let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("Compressible Apply Fields Bind Group {}", i),
+                &apply_fields_layout,
+                wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
+                0,
+                |name| match name {
+                    "state" => Some(wgpu::BindingResource::Buffer(
+                        fields.state.buffers()[idx_state].as_entire_buffer_binding(),
+                    )),
+                    "state_old" => Some(wgpu::BindingResource::Buffer(
+                        fields.state.buffers()[idx_old].as_entire_buffer_binding(),
+                    )),
+                    "state_old_old" => Some(wgpu::BindingResource::Buffer(
+                        fields.state.buffers()[idx_old_old].as_entire_buffer_binding(),
+                    )),
+                    "state_iter" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_state_iter.as_entire_buffer_binding(),
+                    )),
+                    "fluxes" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_fluxes.as_entire_buffer_binding(),
+                    )),
+                    "constants" => Some(wgpu::BindingResource::Buffer(
+                        fields.constants.buffer().as_entire_buffer_binding(),
+                    )),
+                    "grad_rho" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_grad_rho.as_entire_buffer_binding(),
+                    )),
+                    "grad_rho_u_x" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_grad_rho_u_x.as_entire_buffer_binding(),
+                    )),
+                    "grad_rho_u_y" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_grad_rho_u_y.as_entire_buffer_binding(),
+                    )),
+                    "grad_rho_e" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_grad_rho_e.as_entire_buffer_binding(),
+                    )),
+                    "low_mach" => Some(wgpu::BindingResource::Buffer(
+                        fields.b_low_mach_params.as_entire_buffer_binding(),
+                    )),
+                    _ => None,
+                },
+            )
+            .unwrap_or_else(|err| {
+                panic!("Compressible apply-fields bind group build failed: {err}")
             });
             bg_apply_fields_ping_pong.push(bg);
         }
 
-        let apply_solver_layout =
-            device.create_bind_group_layout(&generated_apply::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-        let bg_apply_solver = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compressible Apply Solver Bind Group"),
-            layout: &apply_solver_layout,
-            entries: &generated_apply::WgpuBindGroup1Entries::new(
-                generated_apply::WgpuBindGroup1EntriesParams {
-                    solution: system.x().as_entire_buffer_binding(),
-                },
-            )
-            .into_array(),
-        });
+        let apply_solver_layout = pipeline_apply.get_bind_group_layout(1);
+        let bg_apply_solver = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Compressible Apply Solver Bind Group",
+            &apply_solver_layout,
+            wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
+            1,
+            |name| match name {
+                "solution" => Some(wgpu::BindingResource::Buffer(
+                    system.x().as_entire_buffer_binding(),
+                )),
+                _ => None,
+            },
+        )
+        .unwrap_or_else(|err| panic!("Compressible apply-solver bind group build failed: {err}"));
 
         Self {
             state_step_index,

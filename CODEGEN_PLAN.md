@@ -31,7 +31,6 @@ One **model-driven** GPU solver pipeline with:
    - Replace “call legacy `step()`” with explicit per-pass schedules (module graphs + host nodes) in the spec for incompressible and compressible.
    - Goal: the runtime owns pass ordering and dispatch; solver-family code becomes pure “lowering/building modules”, not orchestration.
 2. **Delete migrated legacy plan types**
-   - Remove `GpuGenericCoupledSolver` (now unused) and any remaining callers.
    - Once incompressible/compressible schedules are moved into specs, delete `GpuSolver`/`CompressiblePlanResources` as `GpuPlanInstance` implementations (keep only as internal lowered resources/modules if still needed).
 3. **Elevate “first-class modules”**
    - Krylov / preconditioners / AMG become pluggable modules with explicit ports and self-owned resources.

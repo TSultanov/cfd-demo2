@@ -15,6 +15,7 @@ One **model-driven** GPU solver pipeline with:
 - Solver-family structs (`GpuSolver`, `CompressiblePlanResources`) are internal resources only (not part of the plan API).
 - One unified lowering entrypoint: `src/solver/gpu/lowering/mod.rs` `lower_program(...)`.
 - Program runtime supports control flow (`If`, `Repeat`, `While`) + graph dispatch + host nodes.
+- Program schedules no longer embed function pointers: `ProgramNode::{Graph,Host}` reference `ProgramGraphId`/`ProgramHostId` resolved via `ModelGpuProgramSpec::{graph_ops,host_ops}`.
 - Compressible stepping (explicit + implicit outer loop) is expressed as a program schedule (graphs + host nodes).
 - Incompressible coupled stepping is expressed as a program schedule (graphs + host nodes + outer-loop control flow).
 - Legacy per-family step loops (`step_with_stats`/`step_coupled_impl`) were removed; solver-family structs now exist only as internal resource containers + helpers.
@@ -24,7 +25,7 @@ One **model-driven** GPU solver pipeline with:
 - Not yet: we still have solver-family resource containers and solver-family kernel binding/dispatch wiring. Generated WGSL exists, but the Rust-side binding/plumbing is not model-driven.
 
 ## Remaining Gaps (Concrete)
-- `ModelGpuProgramSpec` is still mostly **function-pointer glue** over solver-family containers rather than a first-class “ports + module graph + dispatch plan” spec.
+- `ModelGpuProgramSpec` still relies on per-model dispatch tables of function pointers (`graph_ops`, `host_ops`, param handlers) over solver-family containers rather than a first-class “ports + module graph + dispatch plan” spec.
 - Lowering still has per-family program builders (`compressible_program.rs` / `incompressible_program.rs` / `generic_coupled_program.rs`); schedules are handwritten rather than derived from `ModelSpec` + config.
 - Kernel wiring is still largely handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering), especially for generated-per-model kernels.
 - “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.

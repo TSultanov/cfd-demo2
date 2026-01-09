@@ -30,6 +30,12 @@ pub(crate) type ProgramStepWithStatsFn =
 pub(crate) type ProgramLinearDebugProvider =
     fn(&mut GpuProgramPlan) -> Option<&mut dyn PlanLinearSystemDebug>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ProgramGraphId(pub u16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ProgramHostId(pub u16);
+
 pub(crate) struct ProgramResources {
     by_type: HashMap<TypeId, Box<dyn Any + Send>>,
 }
@@ -65,12 +71,12 @@ impl ProgramResources {
 pub(crate) enum ProgramNode {
     Graph {
         label: &'static str,
-        run: ProgramGraphRun,
+        id: ProgramGraphId,
         mode: GraphExecMode,
     },
     Host {
         label: &'static str,
-        run: ProgramHostRun,
+        id: ProgramHostId,
     },
     If {
         label: &'static str,
@@ -103,10 +109,24 @@ impl ProgramExecutionPlan {
     pub fn execute(&self, plan: &mut GpuProgramPlan) {
         for node in &self.nodes {
             match node {
-                ProgramNode::Graph { run, mode, .. } => {
+                ProgramNode::Graph { id, mode, .. } => {
+                    let run = plan
+                        .spec
+                        .graph_ops
+                        .get(id)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing graph op for id={id:?}"));
                     let _ = run(&*plan, &plan.context, *mode);
                 }
-                ProgramNode::Host { run, .. } => run(plan),
+                ProgramNode::Host { id, .. } => {
+                    let run = plan
+                        .spec
+                        .host_ops
+                        .get(id)
+                        .copied()
+                        .unwrap_or_else(|| panic!("missing host op for id={id:?}"));
+                    run(plan)
+                }
                 ProgramNode::If {
                     cond,
                     then_plan,
@@ -143,6 +163,8 @@ impl ProgramExecutionPlan {
 }
 
 pub(crate) struct ModelGpuProgramSpec {
+    pub graph_ops: HashMap<ProgramGraphId, ProgramGraphRun>,
+    pub host_ops: HashMap<ProgramHostId, ProgramHostRun>,
     pub num_cells: ProgramU32Fn,
     pub time: ProgramF32Fn,
     pub dt: ProgramF32Fn,

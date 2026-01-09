@@ -6,7 +6,10 @@ use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph,
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
 };
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramNode};
+use crate::solver::gpu::plans::program::{
+    GpuProgramPlan, ModelGpuProgramSpec, ProgramExecutionPlan, ProgramGraphId, ProgramHostId,
+    ProgramNode,
+};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
@@ -242,6 +245,12 @@ fn build_update_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
     })])
 }
 
+const G_ASSEMBLY: ProgramGraphId = ProgramGraphId(0);
+const G_UPDATE: ProgramGraphId = ProgramGraphId(1);
+
+const H_PREPARE: ProgramHostId = ProgramHostId(0);
+const H_SOLVE: ProgramHostId = ProgramHostId(1);
+
 pub(crate) async fn lower_generic_coupled_program(
     mesh: &crate::solver::mesh::Mesh,
     model: ModelSpec,
@@ -450,28 +459,38 @@ pub(crate) async fn lower_generic_coupled_program(
         params.insert(PlanParam::Preconditioner, param_preconditioner as _);
         params.insert(PlanParam::DetailedProfilingEnabled, param_detailed_profiling as _);
 
+        let mut graph_ops = std::collections::HashMap::new();
+        graph_ops.insert(G_ASSEMBLY, assembly_graph_run as _);
+        graph_ops.insert(G_UPDATE, update_graph_run as _);
+
+        let mut host_ops = std::collections::HashMap::new();
+        host_ops.insert(H_PREPARE, host_prepare_step as _);
+        host_ops.insert(H_SOLVE, host_solve_linear_system as _);
+
         let step = std::sync::Arc::new(ProgramExecutionPlan::new(vec![
             ProgramNode::Host {
                 label: "generic_coupled:prepare",
-                run: host_prepare_step,
+                id: H_PREPARE,
             },
             ProgramNode::Graph {
                 label: "generic_coupled:assembly",
-                run: assembly_graph_run,
+                id: G_ASSEMBLY,
                 mode: GraphExecMode::SplitTimed,
             },
             ProgramNode::Host {
                 label: "generic_coupled:solve",
-                run: host_solve_linear_system,
+                id: H_SOLVE,
             },
             ProgramNode::Graph {
                 label: "generic_coupled:update",
-                run: update_graph_run,
+                id: G_UPDATE,
                 mode: GraphExecMode::SingleSubmit,
             },
         ]));
 
         let spec = ModelGpuProgramSpec {
+            graph_ops,
+            host_ops,
             num_cells: spec_num_cells,
             time: spec_time,
             dt: spec_dt,

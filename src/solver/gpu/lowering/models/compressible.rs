@@ -124,11 +124,11 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).fields.constants.values().time
+    res(plan).time_integration.time as f32
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).fields.constants.values().dt
+    res(plan).time_integration.dt
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {

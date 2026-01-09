@@ -12,3 +12,4 @@ pub mod model_lowerer;
 pub mod ports;
 pub mod scalar_cg;
 pub mod state;
+pub mod time_integration;

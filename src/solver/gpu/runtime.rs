@@ -3,6 +3,7 @@ use crate::solver::gpu::modules::constants::ConstantsModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
+use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
 use crate::solver::mesh::Mesh;
@@ -17,6 +18,8 @@ pub(crate) struct GpuScalarRuntime {
     pub linear_port_space: PortSpace,
 
     pub scalar_cg: ScalarCgModule,
+
+    pub time_integration: TimeIntegrationModule,
 }
 
 impl GpuScalarRuntime {
@@ -47,6 +50,7 @@ impl GpuScalarRuntime {
             linear_ports: cg.ports,
             linear_port_space: cg.port_space,
             scalar_cg: cg.scalar_cg,
+            time_integration: TimeIntegrationModule::new(),
         }
     }
 
@@ -55,7 +59,11 @@ impl GpuScalarRuntime {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        self.constants.set_dt(&self.common.context.queue, dt);
+        self.time_integration.set_dt(
+            dt,
+            &mut self.constants,
+            &self.common.context.queue,
+        );
     }
 
     pub fn set_scheme(&mut self, scheme: u32) {
@@ -75,7 +83,10 @@ impl GpuScalarRuntime {
     }
 
     pub fn advance_time(&mut self) {
-        self.constants.advance_time(&self.common.context.queue);
+        self.time_integration.prepare_step(
+            &mut self.constants,
+            &self.common.context.queue,
+        );
     }
 
     pub fn solve_linear_system_cg_with_size(

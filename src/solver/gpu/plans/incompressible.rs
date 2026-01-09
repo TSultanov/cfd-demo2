@@ -51,7 +51,11 @@ impl GpuSolver {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        self.fields.constants.set_dt(&self.common.context.queue, dt);
+        self.time_integration.set_dt(
+            dt,
+            &mut self.fields.constants,
+            &self.common.context.queue,
+        );
     }
 
     pub fn set_viscosity(&mut self, mu: f32) {

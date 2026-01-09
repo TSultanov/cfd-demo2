@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
+use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::model::ModelSpec;
 
 use super::runtime_common::GpuRuntimeCommon;
@@ -93,6 +94,7 @@ impl GpuSolver {
             linear_ports: linear_res.ports,
             linear_port_space: linear_res.port_space,
             scalar_cg: linear_res.scalar_cg,
+            time_integration: TimeIntegrationModule::new(),
         };
         solver.update_needs_gradients();
         Ok(solver)

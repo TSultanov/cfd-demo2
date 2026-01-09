@@ -125,11 +125,11 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).fields.constants.values().time
+    res(plan).time_integration.time as f32
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).fields.constants.values().dt
+    res(plan).time_integration.dt
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
@@ -252,6 +252,10 @@ pub(in crate::solver::gpu::lowering) fn host_coupled_begin_step(plan: &mut GpuPr
 
     // Ping-pong rotation (shared with kernels via PingPongState handle).
     solver.fields.state.advance();
+    solver.time_integration.prepare_step(
+        &mut solver.fields.constants,
+        &solver.common.context.queue,
+    );
 
     // Initialize fluxes and d_p (and gradients) expects `component = 0`.
     {
@@ -410,7 +414,11 @@ pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     let solver = res_mut(plan);
     match (param, value) {
         (PlanParam::Dt, PlanParamValue::F32(dt)) => {
-            solver.set_dt(dt);
+            solver.time_integration.set_dt(
+                dt,
+                &mut solver.fields.constants,
+                &solver.common.context.queue,
+            );
             Ok(())
         }
         (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
@@ -478,12 +486,10 @@ pub(in crate::solver::gpu::lowering) fn host_coupled_finalize_step(plan: &mut Gp
         return;
     }
 
-    {
-        let values = solver.fields.constants.values_mut();
-        values.time += values.dt;
-        values.dt_old = values.dt;
-    }
-    solver.fields.constants.write(&solver.common.context.queue);
+    solver.time_integration.finalize_step(
+        &mut solver.fields.constants,
+        &solver.common.context.queue,
+    );
 
     solver.check_evolution();
 

@@ -10,6 +10,7 @@ use crate::solver::gpu::modules::model_kernels::{
     KernelBindGroups, KernelPipeline, ModelKernelsModule,
 };
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
@@ -154,6 +155,7 @@ pub(crate) struct CompressiblePlanResources {
     implicit_assembly_module_graph_first_order: ModuleGraph<ModelKernelsModule>,
     implicit_apply_module_graph: ModuleGraph<ModelKernelsModule>,
     primitive_update_module_graph: ModuleGraph<ModelKernelsModule>,
+    pub(crate) time_integration: TimeIntegrationModule,
 }
 
 impl CompressiblePlanResources {
@@ -465,6 +467,7 @@ impl CompressiblePlanResources {
                 CompressiblePlanResources::build_implicit_apply_module_graph(),
             primitive_update_module_graph:
                 CompressiblePlanResources::build_primitive_update_module_graph(),
+            time_integration: TimeIntegrationModule::new(),
         };
         solver.update_needs_gradients();
         Ok(solver)
@@ -497,7 +500,11 @@ impl CompressiblePlanResources {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        self.fields.constants.set_dt(&self.common.context.queue, dt);
+        self.time_integration.set_dt(
+            dt,
+            &mut self.fields.constants,
+            &self.common.context.queue,
+        );
     }
 
     pub fn set_dtau(&mut self, dtau: f32) {
@@ -657,9 +664,10 @@ impl CompressiblePlanResources {
 
     pub(crate) fn advance_ping_pong_and_time(&mut self) {
         self.fields.state.advance();
-        self.fields
-            .constants
-            .advance_time(&self.common.context.queue);
+        self.time_integration.prepare_step(
+            &mut self.fields.constants,
+            &self.common.context.queue,
+        );
     }
 
     pub(crate) fn implicit_set_base_alpha(&mut self) {
@@ -740,9 +748,10 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) fn finalize_dt_old(&mut self) {
-        self.fields
-            .constants
-            .finalize_dt_old(&self.common.context.queue);
+        self.time_integration.finalize_step(
+            &mut self.fields.constants,
+            &self.common.context.queue,
+        );
     }
 
     pub async fn get_rho(&self) -> Vec<f64> {

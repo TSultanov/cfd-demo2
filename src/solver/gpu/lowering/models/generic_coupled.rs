@@ -116,11 +116,11 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).runtime.constants.values().time
+    res(plan).runtime.time_integration.time as f32
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).runtime.constants.values().dt
+    res(plan).runtime.time_integration.dt
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
@@ -144,7 +144,10 @@ pub(in crate::solver::gpu::lowering) fn host_prepare_step(plan: &mut GpuProgramP
 pub(in crate::solver::gpu::lowering) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
-    r.runtime.constants.finalize_dt_old(&queue);
+    r.runtime.time_integration.finalize_step(
+        &mut r.runtime.constants,
+        &queue,
+    );
 }
 
 pub(in crate::solver::gpu::lowering) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {

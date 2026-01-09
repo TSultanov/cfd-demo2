@@ -31,24 +31,4 @@ impl ConstantsModule {
     pub fn write(&self, queue: &wgpu::Queue) {
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&self.values));
     }
-
-    pub fn set_dt(&mut self, queue: &wgpu::Queue, dt: f32) {
-        // `dt_old` is advanced at step finalization.
-        // Only seed it on the initial step so BDF2 has a sensible ratio.
-        if self.values.time <= 0.0 {
-            self.values.dt_old = dt;
-        }
-        self.values.dt = dt;
-        self.write(queue);
-    }
-
-    pub fn finalize_dt_old(&mut self, queue: &wgpu::Queue) {
-        self.values.dt_old = self.values.dt;
-        self.write(queue);
-    }
-
-    pub fn advance_time(&mut self, queue: &wgpu::Queue) {
-        self.values.time += self.values.dt;
-        self.write(queue);
-    }
 }

@@ -37,6 +37,7 @@ One **model-driven** GPU solver pipeline with:
 2. **Generate kernel bindings + dispatch**
    - Emit binding metadata alongside WGSL (ports/resources per bind group) and add a generic bind-group builder.
    - Replace string-based per-model kernel selection with a generated registry (`ModelSpec.id` + kernel kind -> pipeline/bind builders).
+   - Endgame: generate specialized kernel sets per (temporal scheme + spatial scheme) choice, each with its own optimized memory layout, rather than a single generic layout + `constants.scheme/time_scheme` runtime switching.
 3. **Eliminate handwritten WGSL (incremental)**
    - Start with solver-family-specific shaders (`compressible_*`, `schur_precond`) and migrate them into the codegen WGSL pipeline.
    - Keep handwritten WGSL only as a temporary bootstrapping layer.

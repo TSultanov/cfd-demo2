@@ -9,6 +9,7 @@ pub enum KernelKind {
     CompressibleAssembly,
     CompressibleApply,
     CompressibleGradients,
+    CompressibleExplicitUpdate,
     CompressibleUpdate,
     CompressibleFluxKt,
     GenericCoupledAssembly,

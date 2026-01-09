@@ -145,6 +145,12 @@ mod solver {
                 "/src/solver/codegen/compressible_apply.rs"
             ));
         }
+        pub mod compressible_explicit_update {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/compressible_explicit_update.rs"
+            ));
+        }
         pub mod compressible_gradients {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -448,6 +454,10 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             gen_dir.join("compressible_apply.wgsl"),
         ),
         (
+            "compressible_explicit_update",
+            gen_dir.join("compressible_explicit_update.wgsl"),
+        ),
+        (
             "compressible_flux_kt",
             gen_dir.join("compressible_flux_kt.wgsl"),
         ),
@@ -518,6 +528,7 @@ fn generate_kernel_registry_map() {
         ("FluxRhieChow", "flux_rhie_chow"),
         ("CompressibleAssembly", "compressible_assembly"),
         ("CompressibleApply", "compressible_apply"),
+        ("CompressibleExplicitUpdate", "compressible_explicit_update"),
         ("CompressibleGradients", "compressible_gradients"),
         ("CompressibleUpdate", "compressible_update"),
         ("CompressibleFluxKt", "compressible_flux_kt"),

@@ -37,6 +37,7 @@ impl ModelSpec {
             ModelFields::Compressible(_) => KernelPlan::new(vec![
                 KernelKind::CompressibleFluxKt,
                 KernelKind::CompressibleGradients,
+                KernelKind::CompressibleExplicitUpdate,
                 KernelKind::CompressibleAssembly,
                 KernelKind::CompressibleApply,
                 KernelKind::CompressibleUpdate,

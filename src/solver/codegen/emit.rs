@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use super::compressible_apply::generate_compressible_apply_wgsl;
 use super::compressible_assembly::generate_compressible_assembly_wgsl;
+use super::compressible_explicit_update::generate_compressible_explicit_update_wgsl;
 use super::compressible_flux_kt::generate_compressible_flux_kt_wgsl;
 use super::compressible_gradients::generate_compressible_gradients_wgsl;
 use super::compressible_update::generate_compressible_update_wgsl;
@@ -75,6 +76,7 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
         KernelKind::CompressibleAssembly => "compressible_assembly.wgsl".to_string(),
         KernelKind::CompressibleApply => "compressible_apply.wgsl".to_string(),
         KernelKind::CompressibleGradients => "compressible_gradients.wgsl".to_string(),
+        KernelKind::CompressibleExplicitUpdate => "compressible_explicit_update.wgsl".to_string(),
         KernelKind::CompressibleUpdate => "compressible_update.wgsl".to_string(),
         KernelKind::CompressibleFluxKt => "compressible_flux_kt.wgsl".to_string(),
         KernelKind::GenericCoupledAssembly => {
@@ -148,6 +150,12 @@ fn generate_kernel_wgsl(
                     "compressible_gradients requires compressible fields".to_string()
                 })?;
                 generate_compressible_gradients_wgsl(&model.state_layout, fields)
+            }
+            KernelKind::CompressibleExplicitUpdate => {
+                let fields = model.fields.compressible().ok_or_else(|| {
+                    "compressible_explicit_update requires compressible fields".to_string()
+                })?;
+                generate_compressible_explicit_update_wgsl(&model.state_layout, fields)
             }
             KernelKind::CompressibleUpdate => {
                 let fields = model.fields.compressible().ok_or_else(|| {

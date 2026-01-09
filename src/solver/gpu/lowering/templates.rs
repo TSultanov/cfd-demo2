@@ -22,6 +22,7 @@ impl ProgramTemplateKind {
                 k,
                 KernelKind::CompressibleAssembly
                     | KernelKind::CompressibleApply
+                    | KernelKind::CompressibleExplicitUpdate
                     | KernelKind::CompressibleFluxKt
                     | KernelKind::CompressibleGradients
                     | KernelKind::CompressibleUpdate

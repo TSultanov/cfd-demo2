@@ -60,6 +60,7 @@ pub(crate) enum HostOpKind {
     IncompressibleCoupledFinalizeStep,
     GenericCoupledScalarPrepare,
     GenericCoupledScalarSolve,
+    GenericCoupledScalarFinalizeStep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

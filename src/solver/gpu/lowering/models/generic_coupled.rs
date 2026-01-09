@@ -107,6 +107,10 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
 
     registry.register_host(HostOpKind::GenericCoupledScalarPrepare, host_prepare_step)?;
     registry.register_host(HostOpKind::GenericCoupledScalarSolve, host_solve_linear_system)?;
+    registry.register_host(
+        HostOpKind::GenericCoupledScalarFinalizeStep,
+        host_finalize_step,
+    )?;
 
     Ok(())
 }
@@ -130,6 +134,7 @@ impl ProgramOpDispatcher for GenericCoupledOpDispatcher {
         match kind {
             HostOpKind::GenericCoupledScalarPrepare => host_prepare_step(plan),
             HostOpKind::GenericCoupledScalarSolve => host_solve_linear_system(plan),
+            HostOpKind::GenericCoupledScalarFinalizeStep => host_finalize_step(plan),
             other => unreachable!("generic coupled host op not supported: {other:?}"),
         }
     }
@@ -171,6 +176,12 @@ pub(in crate::solver::gpu::lowering) fn host_prepare_step(plan: &mut GpuProgramP
     let r = res_mut(plan);
     r.state.advance();
     r.runtime.advance_time();
+}
+
+pub(in crate::solver::gpu::lowering) fn host_finalize_step(plan: &mut GpuProgramPlan) {
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    r.runtime.constants.finalize_dt_old(&queue);
 }
 
 pub(in crate::solver::gpu::lowering) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {

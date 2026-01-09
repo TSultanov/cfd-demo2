@@ -351,6 +351,7 @@ pub(crate) mod generic_coupled_scalar {
 
     pub(crate) const H_PREPARE: HostOpKind = HostOpKind::GenericCoupledScalarPrepare;
     pub(crate) const H_SOLVE: HostOpKind = HostOpKind::GenericCoupledScalarSolve;
+    pub(crate) const H_FINALIZE: HostOpKind = HostOpKind::GenericCoupledScalarFinalizeStep;
 
     pub(crate) fn build_program_spec() -> ProgramSpec {
         let mut program = ProgramSpecBuilder::new();
@@ -374,6 +375,10 @@ pub(crate) mod generic_coupled_scalar {
                 label: "generic_coupled:update",
                 kind: G_UPDATE,
                 mode: GraphExecMode::SingleSubmit,
+            },
+            ProgramSpecNode::Host {
+                label: "generic_coupled:finalize",
+                kind: H_FINALIZE,
             },
         ] {
             program.push(root, node);

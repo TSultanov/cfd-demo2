@@ -33,10 +33,10 @@ impl ConstantsModule {
     }
 
     pub fn set_dt(&mut self, queue: &wgpu::Queue, dt: f32) {
+        // `dt_old` is advanced at step finalization.
+        // Only seed it on the initial step so BDF2 has a sensible ratio.
         if self.values.time <= 0.0 {
             self.values.dt_old = dt;
-        } else {
-            self.values.dt_old = self.values.dt;
         }
         self.values.dt = dt;
         self.write(queue);

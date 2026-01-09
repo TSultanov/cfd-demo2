@@ -24,6 +24,13 @@ pub struct PlanStepStats {
     pub linear_stats: Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PlanInitConfig {
+    pub advection_scheme: Scheme,
+    pub time_scheme: TimeScheme,
+    pub preconditioner: PreconditionerType,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanParam {
     Dt,

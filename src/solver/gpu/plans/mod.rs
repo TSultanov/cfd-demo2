@@ -7,14 +7,16 @@ pub(crate) mod incompressible;
 pub(crate) mod plan_instance;
 
 use crate::solver::gpu::plans::plan_instance::GpuPlanInstance;
+use crate::solver::gpu::plans::plan_instance::PlanInitConfig;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 
 pub(crate) async fn build_plan_instance(
     mesh: &Mesh,
     model: &ModelSpec,
+    config: PlanInitConfig,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<Box<dyn GpuPlanInstance>, String> {
-    crate::solver::gpu::lowering::lower_plan_instance(mesh, model, device, queue).await
+    crate::solver::gpu::lowering::lower_plan_instance(mesh, model, config, device, queue).await
 }

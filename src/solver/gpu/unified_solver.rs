@@ -1,6 +1,6 @@
 use crate::solver::gpu::plans::build_plan_instance;
 use crate::solver::gpu::plans::plan_instance::{
-    GpuPlanInstance, PlanAction, PlanParam, PlanParamValue,
+    GpuPlanInstance, PlanAction, PlanInitConfig, PlanParam, PlanParamValue,
 };
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
@@ -51,19 +51,18 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
-        let mut plan: Box<dyn GpuPlanInstance> = build_plan_instance(mesh, &model, device, queue).await?;
-        plan.set_param(
-            PlanParam::AdvectionScheme,
-            PlanParamValue::Scheme(config.advection_scheme),
-        )?;
-        plan.set_param(
-            PlanParam::TimeScheme,
-            PlanParamValue::TimeScheme(config.time_scheme),
-        )?;
-        plan.set_param(
-            PlanParam::Preconditioner,
-            PlanParamValue::Preconditioner(config.preconditioner),
-        )?;
+        let plan: Box<dyn GpuPlanInstance> = build_plan_instance(
+            mesh,
+            &model,
+            PlanInitConfig {
+                advection_scheme: config.advection_scheme,
+                time_scheme: config.time_scheme,
+                preconditioner: config.preconditioner,
+            },
+            device,
+            queue,
+        )
+        .await?;
 
         Ok(Self {
             model,

@@ -28,6 +28,7 @@ One **model-driven** GPU solver pipeline with:
 - `step_with_stats` now returns meaningful per-step linear solve stats for all plans (default uses `PlanStepStats.linear_stats`; generic-coupled returns its CG stats).
 - Plan construction is routed through `src/solver/gpu/lowering/mod.rs` (`ModelLowerer` registry), as the starting point for a single model-driven lowerer.
 - GenericCoupled stepping is now `ExecutionPlan`-driven (host+graph nodes) like compressible, reducing bespoke solver-loop code.
+- Solver configuration (advection/time scheme, preconditioner) is now applied during lowering (`PlanInitConfig`) rather than being wired in `UnifiedSolver::new`.
 
 ## Gap Check (What Still Blocks The Goal)
 - Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.

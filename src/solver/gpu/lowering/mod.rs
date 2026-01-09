@@ -1,6 +1,6 @@
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
-use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture};
+use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture, PlanInitConfig, PlanParam, PlanParamValue};
 use crate::solver::gpu::structs::GpuSolver;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
@@ -93,6 +93,7 @@ fn registry() -> &'static [Box<dyn ModelLowerer>] {
 pub(crate) async fn lower_plan_instance(
     mesh: &Mesh,
     model: &ModelSpec,
+    config: PlanInitConfig,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<Box<dyn GpuPlanInstance>, String> {
@@ -100,5 +101,18 @@ pub(crate) async fn lower_plan_instance(
         .iter()
         .find(|lowerer| lowerer.can_lower(model))
         .ok_or_else(|| format!("no model lowerer registered for model fields: {:?}", model.fields))?;
-    lowerer.lower(mesh, model, device, queue).await
+    let mut plan = lowerer.lower(mesh, model, device, queue).await?;
+    plan.set_param(
+        PlanParam::AdvectionScheme,
+        PlanParamValue::Scheme(config.advection_scheme),
+    )?;
+    plan.set_param(
+        PlanParam::TimeScheme,
+        PlanParamValue::TimeScheme(config.time_scheme),
+    )?;
+    plan.set_param(
+        PlanParam::Preconditioner,
+        PlanParamValue::Preconditioner(config.preconditioner),
+    )?;
+    Ok(plan)
 }

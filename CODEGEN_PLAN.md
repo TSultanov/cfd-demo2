@@ -9,54 +9,40 @@ One **model-driven** GPU solver pipeline with:
 - solver features implemented as **pluggable modules** that own their own GPU resources
 - numerical schemes + auxiliary computations derived automatically from `ModelSpec` + solver config
 
-## Current State (Implemented)
-- Typed WGSL DSL is a real AST (no string-based ops) with unit/type checking; units are erased at WGSL emission.
-- `UnifiedSolver` is the only public entrypoint; tests/UI use it.
-- `ExecutionPlan`/`ModuleGraph` exist and drive dispatch sequencing.
-- Readback is unified via cached staging buffers (`StagingBufferCache` + `read_buffer_cached`).
-- `GpuRuntimeCommon` consolidates GPU context + mesh + profiling + cached readback and is used by all current plans (compressible/incompressible/generic coupled/scalar runtimes).
-- Incompressible scalar CG work buffers/pipelines are owned by `ScalarCgModule` (no longer duplicated as `GpuSolver` fields).
-- Scalar CG runtime wiring is centralized in `init_scalar_cg` to avoid per-plan buffer/pipeline plumbing.
-- Coupled FGMRES now reuses shared `fgmres` dispatch helpers (less plan-specific boilerplate).
-- FGMRES restart/init steps (g init, aux clears, basis0 normalization) are centralized on `FgmresWorkspace`.
-- Coupled FGMRES no longer has plan-local scale/normalize helpers; vector scaling is exposed as `FgmresWorkspace::scale_in_place` and used directly.
-- Krylov/FGMRES dispatch grid sizing is centralized (`DispatchGrids::for_sizes`), reducing per-plan workgroup math.
-- Residual computation for restarting FGMRES (`r = b - A x`) is centralized on `FgmresWorkspace`.
-- `GpuPlanInstance` is universal and configured via typed `PlanParam`/`PlanParamValue` (no downcasts).
-- `GpuPlanInstance` no longer exposes plan-family-only debug methods directly; optional debug/sizing hooks are provided via capability-gated trait-object accessors.
-- Linear debug path is supported across current plans (`set_linear_system`, `solve_linear_system_with_size`, `get_linear_solution`) with plan-appropriate Krylov under the hood (CG for scalar systems, FGMRES for compressible coupled).
-- `step_with_stats` now returns meaningful per-step linear solve stats for all plans (default uses `PlanStepStats.linear_stats`; generic-coupled returns its CG stats).
-- Plan construction is routed through `src/solver/gpu/lowering/mod.rs` (`ModelLowerer` registry), as the starting point for a single model-driven lowerer.
-- GenericCoupled stepping is now `ExecutionPlan`-driven (host+graph nodes) like compressible, reducing bespoke solver-loop code.
-- Solver configuration (advection/time scheme, preconditioner) is now applied during lowering (`PlanInitConfig`) rather than being wired in `UnifiedSolver::new`.
-- Coupled unknown counts and FGMRES sizing are derived from `ModelSpec` (no plan-family sizing/debug hooks).
-- Graph execution boilerplate is reduced via a shared `run_module_graph(...)` helper used by plans.
-- Compressible plan construction now uses the provided `ModelSpec` (instead of silently using a baked-in default model).
-- Incompressible plan construction now uses the provided `ModelSpec` (state stride + unknowns per cell are derived from the model during init, instead of using default model globals).
+## Status
+- The solver entrypoint is unified (`GpuUnifiedSolver`), but there are still **three plan families** under the hood: incompressible (`GpuSolver`), compressible (`CompressiblePlanResources`), and generic coupled (`GpuGenericCoupledSolver`).
+- Lowering is routed through `src/solver/gpu/lowering/mod.rs`, and both solver config and the caller-provided `ModelSpec` are now passed into plan construction.
+- Orchestration is increasingly plan-driven (`ExecutionPlan`/`ModuleGraph`), and shared helpers are replacing per-plan boilerplate.
+- `ModelGpuProgramSpec` + `GpuProgramPlan` now exist and are used for **generic coupled** models (first adopter of the “universal plan runtime” idea).
 
-## Gap Check (What Still Blocks The Goal)
-- Still multiple plan builders/resource containers (compressible/incompressible/generic coupled); lowering/compilation is not unified.
-- Some pipelines/bind groups are still owned by solver-family structs instead of module-owned resources.
-- `GpuPlanInstance` still carries non-core debug/inspection hooks; long-term these should be moved behind explicit debug modules/ports.
-- Generic coupled kernels are incomplete (convection/source/cross-coupling, broader BC support, closures).
-- Scheme expansion is only partially wired end-to-end (some auxiliary passes are still hand-selected in plan code).
+## Assessment (Are We Approaching The Goal?)
+- Yes: the public surface is unified, config flows into lowering, and the runtime is moving toward module-graph execution with shared Krylov/FGMRES helpers.
+- Not yet: we still have solver-family resource containers, solver-family kernel binding/dispatch wiring, and multiple lowering/initialization paths. Generated WGSL exists, but the Rust-side binding/plumbing is not model-driven.
 
-## Next Milestones (Ordered)
-1. **Finish tightening the plan surface**
-   - Keep `GpuPlanInstance` minimal (time/state I/O + stepping + param setting).
-   - Audit `src/solver/gpu/plans/plan_instance.rs` and remove/replace plan-family-only methods; move debug/inspection behind explicit debug modules/ports (still capability-gated), so `plan_instance.rs` does not accumulate per-plan APIs.
-2. **Single model-driven lowerer**
-   - Introduce a shared `ModelLowerer` that produces a `ModelGpuProgramSpec` from `ModelSpec` + `SolverConfig` (ports, module list, execution plan, sizing).
-   - Keep “generated-per-model WGSL” but unify the Rust-side binding/dispatch wiring and remove solver-family-specific lowerer/compile paths.
-3. **Module-owned GPU resources**
-   - Move remaining pipeline/bind-group ownership into modules; plans describe composition, not layouts.
-   - Make Krylov/preconditioners/AMG fully own their internal buffers and expose only typed ports.
-4. **Generic scheme expansion end-to-end**
-   - Expand schemes into required auxiliary computations (gradients/reconstruction/history) and drive kernel selection/dispatch from that output for arbitrary models/fields.
-5. **Generic kernels and BCs**
-   - Extend generic assembly/apply/update + boundary conditions until compressible/incompressible reduce to closure modules + generic operators.
-6. **Delete legacy per-family solvers**
-   - Remove remaining solver-family structs/loops and ensure all tests + UI still pass.
+## Remaining Gaps (Concrete)
+- `ModelGpuProgramSpec` exists but is only adopted by generic coupled; compressible/incompressible still build solver-family structs directly.
+- Kernel wiring is still handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering).
+- “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
+- Generic coupled remains intentionally incomplete (limited terms/BCs), and scheme expansion is not yet driving required auxiliary passes automatically.
+
+## Next Steps (Prioritized)
+1. **Introduce `ModelGpuProgramSpec`**
+   - Expand `ModelGpuProgramSpec` beyond the generic-coupled prototype: unify “time/constants source”, state-buffer selection, and linear-solve ports.
+   - Keep generated-per-model WGSL, but move solver-family-specific binding/dispatch wiring into the program spec layer.
+2. **Create a single universal GPU plan runtime**
+   - Make `GpuProgramPlan` the only runtime plan type used by lowering.
+ - Plans become *data* (spec + module registry), not code with bespoke control flow.
+3. **Migrate plans iteratively**
+   - Done: `GpuGenericCoupledSolver` → `GpuProgramPlan`.
+   - Next: compressible → `GpuProgramPlan`, then incompressible → `GpuProgramPlan`.
+   - Delete the corresponding legacy plan structs after each migration.
+4. **Elevate “first-class modules”**
+   - Krylov / preconditioners / AMG become pluggable modules with explicit ports and self-owned resources.
+   - Lowering composes modules; modules do not construct each other’s buffers/bindings.
+5. **Drive scheme expansion end-to-end**
+   - Scheme selection expands to required auxiliary passes (gradients/reconstruction/history) for arbitrary fields/models.
+6. **Unify codegen/lowering**
+   - Remove separate compressible/incompressible lowerers/compilers; keep only the model-driven `ModelGpuProgramSpec` path.
 
 ## Decisions (Locked In)
 - **Generated-per-model WGSL** stays (no runtime compilation/reflection).

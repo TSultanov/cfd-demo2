@@ -1,9 +1,10 @@
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
-use crate::solver::gpu::plans::generic_coupled::GpuGenericCoupledSolver;
 use crate::solver::gpu::plans::plan_instance::{GpuPlanInstance, PlanFuture, PlanInitConfig, PlanParam, PlanParamValue};
 use crate::solver::gpu::structs::GpuSolver;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{ModelFields, ModelSpec};
+
+mod generic_coupled_program;
 
 pub(crate) trait ModelLowerer: Send + Sync {
     fn can_lower(&self, model: &ModelSpec) -> bool;
@@ -74,8 +75,7 @@ impl ModelLowerer for GenericCoupledLowerer {
         queue: Option<wgpu::Queue>,
     ) -> PlanFuture<'a, Result<Box<dyn GpuPlanInstance>, String>> {
         Box::pin(async move {
-            let solver = GpuGenericCoupledSolver::new(mesh, model.clone(), device, queue).await?;
-            Ok(Box::new(solver) as Box<dyn GpuPlanInstance>)
+            generic_coupled_program::lower_generic_coupled_program(mesh, model.clone(), device, queue).await
         })
     }
 }

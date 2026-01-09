@@ -5,6 +5,7 @@ pub(crate) mod coupled_fgmres;
 pub(crate) mod generic_coupled;
 pub(crate) mod incompressible;
 pub(crate) mod plan_instance;
+pub(crate) mod program;
 
 use crate::solver::gpu::plans::plan_instance::GpuPlanInstance;
 use crate::solver::gpu::plans::plan_instance::PlanInitConfig;

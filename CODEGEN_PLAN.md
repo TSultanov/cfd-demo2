@@ -13,7 +13,8 @@ One **model-driven** GPU solver pipeline with:
 - The solver entrypoint is unified (`GpuUnifiedSolver`), and **all models now lower to a single runtime plan type**: `GpuProgramPlan` + `ModelGpuProgramSpec`.
 - Lowering is routed through `src/solver/gpu/lowering/mod.rs` via a single `lower_program(...)` entrypoint, and both solver config and the caller-provided `ModelSpec` are passed into program construction.
 - Orchestration is increasingly plan-driven (`ExecutionPlan`/`ModuleGraph`), and shared helpers are replacing per-plan boilerplate.
-- `ModelGpuProgramSpec` currently wraps existing solver-family resource containers (incompressible `GpuSolver`, compressible `CompressiblePlanResources`, generic coupled resources) and forwards `state_buffer`, params, stepping, and linear-debug hooks through the spec.
+- `ModelGpuProgramSpec` currently wraps existing solver-family resource containers (incompressible `GpuSolver`, compressible `CompressiblePlanResources`, generic coupled resources) and forwards `state_buffer`, params, and linear-debug hooks through the spec.
+- Compressible stepping (explicit + implicit outer loop) is now expressed as a program schedule (host nodes + module graphs + control flow) instead of calling legacy `step_with_stats()`.
 
 ## Assessment (Are We Approaching The Goal?)
 - Yes: the public surface is unified, config flows into lowering, and the runtime is moving toward module-graph execution with shared Krylov/FGMRES helpers.
@@ -24,12 +25,11 @@ One **model-driven** GPU solver pipeline with:
 - Kernel wiring is still handwritten per plan (bind group creation, pipeline selection, ping-pong choices, and pass ordering).
 - “Modules own their own resources” is only partially true; many pipelines/bind groups still live on solver-family structs.
 - Incompressible stepping still happens inside legacy plan code; the runtime does not yet “own” its per-pass schedule.
-- Compressible explicit stepping is now represented as a program schedule, but the implicit path still calls legacy `step_with_stats()`.
 - Generic coupled remains intentionally incomplete (limited terms/BCs), and scheme expansion is not yet driving required auxiliary passes automatically.
 
 ## Next Steps (Prioritized)
 1. **Make `ModelGpuProgramSpec` a real program spec**
-   - Replace remaining “call legacy `step()`/`step_with_stats()`” with explicit per-pass schedules (module graphs + host nodes) in the spec for incompressible and compressible.
+   - Replace remaining “call legacy `step()`/`step_with_stats()`” with explicit per-pass schedules (module graphs + host nodes) in the spec for incompressible.
    - Goal: the runtime owns pass ordering and dispatch; solver-family code becomes pure “lowering/building modules”, not orchestration.
 2. **Delete migrated legacy plan types**
    - Once incompressible/compressible schedules are moved into specs, delete `GpuSolver`/`CompressiblePlanResources` as `GpuPlanInstance` implementations (keep only as internal lowered resources/modules if still needed).
@@ -38,8 +38,8 @@ One **model-driven** GPU solver pipeline with:
    - Lowering composes modules; modules do not construct each other’s buffers/bindings.
 4. **Drive scheme expansion end-to-end**
    - Scheme selection expands to required auxiliary passes (gradients/reconstruction/history) for arbitrary fields/models.
-5. **Unify codegen/lowering**
-   - Remove separate compressible/incompressible lowerers/compilers; keep only the model-driven `ModelGpuProgramSpec` path.
+5. **Reduce handwritten kernel plumbing**
+   - Move bind-group/pipeline construction toward “generated bindings + generic port wiring”, so model-specific code shrinks to declaring ports and assembling module graphs.
 
 ## Decisions (Locked In)
 - **Generated-per-model WGSL** stays (no runtime compilation/reflection).

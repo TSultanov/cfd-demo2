@@ -706,6 +706,22 @@ impl CompressiblePlanResources {
         }
     }
 
+    pub(crate) fn implicit_grad_assembly_graph(&self) -> &ModuleGraph<CompressibleKernelsModule> {
+        if self.needs_gradients {
+            &self.implicit_grad_assembly_module_graph
+        } else {
+            &self.implicit_assembly_module_graph_first_order
+        }
+    }
+
+    pub(crate) fn implicit_apply_graph(&self) -> &ModuleGraph<CompressibleKernelsModule> {
+        &self.implicit_apply_module_graph
+    }
+
+    pub(crate) fn primitive_update_graph(&self) -> &ModuleGraph<CompressibleKernelsModule> {
+        &self.primitive_update_module_graph
+    }
+
     pub(crate) fn advance_ping_pong_and_time(&mut self) {
         self.state_step_index = (self.state_step_index + 1) % 3;
         self.kernels.set_step_index(self.state_step_index);
@@ -717,6 +733,79 @@ impl CompressiblePlanResources {
 
         self.constants.time += self.constants.dt;
         self.update_constants();
+    }
+
+    pub(crate) fn implicit_set_base_alpha(&mut self) {
+        self.implicit_base_alpha_u = self.constants.alpha_u;
+    }
+
+    pub(crate) fn implicit_set_iteration_params(
+        &mut self,
+        tol: f32,
+        retry_tol: f32,
+        max_restart: usize,
+        retry_restart: usize,
+    ) {
+        self.implicit_tol = tol;
+        self.implicit_retry_tol = retry_tol;
+        self.implicit_max_restart = max_restart.max(1);
+        self.implicit_retry_restart = retry_restart.max(1);
+    }
+
+    pub(crate) fn implicit_solve_fgmres(&mut self) {
+        let mut iter_stats =
+            self.solve_compressible_fgmres(self.implicit_max_restart, self.implicit_tol);
+        if !iter_stats.converged {
+            let retry_stats = self.solve_compressible_fgmres(
+                self.implicit_retry_restart,
+                self.implicit_retry_tol,
+            );
+            if retry_stats.converged || retry_stats.residual < iter_stats.residual {
+                iter_stats = retry_stats;
+            }
+        }
+        self.implicit_last_stats = iter_stats;
+    }
+
+    pub(crate) fn implicit_last_stats(&self) -> LinearSolverStats {
+        self.implicit_last_stats
+    }
+
+    pub(crate) fn implicit_snapshot(&self) {
+        let mut encoder =
+            self.common
+                .context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("compressible:implicit_snapshot"),
+                });
+        encoder.copy_buffer_to_buffer(
+            &self.b_state,
+            0,
+            &self.b_state_iter,
+            0,
+            self.state_size_bytes(),
+        );
+        self.common.context.queue.submit(Some(encoder.finish()));
+    }
+
+    pub(crate) fn implicit_set_alpha_for_apply(&mut self) {
+        let apply_alpha = if self.implicit_last_stats.converged {
+            self.implicit_base_alpha_u
+        } else {
+            self.implicit_base_alpha_u * self.nonconverged_relax
+        };
+        if (self.constants.alpha_u - apply_alpha).abs() > 1e-6 {
+            self.constants.alpha_u = apply_alpha;
+            self.update_constants();
+        }
+    }
+
+    pub(crate) fn implicit_restore_alpha(&mut self) {
+        if (self.constants.alpha_u - self.implicit_base_alpha_u).abs() > 1e-6 {
+            self.constants.alpha_u = self.implicit_base_alpha_u;
+            self.update_constants();
+        }
     }
 
     pub(crate) fn finalize_dt_old(&mut self) {

@@ -2,8 +2,9 @@ pub(crate) mod compressible;
 pub(crate) mod compressible_fgmres;
 pub(crate) mod compressible_graphs;
 pub(crate) mod coupled;
-pub(crate) mod coupled_fgmres;
+ // Removing this line
 pub(crate) mod incompressible;
+pub(crate) mod incompressible_linear_solver;
 pub(crate) mod plan_instance;
 pub(crate) mod program;
 

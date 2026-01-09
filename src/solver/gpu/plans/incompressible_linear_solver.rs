@@ -1,21 +1,4 @@
-// Coupled Solver using FGMRES with Schur Complement Preconditioning
-//
-// For the saddle-point system:
-// [A   G] [u]   [b_u]
-// [D   C] [p] = [b_p]
-//
-// We use FGMRES (Flexible GMRES) as the outer Krylov solver.
-// The preconditioner uses the Schur complement approach:
-//
-// M^{-1} = [I  -A^{-1}G] [A^{-1}  0  ] [I    0]
-//          [0     I    ] [0    S^{-1}] [-DA^{-1} I]
-//
-// where S = C - D*A^{-1}*G is the Schur complement (pressure Poisson).
-//
-// This implementation runs FULLY ON THE GPU:
-// - All vectors remain on GPU
-// - Only scalar values (dot products, norms) are read to CPU
-// - Preconditioner sweep
+use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{
     write_iter_params, FgmresPrecondBindings, FgmresSolveOnceConfig, FgmresWorkspace, IterParams,
@@ -24,24 +7,42 @@ use crate::solver::gpu::linear_solver::fgmres::{
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
-use crate::solver::gpu::modules::linear_system::LinearSystemView;
-use crate::solver::gpu::profiling::ProfileCategory;
-use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats, PreconditionerParams};
+use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
+use crate::solver::gpu::modules::ports::PortSpace;
+use crate::solver::gpu::profiling::{ProfileCategory, ProfilingStats};
+use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
+use crate::solver::gpu::structs::{CoupledSolverResources, LinearSolverStats, PreconditionerParams, PreconditionerType};
 use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
 pub type FgmresResources = KrylovSolveModule<CoupledSchurModule>;
 
-impl GpuSolver {
-    pub fn coupled_unknowns(&self) -> u32 {
-        self.coupled_resources
-            .as_ref()
-            .map(|res| res.num_unknowns)
-            .unwrap_or(self.num_cells * self.model.system.unknowns_per_cell())
+pub struct IncompressibleLinearSolver {
+    pub fgmres_resources: Option<FgmresResources>,
+}
+
+impl IncompressibleLinearSolver {
+    pub fn new() -> Self {
+        Self {
+            fgmres_resources: None,
+        }
     }
 
-    fn ensure_fgmres_resources(&mut self, max_restart: usize) {
-        let n = self.coupled_unknowns();
+    fn coupled_unknowns(num_cells: u32, coupled_res: &CoupledSolverResources) -> u32 {
+        coupled_res.num_unknowns
+    }
+
+    fn ensure_fgmres_resources(
+        &mut self,
+        context: &GpuContext,
+        profiling: &ProfilingStats,
+        coupled: &CoupledSolverResources,
+        pressure_ports: LinearSystemPorts,
+        pressure_port_space: &PortSpace,
+        num_cells: u32,
+        max_restart: usize,
+    ) {
+        let n = coupled.num_unknowns;
         let rebuild = match &self.fgmres_resources {
             Some(existing) => {
                 existing.fgmres.max_restart() < max_restart || existing.fgmres.n() != n
@@ -50,18 +51,31 @@ impl GpuSolver {
         };
 
         if rebuild {
-            let resources = self.init_fgmres_resources(max_restart);
+            let resources = self.init_fgmres_resources(
+                context,
+                profiling,
+                coupled,
+                pressure_ports,
+                pressure_port_space,
+                num_cells,
+                max_restart,
+            );
             self.fgmres_resources = Some(resources);
         }
     }
 
     /// Initialize FGMRES resources
-    pub fn init_fgmres_resources(&self, max_restart: usize) -> FgmresResources {
-        let device = &self.common.context.device;
-        let coupled = self
-            .coupled_resources
-            .as_ref()
-            .expect("Coupled resources must be initialized before FGMRES");
+    fn init_fgmres_resources(
+        &self,
+        context: &GpuContext,
+        profiling: &ProfilingStats,
+        coupled: &CoupledSolverResources,
+        pressure_ports: LinearSystemPorts,
+        pressure_port_space: &PortSpace,
+        num_cells: u32,
+        max_restart: usize,
+    ) -> FgmresResources {
+        let device = &context.device;
         let n = coupled.num_unknowns;
         let block_system = LinearSystemView {
             ports: coupled.linear_ports,
@@ -71,7 +85,7 @@ impl GpuSolver {
         let fgmres = FgmresWorkspace::new_from_system(
             device,
             n,
-            self.num_cells,
+            num_cells,
             max_restart,
             block_system,
             FgmresPrecondBindings::DiagWithParams {
@@ -83,76 +97,131 @@ impl GpuSolver {
             "Coupled",
         );
         let pressure_system = LinearSystemView {
-            ports: self.linear_ports,
-            space: &self.linear_port_space,
+            ports: pressure_ports,
+            space: pressure_port_space,
         };
         let precond = CoupledSchurModule::new(
             device,
             &fgmres,
-            self.num_cells,
+            num_cells,
             pressure_system,
             CoupledPressureSolveKind::Chebyshev,
         );
 
         let resources = KrylovSolveModule::new(fgmres, precond);
 
-        self.record_fgmres_allocations(&resources);
+        self.record_fgmres_allocations(profiling, &resources);
 
         resources
     }
 
-    /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
-    pub fn solve_coupled_fgmres(&mut self) -> LinearSolverStats {
-        let start_time = Instant::now();
-        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
-        if self.coupled_resources.is_none() {
-            if !quiet {
-                println!("Coupled resources not initialized!");
-            }
-            return LinearSolverStats::default();
+    fn record_fgmres_allocations(&self, profiling: &ProfilingStats, fgmres: &FgmresResources) {
+        if !profiling.is_enabled() {
+            return;
         }
 
-        let num_cells = self.num_cells;
-        let n = self.coupled_unknowns();
+        let record = |label: &str, buf: &wgpu::Buffer| {
+            profiling.record_gpu_alloc(label, buf.size());
+        };
+
+        record("fgmres:basis", fgmres.fgmres.basis_buffer());
+        for (i, buf) in fgmres.fgmres.z_vectors().iter().enumerate() {
+            record(&format!("fgmres:z_{}", i), buf);
+        }
+        record("fgmres:w", fgmres.fgmres.w_buffer());
+        record("fgmres:temp", fgmres.fgmres.temp_buffer());
+        record("fgmres:dot_partial", fgmres.fgmres.dot_partial_buffer());
+        record("fgmres:scalars", fgmres.fgmres.scalars_buffer());
+        record("fgmres:temp_p", fgmres.precond.b_temp_p());
+        record("fgmres:p_sol", fgmres.precond.b_p_sol());
+        record("fgmres:params", fgmres.fgmres.params_buffer());
+        record("fgmres:hessenberg", fgmres.fgmres.hessenberg_buffer());
+        record("fgmres:givens", fgmres.fgmres.givens_buffer());
+        record("fgmres:g", fgmres.fgmres.g_buffer());
+        record("fgmres:y", fgmres.fgmres.y_buffer());
+        record("fgmres:iter_params", fgmres.fgmres.iter_params_buffer());
+        record("fgmres:staging_scalar", fgmres.fgmres.staging_scalar_buffer());
+    }
+
+    /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve(
+        &mut self,
+        context: &GpuContext,
+        staging_cache: &StagingBufferCache,
+        profiling: &ProfilingStats,
+        coupled_resources: &CoupledSolverResources,
+        pressure_ports: LinearSystemPorts,
+        pressure_port_space: &PortSpace,
+        num_cells: u32,
+        num_nonzeros: u32,
+        preconditioner: PreconditionerType,
+    ) -> LinearSolverStats {
+        let start_time = Instant::now();
+        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
+
+        let n = coupled_resources.num_unknowns;
         let max_restart = 50usize;
         let max_outer = 20usize;
         let tol = 1e-5f32;
         let abstol = 1e-7f32;
 
-        self.ensure_fgmres_resources(max_restart);
-        let Some(res) = &self.coupled_resources else {
-            return LinearSolverStats::default();
-        };
+        self.ensure_fgmres_resources(
+            context,
+            profiling,
+            coupled_resources,
+            pressure_ports,
+            pressure_port_space,
+            num_cells,
+            max_restart,
+        );
         let Some(mut fgmres) = self.fgmres_resources.take() else {
             return LinearSolverStats::default();
         };
 
         let stats = 'stats: {
-            let pressure_kind = CoupledPressureSolveKind::from_config(self.preconditioner);
+            let pressure_kind = CoupledPressureSolveKind::from_config(preconditioner);
             fgmres.precond.set_pressure_kind(pressure_kind);
             if pressure_kind == CoupledPressureSolveKind::Amg {
-                let row_offsets = pollster::block_on(self.read_buffer_u32(
-                    self.linear_port_space.buffer(self.linear_ports.row_offsets),
-                    self.num_cells + 1,
+                let row_offsets = pollster::block_on(read_buffer_cached(
+                    context,
+                    staging_cache,
+                    profiling,
+                    pressure_port_space.buffer(pressure_ports.row_offsets),
+                    (num_cells as u64 + 1) * 4,
+                    "AMG Row Offsets",
                 ));
-                let col_indices = pollster::block_on(self.read_buffer_u32(
-                    self.linear_port_space.buffer(self.linear_ports.col_indices),
-                    self.num_nonzeros,
+                let col_indices = pollster::block_on(read_buffer_cached(
+                    context,
+                    staging_cache,
+                    profiling,
+                    pressure_port_space.buffer(pressure_ports.col_indices),
+                    num_nonzeros as u64 * 4,
+                    "AMG Col Indices",
                 ));
-                let values = pollster::block_on(self.read_buffer_f32(
-                    self.linear_port_space.buffer(self.linear_ports.values),
-                    self.num_nonzeros,
+                let values = pollster::block_on(read_buffer_cached(
+                    context,
+                    staging_cache,
+                    profiling,
+                    pressure_port_space.buffer(pressure_ports.values),
+                    num_nonzeros as u64 * 4,
+                    "AMG Values",
                 ));
+                
+                let row_offsets = bytemuck::cast_slice(&row_offsets).to_vec();
+                let col_indices = bytemuck::cast_slice(&col_indices).to_vec();
+                let values = bytemuck::cast_slice(&values).to_vec();
+
                 let matrix = CsrMatrix {
                     row_offsets,
                     col_indices,
                     values,
-                    num_rows: self.num_cells as usize,
-                    num_cols: self.num_cells as usize,
+                    num_rows: num_cells as usize,
+                    num_cols: num_cells as usize,
                 };
                 fgmres
                     .precond
-                    .ensure_amg_resources(&self.common.context.device, matrix);
+                    .ensure_amg_resources(&context.device, matrix);
             }
 
             let KrylovDispatch {
@@ -172,10 +241,10 @@ impl GpuSolver {
             {
                 let core = fgmres
                     .fgmres
-                    .core(&self.common.context.device, &self.common.context.queue);
+                    .core(&context.device, &context.queue);
                 write_iter_params(&core, &iter_params);
             }
-            self.common.profiling_stats.record_location(
+            profiling.record_location(
                 "fgmres:write_iter_params_init",
                 ProfileCategory::GpuWrite,
                 init_write_start.elapsed(),
@@ -184,30 +253,28 @@ impl GpuSolver {
 
             let precond_params = PreconditionerParams {
                 n: 0,
-                num_cells: self.num_cells,
+                num_cells,
                 omega: 1.2,
                 _pad0: 0,
             };
             let precond_write_start = Instant::now();
-            self.common.context.queue.write_buffer(
-                &res.b_precond_params,
+            context.queue.write_buffer(
+                &coupled_resources.b_precond_params,
                 0,
                 bytemuck::bytes_of(&precond_params),
             );
-            self.common.profiling_stats.record_location(
+            profiling.record_location(
                 "fgmres:write_precond_params",
                 ProfileCategory::GpuWrite,
                 precond_write_start.elapsed(),
                 std::mem::size_of::<PreconditionerParams>() as u64,
             );
 
-            // Refresh block diagonals - REMOVED (Merged into coupled_assembly)
-
             let system = LinearSystemView {
-                ports: res.linear_ports,
-                space: &res.linear_port_space,
+                ports: coupled_resources.linear_ports,
+                space: &coupled_resources.linear_port_space,
             };
-            let rhs_norm = fgmres.rhs_norm(&self.common.context, system, n);
+            let rhs_norm = fgmres.rhs_norm(context, system, n);
             if rhs_norm < abstol || !rhs_norm.is_finite() {
                 break 'stats LinearSolverStats {
                     iterations: 0,
@@ -223,18 +290,14 @@ impl GpuSolver {
                 let start = Instant::now();
                 let core = fgmres
                     .fgmres
-                    .core(&self.common.context.device, &self.common.context.queue);
-                let system = LinearSystemView {
-                    ports: res.linear_ports,
-                    space: &res.linear_port_space,
-                };
+                    .core(&context.device, &context.queue);
                 let norm = fgmres.fgmres.compute_residual_norm_into(
                     &core,
                     system,
                     fgmres.fgmres.basis_binding(0),
                     "FGMRES Residual",
                 );
-                self.common.profiling_stats.record_location(
+                profiling.record_location(
                     "fgmres:residual_norm_into",
                     ProfileCategory::GpuDispatch,
                     start.elapsed(),
@@ -266,14 +329,14 @@ impl GpuSolver {
                 let start = Instant::now();
                 let core = fgmres
                     .fgmres
-                    .core(&self.common.context.device, &self.common.context.queue);
+                    .core(&context.device, &context.queue);
                 fgmres.fgmres.scale_in_place(
                     &core,
                     fgmres.fgmres.basis_binding(0),
                     1.0 / residual_norm,
                     "FGMRES Normalize V0",
                 );
-                self.common.profiling_stats.record_location(
+                profiling.record_location(
                     "fgmres:scale_in_place",
                     ProfileCategory::GpuDispatch,
                     start.elapsed(),
@@ -285,8 +348,8 @@ impl GpuSolver {
             let g_init_write_start = Instant::now();
             fgmres
                 .fgmres
-                .write_g0(&self.common.context.queue, residual_norm);
-            self.common.profiling_stats.record_location(
+                .write_g0(&context.queue, residual_norm);
+            profiling.record_location(
                 "fgmres:write_g_init",
                 ProfileCategory::GpuWrite,
                 g_init_write_start.elapsed(),
@@ -301,7 +364,7 @@ impl GpuSolver {
             if !quiet {
                 println!("FGMRES: Initial residual = {:.2e}", residual_norm);
             }
-            self.common.profiling_stats.record_location(
+            profiling.record_location(
                 "fgmres:println",
                 ProfileCategory::CpuCompute,
                 io_start.elapsed(),
@@ -324,7 +387,7 @@ impl GpuSolver {
                 };
 
                 let solve = fgmres.solve_once(
-                    &self.common.context,
+                    context,
                     system,
                     rhs_norm,
                     params,
@@ -361,18 +424,14 @@ impl GpuSolver {
                     let start = Instant::now();
                     let core = fgmres
                         .fgmres
-                        .core(&self.common.context.device, &self.common.context.queue);
-                    let system = LinearSystemView {
-                        ports: res.linear_ports,
-                        space: &res.linear_port_space,
-                    };
+                        .core(&context.device, &context.queue);
                     let norm = fgmres.fgmres.compute_residual_norm_into(
                         &core,
                         system,
                         fgmres.fgmres.basis_binding(0),
                         "FGMRES Residual",
                     );
-                    self.common.profiling_stats.record_location(
+                    profiling.record_location(
                         "fgmres:residual_norm_into",
                         ProfileCategory::GpuDispatch,
                         start.elapsed(),
@@ -399,8 +458,8 @@ impl GpuSolver {
                 let g_write_start = Instant::now();
                 fgmres
                     .fgmres
-                    .write_g0(&self.common.context.queue, residual_norm);
-                self.common.profiling_stats.record_location(
+                    .write_g0(&context.queue, residual_norm);
+                profiling.record_location(
                     "fgmres:write_g_restart",
                     ProfileCategory::GpuWrite,
                     g_write_start.elapsed(),
@@ -419,14 +478,14 @@ impl GpuSolver {
                     let start = Instant::now();
                     let core = fgmres
                         .fgmres
-                        .core(&self.common.context.device, &self.common.context.queue);
+                        .core(&context.device, &context.queue);
                     fgmres.fgmres.scale_in_place(
                         &core,
                         fgmres.fgmres.basis_binding(0),
                         1.0 / residual_norm,
                         "FGMRES Restart Normalize",
                     );
-                    self.common.profiling_stats.record_location(
+                    profiling.record_location(
                         "fgmres:scale_in_place",
                         ProfileCategory::GpuDispatch,
                         start.elapsed(),
@@ -471,7 +530,7 @@ impl GpuSolver {
                     total_iters, final_resid, converged
                 );
             }
-            self.common.profiling_stats.record_location(
+            profiling.record_location(
                 "fgmres:println",
                 ProfileCategory::CpuCompute,
                 io_start.elapsed(),

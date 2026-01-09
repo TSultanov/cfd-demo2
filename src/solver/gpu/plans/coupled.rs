@@ -159,8 +159,20 @@ impl GpuSolver {
     }
 
     pub(crate) fn solve_coupled_system(&mut self) -> LinearSolverStats {
-        // Use the FGMRES-based coupled solver implementation from
-        // `coupled_solver_fgmres.rs` to solve the coupled block system.
-        self.solve_coupled_fgmres()
+        if let Some(res) = &self.coupled_resources {
+            self.linear_solver.solve(
+                &self.common.context,
+                &self.common.readback_cache,
+                &self.common.profiling_stats,
+                res,
+                self.linear_ports,
+                &self.linear_port_space,
+                self.num_cells,
+                self.num_nonzeros,
+                self.preconditioner,
+            )
+        } else {
+            LinearSolverStats::default()
+        }
     }
 }

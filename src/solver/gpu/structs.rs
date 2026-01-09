@@ -5,7 +5,7 @@ use super::modules::linear_system::LinearSystemPorts;
 use super::modules::model_kernels::ModelKernelsModule;
 use super::modules::ports::PortSpace;
 use super::modules::time_integration::TimeIntegrationModule;
-use super::plans::coupled_fgmres::FgmresResources;
+use super::plans::incompressible_linear_solver::IncompressibleLinearSolver;
 use super::runtime_common::GpuRuntimeCommon;
 use crate::solver::model::ModelSpec;
 use bytemuck::{Pod, Zeroable};
@@ -177,7 +177,7 @@ pub(crate) struct GpuSolver {
     pub outer_residual_p: Mutex<f32>,
     pub outer_iterations: Mutex<u32>,
 
-    pub fgmres_resources: Option<FgmresResources>,
+    pub linear_solver: IncompressibleLinearSolver,
 
     pub n_outer_correctors: u32,
 

@@ -1,7 +1,7 @@
 // Force recompile 2
 use std::sync::Arc;
 
-use super::coupled_fgmres::FgmresResources;
+use super::incompressible_linear_solver::FgmresResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
@@ -374,7 +374,7 @@ impl GpuSolver {
             }
         }
 
-        if let Some(fgmres) = &self.fgmres_resources {
+        if let Some(fgmres) = &self.linear_solver.fgmres_resources {
             self.record_fgmres_allocations(fgmres);
         }
     }

@@ -1,3 +1,4 @@
+pub mod compressible_fields;
 pub mod fields;
 pub mod linear_solver;
 pub mod mesh;
@@ -9,6 +10,7 @@ use std::sync::Mutex;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
+use crate::solver::gpu::plans::incompressible_linear_solver::IncompressibleLinearSolver;
 use crate::solver::model::ModelSpec;
 
 use super::runtime_common::GpuRuntimeCommon;
@@ -76,7 +78,7 @@ impl GpuSolver {
             outer_residual_u: Mutex::new(0.0),
             outer_residual_p: Mutex::new(0.0),
             outer_iterations: Mutex::new(0),
-            fgmres_resources: None,
+            linear_solver: IncompressibleLinearSolver::new(),
             n_outer_correctors: 20,
             coupled_resources: Some(linear_res.coupled_resources),
             coupled_should_clear_max_diff: false,
@@ -100,4 +102,3 @@ impl GpuSolver {
         Ok(solver)
     }
 }
-pub mod compressible_fields;

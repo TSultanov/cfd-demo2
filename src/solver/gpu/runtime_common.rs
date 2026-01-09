@@ -11,7 +11,7 @@ pub(crate) struct GpuRuntimeCommon {
     pub num_cells: u32,
     pub num_faces: u32,
     pub profiling_stats: Arc<ProfilingStats>,
-    readback_cache: StagingBufferCache,
+    pub readback_cache: StagingBufferCache,
 }
 
 impl GpuRuntimeCommon {

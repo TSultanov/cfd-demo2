@@ -1,4 +1,4 @@
-use super::compressible::CompressiblePlanResources;
+use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{
     write_params, FgmresPrecondBindings, FgmresSolveOnceConfig, FgmresWorkspace, IterParams,
@@ -10,99 +10,74 @@ use crate::solver::gpu::modules::compressible_krylov::{
 use crate::solver::gpu::modules::krylov_precond::DispatchGrids;
 use crate::solver::gpu::modules::krylov_precond::KrylovDispatch;
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
-use crate::solver::gpu::modules::linear_system::LinearSystemView;
-use crate::solver::gpu::structs::LinearSolverStats;
+use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
+use crate::solver::gpu::modules::ports::PortSpace;
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
+use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
+use crate::solver::gpu::profiling::ProfilingStats;
 use std::collections::HashMap;
 
 pub type CompressibleFgmresResources = KrylovSolveModule<CompressibleKrylovModule>;
 
-impl CompressiblePlanResources {
-    pub(crate) fn ensure_fgmres_resources(&mut self, max_restart: usize) {
-        let n = self.num_unknowns;
-        let rebuild = match &self.fgmres_resources {
+pub struct CompressibleLinearSolver {
+    pub resources: Option<CompressibleFgmresResources>,
+    pub last_stats: LinearSolverStats,
+    pub tol: f32,
+    pub max_restart: usize,
+    pub retry_tol: f32,
+    pub retry_restart: usize,
+}
+
+impl CompressibleLinearSolver {
+    pub fn new() -> Self {
+        Self {
+            resources: None,
+            last_stats: LinearSolverStats::default(),
+            tol: 0.0,
+            max_restart: 1,
+            retry_tol: 0.0,
+            retry_restart: 1,
+        }
+    }
+
+    pub(crate) fn ensure_resources(
+        &mut self,
+        context: &GpuContext,
+        n: u32,
+        num_cells: u32,
+        ports: LinearSystemPorts,
+        port_space: &PortSpace,
+        max_restart: usize,
+    ) {
+        let rebuild = match &self.resources {
             Some(existing) => {
                 existing.fgmres.max_restart() < max_restart || existing.fgmres.n() != n
             }
             None => true,
         };
         if rebuild {
-            let resources = self.init_fgmres_resources(max_restart);
-            self.fgmres_resources = Some(resources);
+            let resources = self.init_resources(context, n, num_cells, ports, port_space, max_restart);
+            self.resources = Some(resources);
         }
     }
 
-    pub async fn ensure_amg_resources(&mut self) {
-        let needs_init = matches!(
-            self.fgmres_resources.as_ref(),
-            Some(res) if !res.precond.has_amg_resources()
-        );
-        if !needs_init {
-            return;
-        }
-
-        let values = self
-            .read_buffer_f32(
-                self.port_space.buffer(self.system_ports.values),
-                self.block_col_indices.len(),
-            )
-            .await;
-
-        let num_cells = self.num_cells as usize;
-        let mut scalar_values = vec![0.0f32; self.scalar_col_indices.len()];
-
-        for cell in 0..num_cells {
-            let start = self.scalar_row_offsets[cell] as usize;
-            let end = self.scalar_row_offsets[cell + 1] as usize;
-            let mut map = HashMap::with_capacity(end - start);
-            for idx in start..end {
-                map.insert(self.scalar_col_indices[idx] as usize, idx);
-            }
-
-            for row in 0..4usize {
-                let block_row = cell * 4 + row;
-                let bstart = self.block_row_offsets[block_row] as usize;
-                let bend = self.block_row_offsets[block_row + 1] as usize;
-                for k in bstart..bend {
-                    let col_cell = self.block_col_indices[k] as usize / 4;
-                    if let Some(&pos) = map.get(&col_cell) {
-                        scalar_values[pos] += values[k].abs();
-                    }
-                }
-            }
-
-            if let Some(&diag_pos) = map.get(&cell) {
-                if scalar_values[diag_pos].abs() < 1e-12 {
-                    scalar_values[diag_pos] = 1.0;
-                }
-            }
-        }
-
-        let matrix = CsrMatrix {
-            row_offsets: self.scalar_row_offsets.clone(),
-            col_indices: self.scalar_col_indices.clone(),
-            values: scalar_values,
-            num_rows: num_cells,
-            num_cols: num_cells,
-        };
-
-        if let Some(fgmres) = &mut self.fgmres_resources {
-            fgmres
-                .precond
-                .ensure_amg_resources(&self.common.context.device, matrix, 20);
-        }
-    }
-
-    fn init_fgmres_resources(&self, max_restart: usize) -> CompressibleFgmresResources {
-        let device = &self.common.context.device;
-        let n = self.num_unknowns;
-        let num_cells = self.num_cells;
+    fn init_resources(
+        &self,
+        context: &GpuContext,
+        n: u32,
+        num_cells: u32,
+        ports: LinearSystemPorts,
+        port_space: &PortSpace,
+        max_restart: usize,
+    ) -> CompressibleFgmresResources {
+        let device = &context.device;
 
         let (b_diag_u, b_diag_v, b_diag_p) =
             CompressibleKrylovModule::create_diag_buffers(device, n);
 
         let matrix = LinearSystemView {
-            ports: self.system_ports,
-            space: &self.port_space,
+            ports,
+            space: port_space,
         };
         let fgmres = FgmresWorkspace::new_from_system(
             device,
@@ -131,43 +106,126 @@ impl CompressiblePlanResources {
         KrylovSolveModule::new(fgmres, precond)
     }
 
-    pub(crate) fn solve_compressible_fgmres(
+    pub async fn ensure_amg_resources(
         &mut self,
+        context: &GpuContext,
+        staging_cache: &StagingBufferCache,
+        profiling: &ProfilingStats,
+        ports: LinearSystemPorts,
+        port_space: &PortSpace,
+        topology: &LinearTopology<'_>,
+    ) {
+        let needs_init = matches!(
+            self.resources.as_ref(),
+            Some(res) if !res.precond.has_amg_resources()
+        );
+        if !needs_init {
+            return;
+        }
+
+        let values = read_buffer_cached(
+            context,
+            staging_cache,
+            profiling,
+            port_space.buffer(ports.values),
+            topology.block_col_indices.len() as u64 * 4,
+            "AMG Matrix Values",
+        )
+        .await;
+        let values: Vec<f32> = bytemuck::cast_slice(&values).to_vec();
+
+        let num_cells = topology.num_cells as usize;
+        let mut scalar_values = vec![0.0f32; topology.scalar_col_indices.len()];
+
+        for cell in 0..num_cells {
+            let start = topology.scalar_row_offsets[cell] as usize;
+            let end = topology.scalar_row_offsets[cell + 1] as usize;
+            let mut map = HashMap::with_capacity(end - start);
+            for idx in start..end {
+                map.insert(topology.scalar_col_indices[idx] as usize, idx);
+            }
+
+            for row in 0..4usize {
+                let block_row = cell * 4 + row;
+                let bstart = topology.block_row_offsets[block_row] as usize;
+                let bend = topology.block_row_offsets[block_row + 1] as usize;
+                for k in bstart..bend {
+                    let col_cell = topology.block_col_indices[k] as usize / 4;
+                    if let Some(&pos) = map.get(&col_cell) {
+                        scalar_values[pos] += values[k].abs();
+                    }
+                }
+            }
+
+            if let Some(&diag_pos) = map.get(&cell) {
+                if scalar_values[diag_pos].abs() < 1e-12 {
+                    scalar_values[diag_pos] = 1.0;
+                }
+            }
+        }
+
+        let matrix = CsrMatrix {
+            row_offsets: topology.scalar_row_offsets.to_vec(),
+            col_indices: topology.scalar_col_indices.to_vec(),
+            values: scalar_values,
+            num_rows: num_cells,
+            num_cols: num_cells,
+        };
+
+        if let Some(fgmres) = &mut self.resources {
+            fgmres
+                .precond
+                .ensure_amg_resources(&context.device, matrix, 20);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve(
+        &mut self,
+        context: &GpuContext,
+        staging_cache: &StagingBufferCache,
+        profiling: &ProfilingStats,
+        n: u32,
+        num_cells: u32,
+        ports: LinearSystemPorts,
+        port_space: &PortSpace,
+        topology: &LinearTopology<'_>,
+        preconditioner: PreconditionerType,
         max_restart: usize,
         tol: f32,
     ) -> LinearSolverStats {
         let start = std::time::Instant::now();
-        self.ensure_fgmres_resources(max_restart);
+        self.ensure_resources(context, n, num_cells, ports, port_space, max_restart);
+        
         let precond_kind = CompressibleKrylovPreconditionerKind::select(
-            self.preconditioner,
+            preconditioner,
             env_flag("CFD2_COMP_AMG", false),
             env_flag("CFD2_COMP_BLOCK_PRECOND", true),
         );
         if precond_kind == CompressibleKrylovPreconditionerKind::Amg {
-            pollster::block_on(self.ensure_amg_resources());
+            pollster::block_on(self.ensure_amg_resources(context, staging_cache, profiling, ports, port_space, topology));
         }
 
-        let Some(mut fgmres) = self.fgmres_resources.take() else {
+        let Some(mut fgmres) = self.resources.take() else {
             return LinearSolverStats::default();
         };
         fgmres.precond.set_kind(precond_kind);
 
         let stats = 'stats: {
-            let n = self.num_unknowns;
             let KrylovDispatch {
                 grids: dispatch,
                 dofs_dispatch_x_threads,
                 ..
-            } = DispatchGrids::for_sizes(n, self.num_cells);
+            } = DispatchGrids::for_sizes(n, num_cells);
 
             let system = LinearSystemView {
-                ports: self.system_ports,
-                space: &self.port_space,
+                ports,
+                space: port_space,
             };
-            self.zero_buffer(system.x(), n);
+            self.zero_buffer(context, system.x(), n);
 
             let tol_abs = 1e-6f32;
-            let rhs_norm = fgmres.rhs_norm(&self.common.context, system, n);
+            let rhs_norm = fgmres.rhs_norm(context, system, n);
             if rhs_norm <= tol_abs {
                 let stats = LinearSolverStats {
                     iterations: 0,
@@ -187,7 +245,7 @@ impl CompressiblePlanResources {
 
             let params = RawFgmresParams {
                 n,
-                num_cells: self.num_cells,
+                num_cells,
                 num_iters: 0,
                 omega: 1.0,
                 dispatch_x: dofs_dispatch_x_threads,
@@ -197,11 +255,11 @@ impl CompressiblePlanResources {
             };
             let core = fgmres
                 .fgmres
-                .core(&self.common.context.device, &self.common.context.queue);
+                .core(&context.device, &context.queue);
             write_params(&core, &params);
             fgmres.precond.prepare(
-                &self.common.context.device,
-                &self.common.context.queue,
+                &context.device,
+                &context.queue,
                 &fgmres.fgmres,
                 system.rhs().as_entire_binding(),
                 dispatch.cells,
@@ -215,7 +273,7 @@ impl CompressiblePlanResources {
             };
 
             fgmres.fgmres.clear_restart_aux(&core);
-            fgmres.fgmres.write_g0(&self.common.context.queue, rhs_norm);
+            fgmres.fgmres.write_g0(&context.queue, rhs_norm);
             fgmres.fgmres.init_basis0_from_vector_normalized(
                 &core,
                 system.rhs().as_entire_binding(),
@@ -225,7 +283,7 @@ impl CompressiblePlanResources {
 
             // Solve (single restart) using the shared GPU FGMRES core.
             let solve = fgmres.solve_once(
-                &self.common.context,
+                context,
                 system,
                 rhs_norm,
                 params,
@@ -258,17 +316,25 @@ impl CompressiblePlanResources {
             break 'stats stats;
         };
 
-        self.fgmres_resources = Some(fgmres);
+        self.resources = Some(fgmres);
+        self.last_stats = stats;
         stats
     }
 
-    fn zero_buffer(&self, buffer: &wgpu::Buffer, n: u32) {
+    fn zero_buffer(&self, context: &GpuContext, buffer: &wgpu::Buffer, n: u32) {
         let zeros = vec![0.0f32; n as usize];
-        self.common
-            .context
+        context
             .queue
             .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
     }
+}
+
+pub struct LinearTopology<'a> {
+    pub num_cells: u32,
+    pub scalar_row_offsets: &'a [u32],
+    pub scalar_col_indices: &'a [u32],
+    pub block_row_offsets: &'a [u32],
+    pub block_col_indices: &'a [u32],
 }
 
 fn env_flag(name: &str, default: bool) -> bool {

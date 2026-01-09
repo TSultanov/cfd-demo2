@@ -14,7 +14,9 @@ use crate::solver::gpu::modules::model_kernels::{
 };
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
-use crate::solver::gpu::plans::compressible_fgmres::CompressibleFgmresResources;
+use crate::solver::gpu::plans::compressible_fgmres::{
+    CompressibleLinearSolver, LinearTopology,
+};
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
@@ -136,19 +138,14 @@ pub(crate) struct CompressiblePlanResources {
     pub scalar_row_offsets_port: Port<BufU32>,
     pub port_space: PortSpace,
     pub kernels: ModelKernelsModule,
-    pub fgmres_resources: Option<CompressibleFgmresResources>,
+    pub linear_solver: CompressibleLinearSolver,
     pub outer_iters: usize,
     pub nonconverged_relax: f32,
     pub(crate) scalar_row_offsets: Vec<u32>,
     pub(crate) scalar_col_indices: Vec<u32>,
     pub(crate) block_row_offsets: Vec<u32>,
     pub(crate) block_col_indices: Vec<u32>,
-    implicit_tol: f32,
-    implicit_max_restart: usize,
-    implicit_retry_tol: f32,
-    implicit_retry_restart: usize,
     implicit_base_alpha_u: f32,
-    implicit_last_stats: LinearSolverStats,
     profile: CompressibleProfile,
     offsets: CompressibleOffsets,
     needs_gradients: bool,
@@ -443,19 +440,14 @@ impl CompressiblePlanResources {
             scalar_row_offsets_port: lowered.scalar_row_offsets_port,
             port_space,
             kernels,
-            fgmres_resources: None,
+            linear_solver: CompressibleLinearSolver::new(),
             outer_iters: 1,
             nonconverged_relax: 0.5,
             scalar_row_offsets: lowered.scalar_row_offsets,
             scalar_col_indices: lowered.scalar_col_indices,
             block_row_offsets: lowered.block_row_offsets,
             block_col_indices: lowered.block_col_indices,
-            implicit_tol: 0.0,
-            implicit_max_restart: 1,
-            implicit_retry_tol: 0.0,
-            implicit_retry_restart: 1,
             implicit_base_alpha_u: 0.0,
-            implicit_last_stats: LinearSolverStats::default(),
             profile,
             offsets,
             needs_gradients: false,
@@ -684,27 +676,59 @@ impl CompressiblePlanResources {
         max_restart: usize,
         retry_restart: usize,
     ) {
-        self.implicit_tol = tol;
-        self.implicit_retry_tol = retry_tol;
-        self.implicit_max_restart = max_restart.max(1);
-        self.implicit_retry_restart = retry_restart.max(1);
+        self.linear_solver.tol = tol;
+        self.linear_solver.retry_tol = retry_tol;
+        self.linear_solver.max_restart = max_restart.max(1);
+        self.linear_solver.retry_restart = retry_restart.max(1);
     }
 
     pub(crate) fn implicit_solve_fgmres(&mut self) {
-        let mut iter_stats =
-            self.solve_compressible_fgmres(self.implicit_max_restart, self.implicit_tol);
+        let topology = LinearTopology {
+            num_cells: self.num_cells,
+            scalar_row_offsets: &self.scalar_row_offsets,
+            scalar_col_indices: &self.scalar_col_indices,
+            block_row_offsets: &self.block_row_offsets,
+            block_col_indices: &self.block_col_indices,
+        };
+
+        let mut iter_stats = self.linear_solver.solve(
+            &self.common.context,
+            &self.common.readback_cache,
+            &self.common.profiling_stats,
+            self.num_unknowns,
+            self.num_cells,
+            self.system_ports,
+            &self.port_space,
+            &topology,
+            self.preconditioner,
+            self.linear_solver.max_restart,
+            self.linear_solver.tol,
+        );
+
         if !iter_stats.converged {
-            let retry_stats = self
-                .solve_compressible_fgmres(self.implicit_retry_restart, self.implicit_retry_tol);
+            let retry_stats = self.linear_solver.solve(
+                &self.common.context,
+            &self.common.readback_cache,
+            &self.common.profiling_stats,
+                self.num_unknowns,
+                self.num_cells,
+                self.system_ports,
+                &self.port_space,
+                &topology,
+                self.preconditioner,
+                self.linear_solver.retry_restart,
+                self.linear_solver.retry_tol,
+            );
+            
             if retry_stats.converged || retry_stats.residual < iter_stats.residual {
                 iter_stats = retry_stats;
             }
         }
-        self.implicit_last_stats = iter_stats;
+        // self.linear_solver.last_stats is already updated by solve()
     }
 
     pub(crate) fn implicit_last_stats(&self) -> LinearSolverStats {
-        self.implicit_last_stats
+        self.linear_solver.last_stats
     }
 
     pub(crate) fn implicit_snapshot(&self) {
@@ -726,7 +750,7 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) fn implicit_set_alpha_for_apply(&mut self) {
-        let apply_alpha = if self.implicit_last_stats.converged {
+        let apply_alpha = if self.linear_solver.last_stats.converged {
             self.implicit_base_alpha_u
         } else {
             self.implicit_base_alpha_u * self.nonconverged_relax
@@ -825,6 +849,33 @@ impl CompressiblePlanResources {
             .state
             .write_all(&self.common.context.queue, bytes);
     }
+
+    fn solve_compressible_fgmres_helper(
+        &mut self,
+        max_restart: usize,
+        tol: f32,
+    ) -> LinearSolverStats {
+        let topology = LinearTopology {
+            num_cells: self.num_cells,
+            scalar_row_offsets: &self.scalar_row_offsets,
+            scalar_col_indices: &self.scalar_col_indices,
+            block_row_offsets: &self.block_row_offsets,
+            block_col_indices: &self.block_col_indices,
+        };
+        self.linear_solver.solve(
+            &self.common.context,
+            &self.common.readback_cache,
+            &self.common.profiling_stats,
+            self.num_unknowns,
+            self.num_cells,
+            self.system_ports,
+            &self.port_space,
+            &topology,
+            self.preconditioner,
+            max_restart,
+            tol,
+        )
+    }
 }
 
 fn env_flag(name: &str, default: bool) -> bool {
@@ -893,7 +944,7 @@ impl PlanLinearSystemDebug for CompressiblePlanResources {
             ));
         }
         let max_restart = max_iters.min(64) as usize;
-        Ok(self.solve_compressible_fgmres(max_restart, tol))
+        Ok(self.solve_compressible_fgmres_helper(max_restart, tol))
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {

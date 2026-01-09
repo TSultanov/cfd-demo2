@@ -1,4 +1,6 @@
 use crate::solver::gpu::runtime::GpuScalarRuntime;
+use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::execution_plan::{ExecutionPlan, GraphExecMode, GraphNode, PlanNode};
 use crate::solver::gpu::plans::plan_instance::{
     FgmresSizing, GpuPlanInstance, PlanCapability, PlanCoupledUnknowns, PlanFgmresSizing,
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue,
@@ -51,12 +53,17 @@ pub(crate) struct GpuGenericCoupledSolver {
     kernels: GenericCoupledKernelsModule,
     assembly_graph: ModuleGraph<GenericCoupledKernelsModule>,
     update_graph: ModuleGraph<GenericCoupledKernelsModule>,
+    last_linear_stats: LinearSolverStats,
 
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
 }
 
 impl GpuGenericCoupledSolver {
+    fn context_ref(&self) -> &GpuContext {
+        &self.runtime.common.context
+    }
+
     fn build_assembly_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "generic_coupled:assembly",
@@ -73,6 +80,104 @@ impl GpuGenericCoupledSolver {
             bind: GenericCoupledBindGroups::Update,
             dispatch: DispatchKind::Cells,
         })])
+    }
+
+    fn build_step_plan() -> ExecutionPlan<GpuGenericCoupledSolver> {
+        ExecutionPlan::new(
+            GpuGenericCoupledSolver::context_ref,
+            vec![
+                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
+                    label: "generic_coupled:prepare",
+                    run: GpuGenericCoupledSolver::host_prepare_step,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "generic_coupled:assembly",
+                    run: GpuGenericCoupledSolver::assembly_graph_run,
+                    mode: GraphExecMode::SplitTimed,
+                }),
+                PlanNode::Host(crate::solver::gpu::execution_plan::HostNode {
+                    label: "generic_coupled:solve",
+                    run: GpuGenericCoupledSolver::host_solve_linear_system,
+                }),
+                PlanNode::Graph(GraphNode {
+                    label: "generic_coupled:update",
+                    run: GpuGenericCoupledSolver::update_graph_run,
+                    mode: GraphExecMode::SingleSubmit,
+                }),
+            ],
+        )
+    }
+
+    fn step_plan() -> &'static ExecutionPlan<GpuGenericCoupledSolver> {
+        static PLAN: std::sync::OnceLock<ExecutionPlan<GpuGenericCoupledSolver>> =
+            std::sync::OnceLock::new();
+        PLAN.get_or_init(GpuGenericCoupledSolver::build_step_plan)
+    }
+
+    fn runtime_dims(&self) -> RuntimeDims {
+        RuntimeDims {
+            num_cells: self.runtime.common.num_cells,
+            num_faces: 0,
+        }
+    }
+
+    fn host_prepare_step(solver: &mut GpuGenericCoupledSolver) {
+        solver
+            .kernels
+            .set_step_index(solver.kernels.step_index() + 1);
+        solver.runtime.advance_time();
+    }
+
+    fn host_solve_linear_system(solver: &mut GpuGenericCoupledSolver) {
+        solver.last_linear_stats = solver.runtime.solve_linear_system_cg(400, 1e-6);
+    }
+
+    fn assembly_graph_run(
+        solver: &GpuGenericCoupledSolver,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
+        let runtime = solver.runtime_dims();
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                solver.assembly_graph.execute(context, &solver.kernels, runtime);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = solver
+                    .assembly_graph
+                    .execute_split_timed(context, &solver.kernels, runtime);
+                (
+                    detail.total_seconds,
+                    Some(crate::solver::gpu::execution_plan::GraphDetail::Module(detail)),
+                )
+            }
+        }
+    }
+
+    fn update_graph_run(
+        solver: &GpuGenericCoupledSolver,
+        context: &GpuContext,
+        mode: GraphExecMode,
+    ) -> (f64, Option<crate::solver::gpu::execution_plan::GraphDetail>) {
+        let runtime = solver.runtime_dims();
+        match mode {
+            GraphExecMode::SingleSubmit => {
+                let start = std::time::Instant::now();
+                solver.update_graph.execute(context, &solver.kernels, runtime);
+                (start.elapsed().as_secs_f64(), None)
+            }
+            GraphExecMode::SplitTimed => {
+                let detail = solver
+                    .update_graph
+                    .execute_split_timed(context, &solver.kernels, runtime);
+                (
+                    detail.total_seconds,
+                    Some(crate::solver::gpu::execution_plan::GraphDetail::Module(detail)),
+                )
+            }
+        }
     }
 
     pub async fn new(
@@ -287,6 +392,7 @@ impl GpuGenericCoupledSolver {
                 update_graph: GpuGenericCoupledSolver::build_update_graph(),
                 _b_bc_kind: b_bc_kind,
                 _b_bc_value: b_bc_value,
+                last_linear_stats: LinearSolverStats::default(),
             })
         })
     }
@@ -307,23 +413,9 @@ impl GpuGenericCoupledSolver {
     }
 
     pub fn step(&mut self) -> LinearSolverStats {
-        let num_cells = self.runtime.common.num_cells;
-        let dims = RuntimeDims {
-            num_cells,
-            num_faces: 0,
-        };
-
-        self.kernels.set_step_index(self.kernels.step_index() + 1);
-        self.runtime.advance_time();
-
-        self.assembly_graph
-            .execute(&self.runtime.common.context, &self.kernels, dims);
-
-        let stats = self.runtime.solve_linear_system_cg(400, 1e-6);
-
-        self.update_graph
-            .execute(&self.runtime.common.context, &self.kernels, dims);
-        stats
+        self.last_linear_stats = LinearSolverStats::default();
+        GpuGenericCoupledSolver::step_plan().execute(self);
+        self.last_linear_stats
     }
 
     pub fn set_field_scalar(&self, field: &str, values: &[f64]) -> Result<(), String> {

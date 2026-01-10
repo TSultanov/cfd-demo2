@@ -657,6 +657,41 @@ fn generate_kernel_registry_map() {
             "scalars",
             "create_update_rho_old_pipeline_embed_source",
         ),
+        (
+            "linear_solver/spmv_p_v",
+            "linear_solver",
+            "create_spmv_p_v_pipeline_embed_source",
+        ),
+        (
+            "linear_solver/spmv_s_t",
+            "linear_solver",
+            "create_spmv_s_t_pipeline_embed_source",
+        ),
+        (
+            "linear_solver/bicgstab_update_x_r",
+            "linear_solver",
+            "create_bicgstab_update_x_r_pipeline_embed_source",
+        ),
+        (
+            "linear_solver/bicgstab_update_p",
+            "linear_solver",
+            "create_bicgstab_update_p_pipeline_embed_source",
+        ),
+        (
+            "linear_solver/bicgstab_update_s",
+            "linear_solver",
+            "create_bicgstab_update_s_pipeline_embed_source",
+        ),
+        (
+            "linear_solver/cg_update_x_r",
+            "linear_solver",
+            "create_cg_update_x_r_pipeline_embed_source",
+        ),
+        (
+            "linear_solver/cg_update_p",
+            "linear_solver",
+            "create_cg_update_p_pipeline_embed_source",
+        ),
     ];
 
     let mut code = String::new();

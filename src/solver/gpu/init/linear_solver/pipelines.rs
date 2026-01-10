@@ -306,8 +306,20 @@ pub fn init_pipelines(
     });
 
     // Pipelines
-    let pipeline_spmv_p_v = linear_solver::compute::create_spmv_p_v_pipeline_embed_source(device);
-    let pipeline_spmv_s_t = linear_solver::compute::create_spmv_s_t_pipeline_embed_source(device);
+    let pipeline_spmv_p_v = {
+        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
+            .unwrap_or_else(|err| {
+                panic!("missing linear_solver/spmv_p_v kernel registry entry: {err}")
+            });
+        (source.create_pipeline)(device)
+    };
+    let pipeline_spmv_s_t = {
+        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_S_T)
+            .unwrap_or_else(|err| {
+                panic!("missing linear_solver/spmv_s_t kernel registry entry: {err}")
+            });
+        (source.create_pipeline)(device)
+    };
 
     let pipeline_dot = {
         let source = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
@@ -322,16 +334,46 @@ pub fn init_pipelines(
         (source.create_pipeline)(device)
     };
 
-    let pipeline_bicgstab_update_x_r =
-        linear_solver::compute::create_bicgstab_update_x_r_pipeline_embed_source(device);
-    let pipeline_bicgstab_update_p =
-        linear_solver::compute::create_bicgstab_update_p_pipeline_embed_source(device);
-    let pipeline_bicgstab_update_s =
-        linear_solver::compute::create_bicgstab_update_s_pipeline_embed_source(device);
-    let pipeline_cg_update_x_r =
-        linear_solver::compute::create_cg_update_x_r_pipeline_embed_source(device);
-    let pipeline_cg_update_p =
-        linear_solver::compute::create_cg_update_p_pipeline_embed_source(device);
+    let pipeline_bicgstab_update_x_r = {
+        let source = kernel_registry::kernel_source_by_id(
+            "",
+            KernelId::LINEAR_SOLVER_BICGSTAB_UPDATE_X_R,
+        )
+        .unwrap_or_else(|err| {
+            panic!("missing linear_solver/bicgstab_update_x_r kernel registry entry: {err}")
+        });
+        (source.create_pipeline)(device)
+    };
+    let pipeline_bicgstab_update_p = {
+        let source =
+            kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_BICGSTAB_UPDATE_P)
+                .unwrap_or_else(|err| {
+                    panic!("missing linear_solver/bicgstab_update_p kernel registry entry: {err}")
+                });
+        (source.create_pipeline)(device)
+    };
+    let pipeline_bicgstab_update_s = {
+        let source =
+            kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_BICGSTAB_UPDATE_S)
+                .unwrap_or_else(|err| {
+                    panic!("missing linear_solver/bicgstab_update_s kernel registry entry: {err}")
+                });
+        (source.create_pipeline)(device)
+    };
+    let pipeline_cg_update_x_r = {
+        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)
+            .unwrap_or_else(|err| {
+                panic!("missing linear_solver/cg_update_x_r kernel registry entry: {err}")
+            });
+        (source.create_pipeline)(device)
+    };
+    let pipeline_cg_update_p = {
+        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_P)
+            .unwrap_or_else(|err| {
+                panic!("missing linear_solver/cg_update_p kernel registry entry: {err}")
+            });
+        (source.create_pipeline)(device)
+    };
 
     PipelineResources {
         bg_solver: bg_linear_state.clone(),

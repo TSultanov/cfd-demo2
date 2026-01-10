@@ -119,7 +119,7 @@ This roadmap focuses on removing those glue points in small, testable steps.
 - [x] **B2. Extend `kernel_registry` to lookup by `KernelId`**
   - Codegen emits a per-model kernel table mapping `KernelId -> (wgsl source, bind metadata)`.
   - The runtime graph builder uses only `KernelId`.
-- [ ] **B3. Shrink `KernelKind` usage to UI/debug only**
+- [x] **B3. Shrink `KernelKind` usage to UI/debug only**
   - Once recipes are emitted in terms of `KernelId`, `KernelKind` can become optional legacy.
 
   Status: Orchestration/graph building is now `KernelId`-based; `KernelKind` is still carried in recipes as a migration/debug bridge.

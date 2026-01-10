@@ -10,10 +10,10 @@
 //! single source of truth for resource allocation and program construction.
 
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::gpu::modules::graph::DispatchKind;
+use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::model::backend::{expand_schemes, EquationSystem, SchemeRegistry, TermOp};
-use crate::solver::model::{KernelId, KernelKind, ModelSpec};
+use crate::solver::model::{KernelId, ModelSpec};
 use crate::solver::scheme::Scheme;
 
 /// Specification for a linear solver.
@@ -110,15 +110,22 @@ pub enum BufferPurpose {
 #[derive(Debug, Clone)]
 pub struct KernelSpec {
     pub id: KernelId,
-    pub kind: KernelKind,
     pub phase: KernelPhase,
     pub dispatch: DispatchKind,
 }
 
-fn dispatch_for_kind(kind: KernelKind) -> DispatchKind {
-    match kind {
-        KernelKind::FluxRhieChow | KernelKind::CompressibleFluxKt => DispatchKind::Faces,
+fn dispatch_for_id(id: KernelId) -> DispatchKind {
+    match id {
+        KernelId::FLUX_RHIE_CHOW | KernelId::COMPRESSIBLE_FLUX_KT => DispatchKind::Faces,
         _ => DispatchKind::Cells,
+    }
+}
+
+fn kernel(id: KernelId, phase: KernelPhase) -> KernelSpec {
+    KernelSpec {
+        id,
+        phase,
+        dispatch: dispatch_for_id(id),
     }
 }
 
@@ -209,105 +216,38 @@ impl SolverRecipe {
         // `KernelKind -> phase` mapping for correctness.
         let kernels: Vec<KernelSpec> = match &model.fields {
             crate::solver::model::ModelFields::Incompressible(_) => vec![
-                KernelSpec {
-                    id: KernelId::from(KernelKind::PrepareCoupled),
-                    kind: KernelKind::PrepareCoupled,
-                    phase: KernelPhase::Preparation,
-                    dispatch: dispatch_for_kind(KernelKind::PrepareCoupled),
-                },
-                KernelSpec {
-                    id: KernelId::from(KernelKind::FluxRhieChow),
-                    kind: KernelKind::FluxRhieChow,
-                    phase: KernelPhase::Preparation,
-                    dispatch: dispatch_for_kind(KernelKind::FluxRhieChow),
-                },
-                KernelSpec {
-                    id: KernelId::from(KernelKind::CoupledAssembly),
-                    kind: KernelKind::CoupledAssembly,
-                    phase: KernelPhase::Assembly,
-                    dispatch: dispatch_for_kind(KernelKind::CoupledAssembly),
-                },
-                KernelSpec {
-                    id: KernelId::from(KernelKind::PressureAssembly),
-                    kind: KernelKind::PressureAssembly,
-                    phase: KernelPhase::Assembly,
-                    dispatch: dispatch_for_kind(KernelKind::PressureAssembly),
-                },
-                KernelSpec {
-                    id: KernelId::from(KernelKind::UpdateFieldsFromCoupled),
-                    kind: KernelKind::UpdateFieldsFromCoupled,
-                    phase: KernelPhase::Update,
-                    dispatch: dispatch_for_kind(KernelKind::UpdateFieldsFromCoupled),
-                },
+                kernel(KernelId::PREPARE_COUPLED, KernelPhase::Preparation),
+                kernel(KernelId::FLUX_RHIE_CHOW, KernelPhase::Preparation),
+                kernel(KernelId::COUPLED_ASSEMBLY, KernelPhase::Assembly),
+                kernel(KernelId::PRESSURE_ASSEMBLY, KernelPhase::Assembly),
+                kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED, KernelPhase::Update),
             ],
 
             crate::solver::model::ModelFields::Compressible(_) => {
                 let mut out = Vec::new();
 
                 if needs_gradients {
-                    out.push(KernelSpec {
-                        id: KernelId::from(KernelKind::CompressibleGradients),
-                        kind: KernelKind::CompressibleGradients,
-                        phase: KernelPhase::Gradients,
-                        dispatch: dispatch_for_kind(KernelKind::CompressibleGradients),
-                    });
+                    out.push(kernel(KernelId::COMPRESSIBLE_GRADIENTS, KernelPhase::Gradients));
                 }
 
                 out.extend([
-                    KernelSpec {
-                        id: KernelId::from(KernelKind::CompressibleFluxKt),
-                        kind: KernelKind::CompressibleFluxKt,
-                        phase: KernelPhase::FluxComputation,
-                        dispatch: dispatch_for_kind(KernelKind::CompressibleFluxKt),
-                    },
-                    KernelSpec {
-                        id: KernelId::from(KernelKind::CompressibleExplicitUpdate),
-                        kind: KernelKind::CompressibleExplicitUpdate,
-                        phase: KernelPhase::ExplicitUpdate,
-                        dispatch: dispatch_for_kind(KernelKind::CompressibleExplicitUpdate),
-                    },
-                    KernelSpec {
-                        id: KernelId::from(KernelKind::CompressibleAssembly),
-                        kind: KernelKind::CompressibleAssembly,
-                        phase: KernelPhase::Assembly,
-                        dispatch: dispatch_for_kind(KernelKind::CompressibleAssembly),
-                    },
-                    KernelSpec {
-                        id: KernelId::from(KernelKind::CompressibleApply),
-                        kind: KernelKind::CompressibleApply,
-                        phase: KernelPhase::Apply,
-                        dispatch: dispatch_for_kind(KernelKind::CompressibleApply),
-                    },
-                    KernelSpec {
-                        id: KernelId::from(KernelKind::CompressibleUpdate),
-                        kind: KernelKind::CompressibleUpdate,
-                        phase: KernelPhase::PrimitiveRecovery,
-                        dispatch: dispatch_for_kind(KernelKind::CompressibleUpdate),
-                    },
+                    kernel(KernelId::COMPRESSIBLE_FLUX_KT, KernelPhase::FluxComputation),
+                    kernel(
+                        KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
+                        KernelPhase::ExplicitUpdate,
+                    ),
+                    kernel(KernelId::COMPRESSIBLE_ASSEMBLY, KernelPhase::Assembly),
+                    kernel(KernelId::COMPRESSIBLE_APPLY, KernelPhase::Apply),
+                    kernel(KernelId::COMPRESSIBLE_UPDATE, KernelPhase::PrimitiveRecovery),
                 ]);
 
                 out
             }
 
             crate::solver::model::ModelFields::GenericCoupled(_) => vec![
-                KernelSpec {
-                    id: KernelId::from(KernelKind::GenericCoupledAssembly),
-                    kind: KernelKind::GenericCoupledAssembly,
-                    phase: KernelPhase::Assembly,
-                    dispatch: dispatch_for_kind(KernelKind::GenericCoupledAssembly),
-                },
-                KernelSpec {
-                    id: KernelId::from(KernelKind::GenericCoupledApply),
-                    kind: KernelKind::GenericCoupledApply,
-                    phase: KernelPhase::Apply,
-                    dispatch: dispatch_for_kind(KernelKind::GenericCoupledApply),
-                },
-                KernelSpec {
-                    id: KernelId::from(KernelKind::GenericCoupledUpdate),
-                    kind: KernelKind::GenericCoupledUpdate,
-                    phase: KernelPhase::Update,
-                    dispatch: dispatch_for_kind(KernelKind::GenericCoupledUpdate),
-                },
+                kernel(KernelId::GENERIC_COUPLED_ASSEMBLY, KernelPhase::Assembly),
+                kernel(KernelId::GENERIC_COUPLED_APPLY, KernelPhase::Apply),
+                kernel(KernelId::GENERIC_COUPLED_UPDATE, KernelPhase::Update),
             ],
         };
 
@@ -336,8 +276,8 @@ impl SolverRecipe {
         }
 
         // Determine stepping mode from model structure
-        let kernel_kinds: Vec<KernelKind> = kernels.iter().map(|k| k.kind).collect();
-        let stepping = derive_stepping_mode(model, &kernel_kinds);
+        let kernel_ids: Vec<KernelId> = kernels.iter().map(|k| k.id).collect();
+        let stepping = derive_stepping_mode(model, &kernel_ids);
 
         // Linear solver spec
         let linear_solver = LinearSolverSpec {
@@ -556,50 +496,21 @@ impl SolverRecipe {
 // Legacy mapping used by older/handwritten recipe constructors.
 // New recipes should assign phases explicitly when constructing KernelSpecs.
 #[allow(dead_code)]
-fn phase_for_kernel(kind: KernelKind) -> KernelPhase {
-    match kind {
-        KernelKind::PrepareCoupled => KernelPhase::Preparation,
-        KernelKind::FluxRhieChow => KernelPhase::Preparation,
-
-        KernelKind::CompressibleGradients => KernelPhase::Gradients,
-
-        KernelKind::CompressibleFluxKt => KernelPhase::FluxComputation,
-
-        KernelKind::CompressibleExplicitUpdate => KernelPhase::ExplicitUpdate,
-
-        KernelKind::CoupledAssembly
-        | KernelKind::PressureAssembly
-        | KernelKind::CompressibleAssembly
-        | KernelKind::GenericCoupledAssembly
-        => KernelPhase::Assembly,
-
-        KernelKind::CompressibleApply | KernelKind::GenericCoupledApply => KernelPhase::Apply,
-
-        KernelKind::UpdateFieldsFromCoupled | KernelKind::GenericCoupledUpdate => KernelPhase::Update,
-
-        // Primitive recovery for compressible after update/apply.
-        // (Some solver flows may run this explicitly as a separate pass.)
-        KernelKind::CompressibleUpdate => KernelPhase::PrimitiveRecovery,
-
-        KernelKind::IncompressibleMomentum => KernelPhase::Assembly,
-    }
-}
-
 /// Derive stepping mode from model structure.
-fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelKind]) -> SteppingMode {
+fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelId]) -> SteppingMode {
     // Check for compressible (can be explicit or implicit)
-    if kernels.contains(&KernelKind::CompressibleExplicitUpdate) {
+    if kernels.contains(&KernelId::COMPRESSIBLE_EXPLICIT_UPDATE) {
         // Has explicit path, default to implicit with fallback
         return SteppingMode::Implicit { outer_iters: 3 };
     }
 
     // Check for coupled incompressible
-    if kernels.contains(&KernelKind::CoupledAssembly) {
+    if kernels.contains(&KernelId::COUPLED_ASSEMBLY) {
         return SteppingMode::Coupled { outer_correctors: 3 };
     }
 
     // Check for generic coupled scalar
-    if kernels.contains(&KernelKind::GenericCoupledAssembly) {
+    if kernels.contains(&KernelId::GENERIC_COUPLED_ASSEMBLY) {
         return SteppingMode::Coupled { outer_correctors: 1 };
     }
 
@@ -613,7 +524,7 @@ fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelKind]) -> SteppingM
 pub fn derive_kernel_plan(
     system: &EquationSystem,
     schemes: &SchemeRegistry,
-) -> Result<Vec<KernelKind>, String> {
+) -> Result<Vec<KernelId>, String> {
     let expansion = expand_schemes(system, schemes).map_err(|e| e.to_string())?;
 
     let mut kernels = Vec::new();
@@ -637,7 +548,7 @@ pub fn derive_kernel_plan(
     // For now, return a generic coupled kernel set
     // This will be expanded as we migrate more logic here
     if has_convection || has_diffusion {
-        kernels.push(KernelKind::GenericCoupledAssembly);
+        kernels.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
     }
 
     if expansion.needs_gradients() {
@@ -645,8 +556,8 @@ pub fn derive_kernel_plan(
         // For now, handled by the assembly kernel
     }
 
-    kernels.push(KernelKind::GenericCoupledApply);
-    kernels.push(KernelKind::GenericCoupledUpdate);
+    kernels.push(KernelId::GENERIC_COUPLED_APPLY);
+    kernels.push(KernelId::GENERIC_COUPLED_UPDATE);
 
     Ok(kernels)
 }

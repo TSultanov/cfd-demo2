@@ -480,7 +480,7 @@ fn phase_order(phase: KernelPhase) -> u8 {
 }
 
 /// Derive stepping mode from model structure.
-fn derive_stepping_mode(model: &ModelSpec, kernels: &[KernelKind]) -> SteppingMode {
+fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelKind]) -> SteppingMode {
     // Check for compressible (can be explicit or implicit)
     if kernels.contains(&KernelKind::CompressibleExplicitUpdate) {
         // Has explicit path, default to implicit with fallback
@@ -490,6 +490,11 @@ fn derive_stepping_mode(model: &ModelSpec, kernels: &[KernelKind]) -> SteppingMo
     // Check for coupled incompressible
     if kernels.contains(&KernelKind::CoupledAssembly) {
         return SteppingMode::Coupled { outer_correctors: 3 };
+    }
+
+    // Check for generic coupled scalar
+    if kernels.contains(&KernelKind::GenericCoupledAssembly) {
+        return SteppingMode::Coupled { outer_correctors: 1 };
     }
 
     // Default: implicit

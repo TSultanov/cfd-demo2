@@ -202,6 +202,26 @@ impl ProgramOpRegistry {
         }
         Ok(())
     }
+
+    /// Check if a host op is registered.
+    pub fn has_host(&self, kind: &HostOpKind) -> bool {
+        self.host.contains_key(kind)
+    }
+
+    /// Check if a graph op is registered.
+    pub fn has_graph(&self, kind: &GraphOpKind) -> bool {
+        self.graph.contains_key(kind)
+    }
+
+    /// Check if a cond op is registered.
+    pub fn has_cond(&self, kind: &CondOpKind) -> bool {
+        self.cond.contains_key(kind)
+    }
+
+    /// Check if a count op is registered.
+    pub fn has_count(&self, kind: &CountOpKind) -> bool {
+        self.count.contains_key(kind)
+    }
 }
 
 impl ProgramOpDispatcher for ProgramOpRegistry {

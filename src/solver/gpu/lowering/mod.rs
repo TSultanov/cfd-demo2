@@ -8,6 +8,7 @@ mod model_driven;
 pub(crate) mod models;
 mod templates;
 pub(crate) mod types;
+pub(crate) mod unified_registry;
 
 pub(crate) async fn lower_plan_instance(
     mesh: &Mesh,

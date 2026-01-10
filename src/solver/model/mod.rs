@@ -1,6 +1,7 @@
 #[doc(hidden)]
 pub mod backend;
 mod definitions;
+pub mod gpu_spec;
 pub mod kernel;
 
 pub use definitions::{
@@ -9,4 +10,5 @@ pub use definitions::{
     incompressible_momentum_system, BoundaryCondition, BoundarySpec, CompressibleFields,
     FieldBoundarySpec, GenericCoupledFields, IncompressibleMomentumFields, ModelFields, ModelSpec,
 };
+pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
 pub use kernel::{KernelId, KernelKind, KernelPlan};

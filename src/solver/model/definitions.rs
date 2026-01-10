@@ -15,6 +15,7 @@ pub struct ModelSpec {
     pub state_layout: StateLayout,
     pub fields: ModelFields,
     pub boundaries: BoundarySpec,
+    pub gpu: crate::solver::model::gpu_spec::ModelGpuSpec,
 }
 
 #[derive(Debug, Clone)]
@@ -29,14 +30,14 @@ impl ModelSpec {
         match self.fields {
             ModelFields::Incompressible(_) => KernelPlan::new(vec![
                 KernelKind::PrepareCoupled,
+                KernelKind::FluxRhieChow,
                 KernelKind::CoupledAssembly,
                 KernelKind::PressureAssembly,
                 KernelKind::UpdateFieldsFromCoupled,
-                KernelKind::FluxRhieChow,
             ]),
             ModelFields::Compressible(_) => KernelPlan::new(vec![
-                KernelKind::CompressibleFluxKt,
                 KernelKind::CompressibleGradients,
+                KernelKind::CompressibleFluxKt,
                 KernelKind::CompressibleExplicitUpdate,
                 KernelKind::CompressibleAssembly,
                 KernelKind::CompressibleApply,
@@ -350,12 +351,21 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_p,
         fields.grad_component,
     ]);
+
+    let gpu = crate::solver::model::gpu_spec::ModelGpuSpec {
+        flux: Some(crate::solver::model::gpu_spec::FluxSpec { stride: 1 }),
+        requires_low_mach_params: false,
+        gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PerFieldComponents,
+        required_gradient_fields: Vec::new(),
+    };
+
     ModelSpec {
         id: "incompressible_momentum",
         system,
         state_layout: layout,
         fields: ModelFields::Incompressible(fields),
         boundaries: BoundarySpec::default(),
+        gpu,
     }
 }
 
@@ -369,12 +379,29 @@ pub fn compressible_model() -> ModelSpec {
         fields.p,
         fields.u,
     ]);
+
+    let required_gradient_fields = system
+        .equations()
+        .iter()
+        .flat_map(|eqn| crate::solver::model::gpu_spec::expand_field_components(*eqn.target()))
+        .collect();
+
+    let gpu = crate::solver::model::gpu_spec::ModelGpuSpec {
+        flux: Some(crate::solver::model::gpu_spec::FluxSpec {
+            stride: system.unknowns_per_cell(),
+        }),
+        requires_low_mach_params: true,
+        gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PerFieldComponents,
+        required_gradient_fields,
+    };
+
     ModelSpec {
         id: "compressible",
         system,
         state_layout: layout,
         fields: ModelFields::Compressible(fields),
         boundaries: BoundarySpec::default(),
+        gpu,
     }
 }
 
@@ -413,6 +440,12 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         state_layout: layout,
         fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
         boundaries,
+        gpu: crate::solver::model::gpu_spec::ModelGpuSpec {
+            flux: None,
+            requires_low_mach_params: false,
+            gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
+            required_gradient_fields: Vec::new(),
+        },
     }
 }
 
@@ -451,6 +484,12 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         state_layout: layout,
         fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
         boundaries,
+        gpu: crate::solver::model::gpu_spec::ModelGpuSpec {
+            flux: None,
+            requires_low_mach_params: false,
+            gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
+            required_gradient_fields: Vec::new(),
+        },
     }
 }
 

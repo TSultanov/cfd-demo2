@@ -13,8 +13,9 @@ use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::model::backend::{expand_schemes, EquationSystem, SchemeRegistry, TermOp};
-use crate::solver::model::{KernelId, ModelSpec};
+use crate::solver::model::{expand_field_components, FluxSpec, GradientStorage, KernelId, ModelSpec};
 use crate::solver::scheme::Scheme;
+use std::collections::HashSet;
 
 /// Specification for a linear solver.
 #[derive(Debug, Clone)]
@@ -93,13 +94,6 @@ pub struct BufferSpec {
     pub purpose: BufferPurpose,
 }
 
-/// Specification for a face-based flux buffer.
-#[derive(Debug, Clone, Copy)]
-pub struct FluxSpec {
-    /// Floats per face.
-    pub stride: u32,
-}
-
 /// Purpose of an auxiliary buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferPurpose {
@@ -133,6 +127,32 @@ fn kernel(id: KernelId, phase: KernelPhase) -> KernelSpec {
         id,
         phase,
         dispatch: dispatch_for_id(id),
+    }
+}
+
+fn phase_for_id(id: KernelId) -> KernelPhase {
+    match id {
+        KernelId::PREPARE_COUPLED => KernelPhase::Preparation,
+        KernelId::FLUX_RHIE_CHOW => KernelPhase::Preparation,
+
+        KernelId::COMPRESSIBLE_GRADIENTS => KernelPhase::Gradients,
+        KernelId::COMPRESSIBLE_FLUX_KT => KernelPhase::FluxComputation,
+        KernelId::COMPRESSIBLE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
+
+        KernelId::COUPLED_ASSEMBLY
+        | KernelId::PRESSURE_ASSEMBLY
+        | KernelId::COMPRESSIBLE_ASSEMBLY
+        | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
+
+        KernelId::COMPRESSIBLE_APPLY | KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
+
+        KernelId::UPDATE_FIELDS_FROM_COUPLED | KernelId::GENERIC_COUPLED_UPDATE => {
+            KernelPhase::Update
+        }
+
+        KernelId::COMPRESSIBLE_UPDATE => KernelPhase::PrimitiveRecovery,
+
+        _ => KernelPhase::Preparation,
     }
 }
 
@@ -216,72 +236,45 @@ impl SolverRecipe {
         let scheme_expansion = expand_schemes(&model.system, &scheme_registry)
             .map_err(|e| format!("scheme expansion failed: {e}"))?;
 
-        let mut gradient_fields: Vec<String> = scheme_expansion
-            .gradient_fields()
-            .iter()
-            .map(|f| f.name().to_string())
-            .collect();
-
-        // Encode model-specific “always required” gradient storage in the recipe.
-        // The goal is to keep plan-side buffer selection out of the runtime.
-        let (flux, requires_low_mach_params, needs_gradients) = match &model.fields {
-            crate::solver::model::ModelFields::Incompressible(_) => {
-                (Some(FluxSpec { stride: 1 }), false, !gradient_fields.is_empty())
-            }
-            crate::solver::model::ModelFields::Compressible(_) => {
-                // Compressible WGSL kernels expect these component-wise gradients and fluxes.
-                gradient_fields = vec![
-                    "rho".to_string(),
-                    "rho_u_x".to_string(),
-                    "rho_u_y".to_string(),
-                    "rho_e".to_string(),
-                ];
-                (Some(FluxSpec { stride: 4 }), true, true)
-            }
-            crate::solver::model::ModelFields::GenericCoupled(_) => {
-                (None, false, !gradient_fields.is_empty())
-            }
-        };
-
-        // Assign phases as we emit KernelSpecs.
-        // This keeps ordering explicit in the recipe and avoids relying on a global
-        // `KernelKind -> phase` mapping for correctness.
-        let kernels: Vec<KernelSpec> = match &model.fields {
-            crate::solver::model::ModelFields::Incompressible(_) => vec![
-                kernel(KernelId::PREPARE_COUPLED, KernelPhase::Preparation),
-                kernel(KernelId::FLUX_RHIE_CHOW, KernelPhase::Preparation),
-                kernel(KernelId::COUPLED_ASSEMBLY, KernelPhase::Assembly),
-                kernel(KernelId::PRESSURE_ASSEMBLY, KernelPhase::Assembly),
-                kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED, KernelPhase::Update),
-            ],
-
-            crate::solver::model::ModelFields::Compressible(_) => {
-                let mut out = Vec::new();
-
-                if needs_gradients {
-                    out.push(kernel(KernelId::COMPRESSIBLE_GRADIENTS, KernelPhase::Gradients));
+        let mut gradient_fields: Vec<String> = match model.gpu.gradient_storage {
+            GradientStorage::None => Vec::new(),
+            GradientStorage::PackedState => {
+                if scheme_expansion.needs_gradients() {
+                    vec!["state".to_string()]
+                } else {
+                    Vec::new()
                 }
+            }
+            GradientStorage::PerFieldComponents => scheme_expansion
+                .gradient_fields()
+                .iter()
+                .flat_map(|&f| expand_field_components(f))
+                .collect(),
+        };
 
-                out.extend([
-                    kernel(KernelId::COMPRESSIBLE_FLUX_KT, KernelPhase::FluxComputation),
-                    kernel(
-                        KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
-                        KernelPhase::ExplicitUpdate,
-                    ),
-                    kernel(KernelId::COMPRESSIBLE_ASSEMBLY, KernelPhase::Assembly),
-                    kernel(KernelId::COMPRESSIBLE_APPLY, KernelPhase::Apply),
-                    kernel(KernelId::COMPRESSIBLE_UPDATE, KernelPhase::PrimitiveRecovery),
-                ]);
+        gradient_fields.extend(model.gpu.required_gradient_fields.iter().cloned());
 
-                out
+        // Dedupe while preserving a stable order.
+        let mut seen = HashSet::new();
+        gradient_fields.retain(|name| seen.insert(name.clone()));
+
+        let needs_gradients = !gradient_fields.is_empty();
+        let flux = model.gpu.flux;
+        let requires_low_mach_params = model.gpu.requires_low_mach_params;
+
+        // Emit kernel specs from the model's declared kernel plan.
+        let mut kernels: Vec<KernelSpec> = Vec::new();
+        for &kind in model.kernel_plan().kernels() {
+            let id = KernelId::from(kind);
+
+            // Some models include a gradients kernel in the plan, but for schemes that do not
+            // require gradients we can skip it (if nothing else forces gradients).
+            if id == KernelId::COMPRESSIBLE_GRADIENTS && !needs_gradients {
+                continue;
             }
 
-            crate::solver::model::ModelFields::GenericCoupled(_) => vec![
-                kernel(KernelId::GENERIC_COUPLED_ASSEMBLY, KernelPhase::Assembly),
-                kernel(KernelId::GENERIC_COUPLED_APPLY, KernelPhase::Apply),
-                kernel(KernelId::GENERIC_COUPLED_UPDATE, KernelPhase::Update),
-            ],
-        };
+            kernels.push(kernel(id, phase_for_id(id)));
+        }
 
         // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();

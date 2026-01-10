@@ -57,6 +57,12 @@ mod solver {
             #[allow(unused_imports)]
             pub use state_layout::{StateField, StateLayout};
         }
+        pub mod gpu_spec {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/gpu_spec.rs"
+            ));
+        }
         pub mod definitions {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -76,6 +82,8 @@ mod solver {
             incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
             IncompressibleMomentumFields, ModelFields, ModelSpec,
         };
+        #[allow(unused_imports)]
+        pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
     }

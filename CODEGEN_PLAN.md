@@ -60,7 +60,7 @@ One **model-driven** GPU solver pipeline with:
   - Enables bind group code to work with either legacy `CompressibleFieldResources` or `UnifiedFieldResources`
 
 ## Main Blockers
-- **Recipe still contains legacy/model-specific resource hints:** Allocation is recipe-driven, but the recipe currently includes a few model-family defaults (e.g. compressible flux stride / always-present gradients). The end state is to derive these from fully codegen/model-declared specs.
+- **Model requirements are still partially handwritten:** Allocation is recipe-driven and the remaining “always required” GPU resources (flux stride, low-mach params, gradient storage policy) are now declared on `ModelSpec` via `ModelGpuSpec` instead of being hardcoded in `SolverRecipe::from_model`. The end state is to generate these specs from codegen/model metadata (not handwritten model constructors).
  - **Legacy glue cleanup:** remove now-unused init modules/exports and other legacy bind-group ownership codepaths.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.

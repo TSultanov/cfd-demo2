@@ -3,14 +3,15 @@ pub mod pipelines;
 pub mod state;
 
 use crate::solver::gpu::async_buffer::AsyncScalarReader;
-use crate::solver::gpu::bindings;
 use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::csr::build_block_csr;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::init::scalars;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::structs::{CoupledSolverResources, PreconditionerParams};
+use crate::solver::model::KernelId;
 use wgpu::util::DeviceExt;
 
 pub struct LinearSolverResources {
@@ -729,7 +730,12 @@ fn init_coupled_resources(
     });
 
     // Create preconditioner shader and pipelines
-    let shader_precond = bindings::preconditioner::create_shader_module_embed_source(device);
+    let shader_precond = kernel_registry::kernel_shader_module_by_id(
+        device,
+        "",
+        KernelId::PRECONDITIONER_BUILD_SCHUR_RHS,
+    )
+    .expect("preconditioner shader missing from kernel registry");
 
     let pl_precond = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Preconditioner Pipeline Layout"),

@@ -1,4 +1,5 @@
-use crate::solver::gpu::bindings;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::model::KernelId;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use bytemuck::{bytes_of, Pod, Zeroable};
 
@@ -776,7 +777,9 @@ impl FgmresWorkspace {
             ],
         });
 
-        let shader_ops = bindings::gmres_ops::create_shader_module_embed_source(device);
+        let shader_ops =
+            kernel_registry::kernel_shader_module_by_id(device, "", KernelId::GMRES_OPS_SPMV)
+                .expect("gmres_ops shader missing from kernel registry");
         let pipeline_layout_ops = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{label_prefix} FGMRES ops layout")),
             bind_group_layouts: &[&bgl_vectors, &bgl_matrix, &bgl_precond, &bgl_params],
@@ -819,7 +822,12 @@ impl FgmresWorkspace {
             "reduce_final_and_finish_norm",
         );
 
-        let shader_logic = bindings::gmres_logic::create_shader_module_embed_source(device);
+        let shader_logic = kernel_registry::kernel_shader_module_by_id(
+            device,
+            "",
+            KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS,
+        )
+        .expect("gmres_logic shader missing from kernel registry");
         let pipeline_layout_logic =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&format!("{label_prefix} FGMRES logic layout")),
@@ -846,7 +854,9 @@ impl FgmresWorkspace {
             "solve_triangular",
         );
 
-        let shader_cgs = bindings::gmres_cgs::create_shader_module_embed_source(device);
+        let shader_cgs =
+            kernel_registry::kernel_shader_module_by_id(device, "", KernelId::GMRES_CGS_CALC_DOTS)
+                .expect("gmres_cgs shader missing from kernel registry");
         let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{label_prefix} FGMRES cgs layout")),
             bind_group_layouts: &[&bgl_cgs],

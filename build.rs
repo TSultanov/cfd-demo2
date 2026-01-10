@@ -692,6 +692,173 @@ fn generate_kernel_registry_map() {
             "linear_solver",
             "create_cg_update_p_pipeline_embed_source",
         ),
+
+        // AMG
+        (
+            "amg/smooth_op",
+            "amg",
+            "create_smooth_op_pipeline_embed_source",
+        ),
+        (
+            "amg/restrict_residual",
+            "amg",
+            "create_restrict_residual_pipeline_embed_source",
+        ),
+        (
+            "amg/prolongate_op",
+            "amg",
+            "create_prolongate_op_pipeline_embed_source",
+        ),
+        (
+            "amg/clear",
+            "amg",
+            "create_clear_pipeline_embed_source",
+        ),
+
+        // Packing helpers
+        (
+            "amg_pack/pack_component",
+            "amg_pack",
+            "create_pack_component_pipeline_embed_source",
+        ),
+        (
+            "amg_pack/unpack_component",
+            "amg_pack",
+            "create_unpack_component_pipeline_embed_source",
+        ),
+
+        // Block preconditioner
+        (
+            "block_precond/build_block_inv",
+            "block_precond",
+            "create_build_block_inv_pipeline_embed_source",
+        ),
+        (
+            "block_precond/apply_block_precond",
+            "block_precond",
+            "create_apply_block_precond_pipeline_embed_source",
+        ),
+
+        // Schur preconditioner
+        (
+            "schur_precond/predict_and_form_schur",
+            "schur_precond",
+            "create_predict_and_form_schur_pipeline_embed_source",
+        ),
+        (
+            "schur_precond/relax_pressure",
+            "schur_precond",
+            "create_relax_pressure_pipeline_embed_source",
+        ),
+        (
+            "schur_precond/correct_velocity",
+            "schur_precond",
+            "create_correct_velocity_pipeline_embed_source",
+        ),
+
+        // Coupled-solver preconditioner
+        (
+            "preconditioner/build_schur_rhs",
+            "preconditioner",
+            "create_build_schur_rhs_pipeline_embed_source",
+        ),
+        (
+            "preconditioner/finalize_precond",
+            "preconditioner",
+            "create_finalize_precond_pipeline_embed_source",
+        ),
+        (
+            "preconditioner/spmv_phat_v",
+            "preconditioner",
+            "create_spmv_phat_v_pipeline_embed_source",
+        ),
+        (
+            "preconditioner/spmv_shat_t",
+            "preconditioner",
+            "create_spmv_shat_t_pipeline_embed_source",
+        ),
+
+        // GMRES ops/logic/CGS
+        (
+            "gmres_ops/spmv",
+            "gmres_ops",
+            "create_spmv_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/axpy",
+            "gmres_ops",
+            "create_axpy_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/axpy_from_y",
+            "gmres_ops",
+            "create_axpy_from_y_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/axpby",
+            "gmres_ops",
+            "create_axpby_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/scale",
+            "gmres_ops",
+            "create_scale_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/scale_in_place",
+            "gmres_ops",
+            "create_scale_in_place_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/copy",
+            "gmres_ops",
+            "create_copy_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/dot_product_partial",
+            "gmres_ops",
+            "create_dot_product_partial_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/norm_sq_partial",
+            "gmres_ops",
+            "create_norm_sq_partial_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/reduce_final",
+            "gmres_ops",
+            "create_reduce_final_pipeline_embed_source",
+        ),
+        (
+            "gmres_ops/reduce_final_and_finish_norm",
+            "gmres_ops",
+            "create_reduce_final_and_finish_norm_pipeline_embed_source",
+        ),
+        (
+            "gmres_logic/update_hessenberg_givens",
+            "gmres_logic",
+            "create_update_hessenberg_givens_pipeline_embed_source",
+        ),
+        (
+            "gmres_logic/solve_triangular",
+            "gmres_logic",
+            "create_solve_triangular_pipeline_embed_source",
+        ),
+        (
+            "gmres_cgs/calc_dots_cgs",
+            "gmres_cgs",
+            "create_calc_dots_cgs_pipeline_embed_source",
+        ),
+        (
+            "gmres_cgs/reduce_dots_cgs",
+            "gmres_cgs",
+            "create_reduce_dots_cgs_pipeline_embed_source",
+        ),
+        (
+            "gmres_cgs/update_w_cgs",
+            "gmres_cgs",
+            "create_update_w_cgs_pipeline_embed_source",
+        ),
     ];
 
     let mut code = String::new();

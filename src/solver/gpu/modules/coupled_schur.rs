@@ -1,6 +1,7 @@
-use crate::solver::gpu::bindings;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
+use crate::solver::model::KernelId;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::PreconditionerType;
@@ -194,7 +195,12 @@ impl CoupledSchurModule {
                 push_constant_ranges: &[],
             });
 
-        let shader_schur = bindings::schur_precond::create_shader_module_embed_source(device);
+        let shader_schur = kernel_registry::kernel_shader_module_by_id(
+            device,
+            "",
+            KernelId::SCHUR_PRECOND_PREDICT_AND_FORM,
+        )
+        .expect("schur_precond shader missing from kernel registry");
         let make_schur_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),

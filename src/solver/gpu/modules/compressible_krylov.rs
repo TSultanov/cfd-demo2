@@ -1,4 +1,5 @@
-use crate::solver::gpu::bindings;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::model::KernelId;
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::structs::PreconditionerType;
@@ -134,7 +135,12 @@ impl CompressibleKrylovModule {
                 push_constant_ranges: &[],
             });
 
-        let shader_precond = bindings::block_precond::create_shader_module_embed_source(device);
+        let shader_precond = kernel_registry::kernel_shader_module_by_id(
+            device,
+            "",
+            KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV,
+        )
+        .expect("block_precond shader missing from kernel registry");
         let make_precond_pipeline =
             |label: &str, entry: &str, layout: &wgpu::PipelineLayout| -> wgpu::ComputePipeline {
                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -201,7 +207,12 @@ impl CompressibleKrylovModule {
             bind_group_layouts: &[&bgl_pack, &bgl_pack_params],
             push_constant_ranges: &[],
         });
-        let shader_pack = bindings::amg_pack::create_shader_module_embed_source(device);
+        let shader_pack = kernel_registry::kernel_shader_module_by_id(
+            device,
+            "",
+            KernelId::AMG_PACK_PACK_COMPONENT,
+        )
+        .expect("amg_pack shader missing from kernel registry");
         let make_pack_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),

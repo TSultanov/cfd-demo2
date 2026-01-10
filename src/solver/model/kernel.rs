@@ -68,6 +68,53 @@ impl KernelId {
     pub const LINEAR_SOLVER_CG_UPDATE_X_R: KernelId = KernelId("linear_solver/cg_update_x_r");
     pub const LINEAR_SOLVER_CG_UPDATE_P: KernelId = KernelId("linear_solver/cg_update_p");
 
+    // Handwritten solver-infrastructure kernels (multi-entrypoint compute shaders).
+    pub const AMG_SMOOTH_OP: KernelId = KernelId("amg/smooth_op");
+    pub const AMG_RESTRICT_RESIDUAL: KernelId = KernelId("amg/restrict_residual");
+    pub const AMG_PROLONGATE_OP: KernelId = KernelId("amg/prolongate_op");
+    pub const AMG_CLEAR: KernelId = KernelId("amg/clear");
+
+    pub const AMG_PACK_PACK_COMPONENT: KernelId = KernelId("amg_pack/pack_component");
+    pub const AMG_PACK_UNPACK_COMPONENT: KernelId = KernelId("amg_pack/unpack_component");
+
+    pub const BLOCK_PRECOND_BUILD_BLOCK_INV: KernelId = KernelId("block_precond/build_block_inv");
+    pub const BLOCK_PRECOND_APPLY_BLOCK_PRECOND: KernelId =
+        KernelId("block_precond/apply_block_precond");
+
+    pub const SCHUR_PRECOND_PREDICT_AND_FORM: KernelId =
+        KernelId("schur_precond/predict_and_form_schur");
+    pub const SCHUR_PRECOND_RELAX_PRESSURE: KernelId = KernelId("schur_precond/relax_pressure");
+    pub const SCHUR_PRECOND_CORRECT_VELOCITY: KernelId =
+        KernelId("schur_precond/correct_velocity");
+
+    pub const PRECONDITIONER_BUILD_SCHUR_RHS: KernelId =
+        KernelId("preconditioner/build_schur_rhs");
+    pub const PRECONDITIONER_FINALIZE_PRECOND: KernelId =
+        KernelId("preconditioner/finalize_precond");
+    pub const PRECONDITIONER_SPMV_PHAT_V: KernelId = KernelId("preconditioner/spmv_phat_v");
+    pub const PRECONDITIONER_SPMV_SHAT_T: KernelId = KernelId("preconditioner/spmv_shat_t");
+
+    pub const GMRES_OPS_SPMV: KernelId = KernelId("gmres_ops/spmv");
+    pub const GMRES_OPS_AXPY: KernelId = KernelId("gmres_ops/axpy");
+    pub const GMRES_OPS_AXPY_FROM_Y: KernelId = KernelId("gmres_ops/axpy_from_y");
+    pub const GMRES_OPS_AXPBY: KernelId = KernelId("gmres_ops/axpby");
+    pub const GMRES_OPS_SCALE: KernelId = KernelId("gmres_ops/scale");
+    pub const GMRES_OPS_SCALE_IN_PLACE: KernelId = KernelId("gmres_ops/scale_in_place");
+    pub const GMRES_OPS_COPY: KernelId = KernelId("gmres_ops/copy");
+    pub const GMRES_OPS_DOT_PRODUCT_PARTIAL: KernelId = KernelId("gmres_ops/dot_product_partial");
+    pub const GMRES_OPS_NORM_SQ_PARTIAL: KernelId = KernelId("gmres_ops/norm_sq_partial");
+    pub const GMRES_OPS_REDUCE_FINAL: KernelId = KernelId("gmres_ops/reduce_final");
+    pub const GMRES_OPS_REDUCE_FINAL_AND_FINISH_NORM: KernelId =
+        KernelId("gmres_ops/reduce_final_and_finish_norm");
+
+    pub const GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS: KernelId =
+        KernelId("gmres_logic/update_hessenberg_givens");
+    pub const GMRES_LOGIC_SOLVE_TRIANGULAR: KernelId = KernelId("gmres_logic/solve_triangular");
+
+    pub const GMRES_CGS_CALC_DOTS: KernelId = KernelId("gmres_cgs/calc_dots_cgs");
+    pub const GMRES_CGS_REDUCE_DOTS: KernelId = KernelId("gmres_cgs/reduce_dots_cgs");
+    pub const GMRES_CGS_UPDATE_W: KernelId = KernelId("gmres_cgs/update_w_cgs");
+
     pub fn as_str(self) -> &'static str {
         self.0
     }

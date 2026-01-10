@@ -1,4 +1,5 @@
-use crate::solver::gpu::bindings;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::model::KernelId;
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
@@ -622,7 +623,8 @@ impl AmgResources {
         }
 
         // Pipelines
-        let shader = bindings::amg::create_shader_module_embed_source(device);
+        let shader = kernel_registry::kernel_shader_module_by_id(device, "", KernelId::AMG_SMOOTH_OP)
+            .expect("amg shader missing from kernel registry");
 
         // Layouts
         // bgl_cross moved up

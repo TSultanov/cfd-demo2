@@ -3,6 +3,7 @@ pub mod compressible_krylov;
 pub mod compressible_lowering;
 pub mod constants;
 pub mod coupled_schur;
+pub mod field_provider;
 pub mod generic_coupled_kernels;
 pub mod generic_linear_solver;
 pub mod graph;

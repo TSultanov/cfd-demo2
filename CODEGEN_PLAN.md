@@ -31,7 +31,15 @@ One **model-driven** GPU solver pipeline with:
   - `build_program_spec()` method to derive ProgramSpec from stepping mode
 - **Generic Linear Solver Module:** `src/solver/gpu/modules/generic_linear_solver.rs` provides a parameterized `GenericLinearSolverModule<P>` that can be instantiated with different preconditioners, decoupling solver infrastructure from specific physics families.
 - **derive_kernel_plan:** Function in `recipe.rs` to derive kernel requirements from `EquationSystem` structure rather than hardcoding in `ModelSpec::kernel_plan()`.
-- **UnifiedFieldResources (NEW):** `src/solver/gpu/modules/unified_field_resources.rs` provides unified field storage (PingPongState, gradients, constants) derived from SolverRecipe. Integrated into GenericCoupled path.
+- **UnifiedFieldResources (EXTENDED):** `src/solver/gpu/modules/unified_field_resources.rs` provides unified field storage (PingPongState, gradients, constants) derived from SolverRecipe:
+  - Now supports flux buffers for face-based storage
+  - Now supports low-mach preconditioning params buffer
+  - Builder pattern for flexible configuration (`with_flux_buffer()`, `with_low_mach_params()`, `with_gradient_fields()`)
+  - Factory method `for_compressible()` creates compressible-ready resources with grad_rho, grad_rho_u_x, grad_rho_u_y, grad_rho_e
+- **FieldProvider Trait (NEW):** `src/solver/gpu/modules/field_provider.rs` provides trait abstraction for field buffer access:
+  - Common interface for `CompressibleFieldResources` and `UnifiedFieldResources`
+  - Enables gradual migration to unified resources without breaking existing code
+  - `buffer_for_binding()` method for shader reflection-based binding
 - **UnifiedOpRegistryBuilder (NEW):** `src/solver/gpu/lowering/unified_registry.rs` builds op registries dynamically from SolverRecipe stepping mode instead of hardcoded templates.
 - **UnifiedGraphModule (NEW):** `src/solver/gpu/modules/unified_graph.rs` provides trait and helpers for building compute graphs from SolverRecipe kernel specifications.
 - **Recipe-Driven GenericCoupled (NEW):** GenericCoupledScalar now uses:
@@ -46,16 +54,17 @@ One **model-driven** GPU solver pipeline with:
   - Uses `recipe.stepping` for n_outer_correctors
 
 ## Main Blockers
-- **UnifiedFieldResources not yet used in Compressible/Incompressible:** These paths now receive the recipe but still use their own field resource containers. Full unification would require migrating to `UnifiedFieldResources`.
+- **Compressible/Incompressible still use legacy field containers:** These paths now receive the recipe and have the `FieldProvider` trait, but still use `CompressibleFieldResources`/`FieldResources` directly. Switching to `UnifiedFieldResources` requires updating bind group creation code.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
 - **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** These templates still use hardcoded `build_program_spec()` functions in templates.rs.
 
 ## Next Steps (Prioritized)
 
-1. **Migrate Compressible/Incompressible to UnifiedFieldResources** 
-   - Currently these use their own field containers (CompressibleFieldResources, FieldResources)
-   - Migrating to UnifiedFieldResources would enable resource sharing across solver families
+1. **Switch Compressible/Incompressible to use UnifiedFieldResources**
+   - `UnifiedFieldResources::for_compressible()` factory is ready
+   - `FieldProvider` trait provides migration path
+   - Requires updating bind group creation in `model_kernels.rs` to use trait-based access
 
 2. **Migrate Compressible/Incompressible ProgramSpec to recipe-driven**
    - Currently using templates::compressible::build_program_spec() and templates::incompressible_coupled::build_program_spec()

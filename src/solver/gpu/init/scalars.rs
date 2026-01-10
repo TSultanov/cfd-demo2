@@ -1,4 +1,6 @@
 use crate::solver::gpu::bindings::scalars;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::model::KernelId;
 
 pub struct ScalarResources {
     pub bg_scalars: wgpu::BindGroup,
@@ -34,20 +36,46 @@ pub fn init_scalars(
         .into_array(),
     });
 
-    let pipeline_init_scalars = scalars::compute::create_init_scalars_pipeline_embed_source(device);
-    let pipeline_init_cg_scalars =
-        scalars::compute::create_init_cg_scalars_pipeline_embed_source(device);
-    let pipeline_reduce_rho_new_r_r =
-        scalars::compute::create_reduce_rho_new_r_r_pipeline_embed_source(device);
-    let pipeline_reduce_r0_v = scalars::compute::create_reduce_r0_v_pipeline_embed_source(device);
-    let pipeline_reduce_t_s_t_t =
-        scalars::compute::create_reduce_t_s_t_t_pipeline_embed_source(device);
-    let pipeline_update_cg_alpha =
-        scalars::compute::create_update_cg_alpha_pipeline_embed_source(device);
-    let pipeline_update_cg_beta =
-        scalars::compute::create_update_cg_beta_pipeline_embed_source(device);
-    let pipeline_update_rho_old =
-        scalars::compute::create_update_rho_old_pipeline_embed_source(device);
+    let pipeline_init_scalars = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_INIT)
+            .unwrap_or_else(|e| panic!("missing scalars/init_scalars kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_init_cg_scalars = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_INIT_CG)
+            .unwrap_or_else(|e| panic!("missing scalars/init_cg_scalars kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_reduce_rho_new_r_r = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_REDUCE_RHO_NEW_R_R)
+            .unwrap_or_else(|e| panic!("missing scalars/reduce_rho_new_r_r kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_reduce_r0_v = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_REDUCE_R0_V)
+            .unwrap_or_else(|e| panic!("missing scalars/reduce_r0_v kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_reduce_t_s_t_t = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_REDUCE_T_S_T_T)
+            .unwrap_or_else(|e| panic!("missing scalars/reduce_t_s_t_t kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_update_cg_alpha = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_UPDATE_CG_ALPHA)
+            .unwrap_or_else(|e| panic!("missing scalars/update_cg_alpha kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_update_cg_beta = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_UPDATE_CG_BETA)
+            .unwrap_or_else(|e| panic!("missing scalars/update_cg_beta kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
+    let pipeline_update_rho_old = {
+        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_UPDATE_RHO_OLD)
+            .unwrap_or_else(|e| panic!("missing scalars/update_rho_old kernel: {e}"));
+        (src.create_pipeline)(device)
+    };
 
     ScalarResources {
         bg_scalars,

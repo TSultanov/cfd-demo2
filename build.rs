@@ -604,12 +604,59 @@ fn generate_kernel_registry_map() {
         ),
     ];
 
-    // (stable KernelId string, bindings module name)
-    // These are handwritten WGSL kernels that still have a single `compute::main` entrypoint,
-    // so they can be treated like regular registry entries.
-    let id_only_entries: &[(&str, &str)] = &[
-        ("dot_product", "dot_product"),
-        ("dot_product_pair", "dot_product_pair"),
+    // (stable KernelId string, bindings module name, compute pipeline ctor function name)
+    // These are handwritten WGSL kernels that we want to route through the same registry path.
+    let id_only_entries: &[(&str, &str, &str)] = &[
+        (
+            "dot_product",
+            "dot_product",
+            "create_main_pipeline_embed_source",
+        ),
+        (
+            "dot_product_pair",
+            "dot_product_pair",
+            "create_main_pipeline_embed_source",
+        ),
+        (
+            "scalars/init_scalars",
+            "scalars",
+            "create_init_scalars_pipeline_embed_source",
+        ),
+        (
+            "scalars/init_cg_scalars",
+            "scalars",
+            "create_init_cg_scalars_pipeline_embed_source",
+        ),
+        (
+            "scalars/reduce_rho_new_r_r",
+            "scalars",
+            "create_reduce_rho_new_r_r_pipeline_embed_source",
+        ),
+        (
+            "scalars/reduce_r0_v",
+            "scalars",
+            "create_reduce_r0_v_pipeline_embed_source",
+        ),
+        (
+            "scalars/reduce_t_s_t_t",
+            "scalars",
+            "create_reduce_t_s_t_t_pipeline_embed_source",
+        ),
+        (
+            "scalars/update_cg_alpha",
+            "scalars",
+            "create_update_cg_alpha_pipeline_embed_source",
+        ),
+        (
+            "scalars/update_cg_beta",
+            "scalars",
+            "create_update_cg_beta_pipeline_embed_source",
+        ),
+        (
+            "scalars/update_rho_old",
+            "scalars",
+            "create_update_rho_old_pipeline_embed_source",
+        ),
     ];
 
     let mut code = String::new();
@@ -669,13 +716,11 @@ fn generate_kernel_registry_map() {
         code.push_str("        )),\n");
     }
 
-    for (kernel_id, module) in id_only_entries {
+    for (kernel_id, module, ctor) in id_only_entries {
         let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
         code.push_str(&format!("        \"{kernel_id}\" => Some((\n"));
         code.push_str(&format!("            bindings::{module}::SHADER_STRING,\n"));
-        code.push_str(&format!(
-            "            bindings::{module}::compute::create_main_pipeline_embed_source,\n"
-        ));
+        code.push_str(&format!("            bindings::{module}::compute::{ctor},\n"));
         code.push_str(&format!("            wgsl_meta::{bindings_const},\n"));
         code.push_str("        )),\n");
     }

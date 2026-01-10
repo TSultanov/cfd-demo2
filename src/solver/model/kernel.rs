@@ -93,6 +93,19 @@ pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem
     synthesize_kernel_plan(&req)
 }
 
+/// Derive a kernel execution ordering in terms of stable `KernelId`s.
+///
+/// This is the model-structure-level kernel plan used by the unified solver.
+///
+/// Notes:
+/// - This returns only *which* kernels are required and their order.
+/// - Phase assignment and dispatch kind are decided by the solver recipe.
+/// - `KernelKind` is retained as a legacy/debug bridge.
+pub fn derive_kernel_ids(system: &crate::solver::model::backend::EquationSystem) -> Vec<KernelId> {
+    let req = analyze_kernel_requirements(system);
+    synthesize_kernel_ids(&req)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PressureCoupling {
     momentum: crate::solver::model::backend::FieldRef,
@@ -194,4 +207,35 @@ fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
         KernelKind::GenericCoupledApply,
         KernelKind::GenericCoupledUpdate,
     ])
+}
+
+fn synthesize_kernel_ids(req: &KernelRequirements) -> Vec<KernelId> {
+    // Priority order is intentional: if a system uses DivFlux it should use the compressible
+    // path even if it accidentally also matches other coupling patterns.
+    if req.has_div_flux {
+        return vec![
+            KernelId::COMPRESSIBLE_GRADIENTS,
+            KernelId::COMPRESSIBLE_FLUX_KT,
+            KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
+            KernelId::COMPRESSIBLE_ASSEMBLY,
+            KernelId::COMPRESSIBLE_APPLY,
+            KernelId::COMPRESSIBLE_UPDATE,
+        ];
+    }
+
+    if req.pressure_coupling.is_some() {
+        return vec![
+            KernelId::PREPARE_COUPLED,
+            KernelId::FLUX_RHIE_CHOW,
+            KernelId::COUPLED_ASSEMBLY,
+            KernelId::PRESSURE_ASSEMBLY,
+            KernelId::UPDATE_FIELDS_FROM_COUPLED,
+        ];
+    }
+
+    vec![
+        KernelId::GENERIC_COUPLED_ASSEMBLY,
+        KernelId::GENERIC_COUPLED_APPLY,
+        KernelId::GENERIC_COUPLED_UPDATE,
+    ]
 }

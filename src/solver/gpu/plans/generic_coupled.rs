@@ -18,7 +18,7 @@ use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::mesh::Mesh;
-use crate::solver::model::{KernelKind, ModelSpec};
+use crate::solver::model::{KernelId, ModelSpec};
 
 pub struct GenericCoupledPlanResources {
     pub common: GpuScalarRuntime,
@@ -45,9 +45,8 @@ impl GenericCoupledPlanResources {
 
         let device = &runtime.common.context.device;
 
-        let assembly =
-            kernel_registry::kernel_source(model.id, KernelKind::GenericCoupledAssembly)?;
-        let update = kernel_registry::kernel_source(model.id, KernelKind::GenericCoupledUpdate)?;
+        let assembly = kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_ASSEMBLY)?;
+        let update = kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_UPDATE)?;
         let assembly_bindings = assembly.bindings;
         let update_bindings = update.bindings;
 

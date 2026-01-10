@@ -115,47 +115,6 @@ pub struct KernelSpec {
     pub dispatch: DispatchKind,
 }
 
-fn dispatch_for_id(id: KernelId) -> DispatchKind {
-    match id {
-        KernelId::FLUX_RHIE_CHOW | KernelId::COMPRESSIBLE_FLUX_KT => DispatchKind::Faces,
-        _ => DispatchKind::Cells,
-    }
-}
-
-fn kernel(id: KernelId, phase: KernelPhase) -> KernelSpec {
-    KernelSpec {
-        id,
-        phase,
-        dispatch: dispatch_for_id(id),
-    }
-}
-
-fn phase_for_id(id: KernelId) -> KernelPhase {
-    match id {
-        KernelId::PREPARE_COUPLED => KernelPhase::Preparation,
-        KernelId::FLUX_RHIE_CHOW => KernelPhase::Preparation,
-
-        KernelId::COMPRESSIBLE_GRADIENTS => KernelPhase::Gradients,
-        KernelId::COMPRESSIBLE_FLUX_KT => KernelPhase::FluxComputation,
-        KernelId::COMPRESSIBLE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
-
-        KernelId::COUPLED_ASSEMBLY
-        | KernelId::PRESSURE_ASSEMBLY
-        | KernelId::COMPRESSIBLE_ASSEMBLY
-        | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
-
-        KernelId::COMPRESSIBLE_APPLY | KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
-
-        KernelId::UPDATE_FIELDS_FROM_COUPLED | KernelId::GENERIC_COUPLED_UPDATE => {
-            KernelPhase::Update
-        }
-
-        KernelId::COMPRESSIBLE_UPDATE => KernelPhase::PrimitiveRecovery,
-
-        _ => KernelPhase::Preparation,
-    }
-}
-
 /// Phase in which a kernel executes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelPhase {
@@ -267,18 +226,46 @@ impl SolverRecipe {
         let flux = model.gpu.flux;
         let requires_low_mach_params = model.gpu.requires_low_mach_params;
 
-        // Emit kernel specs from the model's declared kernel plan.
+        // Emit kernel specs in terms of stable KernelIds.
+        //
+        // `derive_kernel_ids` is structural (based on the equation system); the recipe assigns
+        // phase and dispatch as it constructs `KernelSpec`s.
         let mut kernels: Vec<KernelSpec> = Vec::new();
-        for &kind in model.kernel_plan().kernels() {
-            let id = KernelId::from(kind);
-
+        for id in crate::solver::model::kernel::derive_kernel_ids(&model.system) {
             // Some models include a gradients kernel in the plan, but for schemes that do not
             // require gradients we can skip it (if nothing else forces gradients).
             if id == KernelId::COMPRESSIBLE_GRADIENTS && !needs_gradients {
                 continue;
             }
 
-            kernels.push(kernel(id, phase_for_id(id)));
+            let phase = match id {
+                KernelId::COMPRESSIBLE_GRADIENTS => KernelPhase::Gradients,
+                KernelId::COMPRESSIBLE_FLUX_KT => KernelPhase::FluxComputation,
+                KernelId::COMPRESSIBLE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
+
+                KernelId::COUPLED_ASSEMBLY
+                | KernelId::PRESSURE_ASSEMBLY
+                | KernelId::COMPRESSIBLE_ASSEMBLY
+                | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
+
+                KernelId::COMPRESSIBLE_APPLY | KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
+
+                KernelId::UPDATE_FIELDS_FROM_COUPLED | KernelId::GENERIC_COUPLED_UPDATE => {
+                    KernelPhase::Update
+                }
+
+                KernelId::COMPRESSIBLE_UPDATE => KernelPhase::PrimitiveRecovery,
+
+                // Preparation kernels (or legacy defaults)
+                _ => KernelPhase::Preparation,
+            };
+
+            let dispatch = match id {
+                KernelId::FLUX_RHIE_CHOW | KernelId::COMPRESSIBLE_FLUX_KT => DispatchKind::Faces,
+                _ => DispatchKind::Cells,
+            };
+
+            kernels.push(KernelSpec { id, phase, dispatch });
         }
 
         // Derive auxiliary buffers
@@ -354,7 +341,7 @@ impl SolverRecipe {
     ///
     /// This generates the execution sequence (prepare → assembly → solve → update → finalize)
     /// based on the stepping mode and kernel requirements.
-    pub fn build_program_spec(&self) -> crate::solver::gpu::plans::program::ProgramSpec {
+    pub(crate) fn build_program_spec(&self) -> crate::solver::gpu::plans::program::ProgramSpec {
         use crate::solver::gpu::execution_plan::GraphExecMode;
         use crate::solver::gpu::plans::program::{
             CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
@@ -690,7 +677,7 @@ impl SolverRecipe {
                 );
             }
 
-            SteppingMode::Implicit { outer_iters } => {
+            SteppingMode::Implicit { outer_iters: _ } => {
                 // Implicit: prepare → newton loop (gradients → assembly → solve → apply) → finalize
                 let newton_block = program.new_block();
 
@@ -863,7 +850,7 @@ mod tests {
     #[test]
     fn test_recipe_needs_gradients_with_sou() {
         let model = generic_diffusion_demo_model();
-        let recipe = SolverRecipe::from_model(
+        let _recipe = SolverRecipe::from_model(
             &model,
             Scheme::SecondOrderUpwind,
             TimeScheme::Euler,

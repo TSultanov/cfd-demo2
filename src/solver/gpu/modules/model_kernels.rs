@@ -2,6 +2,7 @@ use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::field_provider::FieldProvider;
 use crate::solver::gpu::modules::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
 use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
@@ -11,6 +12,17 @@ use crate::solver::model::KernelKind;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+/// Helper to get a binding resource from a FieldProvider.
+fn field_binding<'a, F: FieldProvider>(
+    fields: &'a F,
+    name: &str,
+    ping_pong_phase: usize,
+) -> Option<wgpu::BindingResource<'a>> {
+    fields
+        .buffer_for_binding(name, ping_pong_phase)
+        .map(|buf| wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KernelPipeline {
@@ -126,50 +138,13 @@ impl ModelKernelsModule {
             let bgl = pipeline_apply.get_bind_group_layout(0);
             let mut out = Vec::new();
             for i in 0..3 {
-                let (idx_state, idx_old, idx_old_old) =
-                    crate::solver::gpu::modules::state::ping_pong_indices(i);
                 let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("Compressible Apply Fields Bind Group {}", i),
                     &bgl,
                     wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
                     0,
-                    |name| match name {
-                        "state" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_state].as_entire_buffer_binding(),
-                        )),
-                        "state_old" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_old].as_entire_buffer_binding(),
-                        )),
-                        "state_old_old" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_old_old].as_entire_buffer_binding(),
-                        )),
-                        "state_iter" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_state_iter.as_entire_buffer_binding(),
-                        )),
-                        "fluxes" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_fluxes.as_entire_buffer_binding(),
-                        )),
-                        "constants" => Some(wgpu::BindingResource::Buffer(
-                            fields.constants.buffer().as_entire_buffer_binding(),
-                        )),
-                        "grad_rho" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho.as_entire_buffer_binding(),
-                        )),
-                        "grad_rho_u_x" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho_u_x.as_entire_buffer_binding(),
-                        )),
-                        "grad_rho_u_y" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho_u_y.as_entire_buffer_binding(),
-                        )),
-                        "grad_rho_e" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho_e.as_entire_buffer_binding(),
-                        )),
-                        "low_mach" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_low_mach_params.as_entire_buffer_binding(),
-                        )),
-                        _ => None,
-                    },
+                    |name| field_binding(fields, name, i),
                 )
                 .unwrap_or_else(|err| {
                     panic!("Compressible apply-fields bind group build failed: {err}")
@@ -203,50 +178,13 @@ impl ModelKernelsModule {
             let bgl = pipeline_update.get_bind_group_layout(0);
             let mut out = Vec::new();
             for i in 0..3 {
-                let (idx_state, idx_old, idx_old_old) =
-                    crate::solver::gpu::modules::state::ping_pong_indices(i);
                 let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("Compressible Update Fields Bind Group {}", i),
                     &bgl,
                     wgsl_meta::COMPRESSIBLE_UPDATE_BINDINGS,
                     0,
-                    |name| match name {
-                        "state" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_state].as_entire_buffer_binding(),
-                        )),
-                        "state_old" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_old].as_entire_buffer_binding(),
-                        )),
-                        "state_old_old" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_old_old].as_entire_buffer_binding(),
-                        )),
-                        "state_iter" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_state_iter.as_entire_buffer_binding(),
-                        )),
-                        "fluxes" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_fluxes.as_entire_buffer_binding(),
-                        )),
-                        "constants" => Some(wgpu::BindingResource::Buffer(
-                            fields.constants.buffer().as_entire_buffer_binding(),
-                        )),
-                        "grad_rho" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho.as_entire_buffer_binding(),
-                        )),
-                        "grad_rho_u_x" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho_u_x.as_entire_buffer_binding(),
-                        )),
-                        "grad_rho_u_y" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho_u_y.as_entire_buffer_binding(),
-                        )),
-                        "grad_rho_e" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_grad_rho_e.as_entire_buffer_binding(),
-                        )),
-                        "low_mach" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_low_mach_params.as_entire_buffer_binding(),
-                        )),
-                        _ => None,
-                    },
+                    |name| field_binding(fields, name, i),
                 )
                 .unwrap_or_else(|err| {
                     panic!("Compressible update-fields bind group build failed: {err}")

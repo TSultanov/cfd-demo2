@@ -149,6 +149,19 @@ pub enum SteppingMode {
     Coupled { outer_correctors: u32 },
 }
 
+/// High-level program structure emitted for a recipe.
+///
+/// This is a transitional bridge while solver-family runtime resources still exist.
+/// The intent is that *eventually* the program can be emitted purely from phases and
+/// module capabilities, but today we persist the chosen structure as part of the recipe
+/// rather than re-inferring it in `build_program_spec()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramShape {
+    Compressible,
+    IncompressibleCoupled,
+    GenericCoupledScalar,
+}
+
 /// A complete recipe for constructing a GPU solver.
 #[derive(Debug, Clone)]
 pub struct SolverRecipe {
@@ -169,6 +182,9 @@ pub struct SolverRecipe {
 
     /// Stepping mode (explicit, implicit, coupled)
     pub stepping: SteppingMode,
+
+    /// Program structure to emit for this recipe.
+    pub program_shape: ProgramShape,
 
     /// Fields that require gradient computation
     pub gradient_fields: Vec<String>,
@@ -296,6 +312,10 @@ impl SolverRecipe {
         let kernel_ids: Vec<KernelId> = kernels.iter().map(|k| k.id).collect();
         let stepping = derive_stepping_mode(model, &kernel_ids);
 
+        // Choose the program structure up-front so `build_program_spec()` does not need
+        // to re-infer “family-like” behavior by scanning the kernel set.
+        let program_shape = derive_program_shape(&kernel_ids);
+
         // Linear solver spec
         let linear_solver = LinearSolverSpec {
             solver_type: LinearSolverType::Fgmres { max_restart: 30 },
@@ -312,6 +332,7 @@ impl SolverRecipe {
             linear_solver,
             time_integration,
             stepping,
+            program_shape,
             gradient_fields,
             flux,
             requires_low_mach_params,
@@ -347,26 +368,8 @@ impl SolverRecipe {
             CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
         };
 
-        // If we can recognize a legacy template family from the kernel set, emit that
-        // program spec exactly (same op kinds as `lowering/templates.rs`).
-        //
-        // This lets us route *all* program construction through the recipe, while keeping
-        // behavior stable during the transition to truly model-agnostic orchestration.
-        let kernel_ids: Vec<KernelId> = self.kernels.iter().map(|k| k.id).collect();
-
-        let is_compressible_like = kernel_ids.iter().any(|&id| {
-            matches!(
-                id,
-                KernelId::COMPRESSIBLE_ASSEMBLY
-                    | KernelId::COMPRESSIBLE_APPLY
-                    | KernelId::COMPRESSIBLE_EXPLICIT_UPDATE
-                    | KernelId::COMPRESSIBLE_FLUX_KT
-                    | KernelId::COMPRESSIBLE_GRADIENTS
-                    | KernelId::COMPRESSIBLE_UPDATE
-            )
-        });
-
-        if is_compressible_like {
+        match self.program_shape {
+            ProgramShape::Compressible => {
             let mut program = ProgramSpecBuilder::new();
             let root = program.root();
             let explicit_block = program.new_block();
@@ -507,20 +510,9 @@ impl SolverRecipe {
             );
 
             return program.build();
-        }
+            }
 
-        let is_incompressible_coupled_like = kernel_ids.iter().any(|&id| {
-            matches!(
-                id,
-                KernelId::PREPARE_COUPLED
-                    | KernelId::COUPLED_ASSEMBLY
-                    | KernelId::PRESSURE_ASSEMBLY
-                    | KernelId::UPDATE_FIELDS_FROM_COUPLED
-                    | KernelId::FLUX_RHIE_CHOW
-            )
-        });
-
-        if is_incompressible_coupled_like {
+            ProgramShape::IncompressibleCoupled => {
             let mut program = ProgramSpecBuilder::new();
             let root = program.root();
             let coupled_iter_block = program.new_block();
@@ -632,6 +624,11 @@ impl SolverRecipe {
             );
 
             return program.build();
+            }
+
+            ProgramShape::GenericCoupledScalar => {
+                // Fall through to generic program emission below (driven by stepping).
+            }
         }
 
         let mut program = ProgramSpecBuilder::new();
@@ -822,6 +819,37 @@ fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelId]) -> SteppingMod
 
     // Default: implicit
     SteppingMode::Implicit { outer_iters: 1 }
+}
+
+fn derive_program_shape(kernels: &[KernelId]) -> ProgramShape {
+    if kernels.iter().any(|&id| {
+        matches!(
+            id,
+            KernelId::COMPRESSIBLE_ASSEMBLY
+                | KernelId::COMPRESSIBLE_APPLY
+                | KernelId::COMPRESSIBLE_EXPLICIT_UPDATE
+                | KernelId::COMPRESSIBLE_FLUX_KT
+                | KernelId::COMPRESSIBLE_GRADIENTS
+                | KernelId::COMPRESSIBLE_UPDATE
+        )
+    }) {
+        return ProgramShape::Compressible;
+    }
+
+    if kernels.iter().any(|&id| {
+        matches!(
+            id,
+            KernelId::PREPARE_COUPLED
+                | KernelId::COUPLED_ASSEMBLY
+                | KernelId::PRESSURE_ASSEMBLY
+                | KernelId::UPDATE_FIELDS_FROM_COUPLED
+                | KernelId::FLUX_RHIE_CHOW
+        )
+    }) {
+        return ProgramShape::IncompressibleCoupled;
+    }
+
+    ProgramShape::GenericCoupledScalar
 }
 
 #[cfg(test)]

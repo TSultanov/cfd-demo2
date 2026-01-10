@@ -1,4 +1,5 @@
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
+use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
@@ -117,6 +118,27 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
     )?;
 
     Ok(())
+}
+
+/// Register ops based on the solver recipe.
+///
+/// Today the compressible program spec is still template-based and expects the full
+/// set of compressible ops (explicit + implicit + primitive recovery). We use the
+/// recipe here primarily as a correctness check and as a hook point for future
+/// recipe-driven op selection.
+pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
+    recipe: &SolverRecipe,
+    registry: &mut ProgramOpRegistry,
+) -> Result<(), String> {
+    if matches!(recipe.stepping, SteppingMode::Coupled { .. }) {
+        return Err(format!(
+            "compressible lowering does not support coupled stepping (recipe.model_id='{}')",
+            recipe.model_id
+        ));
+    }
+
+    // For now, the template spec requires all ops to be registered.
+    register_ops(registry)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

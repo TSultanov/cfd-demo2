@@ -88,7 +88,7 @@ async fn lower_parts_for_template(
             ));
 
             let mut ops = ProgramOpRegistry::new();
-            models::compressible::register_ops(&mut ops)?;
+            models::compressible::register_ops_from_recipe(&recipe, &mut ops)?;
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
@@ -129,7 +129,7 @@ async fn lower_parts_for_template(
             ));
 
             let mut ops = ProgramOpRegistry::new();
-            models::incompressible::register_ops(&mut ops)?;
+            models::incompressible::register_ops_from_recipe(&recipe, &mut ops)?;
 
             Ok(LoweredProgramParts {
                 model: model.clone(),

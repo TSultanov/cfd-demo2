@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::execution_plan::GraphExecMode;
 use crate::solver::gpu::init::compressible_fields::{
     create_compressible_field_bind_groups, CompressibleFieldResources,
 };

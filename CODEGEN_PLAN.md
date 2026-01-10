@@ -129,8 +129,10 @@ This roadmap focuses on removing those glue points in small, testable steps.
 - [ ] **C1. Add “composite phase” support to the recipe/program spec**
   - Explicit compressible needs sequences like `gradients -> flux -> explicit_update -> primitive_recovery`.
   - Encode this as a *recipe graph* (or as multiple `GraphOpKind`s that each map to one recipe-defined phase).
-- [ ] **C2. Convert existing solver-family plans to `register_ops_from_recipe()`**
+- [x] **C2. Convert existing solver-family plans to `register_ops_from_recipe()`**
   - GenericCoupled is done; migrate Compressible and IncompressibleCoupled.
+
+    Status: GenericCoupled, Compressible, and IncompressibleCoupled now register ops via recipe-aware entrypoints.
 
 ### Milestone D: Resources fully derived from recipe specs
 

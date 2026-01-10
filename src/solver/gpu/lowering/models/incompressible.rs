@@ -1,4 +1,5 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
@@ -118,6 +119,24 @@ pub(in crate::solver::gpu::lowering) fn register_ops(
     registry.register_count(op_ids::N_COUPLED_MAX_ITERS, coupled_max_iters)?;
 
     Ok(())
+}
+
+/// Register ops based on the solver recipe.
+///
+/// IncompressibleCoupled is expected to run in `SteppingMode::Coupled`.
+pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
+    recipe: &SolverRecipe,
+    registry: &mut ProgramOpRegistry,
+) -> Result<(), String> {
+    if !matches!(recipe.stepping, SteppingMode::Coupled { .. }) {
+        return Err(format!(
+            "incompressible_coupled lowering expects coupled stepping (recipe.model_id='{}', stepping={:?})",
+            recipe.model_id, recipe.stepping
+        ));
+    }
+
+    // The program spec is still template-based, so register the full coupled op set.
+    register_ops(registry)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

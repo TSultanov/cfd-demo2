@@ -7,15 +7,15 @@ pub mod scalars;
 use crate::solver::mesh::Mesh;
 use std::sync::Mutex;
 
-use crate::solver::gpu::bindings::generated::coupled_assembly_merged as generated_coupled_assembly;
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
+use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::plans::incompressible_linear_solver::IncompressibleLinearSolver;
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::model::ModelSpec;
 
 use super::runtime_common::GpuRuntimeCommon;
-use super::structs::{GpuSolver, PreconditionerType};
+use super::structs::{GpuConstants, GpuSolver, PreconditionerType};
 
 impl GpuSolver {
     pub async fn new(
@@ -41,9 +41,22 @@ impl GpuSolver {
             _ => 20, // default fallback
         };
 
-        // 2. Initialize Field Buffers (phase 1 - before pipelines)
-        let field_buffers =
-            fields::init_field_buffers(&common.context.device, num_cells, num_faces, state_stride);
+        let initial_constants = GpuConstants {
+            dt: 0.0001,
+            dt_old: 0.0001,
+            dtau: 0.0,
+            time: 0.0,
+            viscosity: 0.01,
+            density: 1.0,
+            component: 0,
+            alpha_p: 1.0,
+            scheme: 0,
+            alpha_u: 0.7,
+            stride_x: 65535 * 64,
+            time_scheme: 0,
+            inlet_velocity: 1.0,
+            ramp_time: 0.1,
+        };
 
         // 3. Initialize Linear Solver
         let linear_res = linear_solver::init_linear_solver(
@@ -54,22 +67,27 @@ impl GpuSolver {
             unknowns_per_cell,
         );
 
-        // 5. Create fields bind groups (phase 2)
-        let bgl_fields = common.context.device.create_bind_group_layout(
-            &generated_coupled_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
-        );
-        let fields_res =
-            fields::create_field_bind_groups(&common.context.device, field_buffers, &bgl_fields);
+        // Incompressible/coupled WGSL expects face fluxes + constants, and ping-pong state.
+        // We use UnifiedFieldResources for storage and build bind groups via reflection.
+        let fields_res = UnifiedFieldResources::builder(
+            &common.context.device,
+            &recipe,
+            num_cells,
+            state_stride,
+            initial_constants,
+        )
+        .with_flux_buffer(num_faces, 1)
+        .build();
 
         let kernels = ModelKernelsModule::new_incompressible(
             &common.context.device,
             &common.mesh,
             &fields_res,
-            fields_res.state.step_handle(),
+            fields_res.step_handle(),
             &linear_res.coupled_resources,
         );
 
-        let mut solver = Self {
+        let solver = Self {
             common,
             model,
 

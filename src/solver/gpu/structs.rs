@@ -1,10 +1,10 @@
 use super::async_buffer::AsyncScalarReader;
-use super::init::fields::FieldResources;
 use super::modules::graph::ModuleGraph;
 use super::modules::linear_system::LinearSystemPorts;
 use super::modules::model_kernels::ModelKernelsModule;
 use super::modules::ports::PortSpace;
 use super::modules::time_integration::TimeIntegrationModule;
+use super::modules::unified_field_resources::UnifiedFieldResources;
 use super::plans::incompressible_linear_solver::IncompressibleLinearSolver;
 use super::runtime_common::GpuRuntimeCommon;
 use crate::solver::model::ModelSpec;
@@ -156,7 +156,7 @@ pub(crate) struct GpuSolver {
     pub common: GpuRuntimeCommon,
     pub model: ModelSpec,
 
-    pub fields: FieldResources,
+    pub fields: UnifiedFieldResources,
 
     pub num_nonzeros: u32,
 

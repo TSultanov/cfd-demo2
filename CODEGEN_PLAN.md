@@ -55,12 +55,13 @@ One **model-driven** GPU solver pipeline with:
 - **Recipe-Driven IncompressibleCoupled (NEW):** GpuSolver::new() now takes SolverRecipe
   - Uses `recipe.needs_gradients()` for scheme_needs_gradients
   - Uses `recipe.stepping` for n_outer_correctors
-- **FieldProvider-based bind groups (NEW):** `model_kernels.rs` now uses `FieldProvider::buffer_for_binding()` for compressible bind group creation:
+- **FieldProvider-based bind groups (NEW):** `model_kernels.rs` now uses `FieldProvider::buffer_for_binding()` for compressible and incompressible bind group creation:
   - `field_binding()` helper reduces bind group creation from ~40 lines to single call
   - Enables bind group code to work with either legacy `CompressibleFieldResources` or `UnifiedFieldResources`
 
 ## Main Blockers
-- **IncompressibleCoupled still uses legacy field containers:** The `FieldProvider` trait provides the migration path and compressible has switched to `UnifiedFieldResources`. Remaining work is to migrate incompressible/coupled plans to `UnifiedFieldResources` and remove legacy bind-group ownership.
+- **Resources not yet fully recipe-derived:** `UnifiedFieldResources` allocation is still configured via builder calls in plans (e.g. `with_flux_buffer(...)`) rather than being allocated solely from `SolverRecipe` buffer specs.
+- **Legacy field init modules remain:** `src/solver/gpu/init/fields.rs` and other legacy bind-group ownership patterns should be removable now that compressible and incompressible/coupled use `UnifiedFieldResources`.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
 - **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** The ProgramSpec construction now routes through `SolverRecipe::build_program_spec()` (with legacy template structures emitted when the kernel set matches those families), but op-id constants and some plan logic still live in `templates.rs`.
@@ -68,8 +69,8 @@ One **model-driven** GPU solver pipeline with:
 ## Next Steps (Prioritized)
 
 1. **Switch remaining solver families field storage to UnifiedFieldResources**
-  - Compressible is now migrated; bind-group creation is `FieldProvider`-based.
-  - Migrate IncompressibleCoupled and any remaining legacy plans.
+  - Compressible and IncompressibleCoupled are now migrated; bind-group creation is `FieldProvider`-based.
+  - Remove any remaining legacy plan usage and delete legacy field containers/init helpers.
   - Keep solver-family knowledge in plans (buffer selection), not in unified modules.
 
 2. **Implement UnifiedGraphModule for ModelKernelsModule**

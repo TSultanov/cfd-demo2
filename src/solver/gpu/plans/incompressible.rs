@@ -311,7 +311,9 @@ impl GpuSolver {
         record(self, "fields:state", &state_buffers[0]);
         record(self, "fields:state_old", &state_buffers[1]);
         record(self, "fields:state_old_old", &state_buffers[2]);
-        record(self, "fields:fluxes", &self.fields.b_fluxes);
+        if let Some(fluxes) = self.fields.flux_buffer.as_ref() {
+            record(self, "fields:fluxes", fluxes);
+        }
         record(self, "fields:constants", self.fields.constants.buffer());
 
         // Matrix / linear solver

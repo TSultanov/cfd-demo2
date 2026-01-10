@@ -1,4 +1,3 @@
-use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::field_provider::FieldProvider;
@@ -225,7 +224,7 @@ impl ModelKernelsModule {
     pub fn new_incompressible(
         device: &wgpu::Device,
         mesh: &MeshResources,
-        fields: &FieldResources,
+        fields: &impl FieldProvider,
         state_step_index: Arc<AtomicUsize>,
         coupled: &CoupledSolverResources,
     ) -> Self {
@@ -259,38 +258,37 @@ impl ModelKernelsModule {
             .unwrap_or_else(|err| panic!("Incompressible mesh bind group build failed: {err}"))
         };
 
-        let bg_fields_ping_pong = fields.bg_fields_ping_pong.clone();
+        let bg_fields_ping_pong = {
+            let bgl = pipeline_prepare.get_bind_group_layout(1);
+            let mut out = Vec::with_capacity(3);
+            for i in 0..3 {
+                let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("Incompressible fields bind group {i}"),
+                    &bgl,
+                    wgsl_meta::PREPARE_COUPLED_BINDINGS,
+                    1,
+                    |name| field_binding(fields, name, i),
+                )
+                .unwrap_or_else(|err| {
+                    panic!("Incompressible fields bind group build failed: {err}")
+                });
+                out.push(bg);
+            }
+            out
+        };
 
         let bg_update_fields_ping_pong = {
             let bgl = pipeline_update.get_bind_group_layout(0);
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
-                let (idx_state, idx_old, idx_old_old) =
-                    crate::solver::gpu::modules::state::ping_pong_indices(i);
                 let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("Incompressible update fields bind group {i}"),
                     &bgl,
                     wgsl_meta::UPDATE_FIELDS_FROM_COUPLED_BINDINGS,
                     0,
-                    |name| match name {
-                        "state" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_state].as_entire_buffer_binding(),
-                        )),
-                        "state_old" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_old].as_entire_buffer_binding(),
-                        )),
-                        "state_old_old" => Some(wgpu::BindingResource::Buffer(
-                            fields.state.buffers()[idx_old_old].as_entire_buffer_binding(),
-                        )),
-                        "fluxes" => Some(wgpu::BindingResource::Buffer(
-                            fields.b_fluxes.as_entire_buffer_binding(),
-                        )),
-                        "constants" => Some(wgpu::BindingResource::Buffer(
-                            fields.constants.buffer().as_entire_buffer_binding(),
-                        )),
-                        _ => None,
-                    },
+                    |name| field_binding(fields, name, i),
                 )
                 .unwrap_or_else(|err| {
                     panic!("Incompressible update-fields bind group build failed: {err}")

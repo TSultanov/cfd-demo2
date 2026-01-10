@@ -11,6 +11,7 @@ use crate::solver::gpu::lowering::models::generic_coupled::{
     spec_state_buffer, spec_time, spec_write_state_bytes, GenericCoupledProgramResources,
 };
 use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
+use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{ProgramOpRegistry, ProgramResources};
 use crate::solver::gpu::recipe::SolverRecipe;
@@ -74,76 +75,44 @@ impl GenericCoupledPlanResources {
             )?
         };
 
-        let stride = model.state_layout.stride() as usize;
-        let num_cells = runtime.common.num_cells as usize;
-        let zero_state = vec![0.0f32; num_cells * stride];
+        let stride = model.state_layout.stride();
+        let num_cells = runtime.common.num_cells;
 
-        let state = crate::solver::gpu::modules::state::PingPongState::new([
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("GenericCoupled state buffer 0"),
-                contents: cast_slice(&zero_state),
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-            }),
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("GenericCoupled state buffer 1"),
-                contents: cast_slice(&zero_state),
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-            }),
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("GenericCoupled state buffer 2"),
-                contents: cast_slice(&zero_state),
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-            }),
-        ]);
-
-        let b_grad_state = if needs_gradients {
-            let zero_grad = vec![[0.0f32; 2]; num_cells];
-            Some(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("GenericCoupled grad_state buffer"),
-                    contents: cast_slice(&zero_grad),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                }),
-            )
-        } else {
-            None
-        };
+        // Create unified field resources from recipe
+        // Clone the initial constants from runtime
+        let initial_constants = *runtime.constants.values();
+        let fields = UnifiedFieldResources::new(
+            device,
+            &recipe,
+            num_cells,
+            stride,
+            initial_constants,
+        );
 
         let bg_fields_ping_pong = {
             let bgl = pipeline_assembly.get_bind_group_layout(1);
             let mut out = Vec::new();
             for i in 0..3 {
-                let (idx_state, idx_old, idx_old_old) =
-                    crate::solver::gpu::modules::state::ping_pong_indices(i);
                 out.push(wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("GenericCoupled assembly fields bind group {i}"),
                     &bgl,
                     assembly_bindings,
                     1,
-                    |name| match name {
-                        "state" => Some(wgpu::BindingResource::Buffer(
-                            state.buffers()[idx_state].as_entire_buffer_binding(),
-                        )),
-                        "state_old" => Some(wgpu::BindingResource::Buffer(
-                            state.buffers()[idx_old].as_entire_buffer_binding(),
-                        )),
-                        "state_old_old" => Some(wgpu::BindingResource::Buffer(
-                            state.buffers()[idx_old_old].as_entire_buffer_binding(),
-                        )),
-                        "constants" => Some(wgpu::BindingResource::Buffer(
-                            runtime.constants.buffer().as_entire_buffer_binding(),
-                        )),
-                        "grad_state" => b_grad_state
-                            .as_ref()
-                            .map(|b| wgpu::BindingResource::Buffer(b.as_entire_buffer_binding())),
-                        _ => None,
+                    |name| {
+                        // First check unified fields, then fall back to runtime constants
+                        if let Some(buf) = fields.buffer_for_binding(name, i) {
+                            return Some(wgpu::BindingResource::Buffer(
+                                buf.as_entire_buffer_binding(),
+                            ));
+                        }
+                        // Handle constants from runtime (which is updated during time stepping)
+                        if name == "constants" {
+                            return Some(wgpu::BindingResource::Buffer(
+                                runtime.constants.buffer().as_entire_buffer_binding(),
+                            ));
+                        }
+                        None
                     },
                 )?);
             }
@@ -222,21 +191,26 @@ impl GenericCoupledPlanResources {
             let bgl = pipeline_update.get_bind_group_layout(0);
             let mut out = Vec::new();
             for i in 0..3 {
-                let (idx_state, _, _) = crate::solver::gpu::modules::state::ping_pong_indices(i);
                 out.push(wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("GenericCoupled update state bind group {i}"),
                     &bgl,
                     update_bindings,
                     0,
-                    |name| match name {
-                        "state" => Some(wgpu::BindingResource::Buffer(
-                            state.buffers()[idx_state].as_entire_buffer_binding(),
-                        )),
-                        "constants" => Some(wgpu::BindingResource::Buffer(
-                            runtime.constants.buffer().as_entire_buffer_binding(),
-                        )),
-                        _ => None,
+                    |name| {
+                        // First check unified fields, then fall back to runtime constants
+                        if let Some(buf) = fields.buffer_for_binding(name, i) {
+                            return Some(wgpu::BindingResource::Buffer(
+                                buf.as_entire_buffer_binding(),
+                            ));
+                        }
+                        // Handle constants from runtime
+                        if name == "constants" {
+                            return Some(wgpu::BindingResource::Buffer(
+                                runtime.constants.buffer().as_entire_buffer_binding(),
+                            ));
+                        }
+                        None
                     },
                 )?);
             }
@@ -265,7 +239,7 @@ impl GenericCoupledPlanResources {
 
         let kernels =
             crate::solver::gpu::modules::generic_coupled_kernels::GenericCoupledKernelsModule::new(
-                state.step_handle(),
+                fields.step_handle(),
                 bg_mesh,
                 bg_fields_ping_pong,
                 bg_solver,
@@ -285,11 +259,10 @@ impl GenericCoupledPlanResources {
         let mut resources = ProgramResources::new();
         resources.insert(GenericCoupledProgramResources::new(
             runtime,
-            state,
+            fields,
             kernels,
             b_bc_kind,
             b_bc_value,
-            b_grad_state,
         ));
 
         let mut params = HashMap::new();

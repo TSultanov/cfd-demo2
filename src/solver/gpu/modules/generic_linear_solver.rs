@@ -4,12 +4,10 @@
 //! This module provides a common abstraction over FGMRES, CG, and other Krylov methods,
 //! with pluggable preconditioners.
 
-use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule, KrylovDispatch};
+use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
-use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
-use crate::solver::gpu::modules::ports::PortSpace;
+use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::recipe::{LinearSolverSpec, LinearSolverType};
 use crate::solver::gpu::structs::LinearSolverStats;
 

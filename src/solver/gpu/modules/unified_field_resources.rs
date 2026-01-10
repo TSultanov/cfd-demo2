@@ -196,6 +196,8 @@ impl UnifiedFieldResources {
 
     /// Get buffer by binding name (for shader reflection).
     /// Returns the appropriate buffer based on the current ping-pong phase.
+    /// Note: "constants" is not returned here since it's typically managed by the runtime.
+    /// Use buffer_for_binding_with_constants() if you want to include constants.
     pub fn buffer_for_binding(&self, name: &str, ping_pong_phase: usize) -> Option<&wgpu::Buffer> {
         let (idx_cur, idx_old, idx_old_old) =
             crate::solver::gpu::modules::state::ping_pong_indices(ping_pong_phase);
@@ -204,7 +206,6 @@ impl UnifiedFieldResources {
             "state" => Some(&self.state.buffers()[idx_cur]),
             "state_old" => Some(&self.state.buffers()[idx_old]),
             "state_old_old" => Some(&self.state.buffers()[idx_old_old]),
-            "constants" => Some(self.constants.buffer()),
             "grad_state" => self.gradients.get("state"),
             _ => {
                 // Check for gradient field names
@@ -241,11 +242,6 @@ impl UnifiedFieldResources {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::gpu::enums::TimeScheme;
-    use crate::solver::gpu::recipe::SolverRecipe;
-    use crate::solver::gpu::structs::PreconditionerType;
-    use crate::solver::model::generic_diffusion_demo_model;
-    use crate::solver::scheme::Scheme;
 
     // Note: These tests would require a GPU device to run.
     // For now, we just verify the types compile correctly.

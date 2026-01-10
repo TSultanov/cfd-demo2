@@ -5,7 +5,7 @@ use crate::solver::gpu::modules::generic_coupled_kernels::{
 use crate::solver::gpu::modules::graph::{
     ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
 };
-use crate::solver::gpu::modules::state::PingPongState;
+use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
@@ -15,33 +15,30 @@ use crate::solver::gpu::lowering::templates::generic_coupled_scalar as op_ids;
 
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuScalarRuntime,
-    state: PingPongState,
+    fields: UnifiedFieldResources,
     kernels: GenericCoupledKernelsModule,
     assembly_graph: ModuleGraph<GenericCoupledKernelsModule>,
     update_graph: ModuleGraph<GenericCoupledKernelsModule>,
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
-    _b_grad_state: Option<wgpu::Buffer>,
 }
 
 impl GenericCoupledProgramResources {
     pub(crate) fn new(
         runtime: GpuScalarRuntime,
-        state: PingPongState,
+        fields: UnifiedFieldResources,
         kernels: GenericCoupledKernelsModule,
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
-        b_grad_state: Option<wgpu::Buffer>,
     ) -> Self {
         Self {
             runtime,
-            state,
+            fields,
             kernels,
             assembly_graph: build_assembly_graph(),
             update_graph: build_update_graph(),
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
-            _b_grad_state: b_grad_state,
         }
     }
 }
@@ -122,17 +119,17 @@ pub(crate) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
 }
 
 pub(crate) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    res(plan).state.state()
+    res(plan).fields.current_state()
 }
 
 pub(crate) fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
-    res(plan).state.write_all(&plan.context.queue, bytes);
+    res(plan).fields.write_state_bytes(&plan.context.queue, bytes);
     Ok(())
 }
 
 pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     let r = res_mut(plan);
-    r.state.advance();
+    r.fields.advance_step();
     r.runtime.advance_time();
 }
 

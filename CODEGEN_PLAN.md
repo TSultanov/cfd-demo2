@@ -93,6 +93,61 @@ One **model-driven** GPU solver pipeline with:
 6. **Typed Config Deltas**
    - Replace `PlanParam` with generated `SolverConfigDelta` + module-specific deltas to remove ad-hoc host callbacks.
 
+## Roadmap: Truly Model-Agnostic Unified Solver
+
+The current unified pieces (`SolverRecipe`, `UnifiedFieldResources`, unified graph builder) are moving in the right direction, but a few remaining “legacy glue points” prevent *arbitrary* models/methods from fitting without touching handwritten matches.
+
+This roadmap focuses on removing those glue points in small, testable steps.
+
+### Milestone A: Make the recipe authoritative for kernel scheduling
+
+**Goal:** No handwritten `KernelKind -> phase` mapping is required for correct execution. The recipe explicitly describes kernel order for each solver mode.
+
+- [ ] **A1. Move phase assignment into recipe construction**
+  - Today `phase_for_kernel()` in `src/solver/gpu/recipe.rs` is a central match on `KernelKind`. This should become an implementation detail of *legacy recipes only*.
+  - New path: `SolverRecipe::from_model(...)` assigns phases when emitting `KernelSpec`s.
+- [ ] **A2. Validate required phases are non-empty**
+  - `build_graph_for_phase()` should error on “required but empty” phases to avoid silent no-ops (the BDF2 acoustic regression was caused by an empty apply graph being accepted).
+
+### Milestone B: Decouple orchestration from `KernelKind`
+
+**Goal:** Add new kernels via codegen/model definitions without editing handwritten enums/matches.
+
+- [ ] **B1. Introduce a generated kernel identifier**
+  - Add `KernelId(&'static str)` (or similar) alongside the existing `KernelKind` bridge.
+  - Update `KernelSpec` to carry `KernelId` (and optionally keep `KernelKind` during migration).
+- [ ] **B2. Extend `kernel_registry` to lookup by `KernelId`**
+  - Codegen emits a per-model kernel table mapping `KernelId -> (wgsl source, bind metadata)`.
+  - The runtime graph builder uses only `KernelId`.
+- [ ] **B3. Shrink `KernelKind` usage to UI/debug only**
+  - Once recipes are emitted in terms of `KernelId`, `KernelKind` can become optional legacy.
+
+### Milestone C: Full recipe-driven graphs (no solver-family graph builders)
+
+**Goal:** `CompressibleGraphs`, `IncompressibleGraphs`, etc. become thin wrappers (or disappear). Execution structure is derived from the recipe.
+
+- [ ] **C1. Add “composite phase” support to the recipe/program spec**
+  - Explicit compressible needs sequences like `gradients -> flux -> explicit_update -> primitive_recovery`.
+  - Encode this as a *recipe graph* (or as multiple `GraphOpKind`s that each map to one recipe-defined phase).
+- [ ] **C2. Convert existing solver-family plans to `register_ops_from_recipe()`**
+  - GenericCoupled is done; migrate Compressible and IncompressibleCoupled.
+
+### Milestone D: Resources fully derived from recipe specs
+
+**Goal:** No solver-family plan decides “which buffers exist”. It only supplies numerics and initial/boundary conditions.
+
+- [ ] **D1. Allocate `UnifiedFieldResources` from `BufferSpec`/field requirements**
+  - Replace builder calls with a recipe-driven allocator.
+- [ ] **D2. Bind groups generated from reflection + `FieldProvider`/resource registry**
+  - Existing `field_binding()` helper is the migration path; end state is uniform reflection-driven binds.
+
+### Execution order (recommended)
+
+1. A2 (safety) → A1 (phase assignment in recipe) → C2 (use unified registry) to eliminate correctness footguns.
+2. B1/B2 (KernelId) to unlock “arbitrary models” without touching handwritten enums.
+3. C1/C2 to remove solver-family graph code.
+4. D1/D2 to finish resource unification.
+
 ## Decisions (Locked In)
 - **Generated-per-model WGSL** stays (no runtime compilation/reflection).
 - **Flux/EOS closures** are explicit plan/modules, not inline expressions.

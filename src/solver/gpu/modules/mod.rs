@@ -17,3 +17,4 @@ pub mod scalar_cg;
 pub mod state;
 pub mod time_integration;
 pub mod unified_field_resources;
+pub mod unified_graph;

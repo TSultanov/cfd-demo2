@@ -84,28 +84,7 @@ impl ModelSpec {
     }
 
     pub fn kernel_plan(&self) -> KernelPlan {
-        match self.fields {
-            ModelFields::Incompressible(_) => KernelPlan::new(vec![
-                KernelKind::PrepareCoupled,
-                KernelKind::FluxRhieChow,
-                KernelKind::CoupledAssembly,
-                KernelKind::PressureAssembly,
-                KernelKind::UpdateFieldsFromCoupled,
-            ]),
-            ModelFields::Compressible(_) => KernelPlan::new(vec![
-                KernelKind::CompressibleGradients,
-                KernelKind::CompressibleFluxKt,
-                KernelKind::CompressibleExplicitUpdate,
-                KernelKind::CompressibleAssembly,
-                KernelKind::CompressibleApply,
-                KernelKind::CompressibleUpdate,
-            ]),
-            ModelFields::GenericCoupled(_) => KernelPlan::new(vec![
-                KernelKind::GenericCoupledAssembly,
-                KernelKind::GenericCoupledApply,
-                KernelKind::GenericCoupledUpdate,
-            ]),
-        }
+        super::kernel::derive_kernel_plan(&self.system)
     }
 }
 

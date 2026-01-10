@@ -12,7 +12,7 @@
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::PreconditionerType;
-use crate::solver::model::backend::{expand_schemes, EquationSystem, SchemeRegistry, TermOp};
+use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::{expand_field_components, FluxSpec, GradientStorage, KernelId, ModelSpec};
 use crate::solver::scheme::Scheme;
 use std::collections::HashSet;
@@ -835,50 +835,6 @@ fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelId]) -> SteppingMod
 
     // Default: implicit
     SteppingMode::Implicit { outer_iters: 1 }
-}
-
-/// Derive kernel requirements from equation system structure.
-///
-/// This is a more principled approach than hardcoding in `ModelSpec::kernel_plan()`.
-pub fn derive_kernel_plan(
-    system: &EquationSystem,
-    schemes: &SchemeRegistry,
-) -> Result<Vec<KernelId>, String> {
-    let expansion = expand_schemes(system, schemes).map_err(|e| e.to_string())?;
-
-    let mut kernels = Vec::new();
-
-    // Analyze equation terms to determine required kernels
-    let has_convection = system
-        .equations()
-        .iter()
-        .any(|eq| eq.terms().iter().any(|t| t.op == TermOp::Div));
-
-    let has_diffusion = system
-        .equations()
-        .iter()
-        .any(|eq| eq.terms().iter().any(|t| t.op == TermOp::Laplacian));
-
-    let has_time_derivative = system
-        .equations()
-        .iter()
-        .any(|eq| eq.terms().iter().any(|t| t.op == TermOp::Ddt));
-
-    // For now, return a generic coupled kernel set
-    // This will be expanded as we migrate more logic here
-    if has_convection || has_diffusion {
-        kernels.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
-    }
-
-    if expansion.needs_gradients() {
-        // Gradient computation would go here
-        // For now, handled by the assembly kernel
-    }
-
-    kernels.push(KernelId::GENERIC_COUPLED_APPLY);
-    kernels.push(KernelId::GENERIC_COUPLED_UPDATE);
-
-    Ok(kernels)
 }
 
 #[cfg(test)]

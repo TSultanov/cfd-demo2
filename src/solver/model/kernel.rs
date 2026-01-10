@@ -87,3 +87,62 @@ impl KernelPlan {
         self.kernels.contains(&kind)
     }
 }
+
+pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem) -> KernelPlan {
+    use crate::solver::model::backend::{FieldKind, TermOp};
+
+    let equations = system.equations();
+
+    let has_div_flux = equations
+        .iter()
+        .any(|eq| eq.terms().iter().any(|t| t.op == TermOp::DivFlux));
+
+    if has_div_flux {
+        return KernelPlan::new(vec![
+            KernelKind::CompressibleGradients,
+            KernelKind::CompressibleFluxKt,
+            KernelKind::CompressibleExplicitUpdate,
+            KernelKind::CompressibleAssembly,
+            KernelKind::CompressibleApply,
+            KernelKind::CompressibleUpdate,
+        ]);
+    }
+
+    // Heuristic for incompressible momentum+pressure:
+    // - exactly 2 equations
+    // - one vector target, one scalar target
+    // - vector equation contains a grad term (pressure gradient)
+    // - scalar equation contains a laplacian term (pressure Poisson)
+    if equations.len() == 2 {
+        let mut vector_eq = None;
+        let mut scalar_eq = None;
+        for eq in equations {
+            match eq.target().kind() {
+                FieldKind::Vector2 => vector_eq = Some(eq),
+                FieldKind::Scalar => scalar_eq = Some(eq),
+            }
+        }
+
+        let vector_has_grad = vector_eq
+            .is_some_and(|eq| eq.terms().iter().any(|t| t.op == TermOp::Grad));
+        let scalar_has_laplacian = scalar_eq
+            .is_some_and(|eq| eq.terms().iter().any(|t| t.op == TermOp::Laplacian));
+
+        if vector_eq.is_some() && scalar_eq.is_some() && vector_has_grad && scalar_has_laplacian {
+            return KernelPlan::new(vec![
+                KernelKind::PrepareCoupled,
+                KernelKind::FluxRhieChow,
+                KernelKind::CoupledAssembly,
+                KernelKind::PressureAssembly,
+                KernelKind::UpdateFieldsFromCoupled,
+            ]);
+        }
+    }
+
+    // Default: generic coupled path.
+    KernelPlan::new(vec![
+        KernelKind::GenericCoupledAssembly,
+        KernelKind::GenericCoupledApply,
+        KernelKind::GenericCoupledUpdate,
+    ])
+}

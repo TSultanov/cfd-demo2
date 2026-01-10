@@ -12,3 +12,4 @@ pub use definitions::{
 };
 pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
 pub use kernel::{KernelId, KernelKind, KernelPlan};
+pub use kernel::derive_kernel_plan;

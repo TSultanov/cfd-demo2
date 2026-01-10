@@ -38,22 +38,28 @@ One **model-driven** GPU solver pipeline with:
   - `recipe.build_program_spec()` instead of hardcoded template spec
   - `register_ops_from_recipe()` instead of manual op registration
   - `UnifiedFieldResources` for field storage
+- **Recipe-Driven Compressible (NEW):** CompressiblePlanResources::new() now takes SolverRecipe
+  - Uses `recipe.needs_gradients()` instead of runtime scheme detection
+  - Uses `recipe.stepping` for outer iterations count
+- **Recipe-Driven IncompressibleCoupled (NEW):** GpuSolver::new() now takes SolverRecipe
+  - Uses `recipe.needs_gradients()` for scheme_needs_gradients
+  - Uses `recipe.stepping` for n_outer_correctors
 
 ## Main Blockers
-- **Monolithic Resource Containers (Compressible/Incompressible):** These paths still use hardcoded resource containers. Need to migrate to recipe-driven approach like GenericCoupled.
+- **UnifiedFieldResources not yet used in Compressible/Incompressible:** These paths now receive the recipe but still use their own field resource containers. Full unification would require migrating to `UnifiedFieldResources`.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
-- **Two Remaining Template Paths:** `ProgramTemplateKind::Compressible` and `ProgramTemplateKind::IncompressibleCoupled` still have separate resource containers and op handlers.
+- **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** These templates still use hardcoded `build_program_spec()` functions in templates.rs.
 
 ## Next Steps (Prioritized)
 
-1. **Migrate IncompressibleCoupled to Recipe-Driven Approach** ✅ Partially done for GenericCoupled
-   - Apply same pattern as GenericCoupled: use `UnifiedFieldResources`, `register_ops_from_recipe()`, recipe's `build_program_spec()`.
-   - Update `IncompressibleProgramResources` to use unified field storage.
+1. **Migrate Compressible/Incompressible to UnifiedFieldResources** 
+   - Currently these use their own field containers (CompressibleFieldResources, FieldResources)
+   - Migrating to UnifiedFieldResources would enable resource sharing across solver families
 
-2. **Migrate Compressible to Recipe-Driven Approach**
-   - More complex due to explicit/implicit branching and FGMRES integration.
-   - May need to extend `UnifiedOpRegistryBuilder` to handle conditional ops.
+2. **Migrate Compressible/Incompressible ProgramSpec to recipe-driven**
+   - Currently using templates::compressible::build_program_spec() and templates::incompressible_coupled::build_program_spec()
+   - Would need to extend recipe.build_program_spec() to handle conditional ops and while loops
 
 3. **Implement UnifiedGraphModule for Modules**
    - Have GenericCoupledKernelsModule implement `UnifiedGraphModule` trait.

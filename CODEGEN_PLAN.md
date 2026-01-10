@@ -14,7 +14,7 @@ One **model-driven** GPU solver pipeline with:
 - **Resource Modularization:** `CompressiblePlanResources` has been refactored into a coordinator of self-contained modules:
   - `CompressibleLinearSolver`: Manages FGMRES resources, AMG setup, and solve logic.
   - `CompressibleGraphs`: Manages graph construction and execution (explicit/implicit/update).
-  - `CompressibleFieldResources`: Owns fields and buffers.
+  - `UnifiedFieldResources`: Owns fields and buffers (including fluxes, gradients, iteration snapshot, and low-mach params).
   - `TimeIntegrationModule`: Owns time stepping logic.
 - **Unified Lowering:** Lowering routes through `src/solver/gpu/lowering/model_driven.rs`.
 - **Shared State & Constants:** `PingPongState` and `ConstantsModule` used across solver families.
@@ -57,20 +57,20 @@ One **model-driven** GPU solver pipeline with:
   - Uses `recipe.stepping` for n_outer_correctors
 - **FieldProvider-based bind groups (NEW):** `model_kernels.rs` now uses `FieldProvider::buffer_for_binding()` for compressible bind group creation:
   - `field_binding()` helper reduces bind group creation from ~40 lines to single call
-  - Enables bind group code to work with either `CompressibleFieldResources` or `UnifiedFieldResources`
+  - Enables bind group code to work with either legacy `CompressibleFieldResources` or `UnifiedFieldResources`
 
 ## Main Blockers
-- **Compressible/Incompressible still use legacy field containers:** The `FieldProvider` trait provides the migration path, and bind group creation now uses `field_binding()` helper. Actual switch to `UnifiedFieldResources` requires callers to use the builder pattern to configure needed buffers.
+- **IncompressibleCoupled still uses legacy field containers:** The `FieldProvider` trait provides the migration path and compressible has switched to `UnifiedFieldResources`. Remaining work is to migrate incompressible/coupled plans to `UnifiedFieldResources` and remove legacy bind-group ownership.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
 - **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** The ProgramSpec construction now routes through `SolverRecipe::build_program_spec()` (with legacy template structures emitted when the kernel set matches those families), but op-id constants and some plan logic still live in `templates.rs`.
 
 ## Next Steps (Prioritized)
 
-1. **Switch Compressible field storage to UnifiedFieldResources**
-   - Bind group creation already uses `FieldProvider` trait via `field_binding()` helper
-   - Use builder: `UnifiedFieldResourcesBuilder::new(...).with_flux_buffer(...).with_gradient_fields(&[...]).build()`
-   - Keep solver-family knowledge in the compressible plan, not in unified modules
+1. **Switch remaining solver families field storage to UnifiedFieldResources**
+  - Compressible is now migrated; bind-group creation is `FieldProvider`-based.
+  - Migrate IncompressibleCoupled and any remaining legacy plans.
+  - Keep solver-family knowledge in plans (buffer selection), not in unified modules.
 
 2. **Implement UnifiedGraphModule for ModelKernelsModule**
    - [x] GenericCoupledKernelsModule now implements `UnifiedGraphModule` trait (done).

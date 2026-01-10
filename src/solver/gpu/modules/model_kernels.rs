@@ -1,4 +1,3 @@
-use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
 use crate::solver::gpu::init::fields::FieldResources;
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::lowering::kernel_registry;
@@ -57,10 +56,10 @@ pub struct ModelKernelsModule {
 }
 
 impl ModelKernelsModule {
-    pub fn new_compressible(
+    pub fn new_compressible<F: FieldProvider>(
         device: &wgpu::Device,
         mesh: &MeshResources,
-        fields: &CompressibleFieldResources,
+        fields: &F,
         state_step_index: Arc<AtomicUsize>,
         port_space: &PortSpace,
         system_ports: LinearSystemPorts,
@@ -105,7 +104,25 @@ impl ModelKernelsModule {
             .unwrap_or_else(|err| panic!("Compressible mesh bind group build failed: {err}"))
         };
 
-        let bg_fields_ping_pong = fields.bg_fields_ping_pong.clone();
+        let bg_fields_ping_pong = {
+            let bgl = pipeline_assembly.get_bind_group_layout(1);
+            let mut out = Vec::with_capacity(3);
+            for i in 0..3 {
+                let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("Compressible Fields Bind Group {}", i),
+                    &bgl,
+                    wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                    1,
+                    |name| field_binding(fields, name, i),
+                )
+                .unwrap_or_else(|err| {
+                    panic!("Compressible fields bind group build failed: {err}")
+                });
+                out.push(bg);
+            }
+            out
+        };
 
         let bg_solver = {
             let bgl = pipeline_assembly.get_bind_group_layout(2);

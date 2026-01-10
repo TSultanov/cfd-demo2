@@ -1,7 +1,4 @@
 use crate::solver::gpu::csr::build_block_csr;
-use crate::solver::gpu::init::compressible_fields::{
-    init_compressible_field_buffers, CompressibleFieldBuffers, PackedStateConfig,
-};
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::model::backend::StateLayout;
 
@@ -15,7 +12,6 @@ pub struct CompressibleLowered {
 
     pub system_ports: LinearSystemPorts,
     pub scalar_row_offsets_port: Port<BufU32>,
-    pub fields: CompressibleFieldBuffers,
     pub ports: PortSpace,
 
     pub scalar_row_offsets: Vec<u32>,
@@ -32,20 +28,11 @@ impl CompressibleLowered {
         num_faces: u32,
         state_layout: &StateLayout,
         unknowns_per_cell: u32,
-        flux_stride: u32,
     ) -> Self {
         let num_unknowns = num_cells * unknowns_per_cell;
         let state_stride = state_layout.stride();
 
-        let fields = init_compressible_field_buffers(
-            device,
-            num_cells,
-            num_faces,
-            PackedStateConfig {
-                state_stride,
-                flux_stride,
-            },
-        );
+        let _ = num_faces;
 
         let scalar_row_offsets = mesh.row_offsets.clone();
         let scalar_col_indices = mesh.col_indices.clone();
@@ -133,7 +120,6 @@ impl CompressibleLowered {
             state_stride,
             system_ports,
             scalar_row_offsets_port,
-            fields,
             ports,
             scalar_row_offsets,
             scalar_col_indices,

@@ -1,14 +1,12 @@
 #![allow(dead_code)]
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::init::compressible_fields::{
-    create_compressible_field_bind_groups, CompressibleFieldResources,
-};
 use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
 use crate::solver::gpu::modules::graph::RuntimeDims;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
+use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::plans::compressible_fgmres::{
@@ -18,7 +16,7 @@ use crate::solver::gpu::plans::compressible_graphs::CompressibleGraphs;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
-use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
+use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::ModelSpec;
@@ -130,7 +128,7 @@ pub(crate) struct CompressiblePlanResources {
     pub num_faces: u32,
     pub model: ModelSpec,
     pub num_unknowns: u32,
-    pub fields: CompressibleFieldResources,
+    pub fields: UnifiedFieldResources,
     pub preconditioner: PreconditionerType,
     pub system_ports: LinearSystemPorts,
     pub scalar_row_offsets_port: Port<BufU32>,
@@ -176,13 +174,7 @@ impl CompressiblePlanResources {
             0,
             size,
         );
-        encoder.copy_buffer_to_buffer(
-            self.fields.state.state(),
-            0,
-            &self.fields.b_state_iter,
-            0,
-            size,
-        );
+        self.fields.snapshot_for_iteration(&mut encoder);
         self.common.context.queue.submit(Some(encoder.finish()));
     }
 
@@ -242,29 +234,47 @@ impl CompressiblePlanResources {
             common.num_faces,
             &model.state_layout,
             unknowns_per_cell,
-            4,
         );
         let num_cells = common.num_cells;
         let num_faces = common.num_faces;
         let num_unknowns = num_cells * unknowns_per_cell;
 
-        let fields_layout = common
-            .context
-            .device
-            .create_bind_group_layout(
-                &crate::solver::gpu::bindings::generated::compressible_assembly::WgpuBindGroup1::LAYOUT_DESCRIPTOR,
-            );
-        let fields_res = create_compressible_field_bind_groups(
+        let initial_constants = GpuConstants {
+            dt: 0.0001,
+            dt_old: 0.0001,
+            dtau: 0.0,
+            time: 0.0,
+            viscosity: 0.0,
+            density: 1.0,
+            component: 0,
+            alpha_p: 1.0,
+            scheme: 0,
+            alpha_u: 1.0,
+            stride_x: 65535 * 64,
+            time_scheme: 0,
+            inlet_velocity: 0.0,
+            ramp_time: 0.0,
+        };
+
+        // Compressible WGSL expects fluxes + low-mach params + component-wise gradients
+        // regardless of the advection scheme.
+        let fields_res = UnifiedFieldResources::builder(
             &common.context.device,
-            lowered.fields,
-            &fields_layout,
-        );
+            &recipe,
+            num_cells,
+            offsets.stride,
+            initial_constants,
+        )
+        .with_flux_buffer(num_faces, 4)
+        .with_low_mach_params()
+        .with_gradient_fields(&["rho", "rho_u_x", "rho_u_y", "rho_e"])
+        .build();
 
         let kernels = ModelKernelsModule::new_compressible(
             &common.context.device,
             &common.mesh,
             &fields_res,
-            fields_res.state.step_handle(),
+            fields_res.step_handle(),
             &lowered.ports,
             lowered.system_ports,
             lowered.scalar_row_offsets_port,
@@ -551,13 +561,7 @@ impl CompressiblePlanResources {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("compressible:implicit_snapshot"),
                 });
-        encoder.copy_buffer_to_buffer(
-            self.fields.state.state(),
-            0,
-            &self.fields.b_state_iter,
-            0,
-            self.state_size_bytes(),
-        );
+        self.fields.snapshot_for_iteration(&mut encoder);
         self.common.context.queue.submit(Some(encoder.finish()));
     }
 
@@ -623,12 +627,8 @@ impl CompressiblePlanResources {
             .collect()
     }
 
-    fn update_low_mach_params(&self) {
-        self.common.context.queue.write_buffer(
-            &self.fields.b_low_mach_params,
-            0,
-            bytemuck::bytes_of(&self.fields.low_mach_params),
-        );
+    fn update_low_mach_params(&mut self) {
+        self.fields.update_low_mach_params(&self.common.context.queue);
     }
 
     async fn read_state(&self) -> Vec<f32> {

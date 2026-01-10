@@ -119,8 +119,14 @@ pub enum KernelPhase {
     Preparation,
     /// Gradient computation (if needed)
     Gradients,
+    /// Flux computation (for explicit schemes)
+    FluxComputation,
+    /// Explicit update step
+    ExplicitUpdate,
     /// Matrix/RHS assembly
     Assembly,
+    /// Apply solution correction (implicit methods)
+    Apply,
     /// Linear solve (handled by linear solver module)
     LinearSolve,
     /// Solution update/correction
@@ -472,10 +478,13 @@ fn phase_order(phase: KernelPhase) -> u8 {
     match phase {
         KernelPhase::Preparation => 0,
         KernelPhase::Gradients => 1,
-        KernelPhase::Assembly => 2,
-        KernelPhase::LinearSolve => 3,
-        KernelPhase::Update => 4,
-        KernelPhase::PrimitiveRecovery => 5,
+        KernelPhase::FluxComputation => 2,
+        KernelPhase::ExplicitUpdate => 3,
+        KernelPhase::Assembly => 4,
+        KernelPhase::LinearSolve => 5,
+        KernelPhase::Apply => 6,
+        KernelPhase::Update => 7,
+        KernelPhase::PrimitiveRecovery => 8,
     }
 }
 

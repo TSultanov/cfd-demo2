@@ -451,7 +451,7 @@ impl UnifiedGraphModule for ModelKernelsModule {
 
     fn dispatch_for_kernel(&self, kind: KernelKind) -> DispatchKind {
         match kind {
-            KernelKind::FluxRhieChow => DispatchKind::Faces,
+            KernelKind::FluxRhieChow | KernelKind::CompressibleFluxKt => DispatchKind::Faces,
             _ => DispatchKind::Cells,
         }
     }

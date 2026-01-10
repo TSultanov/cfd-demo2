@@ -39,17 +39,13 @@ pub trait UnifiedGraphModule: GpuComputeModule {
     fn bind_for_kernel(&self, id: KernelId) -> Option<Self::BindKey>;
 }
 
-/// Build a compute graph from a recipe for a specific phase.
-/// 
-/// This is a generic function that works with any module implementing UnifiedGraphModule.
-pub fn build_graph_for_phase<M: UnifiedGraphModule>(
+fn push_nodes_for_phase<M: UnifiedGraphModule>(
+    nodes: &mut Vec<ModuleNode<M::PipelineKey, M::BindKey>>,
     recipe: &SolverRecipe,
     phase: KernelPhase,
     module: &M,
     label_prefix: &'static str,
-) -> Result<ModuleGraph<M>, String> {
-    let mut nodes = Vec::new();
-    
+) -> Result<(), String> {
     for kernel_spec in recipe.kernels_for_phase(phase) {
         let pipeline = module
             .pipeline_for_kernel(kernel_spec.id)
@@ -60,7 +56,7 @@ pub fn build_graph_for_phase<M: UnifiedGraphModule>(
         let dispatch = kernel_spec.dispatch;
 
         let label = kernel_label(label_prefix, kernel_spec.id);
-        
+
         nodes.push(ModuleNode::Compute(ComputeSpec {
             label,
             pipeline,
@@ -69,11 +65,63 @@ pub fn build_graph_for_phase<M: UnifiedGraphModule>(
         }));
     }
 
+    Ok(())
+}
+
+/// Build a compute graph from a recipe for a specific phase.
+/// 
+/// This is a generic function that works with any module implementing UnifiedGraphModule.
+pub fn build_graph_for_phase<M: UnifiedGraphModule>(
+    recipe: &SolverRecipe,
+    phase: KernelPhase,
+    module: &M,
+    label_prefix: &'static str,
+) -> Result<ModuleGraph<M>, String> {
+    let mut nodes = Vec::new();
+    push_nodes_for_phase(&mut nodes, recipe, phase, module, label_prefix)?;
+
     if nodes.is_empty() {
         return Err(format!("no kernels found for phase {phase:?}"));
     }
-    
+
     Ok(ModuleGraph::new(nodes))
+}
+
+/// Build a compute graph from a recipe for a sequence of phases.
+///
+/// Phases are appended in the order provided.
+pub fn build_graph_for_phases<M: UnifiedGraphModule>(
+    recipe: &SolverRecipe,
+    phases: &[KernelPhase],
+    module: &M,
+    label_prefix: &'static str,
+) -> Result<ModuleGraph<M>, String> {
+    let mut nodes = Vec::new();
+    for &phase in phases {
+        push_nodes_for_phase(&mut nodes, recipe, phase, module, label_prefix)?;
+    }
+
+    if nodes.is_empty() {
+        return Err(format!("no kernels found for phases {phases:?}"));
+    }
+
+    Ok(ModuleGraph::new(nodes))
+}
+
+/// Build a compute graph for a sequence of phases, returning None when all phases are empty.
+///
+/// Use this for optional composite graphs (e.g. a model family may omit a whole path).
+pub fn build_optional_graph_for_phases<M: UnifiedGraphModule>(
+    recipe: &SolverRecipe,
+    phases: &[KernelPhase],
+    module: &M,
+    label_prefix: &'static str,
+) -> Result<Option<ModuleGraph<M>>, String> {
+    match build_graph_for_phases(recipe, phases, module, label_prefix) {
+        Ok(g) => Ok(Some(g)),
+        Err(e) if e.starts_with("no kernels found for phases") => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Build a compute graph for a phase, returning None when the phase has no kernels.

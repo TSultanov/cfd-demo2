@@ -42,6 +42,7 @@ One **model-driven** GPU solver pipeline with:
   - `buffer_for_binding()` method for shader reflection-based binding
 - **UnifiedOpRegistryBuilder (NEW):** `src/solver/gpu/lowering/unified_registry.rs` builds op registries dynamically from SolverRecipe stepping mode instead of hardcoded templates.
 - **UnifiedGraphModule (NEW):** `src/solver/gpu/modules/unified_graph.rs` provides trait and helpers for building compute graphs from SolverRecipe kernel specifications.
+- **Composite Phase Graphs (NEW):** `src/solver/gpu/modules/unified_graph.rs` now supports building a single graph from an ordered sequence of phases (`build_graph_for_phases`, `build_optional_graph_for_phases`). This enables multi-pass graphs like `gradients -> flux -> update -> primitive_recovery` to be recipe-driven.
 - **GenericCoupledKernelsModule (UPDATED):** Now implements `UnifiedGraphModule` trait, enabling recipe-driven graph construction via `build_graph_for_phase()`.
 - **Recipe-Driven Graph Building (NEW):** `GenericCoupledProgramResources::new()` now uses `build_graph_for_phase(recipe, phase, module, label)` to derive compute graphs from the recipe instead of hardcoded graph builders (with fallbacks for legacy recipes).
 - **Recipe-Driven GenericCoupled (NEW):** GenericCoupledScalar now uses:
@@ -128,9 +129,9 @@ This roadmap focuses on removing those glue points in small, testable steps.
 
 **Goal:** `CompressibleGraphs`, `IncompressibleGraphs`, etc. become thin wrappers (or disappear). Execution structure is derived from the recipe.
 
-- [ ] **C1. Add “composite phase” support to the recipe/program spec**
+- [x] **C1. Add “composite phase” support to the recipe/program spec**
   - Explicit compressible needs sequences like `gradients -> flux -> explicit_update -> primitive_recovery`.
-  - Encode this as a *recipe graph* (or as multiple `GraphOpKind`s that each map to one recipe-defined phase).
+  - Implemented as recipe-driven composite graph building from ordered phase sequences (`build_graph_for_phases` / `build_optional_graph_for_phases`), and wired into `CompressibleGraphs::from_recipe()`.
 - [x] **C2. Convert existing solver-family plans to `register_ops_from_recipe()`**
   - GenericCoupled is done; migrate Compressible and IncompressibleCoupled.
 

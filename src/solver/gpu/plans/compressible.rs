@@ -274,7 +274,7 @@ impl CompressiblePlanResources {
         let port_space = lowered.ports;
         
         // Create graphs before struct construction (needs borrow of kernels)
-        let graphs = CompressibleGraphs::from_recipe(&recipe, &kernels);
+        let graphs = CompressibleGraphs::from_recipe(&recipe, &kernels)?;
 
         let mut solver = Self {
             common,

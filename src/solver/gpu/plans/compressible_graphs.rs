@@ -6,7 +6,7 @@ use crate::solver::gpu::modules::graph::{
 use crate::solver::gpu::modules::model_kernels::{
     KernelBindGroups, KernelPipeline, ModelKernelsModule,
 };
-use crate::solver::gpu::modules::unified_graph::build_graph_for_phase;
+use crate::solver::gpu::modules::unified_graph::build_optional_graph_for_phase;
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
 use crate::solver::model::KernelKind;
 
@@ -22,22 +22,39 @@ pub struct CompressibleGraphs {
 impl CompressibleGraphs {
     /// Create graphs from a SolverRecipe, falling back to hardcoded graphs
     /// when the recipe doesn't define the needed phases.
-    pub fn from_recipe(recipe: &SolverRecipe, kernels: &ModelKernelsModule) -> Self {
+    pub fn from_recipe(recipe: &SolverRecipe, kernels: &ModelKernelsModule) -> Result<Self, String> {
         // Try to build graphs from recipe phases; fall back to hardcoded
         // TODO: Use these once we have composite graph building from recipe
-        let _gradients_graph =
-            build_graph_for_phase(recipe, KernelPhase::Gradients, kernels, "compressible").ok();
-        let _assembly_graph =
-            build_graph_for_phase(recipe, KernelPhase::Assembly, kernels, "compressible").ok();
-        let apply_graph =
-            build_graph_for_phase(recipe, KernelPhase::Apply, kernels, "compressible").ok();
-        let update_graph =
-            build_graph_for_phase(recipe, KernelPhase::PrimitiveRecovery, kernels, "compressible")
-                .ok();
+        let _gradients_graph = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::Gradients,
+            kernels,
+            "compressible",
+        )?;
+        let _assembly_graph = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::Assembly,
+            kernels,
+            "compressible",
+        )?;
+
+        // These are used today; treat non-empty phases as required if present.
+        let apply_graph = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::Apply,
+            kernels,
+            "compressible",
+        )?;
+        let update_graph = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::PrimitiveRecovery,
+            kernels,
+            "compressible",
+        )?;
 
         // For now, use hardcoded graphs since compressible has complex multi-phase sequences
         // TODO: Once recipe fully describes all phases, switch to recipe-driven construction
-        Self {
+        Ok(Self {
             explicit_module_graph: Self::build_explicit_module_graph(true),
             explicit_module_graph_first_order: Self::build_explicit_module_graph(false),
             implicit_grad_assembly_module_graph: Self::build_implicit_grad_assembly_module_graph(
@@ -49,7 +66,7 @@ impl CompressibleGraphs {
                 .unwrap_or_else(|| Self::build_implicit_apply_module_graph()),
             primitive_update_module_graph: update_graph
                 .unwrap_or_else(|| Self::build_primitive_update_module_graph()),
-        }
+        })
     }
 
     pub fn new() -> Self {

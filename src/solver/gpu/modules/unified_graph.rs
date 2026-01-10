@@ -76,8 +76,28 @@ pub fn build_graph_for_phase<M: UnifiedGraphModule>(
             dispatch,
         }));
     }
+
+    if nodes.is_empty() {
+        return Err(format!("no kernels found for phase {phase:?}"));
+    }
     
     Ok(ModuleGraph::new(nodes))
+}
+
+/// Build a compute graph for a phase, returning None when the phase has no kernels.
+///
+/// Use this for optional phases (e.g. gradients when `needs_gradients == false`).
+pub fn build_optional_graph_for_phase<M: UnifiedGraphModule>(
+    recipe: &SolverRecipe,
+    phase: KernelPhase,
+    module: &M,
+    label_prefix: &'static str,
+) -> Result<Option<ModuleGraph<M>>, String> {
+    match build_graph_for_phase(recipe, phase, module, label_prefix) {
+        Ok(g) => Ok(Some(g)),
+        Err(e) if e.starts_with("no kernels found for phase") => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Generate a static label for a kernel.
@@ -108,10 +128,10 @@ impl<M: UnifiedGraphModule> UnifiedGraphSet<M> {
         module: &M,
         label_prefix: &'static str,
     ) -> Result<Self, String> {
-        let preparation = build_graph_for_phase(recipe, KernelPhase::Preparation, module, label_prefix).ok();
-        let gradients = build_graph_for_phase(recipe, KernelPhase::Gradients, module, label_prefix).ok();
-        let assembly = build_graph_for_phase(recipe, KernelPhase::Assembly, module, label_prefix).ok();
-        let update = build_graph_for_phase(recipe, KernelPhase::Update, module, label_prefix).ok();
+        let preparation = build_optional_graph_for_phase(recipe, KernelPhase::Preparation, module, label_prefix)?;
+        let gradients = build_optional_graph_for_phase(recipe, KernelPhase::Gradients, module, label_prefix)?;
+        let assembly = build_optional_graph_for_phase(recipe, KernelPhase::Assembly, module, label_prefix)?;
+        let update = build_optional_graph_for_phase(recipe, KernelPhase::Update, module, label_prefix)?;
         
         Ok(Self {
             preparation,

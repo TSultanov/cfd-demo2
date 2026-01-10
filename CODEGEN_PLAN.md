@@ -52,24 +52,22 @@ One **model-driven** GPU solver pipeline with:
 - **Recipe-Driven IncompressibleCoupled (NEW):** GpuSolver::new() now takes SolverRecipe
   - Uses `recipe.needs_gradients()` for scheme_needs_gradients
   - Uses `recipe.stepping` for n_outer_correctors
+- **FieldProvider-based bind groups (NEW):** `model_kernels.rs` now uses `FieldProvider::buffer_for_binding()` for compressible bind group creation:
+  - `field_binding()` helper reduces bind group creation from ~40 lines to single call
+  - Enables bind group code to work with either `CompressibleFieldResources` or `UnifiedFieldResources`
 
 ## Main Blockers
-- **Compressible/Incompressible still use legacy field containers:** These paths now receive the recipe and have the `FieldProvider` trait, but still use `CompressibleFieldResources`/`FieldResources` directly. Switching to `UnifiedFieldResources` requires updating bind group creation code.
+- **Compressible/Incompressible still use legacy field containers:** The `FieldProvider` trait provides the migration path, and bind group creation now uses `field_binding()` helper. Actual switch to `UnifiedFieldResources` requires creating resources with `for_compressible()` factory.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
 - **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** These templates still use hardcoded `build_program_spec()` functions in templates.rs.
 
 ## Next Steps (Prioritized)
 
-1. **Switch Compressible/Incompressible to use UnifiedFieldResources**
+1. **Switch Compressible field storage to UnifiedFieldResources**
+   - Bind group creation already uses `FieldProvider` trait via `field_binding()` helper
    - `UnifiedFieldResources::for_compressible()` factory is ready
-   - `FieldProvider` trait provides migration path
-   - Requires updating bind group creation in `model_kernels.rs` to use trait-based access
-
-2. **Migrate Compressible/Incompressible ProgramSpec to recipe-driven**
-   - Currently using templates::compressible::build_program_spec() and templates::incompressible_coupled::build_program_spec()
-   - Would need to extend recipe.build_program_spec() to handle conditional ops and while loops
-
+   - Need to replace `create_compressible_field_bind_groups()` call with unified resources
 3. **Implement UnifiedGraphModule for Modules**
    - Have GenericCoupledKernelsModule implement `UnifiedGraphModule` trait.
    - Use `build_graph_for_phase()` instead of manual graph construction.

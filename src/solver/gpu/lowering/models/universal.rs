@@ -1,6 +1,6 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
-use crate::solver::gpu::plans::compressible::CompressiblePlanResources;
+use crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
@@ -21,7 +21,7 @@ enum UniversalBackend {
 }
 
 struct ExplicitImplicitBackend {
-    plan: CompressiblePlanResources,
+    plan: ExplicitImplicitPlanResources,
     implicit_outer_idx: usize,
     implicit_stats: Vec<LinearSolverStats>,
 }
@@ -36,7 +36,7 @@ struct CoupledBackend {
 
 impl UniversalProgramResources {
     pub(in crate::solver::gpu::lowering) fn new_explicit_implicit(
-        plan: CompressiblePlanResources,
+        plan: ExplicitImplicitPlanResources,
     ) -> Self {
         Self {
             backend: UniversalBackend::ExplicitImplicit(ExplicitImplicitBackend {
@@ -112,14 +112,14 @@ fn wrap_mut(plan: &mut GpuProgramPlan) -> &mut UniversalProgramResources {
         .expect("missing UniversalProgramResources")
 }
 
-fn explicit_implicit(plan: &GpuProgramPlan) -> Option<&CompressiblePlanResources> {
+fn explicit_implicit(plan: &GpuProgramPlan) -> Option<&ExplicitImplicitPlanResources> {
     match &wrap(plan).backend {
         UniversalBackend::ExplicitImplicit(b) => Some(&b.plan),
         UniversalBackend::Coupled(_) => None,
     }
 }
 
-fn explicit_implicit_mut(plan: &mut GpuProgramPlan) -> Option<&mut CompressiblePlanResources> {
+fn explicit_implicit_mut(plan: &mut GpuProgramPlan) -> Option<&mut ExplicitImplicitPlanResources> {
     match &mut wrap_mut(plan).backend {
         UniversalBackend::ExplicitImplicit(b) => Some(&mut b.plan),
         UniversalBackend::Coupled(_) => None,

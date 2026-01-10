@@ -16,6 +16,7 @@ pub mod readback;
 pub mod recipe;
 pub(crate) mod runtime;
 pub(crate) mod runtime_common;
+pub(crate) mod solver_api;
 pub mod structs;
 pub mod unified_solver;
 pub(crate) mod wgsl_meta;

@@ -1,7 +1,6 @@
-// Force recompile 2
 use std::sync::Arc;
 
-use super::incompressible_linear_solver::FgmresResources;
+use crate::solver::gpu::plans::incompressible_linear_solver::FgmresResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};

@@ -23,7 +23,7 @@ use bytemuck::cast_slice;
 use std::env;
 
 #[derive(Clone, Copy, Debug)]
-struct CompressibleOffsets {
+struct ExplicitImplicitOffsets {
     stride: u32,
     rho: u32,
     rho_u: u32,
@@ -33,7 +33,7 @@ struct CompressibleOffsets {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct CompressibleProfile {
+struct ExplicitImplicitProfile {
     enabled: bool,
     stride: usize,
     step: usize,
@@ -47,11 +47,11 @@ struct CompressibleProfile {
     accum_iters: u64,
 }
 
-impl CompressibleProfile {
+impl ExplicitImplicitProfile {
     fn new() -> Self {
         let enabled = env_flag("CFD2_COMP_PROFILE", false);
         let stride = env_usize("CFD2_COMP_PROFILE_STRIDE", 25).max(1);
-        CompressibleProfile {
+        ExplicitImplicitProfile {
             enabled,
             stride,
             ..Default::default()
@@ -120,7 +120,7 @@ impl CompressibleProfile {
     }
 }
 
-pub(crate) struct CompressiblePlanResources {
+pub(crate) struct ExplicitImplicitPlanResources {
     pub common: GpuRuntimeCommon,
     pub num_cells: u32,
     pub num_faces: u32,
@@ -141,13 +141,13 @@ pub(crate) struct CompressiblePlanResources {
     pub(crate) block_row_offsets: Vec<u32>,
     pub(crate) block_col_indices: Vec<u32>,
     implicit_base_alpha_u: f32,
-    profile: CompressibleProfile,
-    offsets: CompressibleOffsets,
+    profile: ExplicitImplicitProfile,
+    offsets: ExplicitImplicitOffsets,
     pub(crate) needs_gradients: bool,
     pub(crate) time_integration: TimeIntegrationModule,
 }
 
-impl CompressiblePlanResources {
+impl ExplicitImplicitPlanResources {
     fn context_ref(&self) -> &GpuContext {
         &self.common.context
     }
@@ -193,7 +193,7 @@ impl CompressiblePlanResources {
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
         let common = GpuRuntimeCommon::new(mesh, device, queue).await;
-        let profile = CompressibleProfile::new();
+        let profile = ExplicitImplicitProfile::new();
 
         // Use recipe to determine if gradients are needed (computed at recipe creation time)
         let needs_gradients = recipe.needs_gradients();
@@ -206,7 +206,7 @@ impl CompressiblePlanResources {
 
         let unknowns_per_cell = model.system.unknowns_per_cell();
         let layout = &model.state_layout;
-        let offsets = CompressibleOffsets {
+        let offsets = ExplicitImplicitOffsets {
             stride: layout.stride(),
             rho: layout
                 .offset_for("rho")
@@ -646,11 +646,7 @@ impl CompressiblePlanResources {
             .write_all(&self.common.context.queue, bytes);
     }
 
-    fn solve_compressible_fgmres_helper(
-        &mut self,
-        max_restart: usize,
-        tol: f32,
-    ) -> LinearSolverStats {
+    fn solve_fgmres_helper(&mut self, max_restart: usize, tol: f32) -> LinearSolverStats {
         let topology = LinearTopology {
             num_cells: self.num_cells,
             scalar_row_offsets: &self.scalar_row_offsets,
@@ -698,7 +694,7 @@ fn env_f32(name: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
-impl PlanLinearSystemDebug for CompressiblePlanResources {
+impl PlanLinearSystemDebug for ExplicitImplicitPlanResources {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         if matrix_values.len() != self.block_col_indices.len() {
             return Err(format!(
@@ -740,7 +736,7 @@ impl PlanLinearSystemDebug for CompressiblePlanResources {
             ));
         }
         let max_restart = max_iters.min(64) as usize;
-        Ok(self.solve_compressible_fgmres_helper(max_restart, tol))
+        Ok(self.solve_fgmres_helper(max_restart, tol))
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {

@@ -122,14 +122,15 @@ async fn lower_parts_for_model(
             })
         }
         _ => {
-            let plan = crate::solver::gpu::plans::compressible::CompressiblePlanResources::new(
-                mesh,
-                model.clone(),
-                recipe.clone(),
-                device,
-                queue,
-            )
-            .await?;
+            let plan =
+                crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources::new(
+                    mesh,
+                    model.clone(),
+                    recipe.clone(),
+                    device,
+                    queue,
+                )
+                .await?;
 
             let context = crate::solver::gpu::context::GpuContext {
                 device: plan.common.context.device.clone(),

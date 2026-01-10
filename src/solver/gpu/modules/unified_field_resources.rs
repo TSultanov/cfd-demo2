@@ -6,7 +6,7 @@
 
 use crate::solver::gpu::modules::constants::ConstantsModule;
 use crate::solver::gpu::modules::state::PingPongState;
-use crate::solver::gpu::recipe::{BufferPurpose, SolverRecipe};
+use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::structs::GpuConstants;
 use bytemuck::cast_slice;
 use std::collections::HashMap;
@@ -187,6 +187,54 @@ impl UnifiedFieldResources {
                 self.state_size_bytes(),
             );
         }
+    }
+
+    /// Get all state buffers for ping-pong indexing.
+    pub fn state_buffers(&self) -> &[wgpu::Buffer; 3] {
+        self.state.buffers()
+    }
+
+    /// Get buffer by binding name (for shader reflection).
+    /// Returns the appropriate buffer based on the current ping-pong phase.
+    pub fn buffer_for_binding(&self, name: &str, ping_pong_phase: usize) -> Option<&wgpu::Buffer> {
+        let (idx_cur, idx_old, idx_old_old) =
+            crate::solver::gpu::modules::state::ping_pong_indices(ping_pong_phase);
+
+        match name {
+            "state" => Some(&self.state.buffers()[idx_cur]),
+            "state_old" => Some(&self.state.buffers()[idx_old]),
+            "state_old_old" => Some(&self.state.buffers()[idx_old_old]),
+            "constants" => Some(self.constants.buffer()),
+            "grad_state" => self.gradients.get("state"),
+            _ => {
+                // Check for gradient field names
+                if let Some(field) = name.strip_prefix("grad_") {
+                    self.gradients.get(field)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Get the step handle for the ping-pong state.
+    pub fn step_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        self.state.step_handle()
+    }
+
+    /// Update constants buffer with new values.
+    pub fn update_constants(&mut self, queue: &wgpu::Queue) {
+        self.constants.write(queue);
+    }
+
+    /// Get mutable access to constants values.
+    pub fn constants_mut(&mut self) -> &mut GpuConstants {
+        self.constants.values_mut()
+    }
+
+    /// Get read access to constants values.
+    pub fn constants(&self) -> &GpuConstants {
+        self.constants.values()
     }
 }
 

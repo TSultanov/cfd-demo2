@@ -9,150 +9,67 @@ One **model-driven** GPU solver pipeline with:
 - solver features implemented as **pluggable modules** that own their own GPU resources
 - kernels + auxiliary passes derived automatically from `ModelSpec` + solver config (no handwritten WGSL)
 
-## Status (Reality Check)
-- **Op Dispatch:** Fully module-owned via string IDs (`GraphOpKind` et al). Global enums in `program.rs` have been replaced with newtypes wrapping `&'static str`. Models now register ops using decentralized constants defined in `templates.rs`.
-- **Resource Modularization:** `CompressiblePlanResources` has been refactored into a coordinator of self-contained modules:
-  - `CompressibleLinearSolver`: Manages FGMRES resources, AMG setup, and solve logic.
-  - `CompressibleGraphs`: Manages graph construction and execution (explicit/implicit/update).
-  - `UnifiedFieldResources`: Owns fields and buffers (including fluxes, gradients, iteration snapshot, and low-mach params).
-  - `TimeIntegrationModule`: Owns time stepping logic.
-- **Unified Lowering:** Lowering routes through `src/solver/gpu/lowering/model_driven.rs`.
-- **Shared State & Constants:** `PingPongState` and `ConstantsModule` used across solver families.
-- **Kernel Lookup:** Unified via `kernel_registry::kernel_source`.
-- **Linear Solver:** FGMRES logic extracted into generic `solve_fgmres` in `src/solver/gpu/modules/linear_solver.rs`, decoupling algorithm from resource management.
-- **Codegen:** Emits WGSL at build time.
-- **SolverRecipe Abstraction:** `src/solver/gpu/recipe.rs` defines `SolverRecipe` — a unified specification derived from `ModelSpec + SolverConfig` that captures:
-  - Required kernel passes (`KernelSpec` with `KernelPhase`)
-  - Required auxiliary buffers (`BufferSpec` for gradients, history, etc.)
-  - Linear solver configuration (`LinearSolverSpec`)
-  - Time integration requirements (`TimeIntegrationSpec`)
-  - Stepping mode (`SteppingMode`: Explicit/Implicit/Coupled)
-  - Fields requiring gradient computation
-  - `build_program_spec()` method to derive ProgramSpec from stepping mode
-- **Generic Linear Solver Module:** `src/solver/gpu/modules/generic_linear_solver.rs` provides a parameterized `GenericLinearSolverModule<P>` that can be instantiated with different preconditioners, decoupling solver infrastructure from specific physics families.
-- **derive_kernel_plan:** Function in `recipe.rs` to derive kernel requirements from `EquationSystem` structure rather than hardcoding in `ModelSpec::kernel_plan()`.
-- **UnifiedFieldResources (EXTENDED):** `src/solver/gpu/modules/unified_field_resources.rs` provides unified field storage (PingPongState, gradients, constants) derived from SolverRecipe:
-  - Supports flux buffers for face-based storage
-  - Supports low-mach preconditioning params buffer
-  - Allocated directly from recipe (no plan-side builder configuration)
-  - **Model-agnostic**: No solver-family-specific factory methods; allocation follows recipe requirements
-- **FieldProvider Trait (NEW):** `src/solver/gpu/modules/field_provider.rs` provides trait abstraction for field buffer access:
-  - Common interface for `CompressibleFieldResources` and `UnifiedFieldResources`
-  - Enables gradual migration to unified resources without breaking existing code
-  - `buffer_for_binding()` method for shader reflection-based binding
-- **UnifiedOpRegistryBuilder (NEW):** `src/solver/gpu/lowering/unified_registry.rs` builds op registries dynamically from SolverRecipe stepping mode instead of hardcoded templates.
-- **UnifiedGraphModule (NEW):** `src/solver/gpu/modules/unified_graph.rs` provides trait and helpers for building compute graphs from SolverRecipe kernel specifications.
-- **Composite Phase Graphs (NEW):** `src/solver/gpu/modules/unified_graph.rs` now supports building a single graph from an ordered sequence of phases (`build_graph_for_phases`, `build_optional_graph_for_phases`). This enables multi-pass graphs like `gradients -> flux -> update -> primitive_recovery` to be recipe-driven.
-- **GenericCoupledKernelsModule (UPDATED):** Now implements `UnifiedGraphModule` trait, enabling recipe-driven graph construction via `build_graph_for_phase()`.
-- **Recipe-Driven Graph Building (NEW):** `GenericCoupledProgramResources::new()` now uses `build_graph_for_phase(recipe, phase, module, label)` to derive compute graphs from the recipe instead of hardcoded graph builders (with fallbacks for legacy recipes).
-- **Recipe-Driven GenericCoupled (NEW):** GenericCoupledScalar now uses:
-  - `recipe.build_program_spec()` instead of hardcoded template spec
-  - `register_ops_from_recipe()` instead of manual op registration
-  - `UnifiedFieldResources` for field storage
-- **Recipe-Driven Compressible (NEW):** CompressiblePlanResources::new() now takes SolverRecipe
-  - Uses `recipe.needs_gradients()` instead of runtime scheme detection
-  - Uses `recipe.stepping` for outer iterations count
-- **Recipe-Driven IncompressibleCoupled (NEW):** GpuSolver::new() now takes SolverRecipe
-  - Uses `recipe.needs_gradients()` for scheme_needs_gradients
-  - Uses `recipe.stepping` for n_outer_correctors
-- **FieldProvider-based bind groups (NEW):** `model_kernels.rs` now uses `FieldProvider::buffer_for_binding()` for compressible and incompressible bind group creation:
-  - `field_binding()` helper reduces bind group creation from ~40 lines to single call
-  - Enables bind group code to work with either legacy `CompressibleFieldResources` or `UnifiedFieldResources`
+## Current State (Implemented)
+- **Single lowering entrypoint exists:** Lowering routes through `src/solver/gpu/lowering/model_driven.rs` and is recipe-aware.
+- **Recipe abstraction exists:** `src/solver/gpu/recipe.rs` defines `SolverRecipe` which drives ProgramSpec generation and resource requirements.
+- **Graph building is recipe-driven:** `src/solver/gpu/modules/unified_graph.rs` builds graphs from recipe phases and supports composite phase sequences.
+- **Unified resources exist:** `UnifiedFieldResources` allocates from recipe requirements; `FieldProvider` + bind-group builder use shader binding names.
+- **Kernel identifiers exist:** `KernelId(&'static str)` exists and is used for id-based kernel lookup in parts of the runtime.
+- **Kernel requirements are derived:** `ModelSpec::kernel_plan()` routes through `derive_kernel_plan(system)`.
+- **Generic solver infrastructure exists:** `GenericLinearSolverModule<P>` exists; FGMRES driver logic is extracted.
 
-## Main Blockers
-- **Model requirements are still partially handwritten:** Allocation is recipe-driven and the remaining “always required” GPU resources (flux stride, low-mach params, gradient storage policy) are now declared on `ModelSpec` via `ModelGpuSpec` instead of being hardcoded in `SolverRecipe::from_model`. The end state is to generate these specs from codegen/model metadata (not handwritten model constructors).
- - **Legacy glue cleanup:** remove now-unused init modules/exports and other legacy bind-group ownership codepaths.
-- **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
-- **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
-- **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** The ProgramSpec construction now routes through `SolverRecipe::build_program_spec()` (with legacy template structures emitted when the kernel set matches those families), but op-id constants and some plan logic still live in `templates.rs`.
+## Remaining Gaps (Blocking “any model + any method”)
+- **Lowering still selects a template family:** `ProgramTemplateKind` + `lowering/templates.rs` are still in the runtime path.
+- **KernelKind still leaks into orchestration:** `SolverRecipe` and some plans still iterate kernels via `KernelKind` / `kernel_registry::kernel_source(...)`.
+- **Kernel registry is not fully scheme-expanded:** kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`) that are not purely derived from “model + selected numerics”.
+- **Model GPU requirements are not fully generated:** `ModelGpuSpec`/resource policies still carry some handwritten or heuristic requirements.
+- **Bind groups are not fully reflection-driven:** current `field_binding()` is a migration helper; end state should not require plan/module-specific binding code.
+- **Config deltas are ad-hoc:** `PlanParam` is still used for host → plan configuration.
+- **Some handwritten WGSL remains:** solver-family-specific shaders still exist outside codegen.
+- **Preconditioner pluggability incomplete:** compressible linear solver hasn’t fully converged onto the generic module + factory abstraction.
 
-## Next Steps (Prioritized)
+## Remaining Work (Single Prioritized List)
 
-1. **Switch remaining solver families field storage to UnifiedFieldResources**
-  - Compressible and IncompressibleCoupled are now migrated; bind-group creation is `FieldProvider`-based.
-  - Remove any remaining legacy plan usage and delete legacy field containers/init helpers.
-  - Keep solver-family knowledge in plans (buffer selection), not in unified modules.
+1. **Make the recipe the sole lowering/orchestration authority (remove template selection).**
+   - Remove `ProgramTemplateKind` routing from `model_driven`.
+   - Ensure op registration and ProgramSpec derivation are entirely recipe-driven.
+   - Success: adding a new model/method does not require edits to `lowering/templates.rs` or new template kinds.
 
-2. **Implement UnifiedGraphModule for ModelKernelsModule**
-   - [x] GenericCoupledKernelsModule now implements `UnifiedGraphModule` trait (done).
-   - [x] GenericCoupledProgramResources uses `build_graph_for_phase()` (done).
-   - [x] ModelKernelsModule (compressible) implements `UnifiedGraphModule` trait (done).
-   - [x] CompressiblePlanResources uses `CompressibleGraphs::from_recipe()` (done).
+2. **Eliminate `KernelKind` from runtime orchestration (keep only as debug/UI bridge).**
+   - Make recipes and graphs operate purely on `KernelId`.
+   - Remove remaining `kernel_registry::kernel_source(model.id, KernelKind::...)` call sites from plans.
+   - Success: kernel scheduling/execution never matches on `KernelKind`.
 
-3. **Migrate derive_kernel_plan to Production**
-   - Replace `ModelSpec::kernel_plan()` hardcoded matches with calls to `derive_kernel_plan()`.
-   - Extend `derive_kernel_plan` to handle all equation term types.
+3. **Make the kernel registry fully derived from codegen + selected numerics (scheme expansion).**
+   - Codegen should emit the authoritative `KernelId -> wgsl + binding metadata (+ workgroup sizes if needed)` mapping.
+   - Runtime lookup should be id-based everywhere (`kernel_source_by_id`).
+   - Success: registering a new kernel requires only codegen output changes, not handwritten tables.
 
-4. **Linear Solver & Preconditioner Pluggability**
-   - [x] Extract FGMRES driver logic to `LinearSolverModule` (done).
-   - [x] Create `GenericLinearSolverModule<P>` with pluggable preconditioner (done).
-   - [ ] Migrate `CompressibleLinearSolver` to use `GenericLinearSolverModule`.
-   - [ ] Add `PreconditionerFactory` implementations for Jacobi, AMG, Schur.
+4. **Make GPU resource requirements fully derived (minimize/retire handwritten `ModelGpuSpec`).**
+   - Move “always required buffers” (flux stride, gradient storage policy, low-mach params, history buffers) to recipe/specs generated from model terms + method choices.
+   - Keep manual overrides only where unavoidable and explicitly documented.
+   - Success: model constructors stop encoding solver-method-specific GPU resource policy.
 
-5. **Eliminate Handwritten WGSL**
-   - Migrate solver-family-specific shaders (`compressible_*`, `schur_precond`) into the codegen WGSL pipeline.
+5. **Finish reflection-driven bind groups and retire remaining per-family bind logic.**
+   - Use codegen-emitted binding metadata + `FieldProvider`/resource registry to build bind groups uniformly.
+   - Success: adding a kernel with new bindings requires no handwritten host-side bind-group assembly.
 
-6. **Typed Config Deltas**
-   - Replace `PlanParam` with generated `SolverConfigDelta` + module-specific deltas to remove ad-hoc host callbacks.
+6. **Replace `PlanParam` with typed config deltas (`SolverConfigDelta` + module-specific deltas).**
+   - Generate deltas where possible; route updates through module-owned handlers.
+   - Success: no new features add ad-hoc `PlanParam` matches.
 
-## Roadmap: Truly Model-Agnostic Unified Solver
+7. **Complete linear solver & preconditioner pluggability.**
+   - Migrate `CompressibleLinearSolver` to the generic module infrastructure.
+   - Add `PreconditionerFactory` implementations for Jacobi, AMG, Schur.
+   - Success: preconditioner selection is config-driven and solver-family-agnostic.
 
-The current unified pieces (`SolverRecipe`, `UnifiedFieldResources`, unified graph builder) are moving in the right direction, but a few remaining “legacy glue points” prevent *arbitrary* models/methods from fitting without touching handwritten matches.
+8. **Eliminate remaining handwritten WGSL.**
+   - Migrate remaining solver-family shaders (e.g. `compressible_*`, `schur_precond`) into codegen.
+   - Success: runtime consumes generated WGSL only.
 
-This roadmap focuses on removing those glue points in small, testable steps.
-
-### Milestone A: Make the recipe authoritative for kernel scheduling
-
-**Goal:** No handwritten `KernelKind -> phase` mapping is required for correct execution. The recipe explicitly describes kernel order for each solver mode.
-
-- [x] **A1. Move phase assignment into recipe construction**
-  - Today `phase_for_kernel()` in `src/solver/gpu/recipe.rs` is a central match on `KernelKind`. This should become an implementation detail of *legacy recipes only*.
-  - New path: `SolverRecipe::from_model(...)` assigns phases when emitting `KernelSpec`s.
-- [x] **A2. Validate required phases are non-empty**
-  - `build_graph_for_phase()` should error on “required but empty” phases to avoid silent no-ops (the BDF2 acoustic regression was caused by an empty apply graph being accepted).
-
-### Milestone B: Decouple orchestration from `KernelKind`
-
-**Goal:** Add new kernels via codegen/model definitions without editing handwritten enums/matches.
-
-- [x] **B1. Introduce a generated kernel identifier**
-  - Add `KernelId(&'static str)` (or similar) alongside the existing `KernelKind` bridge.
-  - Update `KernelSpec` to carry `KernelId` (and optionally keep `KernelKind` during migration).
-- [x] **B2. Extend `kernel_registry` to lookup by `KernelId`**
-  - Codegen emits a per-model kernel table mapping `KernelId -> (wgsl source, bind metadata)`.
-  - The runtime graph builder uses only `KernelId`.
-- [x] **B3. Shrink `KernelKind` usage to UI/debug only**
-  - Once recipes are emitted in terms of `KernelId`, `KernelKind` can become optional legacy.
-
-  Status: Orchestration/graph building is now `KernelId`-based; `KernelKind` is still carried in recipes as a migration/debug bridge.
-
-### Milestone C: Full recipe-driven graphs (no solver-family graph builders)
-
-**Goal:** `CompressibleGraphs`, `IncompressibleGraphs`, etc. become thin wrappers (or disappear). Execution structure is derived from the recipe.
-
-- [x] **C1. Add “composite phase” support to the recipe/program spec**
-  - Explicit compressible needs sequences like `gradients -> flux -> explicit_update -> primitive_recovery`.
-  - Implemented as recipe-driven composite graph building from ordered phase sequences (`build_graph_for_phases` / `build_optional_graph_for_phases`), and wired into `CompressibleGraphs::from_recipe()`.
-- [x] **C2. Convert existing solver-family plans to `register_ops_from_recipe()`**
-  - GenericCoupled is done; migrate Compressible and IncompressibleCoupled.
-
-    Status: GenericCoupled, Compressible, and IncompressibleCoupled now register ops via recipe-aware entrypoints.
-
-### Milestone D: Resources fully derived from recipe specs
-
-**Goal:** No solver-family plan decides “which buffers exist”. It only supplies numerics and initial/boundary conditions.
-
-- [x] **D1. Allocate `UnifiedFieldResources` from recipe requirements**
-  - Removed plan-side builder configuration; UnifiedFieldResources allocates from SolverRecipe + mesh sizes.
-- [ ] **D2. Bind groups generated from reflection + `FieldProvider`/resource registry**
-  - Existing `field_binding()` helper is the migration path; end state is uniform reflection-driven binds.
-
-### Execution order (recommended)
-
-1. A2 (safety) → A1 (phase assignment in recipe) → C2 (use unified registry) to eliminate correctness footguns.
-2. B1/B2 (KernelId) to unlock “arbitrary models” without touching handwritten enums.
-3. C1/C2 to remove solver-family graph code.
-4. D1/D2 to finish resource unification.
+9. **Legacy glue cleanup.**
+   - Remove unused init modules/exports and dead legacy bind-group ownership codepaths.
+   - Success: a single owner exists for each GPU resource and each runtime feature lives in a module.
 
 ## Decisions (Locked In)
 - **Generated-per-model WGSL** stays (no runtime compilation/reflection).

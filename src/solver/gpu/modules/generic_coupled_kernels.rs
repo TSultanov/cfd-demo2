@@ -1,4 +1,6 @@
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
+use super::unified_graph::UnifiedGraphModule;
+use crate::solver::model::KernelKind;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -109,5 +111,28 @@ impl GpuComputeModule for GenericCoupledKernelsModule {
             DispatchKind::Faces => ((runtime.num_faces + 63) / 64, 1, 1),
             DispatchKind::Custom { x, y, z } => (x, y, z),
         }
+    }
+}
+
+impl UnifiedGraphModule for GenericCoupledKernelsModule {
+    fn pipeline_for_kernel(&self, kind: KernelKind) -> Option<Self::PipelineKey> {
+        match kind {
+            KernelKind::GenericCoupledAssembly => Some(GenericCoupledPipeline::Assembly),
+            KernelKind::GenericCoupledUpdate => Some(GenericCoupledPipeline::Update),
+            _ => None,
+        }
+    }
+
+    fn bind_for_kernel(&self, kind: KernelKind) -> Option<Self::BindKey> {
+        match kind {
+            KernelKind::GenericCoupledAssembly => Some(GenericCoupledBindGroups::Assembly),
+            KernelKind::GenericCoupledUpdate => Some(GenericCoupledBindGroups::Update),
+            _ => None,
+        }
+    }
+
+    fn dispatch_for_kernel(&self, _kind: KernelKind) -> DispatchKind {
+        // All generic coupled kernels dispatch per cell
+        DispatchKind::Cells
     }
 }

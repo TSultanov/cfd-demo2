@@ -6,11 +6,12 @@ use crate::solver::gpu::modules::graph::{
     ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
 };
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
+use crate::solver::gpu::modules::unified_graph::build_graph_for_phase;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::gpu::recipe::SolverRecipe;
+use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 
 pub(crate) struct GenericCoupledProgramResources {
@@ -28,15 +29,22 @@ impl GenericCoupledProgramResources {
         runtime: GpuScalarRuntime,
         fields: UnifiedFieldResources,
         kernels: GenericCoupledKernelsModule,
+        recipe: &SolverRecipe,
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
     ) -> Self {
+        // Build graphs from recipe using unified graph builder
+        let assembly_graph = build_graph_for_phase(recipe, KernelPhase::Assembly, &kernels, "generic_coupled")
+            .unwrap_or_else(|_| build_assembly_graph_fallback());
+        let update_graph = build_graph_for_phase(recipe, KernelPhase::Update, &kernels, "generic_coupled")
+            .unwrap_or_else(|_| build_update_graph_fallback());
+
         Self {
             runtime,
             fields,
             kernels,
-            assembly_graph: build_assembly_graph(),
-            update_graph: build_update_graph(),
+            assembly_graph,
+            update_graph,
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
         }
@@ -245,7 +253,8 @@ pub(crate) fn linear_debug_provider(
     Some(res_mut(plan) as &mut dyn PlanLinearSystemDebug)
 }
 
-fn build_assembly_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
+/// Fallback when recipe doesn't define assembly phase
+fn build_assembly_graph_fallback() -> ModuleGraph<GenericCoupledKernelsModule> {
     ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
         label: "generic_coupled:assembly",
         pipeline: GenericCoupledPipeline::Assembly,
@@ -254,7 +263,8 @@ fn build_assembly_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
     })])
 }
 
-fn build_update_graph() -> ModuleGraph<GenericCoupledKernelsModule> {
+/// Fallback when recipe doesn't define update phase
+fn build_update_graph_fallback() -> ModuleGraph<GenericCoupledKernelsModule> {
     ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
         label: "generic_coupled:update",
         pipeline: GenericCoupledPipeline::Update,

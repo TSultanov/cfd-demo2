@@ -5,7 +5,6 @@
 //! op registry, this module builds the registry dynamically from the recipe.
 
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
-use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::plans::program::{
     GpuProgramPlan, GraphOpHandler, GraphOpKind, HostOpHandler, HostOpKind, ProgramOpRegistry,
 };

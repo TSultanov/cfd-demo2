@@ -5,7 +5,7 @@
 //! this module derives the graph structure from the recipe's kernel specifications.
 
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, GpuComputeModule, ModuleGraph, ModuleNode};
-use crate::solver::gpu::recipe::{KernelPhase, KernelSpec, SolverRecipe};
+use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
 use crate::solver::model::KernelKind;
 
 /// Configuration for a unified compute graph.

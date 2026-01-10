@@ -261,6 +261,7 @@ impl GenericCoupledPlanResources {
             runtime,
             fields,
             kernels,
+            &recipe,
             b_bc_kind,
             b_bc_value,
         ));

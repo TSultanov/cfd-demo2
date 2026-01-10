@@ -42,6 +42,8 @@ One **model-driven** GPU solver pipeline with:
   - `buffer_for_binding()` method for shader reflection-based binding
 - **UnifiedOpRegistryBuilder (NEW):** `src/solver/gpu/lowering/unified_registry.rs` builds op registries dynamically from SolverRecipe stepping mode instead of hardcoded templates.
 - **UnifiedGraphModule (NEW):** `src/solver/gpu/modules/unified_graph.rs` provides trait and helpers for building compute graphs from SolverRecipe kernel specifications.
+- **GenericCoupledKernelsModule (UPDATED):** Now implements `UnifiedGraphModule` trait, enabling recipe-driven graph construction via `build_graph_for_phase()`.
+- **Recipe-Driven Graph Building (NEW):** `GenericCoupledProgramResources::new()` now uses `build_graph_for_phase(recipe, phase, module, label)` to derive compute graphs from the recipe instead of hardcoded graph builders (with fallbacks for legacy recipes).
 - **Recipe-Driven GenericCoupled (NEW):** GenericCoupledScalar now uses:
   - `recipe.build_program_spec()` instead of hardcoded template spec
   - `register_ops_from_recipe()` instead of manual op registration
@@ -69,9 +71,11 @@ One **model-driven** GPU solver pipeline with:
    - Use builder: `UnifiedFieldResourcesBuilder::new(...).with_flux_buffer(...).with_gradient_fields(&[...]).build()`
    - Keep solver-family knowledge in the compressible plan, not in unified modules
 
-2. **Implement UnifiedGraphModule for Modules**
-   - Have GenericCoupledKernelsModule implement `UnifiedGraphModule` trait.
-   - Use `build_graph_for_phase()` instead of manual graph construction.
+2. **Implement UnifiedGraphModule for ModelKernelsModule**
+   - [x] GenericCoupledKernelsModule now implements `UnifiedGraphModule` trait (done).
+   - [x] GenericCoupledProgramResources uses `build_graph_for_phase()` (done).
+   - [ ] ModelKernelsModule (compressible) should implement `UnifiedGraphModule`.
+   - [ ] CompressiblePlanResources should use recipe-driven graph building.
 
 3. **Migrate derive_kernel_plan to Production**
    - Replace `ModelSpec::kernel_plan()` hardcoded matches with calls to `derive_kernel_plan()`.
@@ -83,7 +87,7 @@ One **model-driven** GPU solver pipeline with:
    - [ ] Migrate `CompressibleLinearSolver` to use `GenericLinearSolverModule`.
    - [ ] Add `PreconditionerFactory` implementations for Jacobi, AMG, Schur.
 
-6. **Eliminate Handwritten WGSL**
+5. **Eliminate Handwritten WGSL**
    - Migrate solver-family-specific shaders (`compressible_*`, `schur_precond`) into the codegen WGSL pipeline.
 
 7. **Typed Config Deltas**

@@ -74,8 +74,8 @@ One **model-driven** GPU solver pipeline with:
 2. **Implement UnifiedGraphModule for ModelKernelsModule**
    - [x] GenericCoupledKernelsModule now implements `UnifiedGraphModule` trait (done).
    - [x] GenericCoupledProgramResources uses `build_graph_for_phase()` (done).
-   - [ ] ModelKernelsModule (compressible) should implement `UnifiedGraphModule`.
-   - [ ] CompressiblePlanResources should use recipe-driven graph building.
+   - [x] ModelKernelsModule (compressible) implements `UnifiedGraphModule` trait (done).
+   - [x] CompressiblePlanResources uses `CompressibleGraphs::from_recipe()` (done).
 
 3. **Migrate derive_kernel_plan to Production**
    - Replace `ModelSpec::kernel_plan()` hardcoded matches with calls to `derive_kernel_plan()`.
@@ -90,7 +90,7 @@ One **model-driven** GPU solver pipeline with:
 5. **Eliminate Handwritten WGSL**
    - Migrate solver-family-specific shaders (`compressible_*`, `schur_precond`) into the codegen WGSL pipeline.
 
-7. **Typed Config Deltas**
+6. **Typed Config Deltas**
    - Replace `PlanParam` with generated `SolverConfigDelta` + module-specific deltas to remove ad-hoc host callbacks.
 
 ## Decisions (Locked In)

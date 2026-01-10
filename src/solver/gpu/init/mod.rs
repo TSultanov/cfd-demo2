@@ -1,5 +1,3 @@
-pub mod compressible_fields;
-pub mod fields;
 pub mod linear_solver;
 pub mod mesh;
 pub mod scalars;
@@ -67,17 +65,15 @@ impl GpuSolver {
             unknowns_per_cell,
         );
 
-        // Incompressible/coupled WGSL expects face fluxes + constants, and ping-pong state.
-        // We use UnifiedFieldResources for storage and build bind groups via reflection.
-        let fields_res = UnifiedFieldResources::builder(
+        // Allocate all required fields directly from the recipe (including face fluxes).
+        let fields_res = UnifiedFieldResources::from_recipe(
             &common.context.device,
             &recipe,
             num_cells,
+            num_faces,
             state_stride,
             initial_constants,
-        )
-        .with_flux_buffer(num_faces, 1)
-        .build();
+        );
 
         let kernels = ModelKernelsModule::new_incompressible(
             &common.context.device,

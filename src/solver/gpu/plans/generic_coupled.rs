@@ -40,9 +40,6 @@ impl GenericCoupledPlanResources {
             ));
         }
 
-        // Use recipe to determine if gradients are needed
-        let needs_gradients = recipe.needs_gradients();
-
         let runtime = GpuScalarRuntime::new(mesh, device, queue).await;
         runtime.update_constants();
 
@@ -81,10 +78,11 @@ impl GenericCoupledPlanResources {
         // Create unified field resources from recipe
         // Clone the initial constants from runtime
         let initial_constants = *runtime.constants.values();
-        let fields = UnifiedFieldResources::new(
+        let fields = UnifiedFieldResources::from_recipe(
             device,
             &recipe,
             num_cells,
+            runtime.common.num_faces,
             stride,
             initial_constants,
         );

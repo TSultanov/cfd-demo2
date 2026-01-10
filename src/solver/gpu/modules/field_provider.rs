@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 /// Trait for providing field buffers to shaders.
 ///
-/// This abstraction allows both `CompressibleFieldResources` and `UnifiedFieldResources`
-/// to be used with the same kernel module code.
+/// This abstraction allows solver kernels to be agnostic to the concrete field
+/// storage implementation (currently backed by `UnifiedFieldResources`).
 pub trait FieldProvider {
     /// Get the ping-pong state.
     fn state(&self) -> &PingPongState;
@@ -100,69 +100,6 @@ pub trait FieldProvider {
         (self.num_cells() as u64) * (self.state_stride() as u64) * 4
     }
 }
-
-// Implementation for CompressibleFieldResources
-use crate::solver::gpu::init::compressible_fields::CompressibleFieldResources;
-
-impl FieldProvider for CompressibleFieldResources {
-    fn state(&self) -> &PingPongState {
-        &self.state
-    }
-
-    fn step_handle(&self) -> Arc<AtomicUsize> {
-        self.state.step_handle()
-    }
-
-    fn constants(&self) -> &ConstantsModule {
-        &self.constants
-    }
-
-    fn constants_mut(&mut self) -> &mut ConstantsModule {
-        &mut self.constants
-    }
-
-    fn iteration_buffer(&self) -> Option<&wgpu::Buffer> {
-        Some(&self.b_state_iter)
-    }
-
-    fn flux_buffer(&self) -> Option<&wgpu::Buffer> {
-        Some(&self.b_fluxes)
-    }
-
-    fn gradient_buffer(&self, field_name: &str) -> Option<&wgpu::Buffer> {
-        match field_name {
-            "rho" => Some(&self.b_grad_rho),
-            "rho_u_x" => Some(&self.b_grad_rho_u_x),
-            "rho_u_y" => Some(&self.b_grad_rho_u_y),
-            "rho_e" => Some(&self.b_grad_rho_e),
-            _ => None,
-        }
-    }
-
-    fn low_mach_buffer(&self) -> Option<&wgpu::Buffer> {
-        Some(&self.b_low_mach_params)
-    }
-
-    fn low_mach_params(&self) -> &GpuLowMachParams {
-        &self.low_mach_params
-    }
-
-    fn low_mach_params_mut(&mut self) -> &mut GpuLowMachParams {
-        &mut self.low_mach_params
-    }
-
-    fn num_cells(&self) -> u32 {
-        // CompressibleFieldResources doesn't store num_cells, so we compute from state buffer
-        // This is a limitation - we need to pass this info another way
-        0 // TODO: This needs to be stored in CompressibleFieldResources or passed separately
-    }
-
-    fn state_stride(&self) -> u32 {
-        0 // TODO: Same limitation as num_cells
-    }
-}
-
-// Implementation for UnifiedFieldResources
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 
 impl FieldProvider for UnifiedFieldResources {

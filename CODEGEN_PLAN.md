@@ -34,8 +34,8 @@ One **model-driven** GPU solver pipeline with:
 - **UnifiedFieldResources (EXTENDED):** `src/solver/gpu/modules/unified_field_resources.rs` provides unified field storage (PingPongState, gradients, constants) derived from SolverRecipe:
   - Supports flux buffers for face-based storage
   - Supports low-mach preconditioning params buffer
-  - Builder pattern for flexible configuration (`with_flux_buffer()`, `with_low_mach_params()`, `with_gradient_fields()`)
-  - **Model-agnostic**: No solver-family-specific factory methods; callers configure via builder
+  - Allocated directly from recipe (no plan-side builder configuration)
+  - **Model-agnostic**: No solver-family-specific factory methods; allocation follows recipe requirements
 - **FieldProvider Trait (NEW):** `src/solver/gpu/modules/field_provider.rs` provides trait abstraction for field buffer access:
   - Common interface for `CompressibleFieldResources` and `UnifiedFieldResources`
   - Enables gradual migration to unified resources without breaking existing code
@@ -60,8 +60,8 @@ One **model-driven** GPU solver pipeline with:
   - Enables bind group code to work with either legacy `CompressibleFieldResources` or `UnifiedFieldResources`
 
 ## Main Blockers
-- **Resources not yet fully recipe-derived:** `UnifiedFieldResources` allocation is still configured via builder calls in plans (e.g. `with_flux_buffer(...)`) rather than being allocated solely from `SolverRecipe` buffer specs.
-- **Legacy field init modules remain:** `src/solver/gpu/init/fields.rs` and other legacy bind-group ownership patterns should be removable now that compressible and incompressible/coupled use `UnifiedFieldResources`.
+- **Recipe still contains legacy/model-specific resource hints:** Allocation is recipe-driven, but the recipe currently includes a few model-family defaults (e.g. compressible flux stride / always-present gradients). The end state is to derive these from fully codegen/model-declared specs.
+ - **Legacy glue cleanup:** remove now-unused init modules/exports and other legacy bind-group ownership codepaths.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
 - **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** The ProgramSpec construction now routes through `SolverRecipe::build_program_spec()` (with legacy template structures emitted when the kernel set matches those families), but op-id constants and some plan logic still live in `templates.rs`.
@@ -142,8 +142,8 @@ This roadmap focuses on removing those glue points in small, testable steps.
 
 **Goal:** No solver-family plan decides “which buffers exist”. It only supplies numerics and initial/boundary conditions.
 
-- [ ] **D1. Allocate `UnifiedFieldResources` from `BufferSpec`/field requirements**
-  - Replace builder calls with a recipe-driven allocator.
+- [x] **D1. Allocate `UnifiedFieldResources` from recipe requirements**
+  - Removed plan-side builder configuration; UnifiedFieldResources allocates from SolverRecipe + mesh sizes.
 - [ ] **D2. Bind groups generated from reflection + `FieldProvider`/resource registry**
   - Existing `field_binding()` helper is the migration path; end state is uniform reflection-driven binds.
 

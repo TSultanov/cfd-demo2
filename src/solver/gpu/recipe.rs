@@ -93,6 +93,13 @@ pub struct BufferSpec {
     pub purpose: BufferPurpose,
 }
 
+/// Specification for a face-based flux buffer.
+#[derive(Debug, Clone, Copy)]
+pub struct FluxSpec {
+    /// Floats per face.
+    pub stride: u32,
+}
+
 /// Purpose of an auxiliary buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferPurpose {
@@ -187,6 +194,12 @@ pub struct SolverRecipe {
     /// Fields that require gradient computation
     pub gradient_fields: Vec<String>,
 
+    /// Optional face-based flux storage requirements.
+    pub flux: Option<FluxSpec>,
+
+    /// Whether the model requires a low-mach params uniform buffer.
+    pub requires_low_mach_params: bool,
+
     /// Number of unknowns per cell in the coupled system
     pub unknowns_per_cell: usize,
 }
@@ -203,13 +216,32 @@ impl SolverRecipe {
         let scheme_expansion = expand_schemes(&model.system, &scheme_registry)
             .map_err(|e| format!("scheme expansion failed: {e}"))?;
 
-        let gradient_fields: Vec<String> = scheme_expansion
+        let mut gradient_fields: Vec<String> = scheme_expansion
             .gradient_fields()
             .iter()
             .map(|f| f.name().to_string())
             .collect();
 
-        let needs_gradients = !gradient_fields.is_empty();
+        // Encode model-specific “always required” gradient storage in the recipe.
+        // The goal is to keep plan-side buffer selection out of the runtime.
+        let (flux, requires_low_mach_params, needs_gradients) = match &model.fields {
+            crate::solver::model::ModelFields::Incompressible(_) => {
+                (Some(FluxSpec { stride: 1 }), false, !gradient_fields.is_empty())
+            }
+            crate::solver::model::ModelFields::Compressible(_) => {
+                // Compressible WGSL kernels expect these component-wise gradients and fluxes.
+                gradient_fields = vec![
+                    "rho".to_string(),
+                    "rho_u_x".to_string(),
+                    "rho_u_y".to_string(),
+                    "rho_e".to_string(),
+                ];
+                (Some(FluxSpec { stride: 4 }), true, true)
+            }
+            crate::solver::model::ModelFields::GenericCoupled(_) => {
+                (None, false, !gradient_fields.is_empty())
+            }
+        };
 
         // Assign phases as we emit KernelSpecs.
         // This keeps ordering explicit in the recipe and avoids relying on a global
@@ -296,6 +328,8 @@ impl SolverRecipe {
             time_integration,
             stepping,
             gradient_fields,
+            flux,
+            requires_low_mach_params,
             unknowns_per_cell: model.system.unknowns_per_cell() as usize,
         })
     }

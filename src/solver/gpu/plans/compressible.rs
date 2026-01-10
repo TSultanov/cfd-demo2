@@ -256,19 +256,15 @@ impl CompressiblePlanResources {
             ramp_time: 0.0,
         };
 
-        // Compressible WGSL expects fluxes + low-mach params + component-wise gradients
-        // regardless of the advection scheme.
-        let fields_res = UnifiedFieldResources::builder(
+        // Allocate all required fields directly from the recipe.
+        let fields_res = UnifiedFieldResources::from_recipe(
             &common.context.device,
             &recipe,
             num_cells,
+            num_faces,
             offsets.stride,
             initial_constants,
-        )
-        .with_flux_buffer(num_faces, 4)
-        .with_low_mach_params()
-        .with_gradient_fields(&["rho", "rho_u_x", "rho_u_y", "rho_e"])
-        .build();
+        );
 
         let kernels = ModelKernelsModule::new_compressible(
             &common.context.device,
@@ -285,7 +281,7 @@ impl CompressiblePlanResources {
         // Create graphs before struct construction (needs borrow of kernels)
         let graphs = CompressibleGraphs::from_recipe(&recipe, &kernels)?;
 
-        let mut solver = Self {
+        let solver = Self {
             common,
             num_cells,
             num_faces,

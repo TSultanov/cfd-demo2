@@ -25,9 +25,13 @@ pub(crate) async fn lower_program_model_driven(
     )?;
 
     let template = ProgramTemplateKind::for_model(model)?;
-    let parts = lower_parts_for_template(template, mesh, model, recipe, device, queue).await?;
+    let parts = lower_parts_for_template(template, mesh, model, recipe.clone(), device, queue).await?;
 
-    let program = build_program_spec(template);
+    // For GenericCoupledScalar, use recipe-driven program spec
+    let program = match template {
+        ProgramTemplateKind::GenericCoupledScalar => recipe.build_program_spec(),
+        _ => build_program_spec(template),
+    };
     let spec = parts.spec.into_spec(program)?;
     let mut plan = GpuProgramPlan::new(
         parts.model,

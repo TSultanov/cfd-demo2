@@ -222,6 +222,24 @@ impl ProgramOpRegistry {
     pub fn has_count(&self, kind: &CountOpKind) -> bool {
         self.count.contains_key(kind)
     }
+
+    /// Merge another registry into this one.
+    /// Returns an error if there are duplicate registrations.
+    pub fn merge(&mut self, other: Self) -> Result<(), String> {
+        for (kind, handler) in other.graph {
+            self.register_graph(kind, handler)?;
+        }
+        for (kind, handler) in other.host {
+            self.register_host(kind, handler)?;
+        }
+        for (kind, handler) in other.cond {
+            self.register_cond(kind, handler)?;
+        }
+        for (kind, handler) in other.count {
+            self.register_count(kind, handler)?;
+        }
+        Ok(())
+    }
 }
 
 impl ProgramOpDispatcher for ProgramOpRegistry {

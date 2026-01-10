@@ -10,8 +10,8 @@ use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
-
-use crate::solver::gpu::lowering::templates::generic_coupled_scalar as op_ids;
+use crate::solver::gpu::recipe::SolverRecipe;
+use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuScalarRuntime,
@@ -95,14 +95,30 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
         .expect("missing GenericCoupledProgramResources")
 }
 
-pub(crate) fn register_ops(registry: &mut ProgramOpRegistry) -> Result<(), String> {
-    registry.register_graph(op_ids::G_ASSEMBLY, assembly_graph_run)?;
-    registry.register_graph(op_ids::G_UPDATE, update_graph_run)?;
-
-    registry.register_host(op_ids::H_PREPARE, host_prepare_step)?;
-    registry.register_host(op_ids::H_SOLVE, host_solve_linear_system)?;
-    registry.register_host(op_ids::H_FINALIZE, host_finalize_step)?;
-
+/// Register ops using the unified registry builder.
+/// The recipe's stepping mode determines which ops are registered.
+pub(crate) fn register_ops_from_recipe(
+    recipe: &SolverRecipe,
+    registry: &mut ProgramOpRegistry,
+) -> Result<(), String> {
+    let config = UnifiedOpRegistryConfig {
+        prepare: Some(host_prepare_step),
+        finalize: Some(host_finalize_step),
+        solve: Some(host_solve_linear_system),
+        assembly_graph: Some(assembly_graph_run),
+        update_graph: Some(update_graph_run),
+        gradients_graph: None, // GenericCoupled doesn't use separate gradients graph
+        apply_graph: None,     // GenericCoupled doesn't use apply graph
+    };
+    
+    let built = crate::solver::gpu::lowering::unified_registry::build_unified_registry(
+        recipe,
+        config,
+    )?;
+    
+    // Merge built registry into provided registry
+    registry.merge(built)?;
+    
     Ok(())
 }
 

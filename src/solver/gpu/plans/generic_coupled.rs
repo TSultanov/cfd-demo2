@@ -7,7 +7,7 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::lowering::models::generic_coupled::{
     linear_debug_provider, param_advection_scheme, param_detailed_profiling, param_dt,
-    param_preconditioner, param_time_scheme, register_ops, spec_dt, spec_num_cells,
+    param_preconditioner, param_time_scheme, register_ops_from_recipe, spec_dt, spec_num_cells,
     spec_state_buffer, spec_time, spec_write_state_bytes, GenericCoupledProgramResources,
 };
 use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
@@ -276,7 +276,7 @@ impl GenericCoupledPlanResources {
         );
 
         let mut ops = ProgramOpRegistry::new();
-        register_ops(&mut ops)?;
+        register_ops_from_recipe(&recipe, &mut ops)?;
 
         Ok(LoweredProgramParts {
             model: model.clone(),

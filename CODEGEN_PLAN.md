@@ -32,10 +32,10 @@ One **model-driven** GPU solver pipeline with:
 - **Generic Linear Solver Module:** `src/solver/gpu/modules/generic_linear_solver.rs` provides a parameterized `GenericLinearSolverModule<P>` that can be instantiated with different preconditioners, decoupling solver infrastructure from specific physics families.
 - **derive_kernel_plan:** Function in `recipe.rs` to derive kernel requirements from `EquationSystem` structure rather than hardcoding in `ModelSpec::kernel_plan()`.
 - **UnifiedFieldResources (EXTENDED):** `src/solver/gpu/modules/unified_field_resources.rs` provides unified field storage (PingPongState, gradients, constants) derived from SolverRecipe:
-  - Now supports flux buffers for face-based storage
-  - Now supports low-mach preconditioning params buffer
+  - Supports flux buffers for face-based storage
+  - Supports low-mach preconditioning params buffer
   - Builder pattern for flexible configuration (`with_flux_buffer()`, `with_low_mach_params()`, `with_gradient_fields()`)
-  - Factory method `for_compressible()` creates compressible-ready resources with grad_rho, grad_rho_u_x, grad_rho_u_y, grad_rho_e
+  - **Model-agnostic**: No solver-family-specific factory methods; callers configure via builder
 - **FieldProvider Trait (NEW):** `src/solver/gpu/modules/field_provider.rs` provides trait abstraction for field buffer access:
   - Common interface for `CompressibleFieldResources` and `UnifiedFieldResources`
   - Enables gradual migration to unified resources without breaking existing code
@@ -57,7 +57,7 @@ One **model-driven** GPU solver pipeline with:
   - Enables bind group code to work with either `CompressibleFieldResources` or `UnifiedFieldResources`
 
 ## Main Blockers
-- **Compressible/Incompressible still use legacy field containers:** The `FieldProvider` trait provides the migration path, and bind group creation now uses `field_binding()` helper. Actual switch to `UnifiedFieldResources` requires creating resources with `for_compressible()` factory.
+- **Compressible/Incompressible still use legacy field containers:** The `FieldProvider` trait provides the migration path, and bind group creation now uses `field_binding()` helper. Actual switch to `UnifiedFieldResources` requires callers to use the builder pattern to configure needed buffers.
 - **Hardcoded Scheme Assumptions:** Runtime lowering often assumes worst-case schemes (e.g., SOU for generic coupled) to allocate resources.
 - **Build-Time Kernel Tables:** Kernel lookup relies on build-time generated tables (`kernel_registry_map.rs`), not yet dynamically derived from scheme expansion.
 - **Template ProgramSpec not yet recipe-driven for Compressible/Incompressible:** These templates still use hardcoded `build_program_spec()` functions in templates.rs.
@@ -66,17 +66,18 @@ One **model-driven** GPU solver pipeline with:
 
 1. **Switch Compressible field storage to UnifiedFieldResources**
    - Bind group creation already uses `FieldProvider` trait via `field_binding()` helper
-   - `UnifiedFieldResources::for_compressible()` factory is ready
-   - Need to replace `create_compressible_field_bind_groups()` call with unified resources
-3. **Implement UnifiedGraphModule for Modules**
+   - Use builder: `UnifiedFieldResourcesBuilder::new(...).with_flux_buffer(...).with_gradient_fields(&[...]).build()`
+   - Keep solver-family knowledge in the compressible plan, not in unified modules
+
+2. **Implement UnifiedGraphModule for Modules**
    - Have GenericCoupledKernelsModule implement `UnifiedGraphModule` trait.
    - Use `build_graph_for_phase()` instead of manual graph construction.
 
-4. **Migrate derive_kernel_plan to Production**
+3. **Migrate derive_kernel_plan to Production**
    - Replace `ModelSpec::kernel_plan()` hardcoded matches with calls to `derive_kernel_plan()`.
    - Extend `derive_kernel_plan` to handle all equation term types.
 
-5. **Linear Solver & Preconditioner Pluggability**
+4. **Linear Solver & Preconditioner Pluggability**
    - [x] Extract FGMRES driver logic to `LinearSolverModule` (done).
    - [x] Create `GenericLinearSolverModule<P>` with pluggable preconditioner (done).
    - [ ] Migrate `CompressibleLinearSolver` to use `GenericLinearSolverModule`.

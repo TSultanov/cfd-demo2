@@ -427,31 +427,6 @@ impl<'a> UnifiedFieldResourcesBuilder<'a> {
     }
 }
 
-/// Factory functions for creating solver-specific field resources.
-impl UnifiedFieldResources {
-    /// Create unified field resources configured for a compressible solver.
-    ///
-    /// This creates:
-    /// - Flux buffer for face-based fluxes
-    /// - Low-mach preconditioning params buffer
-    /// - Gradient buffers for rho, rho_u_x, rho_u_y, rho_e
-    pub fn for_compressible(
-        device: &wgpu::Device,
-        recipe: &SolverRecipe,
-        num_cells: u32,
-        num_faces: u32,
-        state_stride: u32,
-        flux_stride: u32,
-        initial_constants: GpuConstants,
-    ) -> Self {
-        UnifiedFieldResourcesBuilder::new(device, recipe, num_cells, state_stride, initial_constants)
-            .with_flux_buffer(num_faces, flux_stride)
-            .with_low_mach_params()
-            .with_gradient_fields(&["rho", "rho_u_x", "rho_u_y", "rho_e"])
-            .build()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

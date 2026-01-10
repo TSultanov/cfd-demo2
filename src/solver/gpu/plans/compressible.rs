@@ -17,6 +17,7 @@ use crate::solver::gpu::plans::compressible_fgmres::{
 };
 use crate::solver::gpu::plans::compressible_graphs::CompressibleGraphs;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
+use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
@@ -198,11 +199,21 @@ impl CompressiblePlanResources {
     pub async fn new(
         mesh: &Mesh,
         model: ModelSpec,
+        recipe: SolverRecipe,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
         let common = GpuRuntimeCommon::new(mesh, device, queue).await;
         let profile = CompressibleProfile::new();
+
+        // Use recipe to determine if gradients are needed (computed at recipe creation time)
+        let needs_gradients = recipe.needs_gradients();
+
+        // Use recipe stepping mode for outer iterations
+        let outer_iters = match recipe.stepping {
+            crate::solver::gpu::recipe::SteppingMode::Implicit { outer_iters } => outer_iters,
+            _ => 1,
+        };
 
         let unknowns_per_cell = model.system.unknowns_per_cell();
         let layout = &model.state_layout;
@@ -276,7 +287,7 @@ impl CompressiblePlanResources {
             kernels,
             linear_solver: CompressibleLinearSolver::new(),
             graphs: CompressibleGraphs::new(),
-            outer_iters: 1,
+            outer_iters,
             nonconverged_relax: 0.5,
             scalar_row_offsets: lowered.scalar_row_offsets,
             scalar_col_indices: lowered.scalar_col_indices,
@@ -285,10 +296,10 @@ impl CompressiblePlanResources {
             implicit_base_alpha_u: 0.0,
             profile,
             offsets,
-            needs_gradients: false,
+            needs_gradients,
             time_integration: TimeIntegrationModule::new(),
         };
-        solver.update_needs_gradients();
+        // No longer need to call update_needs_gradients - recipe provides this
         Ok(solver)
     }
 

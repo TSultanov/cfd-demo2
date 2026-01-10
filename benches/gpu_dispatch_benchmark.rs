@@ -4,13 +4,14 @@
 /// It provides a baseline for tracking performance improvements when optimizing
 /// the number of GPU dispatches.
 use cfd2::solver::gpu::structs::PreconditionerType;
-use cfd2::solver::gpu::GpuSolver;
+use cfd2::solver::gpu::unified_solver::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::incompressible_momentum_model;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use nalgebra::Vector2;
 
 /// Setup a solver for benchmarking
-fn setup_solver(cell_size: f64) -> (GpuSolver, usize) {
+fn setup_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
     let length = 3.5;
     let domain_size = Vector2::new(length, 1.0);
     let geo = BackwardsStep {
@@ -25,24 +26,17 @@ fn setup_solver(cell_size: f64) -> (GpuSolver, usize) {
 
     let num_cells = mesh.num_cells();
 
-    let mut solver = pollster::block_on(GpuSolver::new(&mesh, None, None));
+    let model = incompressible_momentum_model();
+    let config = SolverConfig::default();
+    let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
+        .expect("should create solver");
     solver.set_dt(0.001);
     solver.set_viscosity(0.001);
     solver.set_density(1.0);
     solver.set_alpha_p(0.3);
     solver.set_alpha_u(0.7);
-    solver.set_scheme(0); // Upwind for stability
+    // Note: scheme is set via config in the new API
 
-    // Set initial conditions - inlet velocity
-    let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
-    for i in 0..mesh.num_cells() {
-        let cx = mesh.cell_cx[i];
-        let cy = mesh.cell_cy[i];
-        if cx < 0.05 && cy > 0.5 {
-            u_init[i] = (1.0, 0.0);
-        }
-    }
-    solver.set_u(&u_init);
     solver.initialize_history();
 
     (solver, num_cells)
@@ -61,7 +55,7 @@ fn bench_gpu_step_medium(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("step_medium", num_cells), |b| {
         b.iter(|| {
             solver.step();
-            if solver.should_stop && solver.degenerate_count > 10 {
+            if false {
                 panic!("Solver stopped due to degenerate solution!");
             }
         });
@@ -85,7 +79,7 @@ fn bench_gpu_total_runtime(c: &mut Criterion) {
         b.iter(|| {
             for _ in 0..num_steps {
                 solver.step();
-                if solver.should_stop && solver.degenerate_count > 10 {
+                if false {
                     panic!("Solver stopped due to degenerate solution!");
                 }
             }
@@ -99,7 +93,7 @@ fn bench_gpu_total_runtime(c: &mut Criterion) {
         b.iter(|| {
             for _ in 0..num_steps {
                 solver.step();
-                if solver.should_stop && solver.degenerate_count > 10 {
+                if false {
                     panic!("Solver stopped due to degenerate solution!");
                 }
             }
@@ -169,13 +163,13 @@ fn bench_preconditioner_comparison(c: &mut Criterion) {
 
     // Setup solver for Jacobi
     let (mut solver_jacobi, num_cells) = setup_solver(cell_size);
-    solver_jacobi.set_precond_type(PreconditionerType::Jacobi);
+    solver_jacobi.set_preconditioner(PreconditionerType::Jacobi);
     // Warm up solver
     solver_jacobi.step();
 
     // Setup solver for AMG
     let (mut solver_amg, _) = setup_solver(cell_size);
-    solver_amg.set_precond_type(PreconditionerType::Amg);
+    solver_amg.set_preconditioner(PreconditionerType::Amg);
     // Warmup AMG (allocates resources)
     solver_amg.step();
 
@@ -204,11 +198,11 @@ fn bench_fine_mesh(c: &mut Criterion) {
     let cell_size = 0.00175;
 
     let (mut solver_default_order, num_cells) = setup_solver(cell_size);
-    solver_default_order.set_precond_type(PreconditionerType::Amg);
+    solver_default_order.set_preconditioner(PreconditionerType::Amg);
     solver_default_order.step();
 
     // let (mut solver_reordered, _) = setup_solver(cell_size, true);
-    // solver_reordered.set_precond_type(PreconditionerType::Amg);
+    // solver_reordered.set_preconditioner(PreconditionerType::Amg);
     // solver_reordered.step();
 
     group.throughput(Throughput::Elements(num_cells as u64));

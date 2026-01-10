@@ -70,6 +70,7 @@ async fn lower_parts_for_template(
             let plan = crate::solver::gpu::plans::compressible::CompressiblePlanResources::new(
                 mesh,
                 model.clone(),
+                recipe.clone(),
                 device,
                 queue,
             )
@@ -113,7 +114,7 @@ async fn lower_parts_for_template(
         }
         ProgramTemplateKind::IncompressibleCoupled => {
             let plan =
-                crate::solver::gpu::structs::GpuSolver::new(mesh, model.clone(), device, queue)
+                crate::solver::gpu::structs::GpuSolver::new(mesh, model.clone(), recipe.clone(), device, queue)
                     .await?;
 
             let context = crate::solver::gpu::context::GpuContext {

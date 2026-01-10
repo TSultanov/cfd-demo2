@@ -1,7 +1,7 @@
 pub mod backend;
 mod codegen;
 pub mod compiler;
-mod gpu;
+pub mod gpu;
 pub mod kernels;
 pub mod mesh;
 pub mod model;

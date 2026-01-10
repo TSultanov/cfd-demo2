@@ -300,7 +300,7 @@ fn main() {
         .output("src/solver/gpu/bindings.rs");
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    if let Err(err) = solver::codegen::emit::emit_incompressible_momentum_wgsl(&manifest_dir) {
+    if let Err(err) = solver::codegen::emit::emit_system_main_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
     let model = solver::model::incompressible_momentum_model();
@@ -458,30 +458,51 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
     let out_path = PathBuf::from(out_dir).join("wgsl_binding_meta.rs");
 
     let gen_dir = solver::codegen::emit::generated_dir_for(manifest_dir);
+    let shader_dir = PathBuf::from(manifest_dir)
+        .join("src")
+        .join("solver")
+        .join("gpu")
+        .join("shaders");
     let shader_paths = [
+        ("amg", shader_dir.join("amg.wgsl")),
+        ("amg_pack", shader_dir.join("amg_pack.wgsl")),
+        ("block_precond", shader_dir.join("block_precond.wgsl")),
+        ("dot_product", shader_dir.join("dot_product.wgsl")),
+        ("dot_product_pair", shader_dir.join("dot_product_pair.wgsl")),
+        ("gmres_cgs", shader_dir.join("gmres_cgs.wgsl")),
+        ("gmres_logic", shader_dir.join("gmres_logic.wgsl")),
+        ("gmres_ops", shader_dir.join("gmres_ops.wgsl")),
+        ("linear_solver", shader_dir.join("linear_solver.wgsl")),
+        ("preconditioner", shader_dir.join("preconditioner.wgsl")),
+        ("scalars", shader_dir.join("scalars.wgsl")),
+        ("schur_precond", shader_dir.join("schur_precond.wgsl")),
         (
-            "compressible_assembly",
-            gen_dir.join("compressible_assembly.wgsl"),
+            "system_main",
+            gen_dir.join("system_main.wgsl"),
         ),
         (
-            "compressible_apply",
-            gen_dir.join("compressible_apply.wgsl"),
+            "ei_assembly",
+            gen_dir.join("ei_assembly.wgsl"),
         ),
         (
-            "compressible_explicit_update",
-            gen_dir.join("compressible_explicit_update.wgsl"),
+            "ei_apply",
+            gen_dir.join("ei_apply.wgsl"),
         ),
         (
-            "compressible_flux_kt",
-            gen_dir.join("compressible_flux_kt.wgsl"),
+            "ei_explicit_update",
+            gen_dir.join("ei_explicit_update.wgsl"),
         ),
         (
-            "compressible_gradients",
-            gen_dir.join("compressible_gradients.wgsl"),
+            "ei_flux_kt",
+            gen_dir.join("ei_flux_kt.wgsl"),
         ),
         (
-            "compressible_update",
-            gen_dir.join("compressible_update.wgsl"),
+            "ei_gradients",
+            gen_dir.join("ei_gradients.wgsl"),
+        ),
+        (
+            "ei_update",
+            gen_dir.join("ei_update.wgsl"),
         ),
         (
             "coupled_assembly_merged",
@@ -547,34 +568,34 @@ fn generate_kernel_registry_map() {
         ),
         ("FluxRhieChow", "flux_rhie_chow", "flux_rhie_chow"),
         (
-            "CompressibleAssembly",
-            "compressible_assembly",
-            "compressible_assembly",
+            "EiAssembly",
+            "ei_assembly",
+            "ei_assembly",
         ),
         (
-            "CompressibleApply",
-            "compressible_apply",
-            "compressible_apply",
+            "EiApply",
+            "ei_apply",
+            "ei_apply",
         ),
         (
-            "CompressibleExplicitUpdate",
-            "compressible_explicit_update",
-            "compressible_explicit_update",
+            "EiExplicitUpdate",
+            "ei_explicit_update",
+            "ei_explicit_update",
         ),
         (
-            "CompressibleGradients",
-            "compressible_gradients",
-            "compressible_gradients",
+            "EiGradients",
+            "ei_gradients",
+            "ei_gradients",
         ),
         (
-            "CompressibleUpdate",
-            "compressible_update",
-            "compressible_update",
+            "EiUpdate",
+            "ei_update",
+            "ei_update",
         ),
         (
-            "CompressibleFluxKt",
-            "compressible_flux_kt",
-            "compressible_flux_kt",
+            "EiFluxKt",
+            "ei_flux_kt",
+            "ei_flux_kt",
         ),
         (
             "GenericCoupledApply",

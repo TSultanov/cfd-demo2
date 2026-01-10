@@ -111,8 +111,8 @@ impl ModelKernelsModule {
 
         // Base mesh+field bind groups (shared by most physics kernels).
         // Choose the anchor kernel that defines the layout.
-        let anchor_kernel = if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)) {
-            KernelId::COMPRESSIBLE_ASSEMBLY
+        let anchor_kernel = if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::EI_ASSEMBLY)) {
+            KernelId::EI_ASSEMBLY
         } else if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::PREPARE_COUPLED)) {
             KernelId::PREPARE_COUPLED
         } else if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::COUPLED_ASSEMBLY)) {
@@ -122,7 +122,7 @@ impl ModelKernelsModule {
         };
 
         let (bg_mesh, bg_fields_ping_pong, bg_solver) = match anchor_kernel {
-            KernelId::COMPRESSIBLE_ASSEMBLY => {
+            KernelId::EI_ASSEMBLY => {
                 let Some(system) = system else {
                     panic!("ModelKernelsModule: compressible kernels require linear system ports");
                 };
@@ -134,8 +134,7 @@ impl ModelKernelsModule {
                     .expect("ModelKernelsModule: missing scalar_row_offsets port");
                 let b_scalar_row_offsets = space.buffer(scalar_row_offsets_port);
 
-                let pipeline_assembly =
-                    &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)];
+                let pipeline_assembly = &pipelines[&KernelPipeline::Kernel(KernelId::EI_ASSEMBLY)];
 
                 let bg_mesh = {
                     let bgl = pipeline_assembly.get_bind_group_layout(0);
@@ -143,7 +142,7 @@ impl ModelKernelsModule {
                         device,
                         "ModelKernels: mesh bind group",
                         &bgl,
-                        wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                        wgsl_meta::EI_ASSEMBLY_BINDINGS,
                         0,
                         |name| {
                             mesh.buffer_for_binding_name(name).map(|buf| {
@@ -162,7 +161,7 @@ impl ModelKernelsModule {
                             device,
                             &format!("ModelKernels: fields bind group {i}"),
                             &bgl,
-                            wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                            wgsl_meta::EI_ASSEMBLY_BINDINGS,
                             1,
                             |name| field_binding(fields, name, i),
                         )
@@ -180,7 +179,7 @@ impl ModelKernelsModule {
                         device,
                         "ModelKernels: solver bind group",
                         &bgl,
-                        wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                        wgsl_meta::EI_ASSEMBLY_BINDINGS,
                         2,
                         |name| match name {
                             "matrix_values" => Some(wgpu::BindingResource::Buffer(
@@ -257,10 +256,9 @@ impl ModelKernelsModule {
             _ => unreachable!("anchor kernel must be one of the known anchors"),
         };
 
-        let bg_apply_fields_ping_pong = if pipelines
-            .contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY))
-        {
-            let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
+        let bg_apply_fields_ping_pong =
+            if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::EI_APPLY)) {
+                let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::EI_APPLY)];
             let bgl = pipeline_apply.get_bind_group_layout(0);
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
@@ -268,7 +266,7 @@ impl ModelKernelsModule {
                     device,
                     &format!("ModelKernels: apply fields bind group {i}"),
                     &bgl,
-                    wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
+                    wgsl_meta::EI_APPLY_BINDINGS,
                     0,
                     |name| field_binding(fields, name, i),
                 )
@@ -280,20 +278,18 @@ impl ModelKernelsModule {
             None
         };
 
-        let bg_apply_solver = if pipelines
-            .contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY))
-        {
+        let bg_apply_solver = if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::EI_APPLY)) {
             let Some(system) = system else {
                 panic!("ModelKernelsModule: apply kernel requires linear system ports");
             };
-            let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
+            let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::EI_APPLY)];
             let bgl = pipeline_apply.get_bind_group_layout(1);
             Some(
                 crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     "ModelKernels: apply solver bind group",
                     &bgl,
-                    wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
+                    wgsl_meta::EI_APPLY_BINDINGS,
                     1,
                     |name| match name {
                         "solution" => Some(wgpu::BindingResource::Buffer(
@@ -310,10 +306,9 @@ impl ModelKernelsModule {
             None
         };
 
-        let bg_fields_group0_ping_pong = if pipelines
-            .contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE))
-        {
-            let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE)];
+        let bg_fields_group0_ping_pong =
+            if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::EI_UPDATE)) {
+                let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::EI_UPDATE)];
             let bgl = pipeline_update.get_bind_group_layout(0);
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
@@ -321,7 +316,7 @@ impl ModelKernelsModule {
                     device,
                     &format!("ModelKernels: fields-only bind group {i}"),
                     &bgl,
-                    wgsl_meta::COMPRESSIBLE_UPDATE_BINDINGS,
+                    wgsl_meta::EI_UPDATE_BINDINGS,
                     0,
                     |name| field_binding(fields, name, i),
                 )
@@ -512,13 +507,13 @@ impl UnifiedGraphModule for ModelKernelsModule {
     fn bind_for_kernel(&self, id: KernelId) -> Option<Self::BindKey> {
         // Map kernel kinds to their bind group requirements
         match id {
-            // Compressible kernels
-            KernelId::COMPRESSIBLE_ASSEMBLY => Some(KernelBindGroups::MeshFieldsSolver),
-            KernelId::COMPRESSIBLE_APPLY => Some(KernelBindGroups::ApplyFieldsSolver),
-            KernelId::COMPRESSIBLE_EXPLICIT_UPDATE => Some(KernelBindGroups::MeshFields),
-            KernelId::COMPRESSIBLE_GRADIENTS => Some(KernelBindGroups::MeshFields),
-            KernelId::COMPRESSIBLE_FLUX_KT => Some(KernelBindGroups::MeshFields),
-            KernelId::COMPRESSIBLE_UPDATE => Some(KernelBindGroups::FieldsOnly),
+            // EI kernels
+            KernelId::EI_ASSEMBLY => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelId::EI_APPLY => Some(KernelBindGroups::ApplyFieldsSolver),
+            KernelId::EI_EXPLICIT_UPDATE => Some(KernelBindGroups::MeshFields),
+            KernelId::EI_GRADIENTS => Some(KernelBindGroups::MeshFields),
+            KernelId::EI_FLUX_KT => Some(KernelBindGroups::MeshFields),
+            KernelId::EI_UPDATE => Some(KernelBindGroups::FieldsOnly),
             // Incompressible kernels
             KernelId::PREPARE_COUPLED => Some(KernelBindGroups::MeshFieldsSolver),
             KernelId::COUPLED_ASSEMBLY => Some(KernelBindGroups::MeshFieldsSolver),

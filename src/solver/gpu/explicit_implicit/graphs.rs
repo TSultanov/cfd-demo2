@@ -108,26 +108,26 @@ impl CompressibleGraphs {
         if include_gradients {
             nodes.push(ModuleNode::Compute(ComputeSpec {
                 label: "compressible:gradients",
-                pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_GRADIENTS),
+                pipeline: KernelPipeline::Kernel(KernelId::EI_GRADIENTS),
                 bind: KernelBindGroups::MeshFields,
                 dispatch: DispatchKind::Cells,
             }));
         }
         nodes.push(ModuleNode::Compute(ComputeSpec {
             label: "compressible:flux_kt",
-            pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_FLUX_KT),
+            pipeline: KernelPipeline::Kernel(KernelId::EI_FLUX_KT),
             bind: KernelBindGroups::MeshFields,
             dispatch: DispatchKind::Faces,
         }));
         nodes.push(ModuleNode::Compute(ComputeSpec {
             label: "compressible:explicit_update",
-            pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_EXPLICIT_UPDATE),
+            pipeline: KernelPipeline::Kernel(KernelId::EI_EXPLICIT_UPDATE),
             bind: KernelBindGroups::MeshFields,
             dispatch: DispatchKind::Cells,
         }));
         nodes.push(ModuleNode::Compute(ComputeSpec {
             label: "compressible:primitive_update",
-            pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE),
+            pipeline: KernelPipeline::Kernel(KernelId::EI_UPDATE),
             bind: KernelBindGroups::FieldsOnly,
             dispatch: DispatchKind::Cells,
         }));
@@ -141,14 +141,14 @@ impl CompressibleGraphs {
         if include_gradients {
             nodes.push(ModuleNode::Compute(ComputeSpec {
                 label: "compressible:gradients",
-                pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_GRADIENTS),
+                pipeline: KernelPipeline::Kernel(KernelId::EI_GRADIENTS),
                 bind: KernelBindGroups::MeshFields,
                 dispatch: DispatchKind::Cells,
             }));
         }
         nodes.push(ModuleNode::Compute(ComputeSpec {
             label: "compressible:assembly",
-            pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY),
+            pipeline: KernelPipeline::Kernel(KernelId::EI_ASSEMBLY),
             bind: KernelBindGroups::MeshFieldsSolver,
             dispatch: DispatchKind::Cells,
         }));
@@ -158,7 +158,7 @@ impl CompressibleGraphs {
     fn build_implicit_apply_module_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "compressible:apply",
-            pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY),
+            pipeline: KernelPipeline::Kernel(KernelId::EI_APPLY),
             bind: KernelBindGroups::ApplyFieldsSolver,
             dispatch: DispatchKind::Cells,
         })])
@@ -167,7 +167,7 @@ impl CompressibleGraphs {
     fn build_primitive_update_module_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "compressible:primitive_update",
-            pipeline: KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE),
+            pipeline: KernelPipeline::Kernel(KernelId::EI_UPDATE),
             bind: KernelBindGroups::FieldsOnly,
             dispatch: DispatchKind::Cells,
         })])

@@ -34,7 +34,7 @@ impl ModelSpec {
 
         let flux = if has(KernelKind::FluxRhieChow) {
             Some(FluxSpec { stride: 1 })
-        } else if has(KernelKind::CompressibleFluxKt) {
+        } else if has(KernelKind::EiFluxKt) {
             Some(FluxSpec {
                 stride: self.system.unknowns_per_cell(),
             })
@@ -42,23 +42,23 @@ impl ModelSpec {
             None
         };
 
-        let requires_low_mach_params = has(KernelKind::CompressibleFluxKt)
-            || has(KernelKind::CompressibleAssembly)
-            || has(KernelKind::CompressibleApply)
-            || has(KernelKind::CompressibleUpdate)
-            || has(KernelKind::CompressibleExplicitUpdate)
-            || has(KernelKind::CompressibleGradients);
+        let requires_low_mach_params = has(KernelKind::EiFluxKt)
+            || has(KernelKind::EiAssembly)
+            || has(KernelKind::EiApply)
+            || has(KernelKind::EiUpdate)
+            || has(KernelKind::EiExplicitUpdate)
+            || has(KernelKind::EiGradients);
 
         let gradient_storage = if has(KernelKind::GenericCoupledAssembly) {
             GradientStorage::PackedState
-        } else if has(KernelKind::CompressibleFluxKt) {
+        } else if has(KernelKind::EiFluxKt) {
             GradientStorage::PerFieldComponents
         } else {
             GradientStorage::PerFieldName
         };
 
         let required_gradient_fields = if gradient_storage == GradientStorage::PerFieldComponents
-            && (has(KernelKind::CompressibleFluxKt) || has(KernelKind::CompressibleGradients))
+            && (has(KernelKind::EiFluxKt) || has(KernelKind::EiGradients))
         {
             self.system
                 .equations()
@@ -518,7 +518,7 @@ mod tests {
         assert_eq!(model.system.equations().len(), 3);
         assert_eq!(model.system.equations()[1].terms().len(), 2);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
-        assert!(model.kernel_plan().contains(KernelKind::CompressibleFluxKt));
+        assert!(model.kernel_plan().contains(KernelKind::EiFluxKt));
     }
 
     #[test]

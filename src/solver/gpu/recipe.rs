@@ -237,21 +237,21 @@ impl SolverRecipe {
         for id in crate::solver::model::kernel::derive_kernel_ids(&model.system) {
             // Some models include a gradients kernel in the plan, but for schemes that do not
             // require gradients we can skip it (if nothing else forces gradients).
-            if id == KernelId::COMPRESSIBLE_GRADIENTS && !needs_gradients {
+            if id == KernelId::EI_GRADIENTS && !needs_gradients {
                 continue;
             }
 
             let phase = match id {
-                KernelId::COMPRESSIBLE_GRADIENTS => KernelPhase::Gradients,
-                KernelId::COMPRESSIBLE_FLUX_KT => KernelPhase::FluxComputation,
-                KernelId::COMPRESSIBLE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
+                KernelId::EI_GRADIENTS => KernelPhase::Gradients,
+                KernelId::EI_FLUX_KT => KernelPhase::FluxComputation,
+                KernelId::EI_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
 
                 KernelId::COUPLED_ASSEMBLY
                 | KernelId::PRESSURE_ASSEMBLY
-                | KernelId::COMPRESSIBLE_ASSEMBLY
+                | KernelId::EI_ASSEMBLY
                 | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
 
-                KernelId::COMPRESSIBLE_APPLY | KernelId::GENERIC_COUPLED_APPLY => {
+                KernelId::EI_APPLY | KernelId::GENERIC_COUPLED_APPLY => {
                     KernelPhase::Apply
                 }
 
@@ -259,14 +259,14 @@ impl SolverRecipe {
                     KernelPhase::Update
                 }
 
-                KernelId::COMPRESSIBLE_UPDATE => KernelPhase::PrimitiveRecovery,
+                KernelId::EI_UPDATE => KernelPhase::PrimitiveRecovery,
 
                 // Preparation kernels (or legacy defaults)
                 _ => KernelPhase::Preparation,
             };
 
             let dispatch = match id {
-                KernelId::FLUX_RHIE_CHOW | KernelId::COMPRESSIBLE_FLUX_KT => DispatchKind::Faces,
+                KernelId::FLUX_RHIE_CHOW | KernelId::EI_FLUX_KT => DispatchKind::Faces,
                 _ => DispatchKind::Cells,
             };
 
@@ -554,7 +554,7 @@ impl SolverRecipe {
 /// Derive stepping mode from model structure.
 fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelId]) -> SteppingMode {
     // Check for compressible (can be explicit or implicit)
-    if kernels.contains(&KernelId::COMPRESSIBLE_EXPLICIT_UPDATE) {
+    if kernels.contains(&KernelId::EI_EXPLICIT_UPDATE) {
         // Has explicit path, default to implicit with fallback
         return SteppingMode::Implicit { outer_iters: 3 };
     }

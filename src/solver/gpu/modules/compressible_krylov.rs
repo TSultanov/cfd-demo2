@@ -134,8 +134,7 @@ impl CompressibleKrylovModule {
                 push_constant_ranges: &[],
             });
 
-        let shader_precond =
-            bindings::compressible_precond::create_shader_module_embed_source(device);
+        let shader_precond = bindings::block_precond::create_shader_module_embed_source(device);
         let make_precond_pipeline =
             |label: &str, entry: &str, layout: &wgpu::PipelineLayout| -> wgpu::ComputePipeline {
                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -202,8 +201,7 @@ impl CompressibleKrylovModule {
             bind_group_layouts: &[&bgl_pack, &bgl_pack_params],
             push_constant_ranges: &[],
         });
-        let shader_pack =
-            bindings::compressible_amg_pack::create_shader_module_embed_source(device);
+        let shader_pack = bindings::amg_pack::create_shader_module_embed_source(device);
         let make_pack_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),

@@ -1,12 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::compressible_apply::generate_compressible_apply_wgsl;
-use super::compressible_assembly::generate_compressible_assembly_wgsl;
-use super::compressible_explicit_update::generate_compressible_explicit_update_wgsl;
-use super::compressible_flux_kt::generate_compressible_flux_kt_wgsl;
-use super::compressible_gradients::generate_compressible_gradients_wgsl;
-use super::compressible_update::generate_compressible_update_wgsl;
+use super::compressible_apply::generate_ei_apply_wgsl;
+use super::compressible_assembly::generate_ei_assembly_wgsl;
+use super::compressible_explicit_update::generate_ei_explicit_update_wgsl;
+use super::compressible_flux_kt::generate_ei_flux_kt_wgsl;
+use super::compressible_gradients::generate_ei_gradients_wgsl;
+use super::compressible_update::generate_ei_update_wgsl;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
 use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use super::generic_coupled_kernels::{
@@ -74,13 +74,13 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
         KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
         KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl".to_string(),
         KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
-        KernelKind::IncompressibleMomentum => "incompressible_momentum.wgsl".to_string(),
-        KernelKind::CompressibleAssembly => "compressible_assembly.wgsl".to_string(),
-        KernelKind::CompressibleApply => "compressible_apply.wgsl".to_string(),
-        KernelKind::CompressibleGradients => "compressible_gradients.wgsl".to_string(),
-        KernelKind::CompressibleExplicitUpdate => "compressible_explicit_update.wgsl".to_string(),
-        KernelKind::CompressibleUpdate => "compressible_update.wgsl".to_string(),
-        KernelKind::CompressibleFluxKt => "compressible_flux_kt.wgsl".to_string(),
+        KernelKind::SystemMain => "system_main.wgsl".to_string(),
+        KernelKind::EiAssembly => "ei_assembly.wgsl".to_string(),
+        KernelKind::EiApply => "ei_apply.wgsl".to_string(),
+        KernelKind::EiGradients => "ei_gradients.wgsl".to_string(),
+        KernelKind::EiExplicitUpdate => "ei_explicit_update.wgsl".to_string(),
+        KernelKind::EiUpdate => "ei_update.wgsl".to_string(),
+        KernelKind::EiFluxKt => "ei_flux_kt.wgsl".to_string(),
         KernelKind::GenericCoupledAssembly => {
             format!("generic_coupled_assembly_{}.wgsl", model.id)
         }
@@ -117,30 +117,30 @@ fn generate_kernel_wgsl(
             let fields = IncompressibleMomentumFields::new();
             generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &fields)
         }
-        KernelKind::IncompressibleMomentum => generate_wgsl(&discrete),
-        KernelKind::CompressibleAssembly => {
+        KernelKind::SystemMain => generate_wgsl(&discrete),
+        KernelKind::EiAssembly => {
             let fields = CompressibleFields::new();
-            generate_compressible_assembly_wgsl(&model.state_layout, &fields)
+            generate_ei_assembly_wgsl(&model.state_layout, &fields)
         }
-        KernelKind::CompressibleApply => {
+        KernelKind::EiApply => {
             let fields = CompressibleFields::new();
-            generate_compressible_apply_wgsl(&model.state_layout, &fields)
+            generate_ei_apply_wgsl(&model.state_layout, &fields)
         }
-        KernelKind::CompressibleGradients => {
+        KernelKind::EiGradients => {
             let fields = CompressibleFields::new();
-            generate_compressible_gradients_wgsl(&model.state_layout, &fields)
+            generate_ei_gradients_wgsl(&model.state_layout, &fields)
         }
-        KernelKind::CompressibleExplicitUpdate => {
+        KernelKind::EiExplicitUpdate => {
             let fields = CompressibleFields::new();
-            generate_compressible_explicit_update_wgsl(&model.state_layout, &fields)
+            generate_ei_explicit_update_wgsl(&model.state_layout, &fields)
         }
-        KernelKind::CompressibleUpdate => {
+        KernelKind::EiUpdate => {
             let fields = CompressibleFields::new();
-            generate_compressible_update_wgsl(&model.state_layout, &fields)
+            generate_ei_update_wgsl(&model.state_layout, &fields)
         }
-        KernelKind::CompressibleFluxKt => {
+        KernelKind::EiFluxKt => {
             let fields = CompressibleFields::new();
-            generate_compressible_flux_kt_wgsl(&model.state_layout, &fields)
+            generate_ei_flux_kt_wgsl(&model.state_layout, &fields)
         }
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = expand_schemes(&model.system, schemes)
@@ -243,12 +243,12 @@ pub fn emit_flux_rhie_chow_codegen_wgsl(base_dir: impl AsRef<Path>) -> std::io::
     emit_model_kernel_wgsl(base_dir, &model, KernelKind::FluxRhieChow)
 }
 
-pub fn emit_incompressible_momentum_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+pub fn emit_system_main_wgsl(base_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let schemes = SchemeRegistry::new(Scheme::Upwind);
-    emit_incompressible_momentum_wgsl_with_schemes(base_dir, &schemes)
+    emit_system_main_wgsl_with_schemes(base_dir, &schemes)
 }
 
-pub fn emit_incompressible_momentum_wgsl_with_schemes(
+pub fn emit_system_main_wgsl_with_schemes(
     base_dir: impl AsRef<Path>,
     schemes: &SchemeRegistry,
 ) -> std::io::Result<PathBuf> {
@@ -257,7 +257,7 @@ pub fn emit_incompressible_momentum_wgsl_with_schemes(
         base_dir,
         &model,
         schemes,
-        KernelKind::IncompressibleMomentum,
+        KernelKind::SystemMain,
     )
 }
 
@@ -401,11 +401,11 @@ mod tests {
     }
 
     #[test]
-    fn emit_incompressible_momentum_wgsl_writes_expected_output() {
+    fn emit_system_main_wgsl_writes_expected_output() {
         let base_dir = temp_base_dir();
-        let output = emit_incompressible_momentum_wgsl(&base_dir).unwrap();
+        let output = emit_system_main_wgsl(&base_dir).unwrap();
 
-        assert!(output.ends_with("incompressible_momentum.wgsl"));
+        assert!(output.ends_with("system_main.wgsl"));
         let content = fs::read_to_string(&output).unwrap();
         assert!(content.contains("// equation: U (vector2)"));
 
@@ -414,12 +414,12 @@ mod tests {
     }
 
     #[test]
-    fn emit_incompressible_momentum_wgsl_respects_scheme_registry() {
+    fn emit_system_main_wgsl_respects_scheme_registry() {
         let base_dir = temp_base_dir();
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term_names(TermOp::Div, Some("phi"), "U", Scheme::QUICK);
 
-        let output = emit_incompressible_momentum_wgsl_with_schemes(&base_dir, &registry).unwrap();
+        let output = emit_system_main_wgsl_with_schemes(&base_dir, &registry).unwrap();
         let content = fs::read_to_string(&output).unwrap();
 
         assert!(content.contains("term_div_phi_U_quick"));

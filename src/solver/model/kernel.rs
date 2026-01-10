@@ -5,13 +5,13 @@ pub enum KernelKind {
     PressureAssembly,
     UpdateFieldsFromCoupled,
     FluxRhieChow,
-    IncompressibleMomentum,
-    CompressibleAssembly,
-    CompressibleApply,
-    CompressibleGradients,
-    CompressibleExplicitUpdate,
-    CompressibleUpdate,
-    CompressibleFluxKt,
+    SystemMain,
+    EiAssembly,
+    EiApply,
+    EiGradients,
+    EiExplicitUpdate,
+    EiUpdate,
+    EiFluxKt,
     GenericCoupledAssembly,
     GenericCoupledApply,
     GenericCoupledUpdate,
@@ -31,12 +31,14 @@ impl KernelId {
     pub const UPDATE_FIELDS_FROM_COUPLED: KernelId = KernelId("update_fields_from_coupled");
     pub const FLUX_RHIE_CHOW: KernelId = KernelId("flux_rhie_chow");
 
-    pub const COMPRESSIBLE_ASSEMBLY: KernelId = KernelId("compressible_assembly");
-    pub const COMPRESSIBLE_APPLY: KernelId = KernelId("compressible_apply");
-    pub const COMPRESSIBLE_GRADIENTS: KernelId = KernelId("compressible_gradients");
-    pub const COMPRESSIBLE_EXPLICIT_UPDATE: KernelId = KernelId("compressible_explicit_update");
-    pub const COMPRESSIBLE_UPDATE: KernelId = KernelId("compressible_update");
-    pub const COMPRESSIBLE_FLUX_KT: KernelId = KernelId("compressible_flux_kt");
+    pub const SYSTEM_MAIN: KernelId = KernelId("system_main");
+
+    pub const EI_ASSEMBLY: KernelId = KernelId("ei_assembly");
+    pub const EI_APPLY: KernelId = KernelId("ei_apply");
+    pub const EI_GRADIENTS: KernelId = KernelId("ei_gradients");
+    pub const EI_EXPLICIT_UPDATE: KernelId = KernelId("ei_explicit_update");
+    pub const EI_UPDATE: KernelId = KernelId("ei_update");
+    pub const EI_FLUX_KT: KernelId = KernelId("ei_flux_kt");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
@@ -55,13 +57,13 @@ impl From<KernelKind> for KernelId {
             KernelKind::PressureAssembly => KernelId::PRESSURE_ASSEMBLY,
             KernelKind::UpdateFieldsFromCoupled => KernelId::UPDATE_FIELDS_FROM_COUPLED,
             KernelKind::FluxRhieChow => KernelId::FLUX_RHIE_CHOW,
-            KernelKind::IncompressibleMomentum => KernelId("incompressible_momentum"),
-            KernelKind::CompressibleAssembly => KernelId::COMPRESSIBLE_ASSEMBLY,
-            KernelKind::CompressibleApply => KernelId::COMPRESSIBLE_APPLY,
-            KernelKind::CompressibleGradients => KernelId::COMPRESSIBLE_GRADIENTS,
-            KernelKind::CompressibleExplicitUpdate => KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
-            KernelKind::CompressibleUpdate => KernelId::COMPRESSIBLE_UPDATE,
-            KernelKind::CompressibleFluxKt => KernelId::COMPRESSIBLE_FLUX_KT,
+            KernelKind::SystemMain => KernelId::SYSTEM_MAIN,
+            KernelKind::EiAssembly => KernelId::EI_ASSEMBLY,
+            KernelKind::EiApply => KernelId::EI_APPLY,
+            KernelKind::EiGradients => KernelId::EI_GRADIENTS,
+            KernelKind::EiExplicitUpdate => KernelId::EI_EXPLICIT_UPDATE,
+            KernelKind::EiUpdate => KernelId::EI_UPDATE,
+            KernelKind::EiFluxKt => KernelId::EI_FLUX_KT,
             KernelKind::GenericCoupledAssembly => KernelId::GENERIC_COUPLED_ASSEMBLY,
             KernelKind::GenericCoupledApply => KernelId::GENERIC_COUPLED_APPLY,
             KernelKind::GenericCoupledUpdate => KernelId::GENERIC_COUPLED_UPDATE,
@@ -185,12 +187,12 @@ fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
     // path even if it accidentally also matches other coupling patterns.
     if req.has_div_flux {
         return KernelPlan::new(vec![
-            KernelKind::CompressibleGradients,
-            KernelKind::CompressibleFluxKt,
-            KernelKind::CompressibleExplicitUpdate,
-            KernelKind::CompressibleAssembly,
-            KernelKind::CompressibleApply,
-            KernelKind::CompressibleUpdate,
+            KernelKind::EiGradients,
+            KernelKind::EiFluxKt,
+            KernelKind::EiExplicitUpdate,
+            KernelKind::EiAssembly,
+            KernelKind::EiApply,
+            KernelKind::EiUpdate,
         ]);
     }
 
@@ -216,12 +218,12 @@ fn synthesize_kernel_ids(req: &KernelRequirements) -> Vec<KernelId> {
     // path even if it accidentally also matches other coupling patterns.
     if req.has_div_flux {
         return vec![
-            KernelId::COMPRESSIBLE_GRADIENTS,
-            KernelId::COMPRESSIBLE_FLUX_KT,
-            KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
-            KernelId::COMPRESSIBLE_ASSEMBLY,
-            KernelId::COMPRESSIBLE_APPLY,
-            KernelId::COMPRESSIBLE_UPDATE,
+            KernelId::EI_GRADIENTS,
+            KernelId::EI_FLUX_KT,
+            KernelId::EI_EXPLICIT_UPDATE,
+            KernelId::EI_ASSEMBLY,
+            KernelId::EI_APPLY,
+            KernelId::EI_UPDATE,
         ];
     }
 

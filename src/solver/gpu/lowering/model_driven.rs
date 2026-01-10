@@ -2,11 +2,10 @@ use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanPa
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
-use crate::solver::model::ModelSpec;
+use crate::solver::model::{ModelFields, ModelSpec};
 use std::collections::HashMap;
 
 use super::models;
-use super::templates::ProgramTemplateKind;
 use super::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 
 pub(crate) async fn lower_program_model_driven(
@@ -24,8 +23,7 @@ pub(crate) async fn lower_program_model_driven(
         config.preconditioner,
     )?;
 
-    let template = ProgramTemplateKind::for_model(model)?;
-    let parts = lower_parts_for_template(template, mesh, model, recipe.clone(), device, queue).await?;
+    let parts = lower_parts_for_model(mesh, model, recipe.clone(), device, queue).await?;
 
     // Program spec is now always recipe-driven (with stable legacy templates
     // emitted when the kernel set matches those families).
@@ -55,16 +53,15 @@ pub(crate) async fn lower_program_model_driven(
     Ok(plan)
 }
 
-async fn lower_parts_for_template(
-    template: ProgramTemplateKind,
+async fn lower_parts_for_model(
     mesh: &Mesh,
     model: &ModelSpec,
     recipe: SolverRecipe,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
-    match template {
-        ProgramTemplateKind::Compressible => {
+    match &model.fields {
+        ModelFields::Compressible(_) => {
             let plan = crate::solver::gpu::plans::compressible::CompressiblePlanResources::new(
                 mesh,
                 model.clone(),
@@ -110,7 +107,7 @@ async fn lower_parts_for_template(
                 },
             })
         }
-        ProgramTemplateKind::IncompressibleCoupled => {
+        ModelFields::Incompressible(_) => {
             let plan =
                 crate::solver::gpu::structs::GpuSolver::new(mesh, model.clone(), recipe.clone(), device, queue)
                     .await?;
@@ -151,7 +148,7 @@ async fn lower_parts_for_template(
                 },
             })
         }
-        ProgramTemplateKind::GenericCoupledScalar => {
+        ModelFields::GenericCoupled(_) => {
             crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
                 mesh,
                 model.clone(),

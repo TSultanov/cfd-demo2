@@ -14,7 +14,7 @@ One model-driven GPU solver pipeline with:
 - **No handwritten kernel scheduling:** ordering/phase membership is part of the recipe emitted from model+methods.
 - **No handwritten kernel lookup tables:** runtime only asks for `KernelId` and receives generated WGSL + binding metadata.
 - **No handwritten bind groups:** host binding is assembled from generated binding metadata + a uniform resource registry.
-- **Extensibility contract:** adding a new PDE term or method should require edits only in codegen/model metadata + the term/method expander, not in runtime orchestration.
+- **Codegen agnostic to the PDE model** - `src/solver/codegen` must ot have dependencies on `src/solver/model`. Adding new PDE should only require editing `src/solver/model` without touching the codegen.
 
 ## Status Snapshot (as of 2026-01-11)
 

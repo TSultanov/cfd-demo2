@@ -89,17 +89,86 @@ impl KernelPlan {
 }
 
 pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem) -> KernelPlan {
+    let req = analyze_kernel_requirements(system);
+    synthesize_kernel_plan(&req)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PressureCoupling {
+    momentum: crate::solver::model::backend::FieldRef,
+    pressure: crate::solver::model::backend::FieldRef,
+}
+
+#[derive(Debug, Clone, Default)]
+struct KernelRequirements {
+    has_div_flux: bool,
+    pressure_coupling: Option<PressureCoupling>,
+}
+
+fn analyze_kernel_requirements(system: &crate::solver::model::backend::EquationSystem) -> KernelRequirements {
     use crate::solver::model::backend::{FieldKind, FieldRef, TermOp};
     use std::collections::{HashMap, HashSet};
 
     let equations = system.equations();
 
-    // 1) Detect compressible-like systems: flux-divergence terms imply face-flux transport.
-    // This is a structural signal from the equation system (not model family).
     let has_div_flux = equations
         .iter()
         .any(|eq| eq.terms().iter().any(|t| t.op == TermOp::DivFlux));
-    if has_div_flux {
+
+    // Build a lookup for equations by target field.
+    let mut eq_by_target: HashMap<FieldRef, usize> = HashMap::new();
+    for (idx, eq) in equations.iter().enumerate() {
+        eq_by_target.insert(*eq.target(), idx);
+    }
+
+    // Detect incompressible momentum+pressure coupling structurally:
+    // - find a vector-target equation that takes Grad(p) for some scalar p
+    // - require some transport operator (Div or Laplacian) on the momentum equation
+    // - require a Laplacian term on the pressure equation targeting p
+    let mut candidates: Vec<PressureCoupling> = Vec::new();
+    for eq in equations {
+        if eq.target().kind() != FieldKind::Vector2 {
+            continue;
+        }
+
+        let momentum = *eq.target();
+        let has_transport = eq
+            .terms()
+            .iter()
+            .any(|t| matches!(t.op, TermOp::Div | TermOp::Laplacian));
+        if !has_transport {
+            continue;
+        }
+
+        let mut grad_scalars: HashSet<FieldRef> = HashSet::new();
+        for term in eq.terms() {
+            if term.op == TermOp::Grad && term.field.kind() == FieldKind::Scalar {
+                grad_scalars.insert(term.field);
+            }
+        }
+
+        for pressure in grad_scalars {
+            let Some(&p_eq_idx) = eq_by_target.get(&pressure) else {
+                continue;
+            };
+            let p_eq = &equations[p_eq_idx];
+            let p_has_laplacian = p_eq.terms().iter().any(|t| t.op == TermOp::Laplacian);
+            if p_has_laplacian {
+                candidates.push(PressureCoupling { momentum, pressure });
+            }
+        }
+    }
+
+    KernelRequirements {
+        has_div_flux,
+        pressure_coupling: (candidates.len() == 1).then(|| candidates[0]),
+    }
+}
+
+fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
+    // Priority order is intentional: if a system uses DivFlux it should use the compressible
+    // path even if it accidentally also matches other coupling patterns.
+    if req.has_div_flux {
         return KernelPlan::new(vec![
             KernelKind::CompressibleGradients,
             KernelKind::CompressibleFluxKt,
@@ -110,54 +179,7 @@ pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem
         ]);
     }
 
-    // Build a lookup for equations by target field.
-    let mut eq_by_target: HashMap<FieldRef, usize> = HashMap::new();
-    for (idx, eq) in equations.iter().enumerate() {
-        eq_by_target.insert(*eq.target(), idx);
-    }
-
-    // 2) Detect incompressible momentum+pressure splitting structurally:
-    // - find a vector-target equation that takes a gradient of some scalar field p
-    // - find an equation that solves for that scalar p (target==p) and contains a Laplacian
-    // - require some transport operator (Div or Laplacian) on the vector equation
-    // This is more general than "two equations" and does not depend on specific field names.
-    let mut candidates: Vec<(usize, usize)> = Vec::new();
-    for (vec_idx, eq) in equations.iter().enumerate() {
-        if eq.target().kind() != FieldKind::Vector2 {
-            continue;
-        }
-
-        let vec_has_transport = eq
-            .terms()
-            .iter()
-            .any(|t| matches!(t.op, TermOp::Div | TermOp::Laplacian));
-        if !vec_has_transport {
-            continue;
-        }
-
-        let mut grad_scalars: HashSet<FieldRef> = HashSet::new();
-        for term in eq.terms() {
-            if term.op != TermOp::Grad {
-                continue;
-            }
-            if term.field.kind() == FieldKind::Scalar {
-                grad_scalars.insert(term.field);
-            }
-        }
-
-        for p in grad_scalars {
-            if let Some(&p_idx) = eq_by_target.get(&p) {
-                let p_eq = &equations[p_idx];
-                let p_has_laplacian = p_eq.terms().iter().any(|t| t.op == TermOp::Laplacian);
-                if p_has_laplacian {
-                    candidates.push((vec_idx, p_idx));
-                }
-            }
-        }
-    }
-
-    // If there is an unambiguous pressure coupling, use the incompressible coupled pipeline.
-    if candidates.len() == 1 {
+    if req.pressure_coupling.is_some() {
         return KernelPlan::new(vec![
             KernelKind::PrepareCoupled,
             KernelKind::FluxRhieChow,
@@ -167,7 +189,6 @@ pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem
         ]);
     }
 
-    // Default: generic coupled path.
     KernelPlan::new(vec![
         KernelKind::GenericCoupledAssembly,
         KernelKind::GenericCoupledApply,

@@ -44,6 +44,10 @@ impl KernelId {
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
     pub const GENERIC_COUPLED_UPDATE: KernelId = KernelId("generic_coupled_update");
 
+    // Handwritten solver-infrastructure kernels (single-entrypoint compute shaders).
+    pub const DOT_PRODUCT: KernelId = KernelId("dot_product");
+    pub const DOT_PRODUCT_PAIR: KernelId = KernelId("dot_product_pair");
+
     pub fn as_str(self) -> &'static str {
         self.0
     }

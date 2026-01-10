@@ -3,6 +3,8 @@ use super::state::StateResources;
 use crate::solver::gpu::bindings::dot_product;
 use crate::solver::gpu::bindings::dot_product_pair;
 use crate::solver::gpu::bindings::linear_solver;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::model::KernelId;
 
 pub struct PipelineResources {
     pub bg_solver: wgpu::BindGroup,
@@ -307,8 +309,18 @@ pub fn init_pipelines(
     let pipeline_spmv_p_v = linear_solver::compute::create_spmv_p_v_pipeline_embed_source(device);
     let pipeline_spmv_s_t = linear_solver::compute::create_spmv_s_t_pipeline_embed_source(device);
 
-    let pipeline_dot = dot_product::compute::create_main_pipeline_embed_source(device);
-    let pipeline_dot_pair = dot_product_pair::compute::create_main_pipeline_embed_source(device);
+    let pipeline_dot = {
+        let source = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
+            .unwrap_or_else(|err| panic!("missing dot_product kernel registry entry: {err}"));
+        (source.create_pipeline)(device)
+    };
+    let pipeline_dot_pair = {
+        let source = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
+            .unwrap_or_else(|err| {
+                panic!("missing dot_product_pair kernel registry entry: {err}")
+            });
+        (source.create_pipeline)(device)
+    };
 
     let pipeline_bicgstab_update_x_r =
         linear_solver::compute::create_bicgstab_update_x_r_pipeline_embed_source(device);

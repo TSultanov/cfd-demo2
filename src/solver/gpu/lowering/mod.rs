@@ -6,7 +6,6 @@ use crate::solver::model::ModelSpec;
 pub(crate) mod kernel_registry;
 mod model_driven;
 pub(crate) mod models;
-mod templates;
 pub(crate) mod types;
 pub(crate) mod unified_registry;
 

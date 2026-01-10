@@ -8,7 +8,36 @@ use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::env;
 
-use crate::solver::gpu::lowering::templates::compressible as op_ids;
+mod op_ids {
+    use crate::solver::gpu::plans::program::{CondOpKind, CountOpKind, GraphOpKind, HostOpKind};
+
+    pub(crate) const G_EXPLICIT_GRAPH: GraphOpKind = GraphOpKind("compressible:explicit_graph");
+    pub(crate) const G_IMPLICIT_GRAD_ASSEMBLY: GraphOpKind =
+        GraphOpKind("compressible:implicit_grad_assembly");
+    pub(crate) const G_IMPLICIT_SNAPSHOT: GraphOpKind = GraphOpKind("compressible:implicit_snapshot");
+    pub(crate) const G_IMPLICIT_APPLY: GraphOpKind = GraphOpKind("compressible:implicit_apply");
+    pub(crate) const G_PRIMITIVE_UPDATE: GraphOpKind = GraphOpKind("compressible:primitive_update");
+
+    pub(crate) const H_EXPLICIT_PREPARE: HostOpKind = HostOpKind("compressible:explicit_prepare");
+    pub(crate) const H_EXPLICIT_FINALIZE: HostOpKind = HostOpKind("compressible:explicit_finalize");
+    pub(crate) const H_IMPLICIT_PREPARE: HostOpKind = HostOpKind("compressible:implicit_prepare");
+    pub(crate) const H_IMPLICIT_SET_ITER_PARAMS: HostOpKind =
+        HostOpKind("compressible:implicit_set_iter_params");
+    pub(crate) const H_IMPLICIT_SOLVE_FGMRES: HostOpKind =
+        HostOpKind("compressible:implicit_solve_fgmres");
+    pub(crate) const H_IMPLICIT_RECORD_STATS: HostOpKind =
+        HostOpKind("compressible:implicit_record_stats");
+    pub(crate) const H_IMPLICIT_SET_ALPHA: HostOpKind = HostOpKind("compressible:implicit_set_alpha");
+    pub(crate) const H_IMPLICIT_RESTORE_ALPHA: HostOpKind =
+        HostOpKind("compressible:implicit_restore_alpha");
+    pub(crate) const H_IMPLICIT_ADVANCE_OUTER_IDX: HostOpKind =
+        HostOpKind("compressible:implicit_advance_outer_idx");
+    pub(crate) const H_IMPLICIT_FINALIZE: HostOpKind = HostOpKind("compressible:implicit_finalize");
+
+    pub(crate) const C_SHOULD_USE_EXPLICIT: CondOpKind = CondOpKind("compressible:should_use_explicit");
+    pub(crate) const N_IMPLICIT_OUTER_ITERS: CountOpKind =
+        CountOpKind("compressible:implicit_outer_iters");
+}
 
 pub(in crate::solver::gpu::lowering) struct CompressibleProgramResources {
     plan: CompressiblePlanResources,

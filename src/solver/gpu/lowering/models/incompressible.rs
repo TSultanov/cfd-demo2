@@ -6,7 +6,36 @@ use crate::solver::gpu::plans::plan_instance::{
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 
-use crate::solver::gpu::lowering::templates::incompressible_coupled as op_ids;
+mod op_ids {
+    use crate::solver::gpu::plans::program::{CondOpKind, CountOpKind, GraphOpKind, HostOpKind};
+
+    pub(crate) const G_COUPLED_PREPARE_ASSEMBLY: GraphOpKind =
+        GraphOpKind("incompressible:coupled_prepare_assembly");
+    pub(crate) const G_COUPLED_ASSEMBLY: GraphOpKind = GraphOpKind("incompressible:coupled_assembly");
+    pub(crate) const G_COUPLED_UPDATE: GraphOpKind = GraphOpKind("incompressible:coupled_update");
+    pub(crate) const G_COUPLED_INIT_PREPARE: GraphOpKind =
+        GraphOpKind("incompressible:coupled_init_prepare");
+
+    pub(crate) const H_COUPLED_BEGIN_STEP: HostOpKind = HostOpKind("incompressible:coupled_begin_step");
+    pub(crate) const H_COUPLED_BEFORE_ITER: HostOpKind =
+        HostOpKind("incompressible:coupled_before_iter");
+    pub(crate) const H_COUPLED_SOLVE: HostOpKind = HostOpKind("incompressible:coupled_solve");
+    pub(crate) const H_COUPLED_CLEAR_MAX_DIFF: HostOpKind =
+        HostOpKind("incompressible:coupled_clear_max_diff");
+    pub(crate) const H_COUPLED_CONVERGENCE_ADVANCE: HostOpKind =
+        HostOpKind("incompressible:coupled_convergence_advance");
+    pub(crate) const H_COUPLED_FINALIZE_STEP: HostOpKind =
+        HostOpKind("incompressible:coupled_finalize_step");
+
+    pub(crate) const C_HAS_COUPLED_RESOURCES: CondOpKind =
+        CondOpKind("incompressible:has_coupled_resources");
+    pub(crate) const C_COUPLED_NEEDS_PREPARE: CondOpKind =
+        CondOpKind("incompressible:coupled_needs_prepare");
+    pub(crate) const C_COUPLED_SHOULD_CONTINUE: CondOpKind =
+        CondOpKind("incompressible:coupled_should_continue");
+
+    pub(crate) const N_COUPLED_MAX_ITERS: CountOpKind = CountOpKind("incompressible:coupled_max_iters");
+}
 
 pub(in crate::solver::gpu::lowering) struct IncompressibleProgramResources {
     plan: GpuSolver,

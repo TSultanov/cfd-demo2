@@ -1,5 +1,6 @@
 use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
@@ -15,8 +16,16 @@ pub(crate) async fn lower_program_model_driven(
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<GpuProgramPlan, String> {
+    // Derive the solver recipe from model + config
+    let recipe = SolverRecipe::from_model(
+        model,
+        config.advection_scheme,
+        config.time_scheme,
+        config.preconditioner,
+    )?;
+
     let template = ProgramTemplateKind::for_model(model)?;
-    let parts = lower_parts_for_template(template, mesh, model, device, queue).await?;
+    let parts = lower_parts_for_template(template, mesh, model, recipe, device, queue).await?;
 
     let program = build_program_spec(template);
     let spec = parts.spec.into_spec(program)?;
@@ -48,6 +57,7 @@ async fn lower_parts_for_template(
     template: ProgramTemplateKind,
     mesh: &Mesh,
     model: &ModelSpec,
+    recipe: SolverRecipe,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
@@ -77,6 +87,7 @@ async fn lower_parts_for_template(
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
+                recipe,
                 context,
                 profiling_stats,
                 resources,
@@ -117,6 +128,7 @@ async fn lower_parts_for_template(
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
+                recipe,
                 context,
                 profiling_stats,
                 resources,
@@ -140,6 +152,7 @@ async fn lower_parts_for_template(
             crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
                 mesh,
                 model.clone(),
+                recipe,
                 device,
                 queue,
             )

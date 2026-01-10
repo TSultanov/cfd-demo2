@@ -7,6 +7,7 @@ use crate::solver::gpu::plans::program::{
     ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -50,6 +51,7 @@ impl ModelGpuProgramSpecParts {
 
 pub(crate) struct LoweredProgramParts {
     pub model: ModelSpec,
+    pub recipe: SolverRecipe,
     pub context: GpuContext,
     pub profiling_stats: Arc<ProfilingStats>,
     pub resources: ProgramResources,

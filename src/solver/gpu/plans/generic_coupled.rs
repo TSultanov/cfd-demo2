@@ -13,12 +13,11 @@ use crate::solver::gpu::lowering::models::generic_coupled::{
 use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{ProgramOpRegistry, ProgramResources};
+use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::mesh::Mesh;
-use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::{KernelKind, ModelSpec};
-use crate::solver::scheme::Scheme;
 
 pub struct GenericCoupledPlanResources {
     pub common: GpuScalarRuntime,
@@ -28,6 +27,7 @@ impl GenericCoupledPlanResources {
     pub async fn new(
         mesh: &Mesh,
         model: ModelSpec,
+        recipe: SolverRecipe,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<LoweredProgramParts, String> {
@@ -39,11 +39,8 @@ impl GenericCoupledPlanResources {
             ));
         }
 
-        // Check if gradients are needed (assuming worst-case scheme SOU).
-        let registry = SchemeRegistry::new(Scheme::SecondOrderUpwind);
-        let needs_gradients = expand_schemes(&model.system, &registry)
-            .map(|e| e.needs_gradients())
-            .unwrap_or(false);
+        // Use recipe to determine if gradients are needed
+        let needs_gradients = recipe.needs_gradients();
 
         let runtime = GpuScalarRuntime::new(mesh, device, queue).await;
         runtime.update_constants();
@@ -310,6 +307,7 @@ impl GenericCoupledPlanResources {
 
         Ok(LoweredProgramParts {
             model: model.clone(),
+            recipe,
             context,
             profiling_stats,
             resources,

@@ -9,4 +9,4 @@ pub use definitions::{
     incompressible_momentum_system, BoundaryCondition, BoundarySpec, CompressibleFields,
     FieldBoundarySpec, GenericCoupledFields, IncompressibleMomentumFields, ModelFields, ModelSpec,
 };
-pub use kernel::{KernelKind, KernelPlan};
+pub use kernel::{KernelId, KernelKind, KernelPlan};

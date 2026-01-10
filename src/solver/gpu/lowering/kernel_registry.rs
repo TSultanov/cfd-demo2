@@ -1,5 +1,5 @@
 use crate::solver::gpu::wgsl_reflect::WgslBindingDesc;
-use crate::solver::model::KernelKind;
+use crate::solver::model::{KernelId, KernelKind};
 
 pub(crate) struct KernelSource {
     pub bindings: &'static [WgslBindingDesc],
@@ -12,9 +12,14 @@ mod generated {
 }
 
 pub(crate) fn kernel_source(model_id: &str, kind: KernelKind) -> Result<KernelSource, String> {
+    kernel_source_by_id(model_id, KernelId::from(kind))
+}
+
+pub(crate) fn kernel_source_by_id(model_id: &str, kernel_id: KernelId) -> Result<KernelSource, String> {
+    // Generic-coupled kernels are emitted per-model, so they require a model-specific lookup.
     if matches!(
-        kind,
-        KernelKind::GenericCoupledAssembly | KernelKind::GenericCoupledUpdate
+        kernel_id,
+        KernelId::GENERIC_COUPLED_ASSEMBLY | KernelId::GENERIC_COUPLED_UPDATE
     ) {
         let Some((
             _assembly_shader,
@@ -30,7 +35,7 @@ pub(crate) fn kernel_source(model_id: &str, kind: KernelKind) -> Result<KernelSo
             ));
         };
 
-        if kind == KernelKind::GenericCoupledAssembly {
+        if kernel_id == KernelId::GENERIC_COUPLED_ASSEMBLY {
             return Ok(KernelSource {
                 bindings: assembly_bindings,
                 create_pipeline: assembly_pipeline,
@@ -43,20 +48,15 @@ pub(crate) fn kernel_source(model_id: &str, kind: KernelKind) -> Result<KernelSo
         });
     }
 
-    if let Some((_shader, create_pipeline, bindings)) = generated::kernel_entry(kind) {
+    if let Some((_shader, create_pipeline, bindings)) = generated::kernel_entry_by_id(kernel_id.as_str()) {
         return Ok(KernelSource {
             bindings,
             create_pipeline,
         });
     }
 
-    match kind {
-        KernelKind::IncompressibleMomentum => Err(
-            "KernelKind::IncompressibleMomentum is not a compute kernel (no generated pipeline entrypoint)"
-                .to_string(),
-        ),
-        _ => Err(format!(
-            "KernelKind::{kind:?} does not have a generated kernel source entry"
-        )),
-    }
+    Err(format!(
+        "KernelId '{}' does not have a generated kernel source entry",
+        kernel_id.as_str()
+    ))
 }

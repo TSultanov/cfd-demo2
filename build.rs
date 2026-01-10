@@ -522,20 +522,29 @@ fn generate_kernel_registry_map() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("kernel_registry_map.rs");
 
-    let entries: &[(&str, &str)] = &[
-        ("PrepareCoupled", "prepare_coupled"),
+    // (KernelKind variant, generated module name, stable KernelId string)
+    let entries: &[(&str, &str, &str)] = &[
+        ("PrepareCoupled", "prepare_coupled", "prepare_coupled"),
         // Note: kernel kind is `CoupledAssembly`, but current shader module is `coupled_assembly_merged`.
-        ("CoupledAssembly", "coupled_assembly_merged"),
-        ("PressureAssembly", "pressure_assembly"),
-        ("UpdateFieldsFromCoupled", "update_fields_from_coupled"),
-        ("FluxRhieChow", "flux_rhie_chow"),
-        ("CompressibleAssembly", "compressible_assembly"),
-        ("CompressibleApply", "compressible_apply"),
-        ("CompressibleExplicitUpdate", "compressible_explicit_update"),
-        ("CompressibleGradients", "compressible_gradients"),
-        ("CompressibleUpdate", "compressible_update"),
-        ("CompressibleFluxKt", "compressible_flux_kt"),
-        ("GenericCoupledApply", "generic_coupled_apply"),
+        ("CoupledAssembly", "coupled_assembly_merged", "coupled_assembly"),
+        ("PressureAssembly", "pressure_assembly", "pressure_assembly"),
+        (
+            "UpdateFieldsFromCoupled",
+            "update_fields_from_coupled",
+            "update_fields_from_coupled",
+        ),
+        ("FluxRhieChow", "flux_rhie_chow", "flux_rhie_chow"),
+        ("CompressibleAssembly", "compressible_assembly", "compressible_assembly"),
+        ("CompressibleApply", "compressible_apply", "compressible_apply"),
+        (
+            "CompressibleExplicitUpdate",
+            "compressible_explicit_update",
+            "compressible_explicit_update",
+        ),
+        ("CompressibleGradients", "compressible_gradients", "compressible_gradients"),
+        ("CompressibleUpdate", "compressible_update", "compressible_update"),
+        ("CompressibleFluxKt", "compressible_flux_kt", "compressible_flux_kt"),
+        ("GenericCoupledApply", "generic_coupled_apply", "generic_coupled_apply"),
     ];
 
     let mut code = String::new();
@@ -555,9 +564,36 @@ fn generate_kernel_registry_map() {
     code.push_str(")> {\n");
     code.push_str("    match kind {\n");
 
-    for (variant, module) in entries {
+    for (variant, module, _kernel_id) in entries {
         let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
         code.push_str(&format!("        KernelKind::{variant} => Some((\n"));
+        code.push_str(&format!(
+            "            bindings::generated::{module}::SHADER_STRING,\n"
+        ));
+        code.push_str(&format!(
+            "            bindings::generated::{module}::compute::create_main_pipeline_embed_source,\n"
+        ));
+        code.push_str(&format!("            wgsl_meta::{bindings_const},\n"));
+        code.push_str("        )),\n");
+    }
+
+    code.push_str("        _ => None,\n");
+    code.push_str("    }\n");
+    code.push_str("}\n");
+
+    code.push_str("\n");
+    code.push_str("pub(crate) fn kernel_entry_by_id(\n");
+    code.push_str("    kernel_id: &str,\n");
+    code.push_str(") -> Option<(\n");
+    code.push_str("    &'static str,\n");
+    code.push_str("    KernelPipelineCtor,\n");
+    code.push_str("    &'static [crate::solver::gpu::wgsl_reflect::WgslBindingDesc],\n");
+    code.push_str(")> {\n");
+    code.push_str("    match kernel_id {\n");
+
+    for (_variant, module, kernel_id) in entries {
+        let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
+        code.push_str(&format!("        \"{kernel_id}\" => Some((\n"));
         code.push_str(&format!(
             "            bindings::generated::{module}::SHADER_STRING,\n"
         ));

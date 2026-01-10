@@ -20,13 +20,13 @@ use crate::solver::gpu::modules::model_kernels::{
     KernelBindGroups, KernelPipeline, ModelKernelsModule,
 };
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
-use crate::solver::model::KernelKind;
+use crate::solver::model::KernelId;
 
 impl GpuSolver {
     pub(crate) fn build_coupled_init_prepare_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:init_prepare",
-            pipeline: KernelPipeline::Kernel(KernelKind::PrepareCoupled),
+            pipeline: KernelPipeline::Kernel(KernelId::PREPARE_COUPLED),
             bind: KernelBindGroups::MeshFieldsSolver,
             dispatch: DispatchKind::Cells,
         })])
@@ -36,13 +36,13 @@ impl GpuSolver {
         ModuleGraph::new(vec![
             ModuleNode::Compute(ComputeSpec {
                 label: "coupled:prepare",
-                pipeline: KernelPipeline::Kernel(KernelKind::PrepareCoupled),
+                pipeline: KernelPipeline::Kernel(KernelId::PREPARE_COUPLED),
                 bind: KernelBindGroups::MeshFieldsSolver,
                 dispatch: DispatchKind::Cells,
             }),
             ModuleNode::Compute(ComputeSpec {
                 label: "coupled:assembly_merged",
-                pipeline: KernelPipeline::Kernel(KernelKind::CoupledAssembly),
+                pipeline: KernelPipeline::Kernel(KernelId::COUPLED_ASSEMBLY),
                 bind: KernelBindGroups::MeshFieldsSolver,
                 dispatch: DispatchKind::Cells,
             }),
@@ -52,7 +52,7 @@ impl GpuSolver {
     pub(crate) fn build_coupled_assembly_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:assembly_merged",
-            pipeline: KernelPipeline::Kernel(KernelKind::CoupledAssembly),
+            pipeline: KernelPipeline::Kernel(KernelId::COUPLED_ASSEMBLY),
             bind: KernelBindGroups::MeshFieldsSolver,
             dispatch: DispatchKind::Cells,
         })])
@@ -61,7 +61,7 @@ impl GpuSolver {
     pub(crate) fn build_coupled_update_graph() -> ModuleGraph<ModelKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:update_fields_max_diff",
-            pipeline: KernelPipeline::Kernel(KernelKind::UpdateFieldsFromCoupled),
+            pipeline: KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED),
             bind: KernelBindGroups::UpdateFieldsSolution,
             dispatch: DispatchKind::Cells,
         })])

@@ -11,8 +11,9 @@
 
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::structs::PreconditionerType;
+use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::model::backend::{expand_schemes, EquationSystem, SchemeRegistry, TermOp};
-use crate::solver::model::{KernelKind, ModelSpec};
+use crate::solver::model::{KernelId, KernelKind, ModelSpec};
 use crate::solver::scheme::Scheme;
 
 /// Specification for a linear solver.
@@ -108,8 +109,17 @@ pub enum BufferPurpose {
 /// Specification for a kernel pass.
 #[derive(Debug, Clone)]
 pub struct KernelSpec {
+    pub id: KernelId,
     pub kind: KernelKind,
     pub phase: KernelPhase,
+    pub dispatch: DispatchKind,
+}
+
+fn dispatch_for_kind(kind: KernelKind) -> DispatchKind {
+    match kind {
+        KernelKind::FluxRhieChow | KernelKind::CompressibleFluxKt => DispatchKind::Faces,
+        _ => DispatchKind::Cells,
+    }
 }
 
 /// Phase in which a kernel executes.
@@ -200,24 +210,34 @@ impl SolverRecipe {
         let kernels: Vec<KernelSpec> = match &model.fields {
             crate::solver::model::ModelFields::Incompressible(_) => vec![
                 KernelSpec {
+                    id: KernelId::from(KernelKind::PrepareCoupled),
                     kind: KernelKind::PrepareCoupled,
                     phase: KernelPhase::Preparation,
+                    dispatch: dispatch_for_kind(KernelKind::PrepareCoupled),
                 },
                 KernelSpec {
+                    id: KernelId::from(KernelKind::FluxRhieChow),
                     kind: KernelKind::FluxRhieChow,
                     phase: KernelPhase::Preparation,
+                    dispatch: dispatch_for_kind(KernelKind::FluxRhieChow),
                 },
                 KernelSpec {
+                    id: KernelId::from(KernelKind::CoupledAssembly),
                     kind: KernelKind::CoupledAssembly,
                     phase: KernelPhase::Assembly,
+                    dispatch: dispatch_for_kind(KernelKind::CoupledAssembly),
                 },
                 KernelSpec {
+                    id: KernelId::from(KernelKind::PressureAssembly),
                     kind: KernelKind::PressureAssembly,
                     phase: KernelPhase::Assembly,
+                    dispatch: dispatch_for_kind(KernelKind::PressureAssembly),
                 },
                 KernelSpec {
+                    id: KernelId::from(KernelKind::UpdateFieldsFromCoupled),
                     kind: KernelKind::UpdateFieldsFromCoupled,
                     phase: KernelPhase::Update,
+                    dispatch: dispatch_for_kind(KernelKind::UpdateFieldsFromCoupled),
                 },
             ],
 
@@ -226,31 +246,43 @@ impl SolverRecipe {
 
                 if needs_gradients {
                     out.push(KernelSpec {
+                        id: KernelId::from(KernelKind::CompressibleGradients),
                         kind: KernelKind::CompressibleGradients,
                         phase: KernelPhase::Gradients,
+                        dispatch: dispatch_for_kind(KernelKind::CompressibleGradients),
                     });
                 }
 
                 out.extend([
                     KernelSpec {
+                        id: KernelId::from(KernelKind::CompressibleFluxKt),
                         kind: KernelKind::CompressibleFluxKt,
                         phase: KernelPhase::FluxComputation,
+                        dispatch: dispatch_for_kind(KernelKind::CompressibleFluxKt),
                     },
                     KernelSpec {
+                        id: KernelId::from(KernelKind::CompressibleExplicitUpdate),
                         kind: KernelKind::CompressibleExplicitUpdate,
                         phase: KernelPhase::ExplicitUpdate,
+                        dispatch: dispatch_for_kind(KernelKind::CompressibleExplicitUpdate),
                     },
                     KernelSpec {
+                        id: KernelId::from(KernelKind::CompressibleAssembly),
                         kind: KernelKind::CompressibleAssembly,
                         phase: KernelPhase::Assembly,
+                        dispatch: dispatch_for_kind(KernelKind::CompressibleAssembly),
                     },
                     KernelSpec {
+                        id: KernelId::from(KernelKind::CompressibleApply),
                         kind: KernelKind::CompressibleApply,
                         phase: KernelPhase::Apply,
+                        dispatch: dispatch_for_kind(KernelKind::CompressibleApply),
                     },
                     KernelSpec {
+                        id: KernelId::from(KernelKind::CompressibleUpdate),
                         kind: KernelKind::CompressibleUpdate,
                         phase: KernelPhase::PrimitiveRecovery,
+                        dispatch: dispatch_for_kind(KernelKind::CompressibleUpdate),
                     },
                 ]);
 
@@ -259,16 +291,22 @@ impl SolverRecipe {
 
             crate::solver::model::ModelFields::GenericCoupled(_) => vec![
                 KernelSpec {
+                    id: KernelId::from(KernelKind::GenericCoupledAssembly),
                     kind: KernelKind::GenericCoupledAssembly,
                     phase: KernelPhase::Assembly,
+                    dispatch: dispatch_for_kind(KernelKind::GenericCoupledAssembly),
                 },
                 KernelSpec {
+                    id: KernelId::from(KernelKind::GenericCoupledApply),
                     kind: KernelKind::GenericCoupledApply,
                     phase: KernelPhase::Apply,
+                    dispatch: dispatch_for_kind(KernelKind::GenericCoupledApply),
                 },
                 KernelSpec {
+                    id: KernelId::from(KernelKind::GenericCoupledUpdate),
                     kind: KernelKind::GenericCoupledUpdate,
                     phase: KernelPhase::Update,
+                    dispatch: dispatch_for_kind(KernelKind::GenericCoupledUpdate),
                 },
             ],
         };

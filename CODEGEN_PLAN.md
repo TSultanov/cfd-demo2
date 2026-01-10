@@ -113,14 +113,16 @@ This roadmap focuses on removing those glue points in small, testable steps.
 
 **Goal:** Add new kernels via codegen/model definitions without editing handwritten enums/matches.
 
-- [ ] **B1. Introduce a generated kernel identifier**
+- [x] **B1. Introduce a generated kernel identifier**
   - Add `KernelId(&'static str)` (or similar) alongside the existing `KernelKind` bridge.
   - Update `KernelSpec` to carry `KernelId` (and optionally keep `KernelKind` during migration).
-- [ ] **B2. Extend `kernel_registry` to lookup by `KernelId`**
+- [x] **B2. Extend `kernel_registry` to lookup by `KernelId`**
   - Codegen emits a per-model kernel table mapping `KernelId -> (wgsl source, bind metadata)`.
   - The runtime graph builder uses only `KernelId`.
 - [ ] **B3. Shrink `KernelKind` usage to UI/debug only**
   - Once recipes are emitted in terms of `KernelId`, `KernelKind` can become optional legacy.
+
+  Status: Orchestration/graph building is now `KernelId`-based; `KernelKind` is still carried in recipes as a migration/debug bridge.
 
 ### Milestone C: Full recipe-driven graphs (no solver-family graph builders)
 

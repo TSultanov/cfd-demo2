@@ -1,6 +1,6 @@
 use super::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
 use super::unified_graph::UnifiedGraphModule;
-use crate::solver::model::KernelKind;
+use crate::solver::model::KernelId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -115,24 +115,19 @@ impl GpuComputeModule for GenericCoupledKernelsModule {
 }
 
 impl UnifiedGraphModule for GenericCoupledKernelsModule {
-    fn pipeline_for_kernel(&self, kind: KernelKind) -> Option<Self::PipelineKey> {
-        match kind {
-            KernelKind::GenericCoupledAssembly => Some(GenericCoupledPipeline::Assembly),
-            KernelKind::GenericCoupledUpdate => Some(GenericCoupledPipeline::Update),
+    fn pipeline_for_kernel(&self, id: KernelId) -> Option<Self::PipelineKey> {
+        match id {
+            KernelId::GENERIC_COUPLED_ASSEMBLY => Some(GenericCoupledPipeline::Assembly),
+            KernelId::GENERIC_COUPLED_UPDATE => Some(GenericCoupledPipeline::Update),
             _ => None,
         }
     }
 
-    fn bind_for_kernel(&self, kind: KernelKind) -> Option<Self::BindKey> {
-        match kind {
-            KernelKind::GenericCoupledAssembly => Some(GenericCoupledBindGroups::Assembly),
-            KernelKind::GenericCoupledUpdate => Some(GenericCoupledBindGroups::Update),
+    fn bind_for_kernel(&self, id: KernelId) -> Option<Self::BindKey> {
+        match id {
+            KernelId::GENERIC_COUPLED_ASSEMBLY => Some(GenericCoupledBindGroups::Assembly),
+            KernelId::GENERIC_COUPLED_UPDATE => Some(GenericCoupledBindGroups::Update),
             _ => None,
         }
-    }
-
-    fn dispatch_for_kernel(&self, _kind: KernelKind) -> DispatchKind {
-        // All generic coupled kernels dispatch per cell
-        DispatchKind::Cells
     }
 }

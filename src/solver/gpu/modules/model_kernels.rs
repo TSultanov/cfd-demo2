@@ -9,7 +9,7 @@ use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystem
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::structs::CoupledSolverResources;
 use crate::solver::gpu::wgsl_meta;
-use crate::solver::model::KernelKind;
+use crate::solver::model::KernelId;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -27,7 +27,7 @@ fn field_binding<'a, F: FieldProvider>(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KernelPipeline {
-    Kernel(KernelKind),
+    Kernel(KernelId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -73,25 +73,21 @@ impl ModelKernelsModule {
         let b_scalar_row_offsets = port_space.buffer(scalar_row_offsets);
 
         let mut pipelines = HashMap::new();
-        for kind in [
-            KernelKind::CompressibleAssembly,
-            KernelKind::CompressibleApply,
-            KernelKind::CompressibleExplicitUpdate,
-            KernelKind::CompressibleGradients,
-            KernelKind::CompressibleFluxKt,
-            KernelKind::CompressibleUpdate,
+        for id in [
+            KernelId::COMPRESSIBLE_ASSEMBLY,
+            KernelId::COMPRESSIBLE_APPLY,
+            KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
+            KernelId::COMPRESSIBLE_GRADIENTS,
+            KernelId::COMPRESSIBLE_FLUX_KT,
+            KernelId::COMPRESSIBLE_UPDATE,
         ] {
-            let source = kernel_registry::kernel_source("compressible", kind)
-                .unwrap_or_else(|err| panic!("missing kernel source for {kind:?}: {err}"));
-            pipelines.insert(
-                KernelPipeline::Kernel(kind),
-                (source.create_pipeline)(device),
-            );
+            let source = kernel_registry::kernel_source_by_id("compressible", id)
+                .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
+            pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
         }
-        let pipeline_assembly =
-            &pipelines[&KernelPipeline::Kernel(KernelKind::CompressibleAssembly)];
-        let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelKind::CompressibleApply)];
-        let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelKind::CompressibleUpdate)];
+        let pipeline_assembly = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)];
+        let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
+        let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE)];
 
         let bg_mesh = {
             let bgl = pipeline_assembly.get_bind_group_layout(0);
@@ -217,22 +213,18 @@ impl ModelKernelsModule {
         coupled: &CoupledSolverResources,
     ) -> Self {
         let mut pipelines = HashMap::new();
-        for kind in [
-            KernelKind::PrepareCoupled,
-            KernelKind::CoupledAssembly,
-            KernelKind::UpdateFieldsFromCoupled,
+        for id in [
+            KernelId::PREPARE_COUPLED,
+            KernelId::COUPLED_ASSEMBLY,
+            KernelId::UPDATE_FIELDS_FROM_COUPLED,
         ] {
-            let source = kernel_registry::kernel_source("incompressible_momentum", kind)
-                .unwrap_or_else(|err| panic!("missing kernel source for {kind:?}: {err}"));
-            pipelines.insert(
-                KernelPipeline::Kernel(kind),
-                (source.create_pipeline)(device),
-            );
+            let source = kernel_registry::kernel_source_by_id("incompressible_momentum", id)
+                .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
+            pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
         }
 
-        let pipeline_prepare = &pipelines[&KernelPipeline::Kernel(KernelKind::PrepareCoupled)];
-        let pipeline_update =
-            &pipelines[&KernelPipeline::Kernel(KernelKind::UpdateFieldsFromCoupled)];
+        let pipeline_prepare = &pipelines[&KernelPipeline::Kernel(KernelId::PREPARE_COUPLED)];
+        let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED)];
 
         let bg_mesh = {
             let bgl = pipeline_prepare.get_bind_group_layout(0);
@@ -419,40 +411,33 @@ impl GpuComputeModule for ModelKernelsModule {
 }
 
 impl UnifiedGraphModule for ModelKernelsModule {
-    fn pipeline_for_kernel(&self, kind: KernelKind) -> Option<Self::PipelineKey> {
+    fn pipeline_for_kernel(&self, id: KernelId) -> Option<Self::PipelineKey> {
         // Only return Some if we have the pipeline registered
-        if self.pipelines.contains_key(&KernelPipeline::Kernel(kind)) {
-            Some(KernelPipeline::Kernel(kind))
+        if self.pipelines.contains_key(&KernelPipeline::Kernel(id)) {
+            Some(KernelPipeline::Kernel(id))
         } else {
             None
         }
     }
 
-    fn bind_for_kernel(&self, kind: KernelKind) -> Option<Self::BindKey> {
+    fn bind_for_kernel(&self, id: KernelId) -> Option<Self::BindKey> {
         // Map kernel kinds to their bind group requirements
-        match kind {
+        match id {
             // Compressible kernels
-            KernelKind::CompressibleAssembly => Some(KernelBindGroups::MeshFieldsSolver),
-            KernelKind::CompressibleApply => Some(KernelBindGroups::ApplyFieldsSolver),
-            KernelKind::CompressibleExplicitUpdate => Some(KernelBindGroups::MeshFields),
-            KernelKind::CompressibleGradients => Some(KernelBindGroups::MeshFields),
-            KernelKind::CompressibleFluxKt => Some(KernelBindGroups::MeshFields),
-            KernelKind::CompressibleUpdate => Some(KernelBindGroups::FieldsOnly),
+            KernelId::COMPRESSIBLE_ASSEMBLY => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelId::COMPRESSIBLE_APPLY => Some(KernelBindGroups::ApplyFieldsSolver),
+            KernelId::COMPRESSIBLE_EXPLICIT_UPDATE => Some(KernelBindGroups::MeshFields),
+            KernelId::COMPRESSIBLE_GRADIENTS => Some(KernelBindGroups::MeshFields),
+            KernelId::COMPRESSIBLE_FLUX_KT => Some(KernelBindGroups::MeshFields),
+            KernelId::COMPRESSIBLE_UPDATE => Some(KernelBindGroups::FieldsOnly),
             // Incompressible kernels
-            KernelKind::PrepareCoupled => Some(KernelBindGroups::MeshFieldsSolver),
-            KernelKind::CoupledAssembly => Some(KernelBindGroups::MeshFieldsSolver),
-            KernelKind::UpdateFieldsFromCoupled => Some(KernelBindGroups::UpdateFieldsSolution),
+            KernelId::PREPARE_COUPLED => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelId::COUPLED_ASSEMBLY => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelId::UPDATE_FIELDS_FROM_COUPLED => Some(KernelBindGroups::UpdateFieldsSolution),
             // Shared kernels
-            KernelKind::FluxRhieChow => Some(KernelBindGroups::MeshFields),
+            KernelId::FLUX_RHIE_CHOW => Some(KernelBindGroups::MeshFields),
             // Unknown or unsupported kernels
             _ => None,
-        }
-    }
-
-    fn dispatch_for_kernel(&self, kind: KernelKind) -> DispatchKind {
-        match kind {
-            KernelKind::FluxRhieChow | KernelKind::CompressibleFluxKt => DispatchKind::Faces,
-            _ => DispatchKind::Cells,
         }
     }
 }

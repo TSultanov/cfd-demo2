@@ -6,7 +6,7 @@
 
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, GpuComputeModule, ModuleGraph, ModuleNode};
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
-use crate::solver::model::KernelKind;
+use crate::solver::model::KernelId;
 
 /// Configuration for a unified compute graph.
 #[derive(Debug, Clone)]
@@ -32,19 +32,11 @@ impl Default for UnifiedGraphConfig {
 /// It requires GpuComputeModule as a supertrait since the graph builder
 /// needs to create ModuleGraph instances.
 pub trait UnifiedGraphModule: GpuComputeModule {
-    /// Get the pipeline key for a kernel kind.
-    fn pipeline_for_kernel(&self, kind: KernelKind) -> Option<Self::PipelineKey>;
-    
-    /// Get the bind key for a kernel kind.
-    fn bind_for_kernel(&self, kind: KernelKind) -> Option<Self::BindKey>;
-    
-    /// Get the dispatch kind for a kernel kind.
-    fn dispatch_for_kernel(&self, kind: KernelKind) -> DispatchKind {
-        match kind {
-            KernelKind::FluxRhieChow => DispatchKind::Faces,
-            _ => DispatchKind::Cells,
-        }
-    }
+    /// Get the pipeline key for a kernel id.
+    fn pipeline_for_kernel(&self, id: KernelId) -> Option<Self::PipelineKey>;
+
+    /// Get the bind key for a kernel id.
+    fn bind_for_kernel(&self, id: KernelId) -> Option<Self::BindKey>;
 }
 
 /// Build a compute graph from a recipe for a specific phase.
@@ -60,14 +52,14 @@ pub fn build_graph_for_phase<M: UnifiedGraphModule>(
     
     for kernel_spec in recipe.kernels_for_phase(phase) {
         let pipeline = module
-            .pipeline_for_kernel(kernel_spec.kind)
-            .ok_or_else(|| format!("no pipeline for kernel {:?}", kernel_spec.kind))?;
+            .pipeline_for_kernel(kernel_spec.id)
+            .ok_or_else(|| format!("no pipeline for kernel {}", kernel_spec.id.as_str()))?;
         let bind = module
-            .bind_for_kernel(kernel_spec.kind)
-            .ok_or_else(|| format!("no bind group for kernel {:?}", kernel_spec.kind))?;
-        let dispatch = module.dispatch_for_kernel(kernel_spec.kind);
-        
-        let label = kernel_label(label_prefix, kernel_spec.kind);
+            .bind_for_kernel(kernel_spec.id)
+            .ok_or_else(|| format!("no bind group for kernel {}", kernel_spec.id.as_str()))?;
+        let dispatch = kernel_spec.dispatch;
+
+        let label = kernel_label(label_prefix, kernel_spec.id);
         
         nodes.push(ModuleNode::Compute(ComputeSpec {
             label,
@@ -101,10 +93,10 @@ pub fn build_optional_graph_for_phase<M: UnifiedGraphModule>(
 }
 
 /// Generate a static label for a kernel.
-fn kernel_label(prefix: &'static str, kind: KernelKind) -> &'static str {
+fn kernel_label(prefix: &'static str, id: KernelId) -> &'static str {
     // Use leaked strings for static labels
     // In practice, these are a fixed set so leaking is acceptable
-    let label = format!("{}:{:?}", prefix, kind);
+    let label = format!("{}:{}", prefix, id.as_str());
     Box::leak(label.into_boxed_str())
 }
 
@@ -151,8 +143,8 @@ mod tests {
     
     #[test]
     fn test_kernel_label_format() {
-        let label = kernel_label("test", KernelKind::GenericCoupledAssembly);
+        let label = kernel_label("test", KernelId::GENERIC_COUPLED_ASSEMBLY);
         assert!(label.starts_with("test:"));
-        assert!(label.contains("GenericCoupledAssembly"));
+        assert!(label.contains("generic_coupled_assembly"));
     }
 }

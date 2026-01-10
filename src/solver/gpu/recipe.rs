@@ -325,8 +325,295 @@ impl SolverRecipe {
     pub fn build_program_spec(&self) -> crate::solver::gpu::plans::program::ProgramSpec {
         use crate::solver::gpu::execution_plan::GraphExecMode;
         use crate::solver::gpu::plans::program::{
-            GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
+            CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
         };
+
+        // If we can recognize a legacy template family from the kernel set, emit that
+        // program spec exactly (same op kinds as `lowering/templates.rs`).
+        //
+        // This lets us route *all* program construction through the recipe, while keeping
+        // behavior stable during the transition to truly model-agnostic orchestration.
+        let kernel_ids: Vec<KernelId> = self.kernels.iter().map(|k| k.id).collect();
+
+        let is_compressible_like = kernel_ids.iter().any(|&id| {
+            matches!(
+                id,
+                KernelId::COMPRESSIBLE_ASSEMBLY
+                    | KernelId::COMPRESSIBLE_APPLY
+                    | KernelId::COMPRESSIBLE_EXPLICIT_UPDATE
+                    | KernelId::COMPRESSIBLE_FLUX_KT
+                    | KernelId::COMPRESSIBLE_GRADIENTS
+                    | KernelId::COMPRESSIBLE_UPDATE
+            )
+        });
+
+        if is_compressible_like {
+            let mut program = ProgramSpecBuilder::new();
+            let root = program.root();
+            let explicit_block = program.new_block();
+            let implicit_iter_block = program.new_block();
+            let implicit_block = program.new_block();
+
+            // Op kinds match `src/solver/gpu/lowering/templates.rs` (compressible)
+            let g_explicit_graph = GraphOpKind("compressible:explicit_graph");
+            let g_implicit_grad_assembly = GraphOpKind("compressible:implicit_grad_assembly");
+            let g_implicit_snapshot = GraphOpKind("compressible:implicit_snapshot");
+            let g_implicit_apply = GraphOpKind("compressible:implicit_apply");
+            let g_primitive_update = GraphOpKind("compressible:primitive_update");
+
+            let h_explicit_prepare = HostOpKind("compressible:explicit_prepare");
+            let h_explicit_finalize = HostOpKind("compressible:explicit_finalize");
+            let h_implicit_prepare = HostOpKind("compressible:implicit_prepare");
+            let h_implicit_set_iter_params = HostOpKind("compressible:implicit_set_iter_params");
+            let h_implicit_solve_fgmres = HostOpKind("compressible:implicit_solve_fgmres");
+            let h_implicit_record_stats = HostOpKind("compressible:implicit_record_stats");
+            let h_implicit_set_alpha = HostOpKind("compressible:implicit_set_alpha");
+            let h_implicit_restore_alpha = HostOpKind("compressible:implicit_restore_alpha");
+            let h_implicit_advance_outer_idx = HostOpKind("compressible:implicit_advance_outer_idx");
+            let h_implicit_finalize = HostOpKind("compressible:implicit_finalize");
+
+            let c_should_use_explicit = CondOpKind("compressible:should_use_explicit");
+            let n_implicit_outer_iters = CountOpKind("compressible:implicit_outer_iters");
+
+            // Explicit block
+            program.push(
+                explicit_block,
+                ProgramSpecNode::Host {
+                    label: "compressible:explicit_prepare",
+                    kind: h_explicit_prepare,
+                },
+            );
+            program.push(
+                explicit_block,
+                ProgramSpecNode::Graph {
+                    label: "compressible:explicit_graph",
+                    kind: g_explicit_graph,
+                    mode: GraphExecMode::SplitTimed,
+                },
+            );
+            program.push(
+                explicit_block,
+                ProgramSpecNode::Host {
+                    label: "compressible:explicit_finalize",
+                    kind: h_explicit_finalize,
+                },
+            );
+
+            // Implicit iteration body
+            for node in [
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_set_iter_params",
+                    kind: h_implicit_set_iter_params,
+                },
+                ProgramSpecNode::Graph {
+                    label: "compressible:implicit_grad_assembly",
+                    kind: g_implicit_grad_assembly,
+                    mode: GraphExecMode::SplitTimed,
+                },
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_fgmres",
+                    kind: h_implicit_solve_fgmres,
+                },
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_record_stats",
+                    kind: h_implicit_record_stats,
+                },
+                ProgramSpecNode::Graph {
+                    label: "compressible:implicit_snapshot",
+                    kind: g_implicit_snapshot,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_set_alpha",
+                    kind: h_implicit_set_alpha,
+                },
+                ProgramSpecNode::Graph {
+                    label: "compressible:implicit_apply",
+                    kind: g_implicit_apply,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_restore_alpha",
+                    kind: h_implicit_restore_alpha,
+                },
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_outer_idx_inc",
+                    kind: h_implicit_advance_outer_idx,
+                },
+            ] {
+                program.push(implicit_iter_block, node);
+            }
+
+            // Implicit block
+            program.push(
+                implicit_block,
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_prepare",
+                    kind: h_implicit_prepare,
+                },
+            );
+            program.push(
+                implicit_block,
+                ProgramSpecNode::Repeat {
+                    label: "compressible:implicit_outer_loop",
+                    times: n_implicit_outer_iters,
+                    body: implicit_iter_block,
+                },
+            );
+            program.push(
+                implicit_block,
+                ProgramSpecNode::Graph {
+                    label: "compressible:primitive_update",
+                    kind: g_primitive_update,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+            );
+            program.push(
+                implicit_block,
+                ProgramSpecNode::Host {
+                    label: "compressible:implicit_finalize",
+                    kind: h_implicit_finalize,
+                },
+            );
+
+            // Select explicit vs implicit
+            program.push(
+                root,
+                ProgramSpecNode::If {
+                    label: "compressible:select_step_path",
+                    cond: c_should_use_explicit,
+                    then_block: explicit_block,
+                    else_block: Some(implicit_block),
+                },
+            );
+
+            return program.build();
+        }
+
+        let is_incompressible_coupled_like = kernel_ids.iter().any(|&id| {
+            matches!(
+                id,
+                KernelId::PREPARE_COUPLED
+                    | KernelId::COUPLED_ASSEMBLY
+                    | KernelId::PRESSURE_ASSEMBLY
+                    | KernelId::UPDATE_FIELDS_FROM_COUPLED
+                    | KernelId::FLUX_RHIE_CHOW
+            )
+        });
+
+        if is_incompressible_coupled_like {
+            let mut program = ProgramSpecBuilder::new();
+            let root = program.root();
+            let coupled_iter_block = program.new_block();
+            let coupled_prepare_block = program.new_block();
+            let coupled_assembly_block = program.new_block();
+            let coupled_step_block = program.new_block();
+
+            // Op kinds match `src/solver/gpu/lowering/templates.rs` (incompressible_coupled)
+            let g_coupled_prepare_assembly = GraphOpKind("incompressible:coupled_prepare_assembly");
+            let g_coupled_assembly = GraphOpKind("incompressible:coupled_assembly");
+            let g_coupled_update = GraphOpKind("incompressible:coupled_update");
+            let g_coupled_init_prepare = GraphOpKind("incompressible:coupled_init_prepare");
+
+            let h_coupled_begin_step = HostOpKind("incompressible:coupled_begin_step");
+            let h_coupled_before_iter = HostOpKind("incompressible:coupled_before_iter");
+            let h_coupled_solve = HostOpKind("incompressible:coupled_solve");
+            let h_coupled_clear_max_diff = HostOpKind("incompressible:coupled_clear_max_diff");
+            let h_coupled_convergence_advance =
+                HostOpKind("incompressible:coupled_convergence_advance");
+            let h_coupled_finalize_step = HostOpKind("incompressible:coupled_finalize_step");
+
+            let c_has_coupled_resources = CondOpKind("incompressible:has_coupled_resources");
+            let c_coupled_needs_prepare = CondOpKind("incompressible:coupled_needs_prepare");
+            let c_coupled_should_continue = CondOpKind("incompressible:coupled_should_continue");
+
+            let n_coupled_max_iters = CountOpKind("incompressible:coupled_max_iters");
+
+            program.push(
+                coupled_prepare_block,
+                ProgramSpecNode::Graph {
+                    label: "incompressible:coupled_prepare_assembly",
+                    kind: g_coupled_prepare_assembly,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+            );
+            program.push(
+                coupled_assembly_block,
+                ProgramSpecNode::Graph {
+                    label: "incompressible:coupled_assembly",
+                    kind: g_coupled_assembly,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+            );
+
+            for node in [
+                ProgramSpecNode::Host {
+                    label: "incompressible:coupled_before_iter",
+                    kind: h_coupled_before_iter,
+                },
+                ProgramSpecNode::If {
+                    label: "incompressible:coupled_prepare_or_assembly",
+                    cond: c_coupled_needs_prepare,
+                    then_block: coupled_prepare_block,
+                    else_block: Some(coupled_assembly_block),
+                },
+                ProgramSpecNode::Host {
+                    label: "incompressible:coupled_solve",
+                    kind: h_coupled_solve,
+                },
+                ProgramSpecNode::Host {
+                    label: "incompressible:coupled_clear_max_diff",
+                    kind: h_coupled_clear_max_diff,
+                },
+                ProgramSpecNode::Graph {
+                    label: "incompressible:coupled_update_fields_max_diff",
+                    kind: g_coupled_update,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+                ProgramSpecNode::Host {
+                    label: "incompressible:coupled_convergence_and_advance",
+                    kind: h_coupled_convergence_advance,
+                },
+            ] {
+                program.push(coupled_iter_block, node);
+            }
+
+            for node in [
+                ProgramSpecNode::Host {
+                    label: "incompressible:coupled_begin_step",
+                    kind: h_coupled_begin_step,
+                },
+                ProgramSpecNode::Graph {
+                    label: "incompressible:coupled_init_prepare",
+                    kind: g_coupled_init_prepare,
+                    mode: GraphExecMode::SingleSubmit,
+                },
+                ProgramSpecNode::While {
+                    label: "incompressible:coupled_outer_loop",
+                    max_iters: n_coupled_max_iters,
+                    cond: c_coupled_should_continue,
+                    body: coupled_iter_block,
+                },
+                ProgramSpecNode::Host {
+                    label: "incompressible:coupled_finalize_step",
+                    kind: h_coupled_finalize_step,
+                },
+            ] {
+                program.push(coupled_step_block, node);
+            }
+
+            program.push(
+                root,
+                ProgramSpecNode::If {
+                    label: "incompressible:step",
+                    cond: c_has_coupled_resources,
+                    then_block: coupled_step_block,
+                    else_block: None,
+                },
+            );
+
+            return program.build();
+        }
 
         let mut program = ProgramSpecBuilder::new();
         let root = program.root();
@@ -565,7 +852,9 @@ pub fn derive_kernel_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::model::{compressible_model, incompressible_momentum_model};
     use crate::solver::model::generic_diffusion_demo_model;
+    use crate::solver::gpu::plans::program::ProgramSpecNode;
 
     #[test]
     fn test_recipe_from_generic_diffusion_model() {
@@ -620,5 +909,49 @@ mod tests {
         // Verify spec has expected structure for coupled solver
         let root_block = spec.block(spec.root);
         assert!(!root_block.nodes.is_empty(), "program spec should have nodes");
+    }
+
+    #[test]
+    fn test_build_program_spec_for_compressible_emits_step_path_if() {
+        let model = compressible_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+        )
+        .expect("should create recipe");
+
+        let spec = recipe.build_program_spec();
+        let root_block = spec.block(spec.root);
+        assert!(
+            root_block.nodes.iter().any(|n| matches!(
+                n,
+                ProgramSpecNode::If { label, .. } if *label == "compressible:select_step_path"
+            )),
+            "compressible program spec should select explicit/implicit path"
+        );
+    }
+
+    #[test]
+    fn test_build_program_spec_for_incompressible_emits_outer_loop() {
+        let model = incompressible_momentum_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+        )
+        .expect("should create recipe");
+
+        let spec = recipe.build_program_spec();
+
+        // Find a While node (outer corrector loop) anywhere in the program blocks.
+        let has_while = spec
+            .blocks
+            .iter()
+            .flat_map(|b| b.nodes.iter())
+            .any(|n| matches!(n, ProgramSpecNode::While { .. }));
+        assert!(has_while, "incompressible coupled spec should have a While loop");
     }
 }

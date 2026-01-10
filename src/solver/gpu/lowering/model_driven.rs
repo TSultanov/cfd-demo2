@@ -6,7 +6,7 @@ use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
 
 use super::models;
-use super::templates::{build_program_spec, ProgramTemplateKind};
+use super::templates::ProgramTemplateKind;
 use super::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 
 pub(crate) async fn lower_program_model_driven(
@@ -27,11 +27,9 @@ pub(crate) async fn lower_program_model_driven(
     let template = ProgramTemplateKind::for_model(model)?;
     let parts = lower_parts_for_template(template, mesh, model, recipe.clone(), device, queue).await?;
 
-    // For GenericCoupledScalar, use recipe-driven program spec
-    let program = match template {
-        ProgramTemplateKind::GenericCoupledScalar => recipe.build_program_spec(),
-        _ => build_program_spec(template),
-    };
+    // Program spec is now always recipe-driven (with stable legacy templates
+    // emitted when the kernel set matches those families).
+    let program = recipe.build_program_spec();
     let spec = parts.spec.into_spec(program)?;
     let mut plan = GpuProgramPlan::new(
         parts.model,

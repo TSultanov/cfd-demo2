@@ -4,6 +4,7 @@ use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::field_provider::FieldProvider;
 use crate::solver::gpu::modules::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
+use crate::solver::gpu::modules::unified_graph::UnifiedGraphModule;
 use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::structs::CoupledSolverResources;
@@ -413,6 +414,45 @@ impl GpuComputeModule for ModelKernelsModule {
             DispatchKind::Cells => ((runtime.num_cells + 63) / 64, 1, 1),
             DispatchKind::Faces => ((runtime.num_faces + 63) / 64, 1, 1),
             DispatchKind::Custom { x, y, z } => (x, y, z),
+        }
+    }
+}
+
+impl UnifiedGraphModule for ModelKernelsModule {
+    fn pipeline_for_kernel(&self, kind: KernelKind) -> Option<Self::PipelineKey> {
+        // Only return Some if we have the pipeline registered
+        if self.pipelines.contains_key(&KernelPipeline::Kernel(kind)) {
+            Some(KernelPipeline::Kernel(kind))
+        } else {
+            None
+        }
+    }
+
+    fn bind_for_kernel(&self, kind: KernelKind) -> Option<Self::BindKey> {
+        // Map kernel kinds to their bind group requirements
+        match kind {
+            // Compressible kernels
+            KernelKind::CompressibleAssembly => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelKind::CompressibleApply => Some(KernelBindGroups::ApplyFieldsSolver),
+            KernelKind::CompressibleExplicitUpdate => Some(KernelBindGroups::MeshFields),
+            KernelKind::CompressibleGradients => Some(KernelBindGroups::MeshFields),
+            KernelKind::CompressibleFluxKt => Some(KernelBindGroups::MeshFields),
+            KernelKind::CompressibleUpdate => Some(KernelBindGroups::FieldsOnly),
+            // Incompressible kernels
+            KernelKind::PrepareCoupled => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelKind::CoupledAssembly => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelKind::UpdateFieldsFromCoupled => Some(KernelBindGroups::UpdateFieldsSolution),
+            // Shared kernels
+            KernelKind::FluxRhieChow => Some(KernelBindGroups::MeshFields),
+            // Unknown or unsupported kernels
+            _ => None,
+        }
+    }
+
+    fn dispatch_for_kernel(&self, kind: KernelKind) -> DispatchKind {
+        match kind {
+            KernelKind::FluxRhieChow => DispatchKind::Faces,
+            _ => DispatchKind::Cells,
         }
     }
 }

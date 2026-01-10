@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 80f59c467ea07e050fd3886894dbe671360a4c0452b640a2fabce450da31034c
+// SourceHash: a48e58164bae29c4436c90aed1a146ec8788806a55acd987609f8f710043bef6
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12291,75 +12291,77 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start = cell_face_offsets[idx];
     let end = cell_face_offsets[(idx + 1u)];
     let scalar_offset = scalar_row_offsets[idx];
-    let _e28 = scalar_row_offsets[(idx + 1u)];
-    let num_neighbors = (_e28 - scalar_offset);
+    let _e26 = diagonal_indices[idx];
+    let diag_rank = (_e26 - scalar_offset);
+    let _e32 = scalar_row_offsets[(idx + 1u)];
+    let num_neighbors = (_e32 - scalar_offset);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
-        let _e33 = rank;
-        if (_e33 < num_neighbors) {
+        let _e37 = rank;
+        if (_e37 < num_neighbors) {
         } else {
             break;
         }
         {
-            let _e35 = rank;
-            matrix_values[((start_row_0_ + (_e35 * 1u)) + 0u)] = 0f;
+            let _e39 = rank;
+            matrix_values[((start_row_0_ + (_e39 * 1u)) + 0u)] = 0f;
         }
         continuing {
-            let _e45 = rank;
-            rank = (_e45 + 1u);
+            let _e49 = rank;
+            rank = (_e49 + 1u);
         }
     }
-    let _e52 = constants.dt;
-    let _e54 = diag_0_;
-    diag_0_ = (_e54 + ((vol * 1f) / _e52));
-    let _e60 = constants.dt;
-    let _e69 = state_old[((idx * 1u) + 0u)];
-    let _e71 = rhs_0_;
-    rhs_0_ = (_e71 + (((vol * 1f) / _e60) * _e69));
-    let _e75 = constants.time_scheme;
-    if (_e75 == 1u) {
-        let _e80 = constants.dt;
-        let _e83 = constants.dt_old;
-        let r = (_e80 / _e83);
-        let _e89 = constants.dt;
-        let diag_bdf2_ = ((((vol * 1f) / _e89) * ((r * 2f) + 1f)) / (r + 1f));
+    let _e56 = constants.dt;
+    let _e58 = diag_0_;
+    diag_0_ = (_e58 + ((vol * 1f) / _e56));
+    let _e64 = constants.dt;
+    let _e73 = state_old[((idx * 1u) + 0u)];
+    let _e75 = rhs_0_;
+    rhs_0_ = (_e75 + (((vol * 1f) / _e64) * _e73));
+    let _e79 = constants.time_scheme;
+    if (_e79 == 1u) {
+        let _e84 = constants.dt;
+        let _e87 = constants.dt_old;
+        let r = (_e84 / _e87);
+        let _e93 = constants.dt;
+        let diag_bdf2_ = ((((vol * 1f) / _e93) * ((r * 2f) + 1f)) / (r + 1f));
         let factor_n = (r + 1f);
         let factor_nm1_ = ((r * r) / (r + 1f));
-        let _e105 = diag_0_;
-        let _e110 = constants.dt;
-        diag_0_ = ((_e105 - ((vol * 1f) / _e110)) + diag_bdf2_);
-        let _e114 = rhs_0_;
-        let _e119 = constants.dt;
-        let _e127 = state_old[((idx * 1u) + 0u)];
-        let _e134 = constants.dt;
-        let _e142 = state_old[((idx * 1u) + 0u)];
-        let _e150 = state_old_old[((idx * 1u) + 0u)];
-        rhs_0_ = ((_e114 - (((vol * 1f) / _e119) * _e127)) + (((vol * 1f) / _e134) * ((factor_n * _e142) - (factor_nm1_ * _e150))));
+        let _e109 = diag_0_;
+        let _e114 = constants.dt;
+        diag_0_ = ((_e109 - ((vol * 1f) / _e114)) + diag_bdf2_);
+        let _e118 = rhs_0_;
+        let _e123 = constants.dt;
+        let _e131 = state_old[((idx * 1u) + 0u)];
+        let _e138 = constants.dt;
+        let _e146 = state_old[((idx * 1u) + 0u)];
+        let _e154 = state_old_old[((idx * 1u) + 0u)];
+        rhs_0_ = ((_e118 - (((vol * 1f) / _e123) * _e131)) + (((vol * 1f) / _e138) * ((factor_n * _e146) - (factor_nm1_ * _e154))));
     }
     k = start;
     loop {
-        let _e156 = k;
-        if (_e156 < end) {
+        let _e160 = k;
+        if (_e160 < end) {
         } else {
             break;
         }
         {
-            let _e159 = k;
-            let face_idx = cell_faces[_e159];
+            let _e163 = k;
+            let face_idx = cell_faces[_e163];
             let owner = face_owner[face_idx];
             let neighbor_raw = face_neighbor[face_idx];
             let boundary_type = face_boundary[face_idx];
             let area = face_areas[face_idx];
             let f_center = face_centers[face_idx];
-            let _e179 = face_normals[face_idx];
-            normal = _e179;
+            let _e183 = face_normals[face_idx];
+            normal = _e183;
             is_boundary = false;
             other_idx = idx;
             if (owner != idx) {
-                let _e187 = normal.x;
-                normal.x = -(_e187);
-                let _e191 = normal.y;
-                normal.y = -(_e191);
+                let _e191 = normal.x;
+                normal.x = -(_e191);
+                let _e195 = normal.y;
+                normal.y = -(_e195);
             }
             if (neighbor_raw != -1i) {
                 let neighbor = u32(neighbor_raw);
@@ -12367,62 +12369,60 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (owner != idx) {
                     other_idx = owner;
                 }
-                let _e198 = other_idx;
-                let _e200 = cell_centers[_e198];
-                other_center = _e200;
+                let _e202 = other_idx;
+                let _e204 = cell_centers[_e202];
+                other_center = _e204;
             } else {
                 is_boundary = true;
                 other_idx = idx;
                 other_center = f_center;
             }
-            let _e204 = other_center.x;
-            let dx = (_e204 - center.x);
-            let _e208 = other_center.y;
-            let dy = (_e208 - center.y);
-            let _e212 = normal.x;
-            let _e215 = normal.y;
-            let dist_proj = abs(((dx * _e212) + (dy * _e215)));
+            let _e208 = other_center.x;
+            let dx = (_e208 - center.x);
+            let _e212 = other_center.y;
+            let dy = (_e212 - center.y);
+            let _e216 = normal.x;
+            let _e219 = normal.y;
+            let dist_proj = abs(((dx * _e216) + (dy * _e219)));
             let dist_euc = sqrt(((dx * dx) + (dy * dy)));
             dist = max(dist_euc, 0.000001f);
             if (dist_proj > 0.000001f) {
                 dist = dist_proj;
             }
-            let _e229 = k;
-            let scalar_mat_idx = cell_face_matrix_indices[_e229];
+            let _e233 = k;
+            let scalar_mat_idx = cell_face_matrix_indices[_e233];
             let neighbor_rank = (scalar_mat_idx - scalar_offset);
-            let _e235 = dist;
-            let diff_coeff_phi = ((1f * area) / _e235);
-            let _e237 = is_boundary;
-            if !(_e237) {
-                let _e239 = diag_0_;
-                diag_0_ = (_e239 + diff_coeff_phi);
-                let _e248 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e248 - diff_coeff_phi);
+            let _e239 = dist;
+            let diff_coeff_phi = ((1f * area) / _e239);
+            let _e241 = is_boundary;
+            if !(_e241) {
+                let _e243 = diag_0_;
+                diag_0_ = (_e243 + diff_coeff_phi);
+                let _e252 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e252 - diff_coeff_phi);
             } else {
-                let _e256 = bc_kind[((boundary_type * 1u) + 0u)];
-                if (_e256 == 1u) {
-                    let _e259 = diag_0_;
-                    diag_0_ = (_e259 + diff_coeff_phi);
-                    let _e267 = bc_value[((boundary_type * 1u) + 0u)];
-                    let _e269 = rhs_0_;
-                    rhs_0_ = (_e269 + (diff_coeff_phi * _e267));
+                let _e260 = bc_kind[((boundary_type * 1u) + 0u)];
+                if (_e260 == 1u) {
+                    let _e263 = diag_0_;
+                    diag_0_ = (_e263 + diff_coeff_phi);
+                    let _e271 = bc_value[((boundary_type * 1u) + 0u)];
+                    let _e273 = rhs_0_;
+                    rhs_0_ = (_e273 + (diff_coeff_phi * _e271));
                 } else {
-                    let _e277 = bc_kind[((boundary_type * 1u) + 0u)];
-                    if (_e277 == 2u) {
-                        let _e288 = bc_value[((boundary_type * 1u) + 0u)];
-                        let _e291 = rhs_0_;
-                        rhs_0_ = (_e291 + -(((1f * area) * _e288)));
+                    let _e281 = bc_kind[((boundary_type * 1u) + 0u)];
+                    if (_e281 == 2u) {
+                        let _e292 = bc_value[((boundary_type * 1u) + 0u)];
+                        let _e295 = rhs_0_;
+                        rhs_0_ = (_e295 + -(((1f * area) * _e292)));
                     }
                 }
             }
         }
         continuing {
-            let _e294 = k;
-            k = (_e294 + 1u);
+            let _e298 = k;
+            k = (_e298 + 1u);
         }
     }
-    let _e298 = diagonal_indices[idx];
-    let diag_rank = (_e298 - scalar_offset);
     let _e307 = diag_0_;
     let _e308 = matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)] = (_e308 + _e307);
@@ -12979,75 +12979,77 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start = cell_face_offsets[idx];
     let end = cell_face_offsets[(idx + 1u)];
     let scalar_offset = scalar_row_offsets[idx];
-    let _e28 = scalar_row_offsets[(idx + 1u)];
-    let num_neighbors = (_e28 - scalar_offset);
+    let _e26 = diagonal_indices[idx];
+    let diag_rank = (_e26 - scalar_offset);
+    let _e32 = scalar_row_offsets[(idx + 1u)];
+    let num_neighbors = (_e32 - scalar_offset);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
-        let _e33 = rank;
-        if (_e33 < num_neighbors) {
+        let _e37 = rank;
+        if (_e37 < num_neighbors) {
         } else {
             break;
         }
         {
-            let _e35 = rank;
-            matrix_values[((start_row_0_ + (_e35 * 1u)) + 0u)] = 0f;
+            let _e39 = rank;
+            matrix_values[((start_row_0_ + (_e39 * 1u)) + 0u)] = 0f;
         }
         continuing {
-            let _e45 = rank;
-            rank = (_e45 + 1u);
+            let _e49 = rank;
+            rank = (_e49 + 1u);
         }
     }
-    let _e52 = constants.dt;
-    let _e54 = diag_0_;
-    diag_0_ = (_e54 + ((vol * 1f) / _e52));
-    let _e60 = constants.dt;
-    let _e69 = state_old[((idx * 1u) + 0u)];
-    let _e71 = rhs_0_;
-    rhs_0_ = (_e71 + (((vol * 1f) / _e60) * _e69));
-    let _e75 = constants.time_scheme;
-    if (_e75 == 1u) {
-        let _e80 = constants.dt;
-        let _e83 = constants.dt_old;
-        let r = (_e80 / _e83);
-        let _e89 = constants.dt;
-        let diag_bdf2_ = ((((vol * 1f) / _e89) * ((r * 2f) + 1f)) / (r + 1f));
+    let _e56 = constants.dt;
+    let _e58 = diag_0_;
+    diag_0_ = (_e58 + ((vol * 1f) / _e56));
+    let _e64 = constants.dt;
+    let _e73 = state_old[((idx * 1u) + 0u)];
+    let _e75 = rhs_0_;
+    rhs_0_ = (_e75 + (((vol * 1f) / _e64) * _e73));
+    let _e79 = constants.time_scheme;
+    if (_e79 == 1u) {
+        let _e84 = constants.dt;
+        let _e87 = constants.dt_old;
+        let r = (_e84 / _e87);
+        let _e93 = constants.dt;
+        let diag_bdf2_ = ((((vol * 1f) / _e93) * ((r * 2f) + 1f)) / (r + 1f));
         let factor_n = (r + 1f);
         let factor_nm1_ = ((r * r) / (r + 1f));
-        let _e105 = diag_0_;
-        let _e110 = constants.dt;
-        diag_0_ = ((_e105 - ((vol * 1f) / _e110)) + diag_bdf2_);
-        let _e114 = rhs_0_;
-        let _e119 = constants.dt;
-        let _e127 = state_old[((idx * 1u) + 0u)];
-        let _e134 = constants.dt;
-        let _e142 = state_old[((idx * 1u) + 0u)];
-        let _e150 = state_old_old[((idx * 1u) + 0u)];
-        rhs_0_ = ((_e114 - (((vol * 1f) / _e119) * _e127)) + (((vol * 1f) / _e134) * ((factor_n * _e142) - (factor_nm1_ * _e150))));
+        let _e109 = diag_0_;
+        let _e114 = constants.dt;
+        diag_0_ = ((_e109 - ((vol * 1f) / _e114)) + diag_bdf2_);
+        let _e118 = rhs_0_;
+        let _e123 = constants.dt;
+        let _e131 = state_old[((idx * 1u) + 0u)];
+        let _e138 = constants.dt;
+        let _e146 = state_old[((idx * 1u) + 0u)];
+        let _e154 = state_old_old[((idx * 1u) + 0u)];
+        rhs_0_ = ((_e118 - (((vol * 1f) / _e123) * _e131)) + (((vol * 1f) / _e138) * ((factor_n * _e146) - (factor_nm1_ * _e154))));
     }
     k = start;
     loop {
-        let _e156 = k;
-        if (_e156 < end) {
+        let _e160 = k;
+        if (_e160 < end) {
         } else {
             break;
         }
         {
-            let _e159 = k;
-            let face_idx = cell_faces[_e159];
+            let _e163 = k;
+            let face_idx = cell_faces[_e163];
             let owner = face_owner[face_idx];
             let neighbor_raw = face_neighbor[face_idx];
             let boundary_type = face_boundary[face_idx];
             let area = face_areas[face_idx];
             let f_center = face_centers[face_idx];
-            let _e179 = face_normals[face_idx];
-            normal = _e179;
+            let _e183 = face_normals[face_idx];
+            normal = _e183;
             is_boundary = false;
             other_idx = idx;
             if (owner != idx) {
-                let _e187 = normal.x;
-                normal.x = -(_e187);
-                let _e191 = normal.y;
-                normal.y = -(_e191);
+                let _e191 = normal.x;
+                normal.x = -(_e191);
+                let _e195 = normal.y;
+                normal.y = -(_e195);
             }
             if (neighbor_raw != -1i) {
                 let neighbor = u32(neighbor_raw);
@@ -13055,62 +13057,60 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (owner != idx) {
                     other_idx = owner;
                 }
-                let _e198 = other_idx;
-                let _e200 = cell_centers[_e198];
-                other_center = _e200;
+                let _e202 = other_idx;
+                let _e204 = cell_centers[_e202];
+                other_center = _e204;
             } else {
                 is_boundary = true;
                 other_idx = idx;
                 other_center = f_center;
             }
-            let _e204 = other_center.x;
-            let dx = (_e204 - center.x);
-            let _e208 = other_center.y;
-            let dy = (_e208 - center.y);
-            let _e212 = normal.x;
-            let _e215 = normal.y;
-            let dist_proj = abs(((dx * _e212) + (dy * _e215)));
+            let _e208 = other_center.x;
+            let dx = (_e208 - center.x);
+            let _e212 = other_center.y;
+            let dy = (_e212 - center.y);
+            let _e216 = normal.x;
+            let _e219 = normal.y;
+            let dist_proj = abs(((dx * _e216) + (dy * _e219)));
             let dist_euc = sqrt(((dx * dx) + (dy * dy)));
             dist = max(dist_euc, 0.000001f);
             if (dist_proj > 0.000001f) {
                 dist = dist_proj;
             }
-            let _e229 = k;
-            let scalar_mat_idx = cell_face_matrix_indices[_e229];
+            let _e233 = k;
+            let scalar_mat_idx = cell_face_matrix_indices[_e233];
             let neighbor_rank = (scalar_mat_idx - scalar_offset);
-            let _e235 = dist;
-            let diff_coeff_phi = ((1f * area) / _e235);
-            let _e237 = is_boundary;
-            if !(_e237) {
-                let _e239 = diag_0_;
-                diag_0_ = (_e239 + diff_coeff_phi);
-                let _e248 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e248 - diff_coeff_phi);
+            let _e239 = dist;
+            let diff_coeff_phi = ((1f * area) / _e239);
+            let _e241 = is_boundary;
+            if !(_e241) {
+                let _e243 = diag_0_;
+                diag_0_ = (_e243 + diff_coeff_phi);
+                let _e252 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e252 - diff_coeff_phi);
             } else {
-                let _e256 = bc_kind[((boundary_type * 1u) + 0u)];
-                if (_e256 == 1u) {
-                    let _e259 = diag_0_;
-                    diag_0_ = (_e259 + diff_coeff_phi);
-                    let _e267 = bc_value[((boundary_type * 1u) + 0u)];
-                    let _e269 = rhs_0_;
-                    rhs_0_ = (_e269 + (diff_coeff_phi * _e267));
+                let _e260 = bc_kind[((boundary_type * 1u) + 0u)];
+                if (_e260 == 1u) {
+                    let _e263 = diag_0_;
+                    diag_0_ = (_e263 + diff_coeff_phi);
+                    let _e271 = bc_value[((boundary_type * 1u) + 0u)];
+                    let _e273 = rhs_0_;
+                    rhs_0_ = (_e273 + (diff_coeff_phi * _e271));
                 } else {
-                    let _e277 = bc_kind[((boundary_type * 1u) + 0u)];
-                    if (_e277 == 2u) {
-                        let _e288 = bc_value[((boundary_type * 1u) + 0u)];
-                        let _e291 = rhs_0_;
-                        rhs_0_ = (_e291 + -(((1f * area) * _e288)));
+                    let _e281 = bc_kind[((boundary_type * 1u) + 0u)];
+                    if (_e281 == 2u) {
+                        let _e292 = bc_value[((boundary_type * 1u) + 0u)];
+                        let _e295 = rhs_0_;
+                        rhs_0_ = (_e295 + -(((1f * area) * _e292)));
                     }
                 }
             }
         }
         continuing {
-            let _e294 = k;
-            k = (_e294 + 1u);
+            let _e298 = k;
+            k = (_e298 + 1u);
         }
     }
-    let _e298 = diagonal_indices[idx];
-    let diag_rank = (_e298 - scalar_offset);
     let _e307 = diag_0_;
     let _e308 = matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (diag_rank * 1u)) + 0u)] = (_e308 + _e307);

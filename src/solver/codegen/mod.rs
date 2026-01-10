@@ -15,6 +15,7 @@ pub mod prepare_coupled;
 pub mod pressure_assembly;
 pub mod reconstruction;
 pub mod state_access;
+pub mod unified_assembly;
 pub mod update_fields_from_coupled;
 pub mod wgsl;
 pub mod wgsl_ast;

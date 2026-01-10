@@ -10,14 +10,14 @@ use super::compressible_update::generate_compressible_update_wgsl;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
 use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use super::generic_coupled_kernels::{
-    generate_generic_coupled_apply_wgsl, generate_generic_coupled_assembly_wgsl,
-    generate_generic_coupled_update_wgsl,
+    generate_generic_coupled_apply_wgsl, generate_generic_coupled_update_wgsl,
 };
 use super::ir::{lower_system, DiscreteSystem};
 use super::prepare_coupled::generate_prepare_coupled_wgsl;
 use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
+use crate::solver::codegen::unified_assembly;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::{incompressible_momentum_model, KernelKind, ModelSpec};
 use crate::solver::scheme::Scheme;
@@ -173,7 +173,12 @@ fn generate_kernel_wgsl(
                 let needs_gradients = expand_schemes(&model.system, schemes)
                     .map(|e| e.needs_gradients())
                     .unwrap_or(false);
-                generate_generic_coupled_assembly_wgsl(&discrete, &model.state_layout, needs_gradients)
+                unified_assembly::generate_unified_assembly_wgsl(
+                    &discrete,
+                    &model.state_layout,
+                    &model.state_layout,
+                    needs_gradients,
+                )
             }
             KernelKind::GenericCoupledApply => generate_generic_coupled_apply_wgsl(),
             KernelKind::GenericCoupledUpdate => {

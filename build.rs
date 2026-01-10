@@ -223,6 +223,12 @@ mod solver {
                 "/src/solver/codegen/ir.rs"
             ));
         }
+        pub mod unified_assembly {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/unified_assembly.rs"
+            ));
+        }
         pub mod plan {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -479,10 +485,7 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             gen_dir.join("generic_coupled_apply.wgsl"),
         ),
         ("prepare_coupled", gen_dir.join("prepare_coupled.wgsl")),
-        (
-            "pressure_assembly",
-            gen_dir.join("pressure_assembly.wgsl"),
-        ),
+        ("pressure_assembly", gen_dir.join("pressure_assembly.wgsl")),
         (
             "update_fields_from_coupled",
             gen_dir.join("update_fields_from_coupled.wgsl"),
@@ -540,7 +543,9 @@ fn generate_kernel_registry_map() {
     code.push_str("// DO NOT EDIT MANUALLY\n\n");
     code.push_str("use crate::solver::gpu::{bindings, wgsl_meta};\n");
     code.push_str("use crate::solver::model::KernelKind;\n\n");
-    code.push_str("pub(crate) type KernelPipelineCtor = fn(&wgpu::Device) -> wgpu::ComputePipeline;\n\n");
+    code.push_str(
+        "pub(crate) type KernelPipelineCtor = fn(&wgpu::Device) -> wgpu::ComputePipeline;\n\n",
+    );
     code.push_str("pub(crate) fn kernel_entry(\n");
     code.push_str("    kind: KernelKind,\n");
     code.push_str(") -> Option<(\n");
@@ -553,7 +558,9 @@ fn generate_kernel_registry_map() {
     for (variant, module) in entries {
         let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
         code.push_str(&format!("        KernelKind::{variant} => Some((\n"));
-        code.push_str(&format!("            bindings::generated::{module}::SHADER_STRING,\n"));
+        code.push_str(&format!(
+            "            bindings::generated::{module}::SHADER_STRING,\n"
+        ));
         code.push_str(&format!(
             "            bindings::generated::{module}::compute::create_main_pipeline_embed_source,\n"
         ));

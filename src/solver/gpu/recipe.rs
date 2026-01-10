@@ -456,18 +456,23 @@ fn phase_for_kernel(kind: KernelKind) -> KernelPhase {
 
         KernelKind::CompressibleGradients => KernelPhase::Gradients,
 
+        KernelKind::CompressibleFluxKt => KernelPhase::FluxComputation,
+
+        KernelKind::CompressibleExplicitUpdate => KernelPhase::ExplicitUpdate,
+
         KernelKind::CoupledAssembly
         | KernelKind::PressureAssembly
         | KernelKind::CompressibleAssembly
         | KernelKind::GenericCoupledAssembly
-        | KernelKind::CompressibleFluxKt => KernelPhase::Assembly,
+        => KernelPhase::Assembly,
 
-        KernelKind::CompressibleApply | KernelKind::GenericCoupledApply => KernelPhase::Assembly,
+        KernelKind::CompressibleApply | KernelKind::GenericCoupledApply => KernelPhase::Apply,
 
-        KernelKind::UpdateFieldsFromCoupled
-        | KernelKind::CompressibleUpdate
-        | KernelKind::CompressibleExplicitUpdate
-        | KernelKind::GenericCoupledUpdate => KernelPhase::Update,
+        KernelKind::UpdateFieldsFromCoupled | KernelKind::GenericCoupledUpdate => KernelPhase::Update,
+
+        // Primitive recovery for compressible after update/apply.
+        // (Some solver flows may run this explicitly as a separate pass.)
+        KernelKind::CompressibleUpdate => KernelPhase::PrimitiveRecovery,
 
         KernelKind::IncompressibleMomentum => KernelPhase::Assembly,
     }

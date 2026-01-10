@@ -1,4 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::env_utils::env_flag;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::modules::compressible_krylov::{
@@ -239,14 +240,4 @@ pub struct LinearTopology<'a> {
     pub scalar_col_indices: &'a [u32],
     pub block_row_offsets: &'a [u32],
     pub block_col_indices: &'a [u32],
-}
-
-fn env_flag(name: &str, default: bool) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|val| {
-            let val = val.to_ascii_lowercase();
-            matches!(val.as_str(), "1" | "true" | "yes" | "y" | "on")
-        })
-        .unwrap_or(default)
 }

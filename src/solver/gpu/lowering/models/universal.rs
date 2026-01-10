@@ -1,3 +1,4 @@
+use crate::solver::gpu::env_utils::{env_f32, env_usize};
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources;
@@ -7,7 +8,6 @@ use crate::solver::gpu::plans::plan_instance::{
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
-use std::env;
 
 // --- Single universal program resource ---
 
@@ -393,20 +393,6 @@ fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
         explicit_implicit_backend_mut(plan).expect("missing universal explicit/implicit backend");
     wrap.implicit_outer_idx = 0;
     wrap.implicit_stats.clear();
-}
-
-fn env_usize(name: &str, default: usize) -> usize {
-    env::var(name)
-        .ok()
-        .and_then(|val| val.parse().ok())
-        .unwrap_or(default)
-}
-
-fn env_f32(name: &str, default: f32) -> f32 {
-    env::var(name)
-        .ok()
-        .and_then(|val| val.parse().ok())
-        .unwrap_or(default)
 }
 
 fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {

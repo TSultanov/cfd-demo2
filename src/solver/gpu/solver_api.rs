@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::solver::gpu::plans::incompressible_linear_solver::FgmresResources;
+use crate::solver::gpu::coupled_backend::linear_solver::FgmresResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};

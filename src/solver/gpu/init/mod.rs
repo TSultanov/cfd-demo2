@@ -5,10 +5,10 @@ pub mod scalars;
 use crate::solver::mesh::Mesh;
 use std::sync::Mutex;
 
+use crate::solver::gpu::coupled_backend::linear_solver::IncompressibleLinearSolver;
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
-use crate::solver::gpu::plans::incompressible_linear_solver::IncompressibleLinearSolver;
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::model::ModelSpec;
 

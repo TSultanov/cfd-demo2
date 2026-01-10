@@ -1,11 +1,11 @@
 use super::async_buffer::AsyncScalarReader;
+use super::coupled_backend::linear_solver::IncompressibleLinearSolver;
 use super::modules::graph::ModuleGraph;
 use super::modules::linear_system::LinearSystemPorts;
 use super::modules::model_kernels::ModelKernelsModule;
 use super::modules::ports::PortSpace;
 use super::modules::time_integration::TimeIntegrationModule;
 use super::modules::unified_field_resources::UnifiedFieldResources;
-use super::plans::incompressible_linear_solver::IncompressibleLinearSolver;
 use super::runtime_common::GpuRuntimeCommon;
 use crate::solver::model::ModelSpec;
 use bytemuck::{Pod, Zeroable};

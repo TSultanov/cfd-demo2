@@ -5,12 +5,12 @@ use crate::solver::gpu::modules::compressible_lowering::CompressibleLowered;
 use crate::solver::gpu::modules::graph::RuntimeDims;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 
+use crate::solver::gpu::explicit_implicit::fgmres::{CompressibleLinearSolver, LinearTopology};
+use crate::solver::gpu::explicit_implicit::graphs::CompressibleGraphs;
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
-use crate::solver::gpu::plans::compressible_fgmres::{CompressibleLinearSolver, LinearTopology};
-use crate::solver::gpu::plans::compressible_graphs::CompressibleGraphs;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
@@ -20,7 +20,8 @@ use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
-use std::env;
+
+use crate::solver::gpu::env_utils::{env_flag, env_usize};
 
 #[derive(Clone, Copy, Debug)]
 struct ExplicitImplicitOffsets {
@@ -668,30 +669,6 @@ impl ExplicitImplicitPlanResources {
             tol,
         )
     }
-}
-
-fn env_flag(name: &str, default: bool) -> bool {
-    env::var(name)
-        .ok()
-        .map(|val| {
-            let val = val.to_ascii_lowercase();
-            matches!(val.as_str(), "1" | "true" | "yes" | "y" | "on")
-        })
-        .unwrap_or(default)
-}
-
-fn env_usize(name: &str, default: usize) -> usize {
-    env::var(name)
-        .ok()
-        .and_then(|val| val.parse().ok())
-        .unwrap_or(default)
-}
-
-fn env_f32(name: &str, default: f32) -> f32 {
-    env::var(name)
-        .ok()
-        .and_then(|val| val.parse().ok())
-        .unwrap_or(default)
 }
 
 impl PlanLinearSystemDebug for ExplicitImplicitPlanResources {

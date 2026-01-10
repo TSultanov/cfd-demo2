@@ -1,9 +1,5 @@
-pub(crate) mod compressible_fgmres;
-pub(crate) mod compressible_graphs;
-pub(crate) mod coupled;
 pub(crate) mod explicit_implicit;
 pub(crate) mod generic_coupled;
-pub(crate) mod incompressible_linear_solver;
 pub(crate) mod plan_instance;
 pub(crate) mod program;
 

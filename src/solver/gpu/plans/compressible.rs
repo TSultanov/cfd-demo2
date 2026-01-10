@@ -272,6 +272,9 @@ impl CompressiblePlanResources {
         );
 
         let port_space = lowered.ports;
+        
+        // Create graphs before struct construction (needs borrow of kernels)
+        let graphs = CompressibleGraphs::from_recipe(&recipe, &kernels);
 
         let mut solver = Self {
             common,
@@ -286,7 +289,7 @@ impl CompressiblePlanResources {
             port_space,
             kernels,
             linear_solver: CompressibleLinearSolver::new(),
-            graphs: CompressibleGraphs::new(),
+            graphs,
             outer_iters,
             nonconverged_relax: 0.5,
             scalar_row_offsets: lowered.scalar_row_offsets,

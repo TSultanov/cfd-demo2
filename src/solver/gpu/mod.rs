@@ -21,5 +21,5 @@ pub mod unified_solver;
 pub(crate) mod wgsl_meta;
 pub(crate) mod wgsl_reflect;
 
-pub use recipe::{SolverRecipe, LinearSolverSpec, TimeIntegrationSpec};
+pub use recipe::{LinearSolverSpec, SolverRecipe, TimeIntegrationSpec};
 pub use unified_solver::{FgmresSizing, GpuUnifiedSolver, SolverConfig};

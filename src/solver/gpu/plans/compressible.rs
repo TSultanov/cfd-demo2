@@ -6,12 +6,10 @@ use crate::solver::gpu::modules::graph::RuntimeDims;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 
 use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
-use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
-use crate::solver::gpu::plans::compressible_fgmres::{
-    CompressibleLinearSolver, LinearTopology,
-};
+use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
+use crate::solver::gpu::plans::compressible_fgmres::{CompressibleLinearSolver, LinearTopology};
 use crate::solver::gpu::plans::compressible_graphs::CompressibleGraphs;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
 use crate::solver::gpu::recipe::SolverRecipe;
@@ -277,7 +275,7 @@ impl CompressiblePlanResources {
         );
 
         let port_space = lowered.ports;
-        
+
         // Create graphs before struct construction (needs borrow of kernels)
         let graphs = CompressibleGraphs::from_recipe(&recipe, &kernels)?;
 
@@ -338,11 +336,8 @@ impl CompressiblePlanResources {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        self.time_integration.set_dt(
-            dt,
-            &mut self.fields.constants,
-            &self.common.context.queue,
-        );
+        self.time_integration
+            .set_dt(dt, &mut self.fields.constants, &self.common.context.queue);
     }
 
     pub fn set_dtau(&mut self, dtau: f32) {
@@ -478,10 +473,8 @@ impl CompressiblePlanResources {
 
     pub(crate) fn advance_ping_pong_and_time(&mut self) {
         self.fields.state.advance();
-        self.time_integration.prepare_step(
-            &mut self.fields.constants,
-            &self.common.context.queue,
-        );
+        self.time_integration
+            .prepare_step(&mut self.fields.constants, &self.common.context.queue);
     }
 
     pub(crate) fn implicit_set_base_alpha(&mut self) {
@@ -510,7 +503,7 @@ impl CompressiblePlanResources {
             block_col_indices: &self.block_col_indices,
         };
 
-        let mut iter_stats = self.linear_solver.solve(
+        let _iter_stats = self.linear_solver.solve(
             &self.common.context,
             &self.common.readback_cache,
             &self.common.profiling_stats,
@@ -524,8 +517,8 @@ impl CompressiblePlanResources {
             self.linear_solver.tol,
         );
 
-        if !iter_stats.converged {
-            let retry_stats = self.linear_solver.solve(
+        if !self.linear_solver.last_stats.converged {
+            let _retry_stats = self.linear_solver.solve(
                 &self.common.context,
                 &self.common.readback_cache,
                 &self.common.profiling_stats,
@@ -538,10 +531,6 @@ impl CompressiblePlanResources {
                 self.linear_solver.retry_restart,
                 self.linear_solver.retry_tol,
             );
-            
-            if retry_stats.converged || retry_stats.residual < iter_stats.residual {
-                iter_stats = retry_stats;
-            }
         }
     }
 
@@ -587,10 +576,8 @@ impl CompressiblePlanResources {
     }
 
     pub(crate) fn finalize_dt_old(&mut self) {
-        self.time_integration.finalize_step(
-            &mut self.fields.constants,
-            &self.common.context.queue,
-        );
+        self.time_integration
+            .finalize_step(&mut self.fields.constants, &self.common.context.queue);
     }
 
     pub async fn get_rho(&self) -> Vec<f64> {
@@ -624,7 +611,8 @@ impl CompressiblePlanResources {
     }
 
     fn update_low_mach_params(&mut self) {
-        self.fields.update_low_mach_params(&self.common.context.queue);
+        self.fields
+            .update_low_mach_params(&self.common.context.queue);
     }
 
     async fn read_state(&self) -> Vec<f32> {

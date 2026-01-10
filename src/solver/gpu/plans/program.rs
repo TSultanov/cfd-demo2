@@ -75,11 +75,7 @@ impl ProgramOpRegistry {
     pub(crate) fn validate_program_spec(&self, program: &ProgramSpec) -> Result<(), String> {
         let mut missing = BTreeSet::<String>::new();
 
-        if program
-            .blocks
-            .get(program.root.0 as usize)
-            .is_none()
-        {
+        if program.blocks.get(program.root.0 as usize).is_none() {
             missing.insert(format!("missing root program block: {:?}", program.root));
         }
 
@@ -171,21 +167,33 @@ impl ProgramOpRegistry {
         ))
     }
 
-    pub fn register_graph(&mut self, kind: GraphOpKind, handler: GraphOpHandler) -> Result<(), String> {
+    pub fn register_graph(
+        &mut self,
+        kind: GraphOpKind,
+        handler: GraphOpHandler,
+    ) -> Result<(), String> {
         if self.graph.insert(kind, handler).is_some() {
             return Err(format!("graph op already registered: {kind:?}"));
         }
         Ok(())
     }
 
-    pub fn register_host(&mut self, kind: HostOpKind, handler: HostOpHandler) -> Result<(), String> {
+    pub fn register_host(
+        &mut self,
+        kind: HostOpKind,
+        handler: HostOpHandler,
+    ) -> Result<(), String> {
         if self.host.insert(kind, handler).is_some() {
             return Err(format!("host op already registered: {kind:?}"));
         }
         Ok(())
     }
 
-    pub fn register_cond(&mut self, kind: CondOpKind, handler: CondOpHandler) -> Result<(), String> {
+    pub fn register_cond(
+        &mut self,
+        kind: CondOpKind,
+        handler: CondOpHandler,
+    ) -> Result<(), String> {
         if self.cond.insert(kind, handler).is_some() {
             return Err(format!("cond op already registered: {kind:?}"));
         }
@@ -585,7 +593,7 @@ impl GpuProgramPlan {
                     cond,
                     then_block,
                     else_block,
-                    .. 
+                    ..
                 } => {
                     if self.spec.ops.eval_cond(cond, &*self) {
                         self.execute_block(then_block);
@@ -603,7 +611,7 @@ impl GpuProgramPlan {
                     max_iters,
                     cond,
                     body,
-                    .. 
+                    ..
                 } => {
                     let max_iters = self.spec.ops.eval_count(max_iters, &*self);
                     for _ in 0..max_iters {
@@ -792,7 +800,10 @@ mod tests {
         registry.register_host(HostOpKind("CompressibleExplicitFinalize"), dummy_host)?;
         registry.register_host(HostOpKind("IncompressibleCoupledBeginStep"), dummy_host)?;
         registry.register_cond(CondOpKind("CompressibleShouldUseExplicit"), dummy_cond)?;
-        registry.register_cond(CondOpKind("IncompressibleCoupledShouldContinue"), dummy_cond)?;
+        registry.register_cond(
+            CondOpKind("IncompressibleCoupledShouldContinue"),
+            dummy_cond,
+        )?;
         registry.register_count(CountOpKind("CompressibleImplicitOuterIters"), dummy_count)?;
         registry.register_count(CountOpKind("IncompressibleCoupledMaxIters"), dummy_count)?;
 

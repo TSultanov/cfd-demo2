@@ -11,11 +11,15 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/kernel_registry_map.rs"));
 }
 
+#[allow(dead_code)]
 pub(crate) fn kernel_source(model_id: &str, kind: KernelKind) -> Result<KernelSource, String> {
     kernel_source_by_id(model_id, KernelId::from(kind))
 }
 
-pub(crate) fn kernel_source_by_id(model_id: &str, kernel_id: KernelId) -> Result<KernelSource, String> {
+pub(crate) fn kernel_source_by_id(
+    model_id: &str,
+    kernel_id: KernelId,
+) -> Result<KernelSource, String> {
     // Generic-coupled kernels are emitted per-model, so they require a model-specific lookup.
     if matches!(
         kernel_id,
@@ -48,7 +52,9 @@ pub(crate) fn kernel_source_by_id(model_id: &str, kernel_id: KernelId) -> Result
         });
     }
 
-    if let Some((_shader, create_pipeline, bindings)) = generated::kernel_entry_by_id(kernel_id.as_str()) {
+    if let Some((_shader, create_pipeline, bindings)) =
+        generated::kernel_entry_by_id(kernel_id.as_str())
+    {
         return Ok(KernelSource {
             bindings,
             create_pipeline,

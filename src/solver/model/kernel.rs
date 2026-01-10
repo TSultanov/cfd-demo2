@@ -118,7 +118,9 @@ struct KernelRequirements {
     pressure_coupling: Option<PressureCoupling>,
 }
 
-fn analyze_kernel_requirements(system: &crate::solver::model::backend::EquationSystem) -> KernelRequirements {
+fn analyze_kernel_requirements(
+    system: &crate::solver::model::backend::EquationSystem,
+) -> KernelRequirements {
     use crate::solver::model::backend::{FieldKind, FieldRef, TermOp};
     use std::collections::{HashMap, HashSet};
 

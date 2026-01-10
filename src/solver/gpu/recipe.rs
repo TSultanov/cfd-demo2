@@ -13,7 +13,9 @@ use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
-use crate::solver::model::{expand_field_components, FluxSpec, GradientStorage, KernelId, ModelSpec};
+use crate::solver::model::{
+    expand_field_components, FluxSpec, GradientStorage, KernelId, ModelSpec,
+};
 use crate::solver::scheme::Scheme;
 use std::collections::HashSet;
 
@@ -150,18 +152,6 @@ pub enum SteppingMode {
 }
 
 /// High-level program structure emitted for a recipe.
-///
-/// This is a transitional bridge while solver-family runtime resources still exist.
-/// The intent is that *eventually* the program can be emitted purely from phases and
-/// module capabilities, but today we persist the chosen structure as part of the recipe
-/// rather than re-inferring it in `build_program_spec()`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProgramShape {
-    Compressible,
-    IncompressibleCoupled,
-    GenericCoupledScalar,
-}
-
 /// A complete recipe for constructing a GPU solver.
 #[derive(Debug, Clone)]
 pub struct SolverRecipe {
@@ -182,9 +172,6 @@ pub struct SolverRecipe {
 
     /// Stepping mode (explicit, implicit, coupled)
     pub stepping: SteppingMode,
-
-    /// Program structure to emit for this recipe.
-    pub program_shape: ProgramShape,
 
     /// Fields that require gradient computation
     pub gradient_fields: Vec<String>,
@@ -264,7 +251,9 @@ impl SolverRecipe {
                 | KernelId::COMPRESSIBLE_ASSEMBLY
                 | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
 
-                KernelId::COMPRESSIBLE_APPLY | KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
+                KernelId::COMPRESSIBLE_APPLY | KernelId::GENERIC_COUPLED_APPLY => {
+                    KernelPhase::Apply
+                }
 
                 KernelId::UPDATE_FIELDS_FROM_COUPLED | KernelId::GENERIC_COUPLED_UPDATE => {
                     KernelPhase::Update
@@ -281,7 +270,11 @@ impl SolverRecipe {
                 _ => DispatchKind::Cells,
             };
 
-            kernels.push(KernelSpec { id, phase, dispatch });
+            kernels.push(KernelSpec {
+                id,
+                phase,
+                dispatch,
+            });
         }
 
         // Derive auxiliary buffers
@@ -312,10 +305,6 @@ impl SolverRecipe {
         let kernel_ids: Vec<KernelId> = kernels.iter().map(|k| k.id).collect();
         let stepping = derive_stepping_mode(model, &kernel_ids);
 
-        // Choose the program structure up-front so `build_program_spec()` does not need
-        // to re-infer “family-like” behavior by scanning the kernel set.
-        let program_shape = derive_program_shape(&kernel_ids);
-
         // Linear solver spec
         let linear_solver = LinearSolverSpec {
             solver_type: LinearSolverType::Fgmres { max_restart: 30 },
@@ -332,7 +321,6 @@ impl SolverRecipe {
             linear_solver,
             time_integration,
             stepping,
-            program_shape,
             gradient_fields,
             flux,
             requires_low_mach_params,
@@ -368,275 +356,12 @@ impl SolverRecipe {
             CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
         };
 
-        match self.program_shape {
-            ProgramShape::Compressible => {
-            let mut program = ProgramSpecBuilder::new();
-            let root = program.root();
-            let explicit_block = program.new_block();
-            let implicit_iter_block = program.new_block();
-            let implicit_block = program.new_block();
-
-            // Op kinds match `src/solver/gpu/lowering/templates.rs` (compressible)
-            let g_explicit_graph = GraphOpKind("compressible:explicit_graph");
-            let g_implicit_grad_assembly = GraphOpKind("compressible:implicit_grad_assembly");
-            let g_implicit_snapshot = GraphOpKind("compressible:implicit_snapshot");
-            let g_implicit_apply = GraphOpKind("compressible:implicit_apply");
-            let g_primitive_update = GraphOpKind("compressible:primitive_update");
-
-            let h_explicit_prepare = HostOpKind("compressible:explicit_prepare");
-            let h_explicit_finalize = HostOpKind("compressible:explicit_finalize");
-            let h_implicit_prepare = HostOpKind("compressible:implicit_prepare");
-            let h_implicit_set_iter_params = HostOpKind("compressible:implicit_set_iter_params");
-            let h_implicit_solve_fgmres = HostOpKind("compressible:implicit_solve_fgmres");
-            let h_implicit_record_stats = HostOpKind("compressible:implicit_record_stats");
-            let h_implicit_set_alpha = HostOpKind("compressible:implicit_set_alpha");
-            let h_implicit_restore_alpha = HostOpKind("compressible:implicit_restore_alpha");
-            let h_implicit_advance_outer_idx = HostOpKind("compressible:implicit_advance_outer_idx");
-            let h_implicit_finalize = HostOpKind("compressible:implicit_finalize");
-
-            let c_should_use_explicit = CondOpKind("compressible:should_use_explicit");
-            let n_implicit_outer_iters = CountOpKind("compressible:implicit_outer_iters");
-
-            // Explicit block
-            program.push(
-                explicit_block,
-                ProgramSpecNode::Host {
-                    label: "compressible:explicit_prepare",
-                    kind: h_explicit_prepare,
-                },
-            );
-            program.push(
-                explicit_block,
-                ProgramSpecNode::Graph {
-                    label: "compressible:explicit_graph",
-                    kind: g_explicit_graph,
-                    mode: GraphExecMode::SplitTimed,
-                },
-            );
-            program.push(
-                explicit_block,
-                ProgramSpecNode::Host {
-                    label: "compressible:explicit_finalize",
-                    kind: h_explicit_finalize,
-                },
-            );
-
-            // Implicit iteration body
-            for node in [
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_set_iter_params",
-                    kind: h_implicit_set_iter_params,
-                },
-                ProgramSpecNode::Graph {
-                    label: "compressible:implicit_grad_assembly",
-                    kind: g_implicit_grad_assembly,
-                    mode: GraphExecMode::SplitTimed,
-                },
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_fgmres",
-                    kind: h_implicit_solve_fgmres,
-                },
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_record_stats",
-                    kind: h_implicit_record_stats,
-                },
-                ProgramSpecNode::Graph {
-                    label: "compressible:implicit_snapshot",
-                    kind: g_implicit_snapshot,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_set_alpha",
-                    kind: h_implicit_set_alpha,
-                },
-                ProgramSpecNode::Graph {
-                    label: "compressible:implicit_apply",
-                    kind: g_implicit_apply,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_restore_alpha",
-                    kind: h_implicit_restore_alpha,
-                },
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_outer_idx_inc",
-                    kind: h_implicit_advance_outer_idx,
-                },
-            ] {
-                program.push(implicit_iter_block, node);
-            }
-
-            // Implicit block
-            program.push(
-                implicit_block,
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_prepare",
-                    kind: h_implicit_prepare,
-                },
-            );
-            program.push(
-                implicit_block,
-                ProgramSpecNode::Repeat {
-                    label: "compressible:implicit_outer_loop",
-                    times: n_implicit_outer_iters,
-                    body: implicit_iter_block,
-                },
-            );
-            program.push(
-                implicit_block,
-                ProgramSpecNode::Graph {
-                    label: "compressible:primitive_update",
-                    kind: g_primitive_update,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-            );
-            program.push(
-                implicit_block,
-                ProgramSpecNode::Host {
-                    label: "compressible:implicit_finalize",
-                    kind: h_implicit_finalize,
-                },
-            );
-
-            // Select explicit vs implicit
-            program.push(
-                root,
-                ProgramSpecNode::If {
-                    label: "compressible:select_step_path",
-                    cond: c_should_use_explicit,
-                    then_block: explicit_block,
-                    else_block: Some(implicit_block),
-                },
-            );
-
-            return program.build();
-            }
-
-            ProgramShape::IncompressibleCoupled => {
-            let mut program = ProgramSpecBuilder::new();
-            let root = program.root();
-            let coupled_iter_block = program.new_block();
-            let coupled_prepare_block = program.new_block();
-            let coupled_assembly_block = program.new_block();
-            let coupled_step_block = program.new_block();
-
-            // Op kinds match `src/solver/gpu/lowering/templates.rs` (incompressible_coupled)
-            let g_coupled_prepare_assembly = GraphOpKind("incompressible:coupled_prepare_assembly");
-            let g_coupled_assembly = GraphOpKind("incompressible:coupled_assembly");
-            let g_coupled_update = GraphOpKind("incompressible:coupled_update");
-            let g_coupled_init_prepare = GraphOpKind("incompressible:coupled_init_prepare");
-
-            let h_coupled_begin_step = HostOpKind("incompressible:coupled_begin_step");
-            let h_coupled_before_iter = HostOpKind("incompressible:coupled_before_iter");
-            let h_coupled_solve = HostOpKind("incompressible:coupled_solve");
-            let h_coupled_clear_max_diff = HostOpKind("incompressible:coupled_clear_max_diff");
-            let h_coupled_convergence_advance =
-                HostOpKind("incompressible:coupled_convergence_advance");
-            let h_coupled_finalize_step = HostOpKind("incompressible:coupled_finalize_step");
-
-            let c_has_coupled_resources = CondOpKind("incompressible:has_coupled_resources");
-            let c_coupled_needs_prepare = CondOpKind("incompressible:coupled_needs_prepare");
-            let c_coupled_should_continue = CondOpKind("incompressible:coupled_should_continue");
-
-            let n_coupled_max_iters = CountOpKind("incompressible:coupled_max_iters");
-
-            program.push(
-                coupled_prepare_block,
-                ProgramSpecNode::Graph {
-                    label: "incompressible:coupled_prepare_assembly",
-                    kind: g_coupled_prepare_assembly,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-            );
-            program.push(
-                coupled_assembly_block,
-                ProgramSpecNode::Graph {
-                    label: "incompressible:coupled_assembly",
-                    kind: g_coupled_assembly,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-            );
-
-            for node in [
-                ProgramSpecNode::Host {
-                    label: "incompressible:coupled_before_iter",
-                    kind: h_coupled_before_iter,
-                },
-                ProgramSpecNode::If {
-                    label: "incompressible:coupled_prepare_or_assembly",
-                    cond: c_coupled_needs_prepare,
-                    then_block: coupled_prepare_block,
-                    else_block: Some(coupled_assembly_block),
-                },
-                ProgramSpecNode::Host {
-                    label: "incompressible:coupled_solve",
-                    kind: h_coupled_solve,
-                },
-                ProgramSpecNode::Host {
-                    label: "incompressible:coupled_clear_max_diff",
-                    kind: h_coupled_clear_max_diff,
-                },
-                ProgramSpecNode::Graph {
-                    label: "incompressible:coupled_update_fields_max_diff",
-                    kind: g_coupled_update,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-                ProgramSpecNode::Host {
-                    label: "incompressible:coupled_convergence_and_advance",
-                    kind: h_coupled_convergence_advance,
-                },
-            ] {
-                program.push(coupled_iter_block, node);
-            }
-
-            for node in [
-                ProgramSpecNode::Host {
-                    label: "incompressible:coupled_begin_step",
-                    kind: h_coupled_begin_step,
-                },
-                ProgramSpecNode::Graph {
-                    label: "incompressible:coupled_init_prepare",
-                    kind: g_coupled_init_prepare,
-                    mode: GraphExecMode::SingleSubmit,
-                },
-                ProgramSpecNode::While {
-                    label: "incompressible:coupled_outer_loop",
-                    max_iters: n_coupled_max_iters,
-                    cond: c_coupled_should_continue,
-                    body: coupled_iter_block,
-                },
-                ProgramSpecNode::Host {
-                    label: "incompressible:coupled_finalize_step",
-                    kind: h_coupled_finalize_step,
-                },
-            ] {
-                program.push(coupled_step_block, node);
-            }
-
-            program.push(
-                root,
-                ProgramSpecNode::If {
-                    label: "incompressible:step",
-                    cond: c_has_coupled_resources,
-                    then_block: coupled_step_block,
-                    else_block: None,
-                },
-            );
-
-            return program.build();
-            }
-
-            ProgramShape::GenericCoupledScalar => {
-                // Fall through to generic program emission below (driven by stepping).
-            }
-        }
-
         let mut program = ProgramSpecBuilder::new();
         let root = program.root();
 
         match &self.stepping {
             SteppingMode::Explicit => {
-                // Explicit: prepare → gradients (if needed) → explicit update → finalize
+                // Explicit: prepare → update_graph → finalize
                 program.push(
                     root,
                     ProgramSpecNode::Host {
@@ -644,27 +369,14 @@ impl SolverRecipe {
                         kind: HostOpKind("explicit:prepare"),
                     },
                 );
-
-                if self.needs_gradients() {
-                    program.push(
-                        root,
-                        ProgramSpecNode::Graph {
-                            label: "explicit:gradients",
-                            kind: GraphOpKind("explicit:gradients"),
-                            mode: GraphExecMode::SingleSubmit,
-                        },
-                    );
-                }
-
                 program.push(
                     root,
                     ProgramSpecNode::Graph {
                         label: "explicit:update",
                         kind: GraphOpKind("explicit:update"),
-                        mode: GraphExecMode::SingleSubmit,
+                        mode: GraphExecMode::SplitTimed,
                     },
                 );
-
                 program.push(
                     root,
                     ProgramSpecNode::Host {
@@ -675,8 +387,8 @@ impl SolverRecipe {
             }
 
             SteppingMode::Implicit { outer_iters: _ } => {
-                // Implicit: prepare → newton loop (gradients → assembly → solve → apply) → finalize
-                let newton_block = program.new_block();
+                // Implicit: prepare → outer loop (before_iter → assembly → solve → after_solve → snapshot → before_apply → apply → after_apply → advance_outer_idx) → update → finalize
+                let iter_block = program.new_block();
 
                 program.push(
                     root,
@@ -686,52 +398,65 @@ impl SolverRecipe {
                     },
                 );
 
-                // Newton iteration body
-                if self.needs_gradients() {
-                    program.push(
-                        newton_block,
-                        ProgramSpecNode::Graph {
-                            label: "implicit:gradients",
-                            kind: GraphOpKind("implicit:gradients"),
-                            mode: GraphExecMode::SingleSubmit,
-                        },
-                    );
-                }
-
-                program.push(
-                    newton_block,
+                for node in [
+                    ProgramSpecNode::Host {
+                        label: "implicit:before_iter",
+                        kind: HostOpKind("implicit:before_iter"),
+                    },
                     ProgramSpecNode::Graph {
                         label: "implicit:assembly",
                         kind: GraphOpKind("implicit:assembly"),
                         mode: GraphExecMode::SplitTimed,
                     },
-                );
-
-                program.push(
-                    newton_block,
                     ProgramSpecNode::Host {
                         label: "implicit:solve",
                         kind: HostOpKind("implicit:solve"),
                     },
-                );
-
-                program.push(
-                    newton_block,
+                    ProgramSpecNode::Host {
+                        label: "implicit:after_solve",
+                        kind: HostOpKind("implicit:after_solve"),
+                    },
+                    ProgramSpecNode::Graph {
+                        label: "implicit:snapshot",
+                        kind: GraphOpKind("implicit:snapshot"),
+                        mode: GraphExecMode::SingleSubmit,
+                    },
+                    ProgramSpecNode::Host {
+                        label: "implicit:before_apply",
+                        kind: HostOpKind("implicit:before_apply"),
+                    },
                     ProgramSpecNode::Graph {
                         label: "implicit:apply",
                         kind: GraphOpKind("implicit:apply"),
                         mode: GraphExecMode::SingleSubmit,
                     },
-                );
+                    ProgramSpecNode::Host {
+                        label: "implicit:after_apply",
+                        kind: HostOpKind("implicit:after_apply"),
+                    },
+                    ProgramSpecNode::Host {
+                        label: "implicit:advance_outer_idx",
+                        kind: HostOpKind("implicit:advance_outer_idx"),
+                    },
+                ] {
+                    program.push(iter_block, node);
+                }
 
                 program.push(
                     root,
                     ProgramSpecNode::Repeat {
-                        label: "implicit:newton_loop",
-                        times: crate::solver::gpu::plans::program::CountOpKind(
-                            "implicit:outer_iters",
-                        ),
-                        body: newton_block,
+                        label: "implicit:outer_loop",
+                        times: CountOpKind("implicit:outer_iters"),
+                        body: iter_block,
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Graph {
+                        label: "implicit:update",
+                        kind: GraphOpKind("implicit:update"),
+                        mode: GraphExecMode::SingleSubmit,
                     },
                 );
 
@@ -744,48 +469,75 @@ impl SolverRecipe {
                 );
             }
 
-            SteppingMode::Coupled { outer_correctors: _ } => {
-                // Coupled: prepare → assembly → solve → update → finalize
-                // (simple linear system, no Newton iteration needed)
-                program.push(
-                    root,
-                    ProgramSpecNode::Host {
-                        label: "coupled:prepare",
-                        kind: HostOpKind("coupled:prepare"),
-                    },
-                );
+            SteppingMode::Coupled {
+                outer_correctors: _,
+            } => {
+                // Coupled: if enabled → begin_step → init_prepare → while (before_iter → assembly → solve → clear_max_diff → update → convergence_advance) → finalize_step
+                let step_block = program.new_block();
+                let iter_block = program.new_block();
 
-                program.push(
-                    root,
+                for node in [
+                    ProgramSpecNode::Host {
+                        label: "coupled:begin_step",
+                        kind: HostOpKind("coupled:begin_step"),
+                    },
+                    ProgramSpecNode::Graph {
+                        label: "coupled:init_prepare",
+                        kind: GraphOpKind("coupled:init_prepare"),
+                        mode: GraphExecMode::SingleSubmit,
+                    },
+                    ProgramSpecNode::While {
+                        label: "coupled:outer_loop",
+                        max_iters: CountOpKind("coupled:max_iters"),
+                        cond: CondOpKind("coupled:should_continue"),
+                        body: iter_block,
+                    },
+                    ProgramSpecNode::Host {
+                        label: "coupled:finalize_step",
+                        kind: HostOpKind("coupled:finalize_step"),
+                    },
+                ] {
+                    program.push(step_block, node);
+                }
+
+                for node in [
+                    ProgramSpecNode::Host {
+                        label: "coupled:before_iter",
+                        kind: HostOpKind("coupled:before_iter"),
+                    },
                     ProgramSpecNode::Graph {
                         label: "coupled:assembly",
                         kind: GraphOpKind("coupled:assembly"),
-                        mode: GraphExecMode::SplitTimed,
+                        mode: GraphExecMode::SingleSubmit,
                     },
-                );
-
-                program.push(
-                    root,
                     ProgramSpecNode::Host {
                         label: "coupled:solve",
                         kind: HostOpKind("coupled:solve"),
                     },
-                );
-
-                program.push(
-                    root,
+                    ProgramSpecNode::Host {
+                        label: "coupled:clear_max_diff",
+                        kind: HostOpKind("coupled:clear_max_diff"),
+                    },
                     ProgramSpecNode::Graph {
                         label: "coupled:update",
                         kind: GraphOpKind("coupled:update"),
                         mode: GraphExecMode::SingleSubmit,
                     },
-                );
+                    ProgramSpecNode::Host {
+                        label: "coupled:convergence_advance",
+                        kind: HostOpKind("coupled:convergence_advance"),
+                    },
+                ] {
+                    program.push(iter_block, node);
+                }
 
                 program.push(
                     root,
-                    ProgramSpecNode::Host {
-                        label: "coupled:finalize",
-                        kind: HostOpKind("coupled:finalize"),
+                    ProgramSpecNode::If {
+                        label: "coupled:step_if_enabled",
+                        cond: CondOpKind("coupled:enabled"),
+                        then_block: step_block,
+                        else_block: None,
                     },
                 );
             }
@@ -809,55 +561,28 @@ fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelId]) -> SteppingMod
 
     // Check for coupled incompressible
     if kernels.contains(&KernelId::COUPLED_ASSEMBLY) {
-        return SteppingMode::Coupled { outer_correctors: 3 };
+        return SteppingMode::Coupled {
+            outer_correctors: 3,
+        };
     }
 
     // Check for generic coupled scalar
     if kernels.contains(&KernelId::GENERIC_COUPLED_ASSEMBLY) {
-        return SteppingMode::Coupled { outer_correctors: 1 };
+        return SteppingMode::Coupled {
+            outer_correctors: 1,
+        };
     }
 
     // Default: implicit
     SteppingMode::Implicit { outer_iters: 1 }
 }
 
-fn derive_program_shape(kernels: &[KernelId]) -> ProgramShape {
-    if kernels.iter().any(|&id| {
-        matches!(
-            id,
-            KernelId::COMPRESSIBLE_ASSEMBLY
-                | KernelId::COMPRESSIBLE_APPLY
-                | KernelId::COMPRESSIBLE_EXPLICIT_UPDATE
-                | KernelId::COMPRESSIBLE_FLUX_KT
-                | KernelId::COMPRESSIBLE_GRADIENTS
-                | KernelId::COMPRESSIBLE_UPDATE
-        )
-    }) {
-        return ProgramShape::Compressible;
-    }
-
-    if kernels.iter().any(|&id| {
-        matches!(
-            id,
-            KernelId::PREPARE_COUPLED
-                | KernelId::COUPLED_ASSEMBLY
-                | KernelId::PRESSURE_ASSEMBLY
-                | KernelId::UPDATE_FIELDS_FROM_COUPLED
-                | KernelId::FLUX_RHIE_CHOW
-        )
-    }) {
-        return ProgramShape::IncompressibleCoupled;
-    }
-
-    ProgramShape::GenericCoupledScalar
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::{compressible_model, incompressible_momentum_model};
-    use crate::solver::model::generic_diffusion_demo_model;
     use crate::solver::gpu::plans::program::ProgramSpecNode;
+    use crate::solver::model::generic_diffusion_demo_model;
+    use crate::solver::model::{compressible_model, incompressible_momentum_model};
 
     #[test]
     fn test_recipe_from_generic_diffusion_model() {
@@ -893,8 +618,14 @@ mod tests {
 
     #[test]
     fn test_time_integration_spec_history_levels() {
-        assert_eq!(TimeIntegrationSpec::for_scheme(TimeScheme::Euler).history_levels, 1);
-        assert_eq!(TimeIntegrationSpec::for_scheme(TimeScheme::BDF2).history_levels, 2);
+        assert_eq!(
+            TimeIntegrationSpec::for_scheme(TimeScheme::Euler).history_levels,
+            1
+        );
+        assert_eq!(
+            TimeIntegrationSpec::for_scheme(TimeScheme::BDF2).history_levels,
+            2
+        );
     }
 
     #[test]
@@ -911,11 +642,14 @@ mod tests {
         let spec = recipe.build_program_spec();
         // Verify spec has expected structure for coupled solver
         let root_block = spec.block(spec.root);
-        assert!(!root_block.nodes.is_empty(), "program spec should have nodes");
+        assert!(
+            !root_block.nodes.is_empty(),
+            "program spec should have nodes"
+        );
     }
 
     #[test]
-    fn test_build_program_spec_for_compressible_emits_step_path_if() {
+    fn test_build_program_spec_for_compressible_emits_implicit_outer_loop() {
         let model = compressible_model();
         let recipe = SolverRecipe::from_model(
             &model,
@@ -926,13 +660,15 @@ mod tests {
         .expect("should create recipe");
 
         let spec = recipe.build_program_spec();
-        let root_block = spec.block(spec.root);
+        // Find a Repeat node (outer loop) anywhere in the program blocks.
+        let has_repeat = spec
+            .blocks
+            .iter()
+            .flat_map(|b| b.nodes.iter())
+            .any(|n| matches!(n, ProgramSpecNode::Repeat { .. }));
         assert!(
-            root_block.nodes.iter().any(|n| matches!(
-                n,
-                ProgramSpecNode::If { label, .. } if *label == "compressible:select_step_path"
-            )),
-            "compressible program spec should select explicit/implicit path"
+            has_repeat,
+            "implicit program spec should have a Repeat outer loop"
         );
     }
 
@@ -955,6 +691,9 @@ mod tests {
             .iter()
             .flat_map(|b| b.nodes.iter())
             .any(|n| matches!(n, ProgramSpecNode::While { .. }));
-        assert!(has_while, "incompressible coupled spec should have a While loop");
+        assert!(
+            has_while,
+            "incompressible coupled spec should have a While loop"
+        );
     }
 }

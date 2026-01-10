@@ -4,8 +4,10 @@ use super::backend::ast::{
 };
 use super::backend::state_layout::StateLayout;
 use super::kernel::{KernelKind, KernelPlan};
-use crate::solver::model::gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
+use crate::solver::model::gpu_spec::{
+    expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec,
+};
 use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
 
@@ -14,16 +16,8 @@ pub struct ModelSpec {
     pub id: &'static str,
     pub system: EquationSystem,
     pub state_layout: StateLayout,
-    pub fields: ModelFields,
     pub boundaries: BoundarySpec,
     pub gpu: crate::solver::model::gpu_spec::ModelGpuSpec,
-}
-
-#[derive(Debug, Clone)]
-pub enum ModelFields {
-    Incompressible(IncompressibleMomentumFields),
-    Compressible(CompressibleFields),
-    GenericCoupled(GenericCoupledFields),
 }
 
 impl ModelSpec {
@@ -85,29 +79,6 @@ impl ModelSpec {
 
     pub fn kernel_plan(&self) -> KernelPlan {
         super::kernel::derive_kernel_plan(&self.system)
-    }
-}
-
-impl ModelFields {
-    pub fn incompressible(&self) -> Option<&IncompressibleMomentumFields> {
-        match self {
-            ModelFields::Incompressible(fields) => Some(fields),
-            _ => None,
-        }
-    }
-
-    pub fn compressible(&self) -> Option<&CompressibleFields> {
-        match self {
-            ModelFields::Compressible(fields) => Some(fields),
-            _ => None,
-        }
-    }
-
-    pub fn generic_coupled(&self) -> Option<&GenericCoupledFields> {
-        match self {
-            ModelFields::GenericCoupled(fields) => Some(fields),
-            _ => None,
-        }
     }
 }
 
@@ -392,7 +363,6 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         id: "incompressible_momentum",
         system,
         state_layout: layout,
-        fields: ModelFields::Incompressible(fields),
         boundaries: BoundarySpec::default(),
         gpu: ModelGpuSpec::default(),
     }
@@ -414,7 +384,6 @@ pub fn compressible_model() -> ModelSpec {
         id: "compressible",
         system,
         state_layout: layout,
-        fields: ModelFields::Compressible(fields),
         boundaries: BoundarySpec::default(),
         gpu: ModelGpuSpec::default(),
     }
@@ -454,7 +423,6 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         id: "generic_diffusion_demo",
         system,
         state_layout: layout,
-        fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
         boundaries,
         gpu: ModelGpuSpec::default(),
     }
@@ -494,7 +462,6 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         id: "generic_diffusion_demo_neumann",
         system,
         state_layout: layout,
-        fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
         boundaries,
         gpu: ModelGpuSpec::default(),
     }
@@ -543,7 +510,6 @@ mod tests {
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
         assert!(model.kernel_plan().contains(KernelKind::CoupledAssembly));
-        assert!(matches!(model.fields, ModelFields::Incompressible(_)));
     }
 
     #[test]
@@ -553,7 +519,6 @@ mod tests {
         assert_eq!(model.system.equations()[1].terms().len(), 2);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
         assert!(model.kernel_plan().contains(KernelKind::CompressibleFluxKt));
-        assert!(matches!(model.fields, ModelFields::Compressible(_)));
     }
 
     #[test]

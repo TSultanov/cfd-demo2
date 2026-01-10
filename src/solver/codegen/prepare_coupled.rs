@@ -1017,6 +1017,7 @@ mod tests {
     use crate::solver::codegen::lower_system;
     use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::model::incompressible_momentum_model;
+    use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::scheme::Scheme;
 
     #[test]
@@ -1024,11 +1025,8 @@ mod tests {
         let model = incompressible_momentum_model();
         let schemes = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&model.system, &schemes).unwrap();
-        let fields = model
-            .fields
-            .incompressible()
-            .expect("incompressible fields");
-        let wgsl = generate_prepare_coupled_wgsl(&discrete, &model.state_layout, fields);
+        let fields = IncompressibleMomentumFields::new();
+        let wgsl = generate_prepare_coupled_wgsl(&discrete, &model.state_layout, &fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("grad_u"));
         assert!(wgsl.contains("grad_v"));

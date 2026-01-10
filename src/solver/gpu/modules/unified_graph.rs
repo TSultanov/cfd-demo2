@@ -4,7 +4,9 @@
 //! Instead of each solver family having its own hardcoded graph construction,
 //! this module derives the graph structure from the recipe's kernel specifications.
 
-use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, GpuComputeModule, ModuleGraph, ModuleNode};
+use crate::solver::gpu::modules::graph::{
+    ComputeSpec, DispatchKind, GpuComputeModule, ModuleGraph, ModuleNode,
+};
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
 use crate::solver::model::KernelId;
 
@@ -27,7 +29,7 @@ impl Default for UnifiedGraphConfig {
 }
 
 /// Trait for modules that can be used with the unified graph builder.
-/// 
+///
 /// This trait maps kernel kinds to pipeline/bind group keys.
 /// It requires GpuComputeModule as a supertrait since the graph builder
 /// needs to create ModuleGraph instances.
@@ -69,7 +71,7 @@ fn push_nodes_for_phase<M: UnifiedGraphModule>(
 }
 
 /// Build a compute graph from a recipe for a specific phase.
-/// 
+///
 /// This is a generic function that works with any module implementing UnifiedGraphModule.
 pub fn build_graph_for_phase<M: UnifiedGraphModule>(
     recipe: &SolverRecipe,
@@ -168,11 +170,15 @@ impl<M: UnifiedGraphModule> UnifiedGraphSet<M> {
         module: &M,
         label_prefix: &'static str,
     ) -> Result<Self, String> {
-        let preparation = build_optional_graph_for_phase(recipe, KernelPhase::Preparation, module, label_prefix)?;
-        let gradients = build_optional_graph_for_phase(recipe, KernelPhase::Gradients, module, label_prefix)?;
-        let assembly = build_optional_graph_for_phase(recipe, KernelPhase::Assembly, module, label_prefix)?;
-        let update = build_optional_graph_for_phase(recipe, KernelPhase::Update, module, label_prefix)?;
-        
+        let preparation =
+            build_optional_graph_for_phase(recipe, KernelPhase::Preparation, module, label_prefix)?;
+        let gradients =
+            build_optional_graph_for_phase(recipe, KernelPhase::Gradients, module, label_prefix)?;
+        let assembly =
+            build_optional_graph_for_phase(recipe, KernelPhase::Assembly, module, label_prefix)?;
+        let update =
+            build_optional_graph_for_phase(recipe, KernelPhase::Update, module, label_prefix)?;
+
         Ok(Self {
             preparation,
             gradients,
@@ -185,10 +191,10 @@ impl<M: UnifiedGraphModule> UnifiedGraphSet<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // Note: These tests require a concrete module implementation to test.
     // The module is tested through integration tests with actual solver modules.
-    
+
     #[test]
     fn test_kernel_label_format() {
         let label = kernel_label("test", KernelId::GENERIC_COUPLED_ASSEMBLY);

@@ -80,7 +80,7 @@ mod solver {
             compressible_model, compressible_system, generic_diffusion_demo_model,
             generic_diffusion_demo_neumann_model, incompressible_momentum_model,
             incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
-            IncompressibleMomentumFields, ModelFields, ModelSpec,
+            IncompressibleMomentumFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
@@ -534,7 +534,11 @@ fn generate_kernel_registry_map() {
     let entries: &[(&str, &str, &str)] = &[
         ("PrepareCoupled", "prepare_coupled", "prepare_coupled"),
         // Note: kernel kind is `CoupledAssembly`, but current shader module is `coupled_assembly_merged`.
-        ("CoupledAssembly", "coupled_assembly_merged", "coupled_assembly"),
+        (
+            "CoupledAssembly",
+            "coupled_assembly_merged",
+            "coupled_assembly",
+        ),
         ("PressureAssembly", "pressure_assembly", "pressure_assembly"),
         (
             "UpdateFieldsFromCoupled",
@@ -542,17 +546,41 @@ fn generate_kernel_registry_map() {
             "update_fields_from_coupled",
         ),
         ("FluxRhieChow", "flux_rhie_chow", "flux_rhie_chow"),
-        ("CompressibleAssembly", "compressible_assembly", "compressible_assembly"),
-        ("CompressibleApply", "compressible_apply", "compressible_apply"),
+        (
+            "CompressibleAssembly",
+            "compressible_assembly",
+            "compressible_assembly",
+        ),
+        (
+            "CompressibleApply",
+            "compressible_apply",
+            "compressible_apply",
+        ),
         (
             "CompressibleExplicitUpdate",
             "compressible_explicit_update",
             "compressible_explicit_update",
         ),
-        ("CompressibleGradients", "compressible_gradients", "compressible_gradients"),
-        ("CompressibleUpdate", "compressible_update", "compressible_update"),
-        ("CompressibleFluxKt", "compressible_flux_kt", "compressible_flux_kt"),
-        ("GenericCoupledApply", "generic_coupled_apply", "generic_coupled_apply"),
+        (
+            "CompressibleGradients",
+            "compressible_gradients",
+            "compressible_gradients",
+        ),
+        (
+            "CompressibleUpdate",
+            "compressible_update",
+            "compressible_update",
+        ),
+        (
+            "CompressibleFluxKt",
+            "compressible_flux_kt",
+            "compressible_flux_kt",
+        ),
+        (
+            "GenericCoupledApply",
+            "generic_coupled_apply",
+            "generic_coupled_apply",
+        ),
     ];
 
     let mut code = String::new();

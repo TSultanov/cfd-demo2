@@ -35,7 +35,9 @@ impl GpuSolver {
 
         // Use recipe stepping mode for outer correctors
         let n_outer_correctors = match recipe.stepping {
-            crate::solver::gpu::recipe::SteppingMode::Coupled { outer_correctors } => outer_correctors,
+            crate::solver::gpu::recipe::SteppingMode::Coupled { outer_correctors } => {
+                outer_correctors
+            }
             _ => 20, // default fallback
         };
 

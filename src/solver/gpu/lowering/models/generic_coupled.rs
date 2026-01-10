@@ -1,4 +1,5 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::modules::generic_coupled_kernels::{
     GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
 };
@@ -9,10 +10,9 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::build_graph_for_phase;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
 use crate::solver::gpu::runtime::GpuScalarRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
-use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuScalarRuntime,
@@ -34,10 +34,12 @@ impl GenericCoupledProgramResources {
         b_bc_value: wgpu::Buffer,
     ) -> Self {
         // Build graphs from recipe using unified graph builder
-        let assembly_graph = build_graph_for_phase(recipe, KernelPhase::Assembly, &kernels, "generic_coupled")
-            .unwrap_or_else(|_| build_assembly_graph_fallback());
-        let update_graph = build_graph_for_phase(recipe, KernelPhase::Update, &kernels, "generic_coupled")
-            .unwrap_or_else(|_| build_update_graph_fallback());
+        let assembly_graph =
+            build_graph_for_phase(recipe, KernelPhase::Assembly, &kernels, "generic_coupled")
+                .unwrap_or_else(|_| build_assembly_graph_fallback());
+        let update_graph =
+            build_graph_for_phase(recipe, KernelPhase::Update, &kernels, "generic_coupled")
+                .unwrap_or_else(|_| build_update_graph_fallback());
 
         Self {
             runtime,
@@ -115,18 +117,15 @@ pub(crate) fn register_ops_from_recipe(
         solve: Some(host_solve_linear_system),
         assembly_graph: Some(assembly_graph_run),
         update_graph: Some(update_graph_run),
-        gradients_graph: None, // GenericCoupled doesn't use separate gradients graph
-        apply_graph: None,     // GenericCoupled doesn't use apply graph
+        ..Default::default()
     };
-    
-    let built = crate::solver::gpu::lowering::unified_registry::build_unified_registry(
-        recipe,
-        config,
-    )?;
-    
+
+    let built =
+        crate::solver::gpu::lowering::unified_registry::build_unified_registry(recipe, config)?;
+
     // Merge built registry into provided registry
     registry.merge(built)?;
-    
+
     Ok(())
 }
 
@@ -147,7 +146,9 @@ pub(crate) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
 }
 
 pub(crate) fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
-    res(plan).fields.write_state_bytes(&plan.context.queue, bytes);
+    res(plan)
+        .fields
+        .write_state_bytes(&plan.context.queue, bytes);
     Ok(())
 }
 

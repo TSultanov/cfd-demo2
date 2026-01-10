@@ -288,10 +288,7 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
             "sign",
             dsl::select(-1.0, 1.0, Expr::ident("owner").eq("idx")),
         ));
-        loop_stmts.push(dsl::let_expr(
-            "base",
-            Expr::ident("face_idx") * 4u32,
-        ));
+        loop_stmts.push(dsl::let_expr("base", Expr::ident("face_idx") * 4u32));
         loop_stmts.push(dsl::assign_op_expr(
             AssignOp::Add,
             Expr::ident("sum_rho"),
@@ -346,4 +343,3 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 
     Block::new(stmts)
 }
-

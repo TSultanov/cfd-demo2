@@ -121,7 +121,7 @@ pub trait PreconditionerFactory<P: FgmresPreconditionerModule> {
         device: &wgpu::Device,
         n: u32,
         num_cells: u32,
-    ) -> (P::Buffers, FgmresPrecondBindings)
+    ) -> (P::Buffers, FgmresPrecondBindings<'_>)
     where
         P: PreconditionerWithBuffers;
 
@@ -157,7 +157,7 @@ pub fn create_fgmres_resources<P: FgmresPreconditionerModule>(
     num_cells: u32,
     max_restart: usize,
     system: LinearSystemView<'_>,
-    precond_bindings: FgmresPrecondBindings,
+    precond_bindings: FgmresPrecondBindings<'_>,
     precond: P,
     label: &str,
 ) -> KrylovSolveModule<P> {
@@ -175,7 +175,7 @@ pub fn create_fgmres_resources<P: FgmresPreconditionerModule>(
 }
 
 /// Identity preconditioner (no preconditioning).
-/// 
+///
 /// Note: A true identity preconditioner would simply copy input to output.
 /// For FGMRES, this is not typically useful, but we provide it for completeness.
 /// In practice, use at least Jacobi preconditioning.

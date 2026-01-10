@@ -241,13 +241,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::compressible_model;
+    use crate::solver::model::{compressible_model, CompressibleFields};
 
     #[test]
     fn compressible_update_codegen_emits_state_arrays() {
         let model = compressible_model();
-        let fields = model.fields.compressible().expect("compressible fields");
-        let wgsl = generate_compressible_update_wgsl(&model.state_layout, fields);
+        let fields = CompressibleFields::new();
+        let wgsl = generate_compressible_update_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("rho_e"));
         assert!(wgsl.contains("p_val"));

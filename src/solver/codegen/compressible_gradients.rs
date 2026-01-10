@@ -463,13 +463,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::compressible_model;
+    use crate::solver::model::{compressible_model, CompressibleFields};
 
     #[test]
     fn compressible_gradients_codegen_emits_grad_buffers() {
         let model = compressible_model();
-        let fields = model.fields.compressible().expect("compressible fields");
-        let wgsl = generate_compressible_gradients_wgsl(&model.state_layout, fields);
+        let fields = CompressibleFields::new();
+        let wgsl = generate_compressible_gradients_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("grad_rho"));
         assert!(wgsl.contains("grad_rho_u_x"));
         assert!(wgsl.contains("grad_rho_u_y"));

@@ -20,11 +20,11 @@ impl TimeIntegrationModule {
 
     pub fn set_dt(&mut self, dt: f32, constants: &mut ConstantsModule, queue: &wgpu::Queue) {
         self.dt = dt;
-        
+
         // If this is the very first configuration (time=0, step=0), seed dt_old
         // so that schemes like BDF2 start with a valid ratio (dt/dt_old = 1).
         if self.step_count == 0 && self.time == 0.0 {
-             self.dt_old = dt;
+            self.dt_old = dt;
         }
 
         let values = constants.values_mut();
@@ -39,7 +39,7 @@ impl TimeIntegrationModule {
     /// Advances `time` by `dt` (t^{n+1} = t^n + dt).
     pub fn prepare_step(&mut self, constants: &mut ConstantsModule, queue: &wgpu::Queue) {
         self.time += self.dt as f64;
-        
+
         let values = constants.values_mut();
         values.time = self.time as f32;
         constants.write(queue);
@@ -55,14 +55,20 @@ impl TimeIntegrationModule {
         values.dt_old = self.dt_old;
         constants.write(queue);
     }
-    
+
     /// For restart or initialization scenarios
-    pub fn initialize(&mut self, time: f64, dt: f32, constants: &mut ConstantsModule, queue: &wgpu::Queue) {
+    pub fn initialize(
+        &mut self,
+        time: f64,
+        dt: f32,
+        constants: &mut ConstantsModule,
+        queue: &wgpu::Queue,
+    ) {
         self.time = time;
         self.dt = dt;
         self.dt_old = dt; // Best guess on restart if unknown
-        // step_count? Keep as is or reset? Probably keep as 0 if unknown.
-        
+                          // step_count? Keep as is or reset? Probably keep as 0 if unknown.
+
         let values = constants.values_mut();
         values.time = self.time as f32;
         values.dt = self.dt;

@@ -2,9 +2,9 @@ use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::field_provider::FieldProvider;
 use crate::solver::gpu::modules::graph::{DispatchKind, GpuComputeModule, RuntimeDims};
-use crate::solver::gpu::modules::unified_graph::UnifiedGraphModule;
 use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::modules::unified_graph::UnifiedGraphModule;
 use crate::solver::gpu::structs::CoupledSolverResources;
 use crate::solver::gpu::wgsl_meta;
 use crate::solver::model::KernelId;
@@ -83,7 +83,8 @@ impl ModelKernelsModule {
                 .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
             pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
         }
-        let pipeline_assembly = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)];
+        let pipeline_assembly =
+            &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)];
         let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
         let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE)];
 
@@ -115,9 +116,7 @@ impl ModelKernelsModule {
                     1,
                     |name| field_binding(fields, name, i),
                 )
-                .unwrap_or_else(|err| {
-                    panic!("Compressible fields bind group build failed: {err}")
-                });
+                .unwrap_or_else(|err| panic!("Compressible fields bind group build failed: {err}"));
                 out.push(bg);
             }
             out
@@ -240,7 +239,8 @@ impl ModelKernelsModule {
         }
 
         let pipeline_prepare = &pipelines[&KernelPipeline::Kernel(KernelId::PREPARE_COUPLED)];
-        let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED)];
+        let pipeline_update =
+            &pipelines[&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED)];
 
         let bg_mesh = {
             let bgl = pipeline_prepare.get_bind_group_layout(0);

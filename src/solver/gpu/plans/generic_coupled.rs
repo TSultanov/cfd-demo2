@@ -45,8 +45,10 @@ impl GenericCoupledPlanResources {
 
         let device = &runtime.common.context.device;
 
-        let assembly = kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_ASSEMBLY)?;
-        let update = kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_UPDATE)?;
+        let assembly =
+            kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_ASSEMBLY)?;
+        let update =
+            kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_UPDATE)?;
         let assembly_bindings = assembly.bindings;
         let update_bindings = update.bindings;
 
@@ -255,12 +257,7 @@ impl GenericCoupledPlanResources {
 
         let mut resources = ProgramResources::new();
         resources.insert(GenericCoupledProgramResources::new(
-            runtime,
-            fields,
-            kernels,
-            &recipe,
-            b_bc_kind,
-            b_bc_value,
+            runtime, fields, kernels, &recipe, b_bc_kind, b_bc_value,
         ));
 
         let mut params = HashMap::new();
@@ -278,7 +275,6 @@ impl GenericCoupledPlanResources {
 
         Ok(LoweredProgramParts {
             model: model.clone(),
-            recipe,
             context,
             profiling_stats,
             resources,

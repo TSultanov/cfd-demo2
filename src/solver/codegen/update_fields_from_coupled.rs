@@ -365,15 +365,13 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
 mod tests {
     use super::*;
     use crate::solver::model::incompressible_momentum_model;
+    use crate::solver::model::IncompressibleMomentumFields;
 
     #[test]
     fn update_fields_codegen_emits_state_arrays() {
         let model = incompressible_momentum_model();
-        let fields = model
-            .fields
-            .incompressible()
-            .expect("incompressible fields");
-        let wgsl = generate_update_fields_from_coupled_wgsl(&model.state_layout, fields);
+        let fields = IncompressibleMomentumFields::new();
+        let wgsl = generate_update_fields_from_coupled_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("atomicMax"));
         let stride = model.state_layout.stride();

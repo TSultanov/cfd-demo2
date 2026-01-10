@@ -19,7 +19,10 @@ use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
 use crate::solver::codegen::unified_assembly;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
-use crate::solver::model::{incompressible_momentum_model, KernelKind, ModelSpec};
+use crate::solver::model::incompressible_momentum_model;
+use crate::solver::model::{
+    CompressibleFields, IncompressibleMomentumFields, KernelKind, ModelSpec,
+};
 use crate::solver::scheme::Scheme;
 
 pub fn write_wgsl_file(
@@ -51,17 +54,16 @@ pub fn generated_dir_for(base_dir: impl AsRef<Path>) -> PathBuf {
 }
 
 pub fn default_generated_dir() -> PathBuf {
-    let base_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     generated_dir_for(base_dir)
 }
 
 pub fn write_wgsl_in_dir(
     system: &DiscreteSystem,
     base_dir: impl AsRef<Path>,
-    file_name: &str,
+    filename: impl AsRef<Path>,
 ) -> std::io::Result<PathBuf> {
-    let output_dir = generated_dir_for(base_dir);
-    let output_path = output_dir.join(file_name);
+    let output_path = generated_dir_for(base_dir).join(filename);
     write_wgsl_file(system, output_path)
 }
 
@@ -83,9 +85,7 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
             format!("generic_coupled_assembly_{}.wgsl", model.id)
         }
         KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
-        KernelKind::GenericCoupledUpdate => {
-            format!("generic_coupled_update_{}.wgsl", model.id)
-        }
+        KernelKind::GenericCoupledUpdate => format!("generic_coupled_update_{}.wgsl", model.id),
     }
 }
 
@@ -94,97 +94,71 @@ fn generate_kernel_wgsl(
     schemes: &SchemeRegistry,
     kind: KernelKind,
 ) -> Result<String, String> {
-    let discrete = lower_system(&model.system, schemes).map_err(|err| err.to_string())?;
-    let wgsl =
-        match kind {
-            KernelKind::PrepareCoupled => {
-                let fields = model
-                    .fields
-                    .incompressible()
-                    .ok_or_else(|| "prepare_coupled requires incompressible fields".to_string())?;
-                generate_prepare_coupled_wgsl(&discrete, &model.state_layout, fields)
-            }
-            KernelKind::CoupledAssembly => {
-                let fields = model
-                    .fields
-                    .incompressible()
-                    .ok_or_else(|| "coupled_assembly requires incompressible fields".to_string())?;
-                generate_coupled_assembly_wgsl(&discrete, &model.state_layout, fields)
-            }
-            KernelKind::PressureAssembly => {
-                let fields = model.fields.incompressible().ok_or_else(|| {
-                    "pressure_assembly requires incompressible fields".to_string()
-                })?;
-                generate_pressure_assembly_wgsl(&discrete, &model.state_layout, fields)
-            }
-            KernelKind::UpdateFieldsFromCoupled => {
-                let fields = model
-                    .fields
-                    .incompressible()
-                    .ok_or_else(|| "update_fields requires incompressible fields".to_string())?;
-                generate_update_fields_from_coupled_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::FluxRhieChow => {
-                let fields = model
-                    .fields
-                    .incompressible()
-                    .ok_or_else(|| "flux_rhie_chow requires incompressible fields".to_string())?;
-                generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, fields)
-            }
-            KernelKind::IncompressibleMomentum => generate_wgsl(&discrete),
-            KernelKind::CompressibleAssembly => {
-                let fields = model.fields.compressible().ok_or_else(|| {
-                    "compressible_assembly requires compressible fields".to_string()
-                })?;
-                generate_compressible_assembly_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::CompressibleApply => {
-                let fields = model
-                    .fields
-                    .compressible()
-                    .ok_or_else(|| "compressible_apply requires compressible fields".to_string())?;
-                generate_compressible_apply_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::CompressibleGradients => {
-                let fields = model.fields.compressible().ok_or_else(|| {
-                    "compressible_gradients requires compressible fields".to_string()
-                })?;
-                generate_compressible_gradients_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::CompressibleExplicitUpdate => {
-                let fields = model.fields.compressible().ok_or_else(|| {
-                    "compressible_explicit_update requires compressible fields".to_string()
-                })?;
-                generate_compressible_explicit_update_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::CompressibleUpdate => {
-                let fields = model.fields.compressible().ok_or_else(|| {
-                    "compressible_update requires compressible fields".to_string()
-                })?;
-                generate_compressible_update_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::CompressibleFluxKt => {
-                let fields = model.fields.compressible().ok_or_else(|| {
-                    "compressible_flux_kt requires compressible fields".to_string()
-                })?;
-                generate_compressible_flux_kt_wgsl(&model.state_layout, fields)
-            }
-            KernelKind::GenericCoupledAssembly => {
-                let needs_gradients = expand_schemes(&model.system, schemes)
-                    .map(|e| e.needs_gradients())
-                    .unwrap_or(false);
-                unified_assembly::generate_unified_assembly_wgsl(
-                    &discrete,
-                    &model.state_layout,
-                    &model.state_layout,
-                    needs_gradients,
-                )
-            }
-            KernelKind::GenericCoupledApply => generate_generic_coupled_apply_wgsl(),
-            KernelKind::GenericCoupledUpdate => {
-                generate_generic_coupled_update_wgsl(&discrete, &model.state_layout)
-            }
-        };
+    let discrete = lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
+
+    let wgsl = match kind {
+        KernelKind::PrepareCoupled => {
+            let fields = IncompressibleMomentumFields::new();
+            generate_prepare_coupled_wgsl(&discrete, &model.state_layout, &fields)
+        }
+        KernelKind::CoupledAssembly => {
+            let fields = IncompressibleMomentumFields::new();
+            generate_coupled_assembly_wgsl(&discrete, &model.state_layout, &fields)
+        }
+        KernelKind::PressureAssembly => {
+            let fields = IncompressibleMomentumFields::new();
+            generate_pressure_assembly_wgsl(&discrete, &model.state_layout, &fields)
+        }
+        KernelKind::UpdateFieldsFromCoupled => {
+            let fields = IncompressibleMomentumFields::new();
+            generate_update_fields_from_coupled_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::FluxRhieChow => {
+            let fields = IncompressibleMomentumFields::new();
+            generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &fields)
+        }
+        KernelKind::IncompressibleMomentum => generate_wgsl(&discrete),
+        KernelKind::CompressibleAssembly => {
+            let fields = CompressibleFields::new();
+            generate_compressible_assembly_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::CompressibleApply => {
+            let fields = CompressibleFields::new();
+            generate_compressible_apply_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::CompressibleGradients => {
+            let fields = CompressibleFields::new();
+            generate_compressible_gradients_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::CompressibleExplicitUpdate => {
+            let fields = CompressibleFields::new();
+            generate_compressible_explicit_update_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::CompressibleUpdate => {
+            let fields = CompressibleFields::new();
+            generate_compressible_update_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::CompressibleFluxKt => {
+            let fields = CompressibleFields::new();
+            generate_compressible_flux_kt_wgsl(&model.state_layout, &fields)
+        }
+        KernelKind::GenericCoupledAssembly => {
+            let needs_gradients = expand_schemes(&model.system, schemes)
+                .map(|e| e.needs_gradients())
+                .unwrap_or(false);
+            unified_assembly::generate_unified_assembly_wgsl(
+                &discrete,
+                &model.state_layout,
+                &model.state_layout,
+                needs_gradients,
+            )
+        }
+        KernelKind::GenericCoupledApply => generate_generic_coupled_apply_wgsl(),
+        KernelKind::GenericCoupledUpdate => {
+            generate_generic_coupled_update_wgsl(&discrete, &model.state_layout)
+        }
+    };
+
     Ok(wgsl)
 }
 

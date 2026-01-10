@@ -8,7 +8,7 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::wgsl_reflect::{create_bind_group_from_bindings, WgslBindingLike};
 
 /// A builder for creating shader bind groups from various resource sources.
-/// 
+///
 /// This builder aggregates buffers from UnifiedFieldResources and additional
 /// external buffers, then creates bind groups that match shader expectations.
 pub struct BindGroupBuilder<'a> {
@@ -55,14 +55,9 @@ impl<'a> BindGroupBuilder<'a> {
         bindings: &[B],
         group: u32,
     ) -> Result<wgpu::BindGroup, String> {
-        create_bind_group_from_bindings(
-            self.device,
-            label,
-            layout,
-            bindings,
-            group,
-            |name| self.resolve_buffer(name),
-        )
+        create_bind_group_from_bindings(self.device, label, layout, bindings, group, |name| {
+            self.resolve_buffer(name)
+        })
     }
 
     /// Resolve a buffer by name, checking all available sources.
@@ -90,7 +85,7 @@ impl<'a> BindGroupBuilder<'a> {
 }
 
 /// Create a ping-pong series of bind groups (for state buffers that rotate each step).
-/// 
+///
 /// This creates 3 bind groups, one for each ping-pong phase, allowing the solver
 /// to advance time by simply switching which bind group is used.
 pub fn create_ping_pong_bind_groups<'a, B: WgslBindingLike>(
@@ -103,16 +98,16 @@ pub fn create_ping_pong_bind_groups<'a, B: WgslBindingLike>(
     external_buffers: &[(&'static str, &'a wgpu::Buffer)],
 ) -> Result<Vec<wgpu::BindGroup>, String> {
     let mut bind_groups = Vec::with_capacity(3);
-    
+
     for phase in 0..3 {
         let mut builder = BindGroupBuilder::new(device)
             .with_unified_fields(unified_fields)
             .at_ping_pong_phase(phase);
-        
+
         for (name, buffer) in external_buffers {
             builder = builder.with_buffer(name, buffer);
         }
-        
+
         bind_groups.push(builder.build_bind_group(
             &format!("{label_prefix} phase {phase}"),
             layout,
@@ -120,7 +115,7 @@ pub fn create_ping_pong_bind_groups<'a, B: WgslBindingLike>(
             group,
         )?);
     }
-    
+
     Ok(bind_groups)
 }
 

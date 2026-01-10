@@ -11,7 +11,9 @@ use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystem
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::profiling::{ProfileCategory, ProfilingStats};
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
-use crate::solver::gpu::structs::{CoupledSolverResources, LinearSolverStats, PreconditionerParams, PreconditionerType};
+use crate::solver::gpu::structs::{
+    CoupledSolverResources, LinearSolverStats, PreconditionerParams, PreconditionerType,
+};
 use std::time::Instant;
 
 /// Resources for GPU-based FGMRES solver
@@ -26,10 +28,6 @@ impl IncompressibleLinearSolver {
         Self {
             fgmres_resources: None,
         }
-    }
-
-    fn coupled_unknowns(num_cells: u32, coupled_res: &CoupledSolverResources) -> u32 {
-        coupled_res.num_unknowns
     }
 
     fn ensure_fgmres_resources(
@@ -140,7 +138,10 @@ impl IncompressibleLinearSolver {
         record("fgmres:g", fgmres.fgmres.g_buffer());
         record("fgmres:y", fgmres.fgmres.y_buffer());
         record("fgmres:iter_params", fgmres.fgmres.iter_params_buffer());
-        record("fgmres:staging_scalar", fgmres.fgmres.staging_scalar_buffer());
+        record(
+            "fgmres:staging_scalar",
+            fgmres.fgmres.staging_scalar_buffer(),
+        );
     }
 
     /// Solve the coupled system using FGMRES with block preconditioning (GPU-accelerated)
@@ -207,7 +208,7 @@ impl IncompressibleLinearSolver {
                     num_nonzeros as u64 * 4,
                     "AMG Values",
                 ));
-                
+
                 let row_offsets = bytemuck::cast_slice(&row_offsets).to_vec();
                 let col_indices = bytemuck::cast_slice(&col_indices).to_vec();
                 let values = bytemuck::cast_slice(&values).to_vec();
@@ -219,9 +220,7 @@ impl IncompressibleLinearSolver {
                     num_rows: num_cells as usize,
                     num_cols: num_cells as usize,
                 };
-                fgmres
-                    .precond
-                    .ensure_amg_resources(&context.device, matrix);
+                fgmres.precond.ensure_amg_resources(&context.device, matrix);
             }
 
             let KrylovDispatch {
@@ -239,9 +238,7 @@ impl IncompressibleLinearSolver {
             };
             let init_write_start = Instant::now();
             {
-                let core = fgmres
-                    .fgmres
-                    .core(&context.device, &context.queue);
+                let core = fgmres.fgmres.core(&context.device, &context.queue);
                 write_iter_params(&core, &iter_params);
             }
             profiling.record_location(
@@ -288,9 +285,7 @@ impl IncompressibleLinearSolver {
             // Initial residual r = b - A x stored in V_0
             let mut residual_norm = {
                 let start = Instant::now();
-                let core = fgmres
-                    .fgmres
-                    .core(&context.device, &context.queue);
+                let core = fgmres.fgmres.core(&context.device, &context.queue);
                 let norm = fgmres.fgmres.compute_residual_norm_into(
                     &core,
                     system,
@@ -327,9 +322,7 @@ impl IncompressibleLinearSolver {
             // Normalize V_0
             {
                 let start = Instant::now();
-                let core = fgmres
-                    .fgmres
-                    .core(&context.device, &context.queue);
+                let core = fgmres.fgmres.core(&context.device, &context.queue);
                 fgmres.fgmres.scale_in_place(
                     &core,
                     fgmres.fgmres.basis_binding(0),
@@ -346,9 +339,7 @@ impl IncompressibleLinearSolver {
 
             // Initialize g on GPU
             let g_init_write_start = Instant::now();
-            fgmres
-                .fgmres
-                .write_g0(&context.queue, residual_norm);
+            fgmres.fgmres.write_g0(&context.queue, residual_norm);
             profiling.record_location(
                 "fgmres:write_g_init",
                 ProfileCategory::GpuWrite,
@@ -422,9 +413,7 @@ impl IncompressibleLinearSolver {
                 // Compute true residual (only when not already converged)
                 residual_norm = {
                     let start = Instant::now();
-                    let core = fgmres
-                        .fgmres
-                        .core(&context.device, &context.queue);
+                    let core = fgmres.fgmres.core(&context.device, &context.queue);
                     let norm = fgmres.fgmres.compute_residual_norm_into(
                         &core,
                         system,
@@ -456,9 +445,7 @@ impl IncompressibleLinearSolver {
                 // Prepare for restart
                 // Reset g on GPU
                 let g_write_start = Instant::now();
-                fgmres
-                    .fgmres
-                    .write_g0(&context.queue, residual_norm);
+                fgmres.fgmres.write_g0(&context.queue, residual_norm);
                 profiling.record_location(
                     "fgmres:write_g_restart",
                     ProfileCategory::GpuWrite,
@@ -476,9 +463,7 @@ impl IncompressibleLinearSolver {
 
                 {
                     let start = Instant::now();
-                    let core = fgmres
-                        .fgmres
-                        .core(&context.device, &context.queue);
+                    let core = fgmres.fgmres.core(&context.device, &context.queue);
                     fgmres.fgmres.scale_in_place(
                         &core,
                         fgmres.fgmres.basis_binding(0),

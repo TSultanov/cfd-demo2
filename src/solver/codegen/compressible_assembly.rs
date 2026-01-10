@@ -1923,13 +1923,13 @@ fn main_body(layout: &StateLayout, fields: &CompressibleFields) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::compressible_model;
+    use crate::solver::model::{compressible_model, CompressibleFields};
 
     #[test]
     fn compressible_assembly_codegen_emits_bindings() {
         let model = compressible_model();
-        let fields = model.fields.compressible().expect("compressible fields");
-        let wgsl = generate_compressible_assembly_wgsl(&model.state_layout, fields);
+        let fields = CompressibleFields::new();
+        let wgsl = generate_compressible_assembly_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("matrix_values"));
         assert!(wgsl.contains("rhs"));
         assert!(wgsl.contains("scalar_row_offsets"));

@@ -110,13 +110,15 @@ impl UnifiedFieldResources {
         }
 
         let iteration_snapshot = if recipe.is_implicit() {
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UnifiedField iteration snapshot"),
-                contents: cast_slice(&zero_state),
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-            }))
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("UnifiedField iteration snapshot"),
+                    contents: cast_slice(&zero_state),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
+                }),
+            )
         } else {
             None
         };
@@ -128,13 +130,15 @@ impl UnifiedFieldResources {
                 let flux_size = num_faces as usize * flux.stride as usize;
                 let zero_flux = vec![0.0f32; flux_size];
                 (
-                    Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("UnifiedField flux buffer"),
-                        contents: cast_slice(&zero_flux),
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    })),
+                    Some(
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("UnifiedField flux buffer"),
+                            contents: cast_slice(&zero_flux),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        }),
+                    ),
                     flux.stride,
                 )
             }
@@ -144,11 +148,13 @@ impl UnifiedFieldResources {
 
         let low_mach_params = GpuLowMachParams::default();
         let low_mach_params_buffer = if recipe.requires_low_mach_params {
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UnifiedField low-mach params"),
-                contents: bytemuck::bytes_of(&low_mach_params),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }))
+            Some(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("UnifiedField low-mach params"),
+                    contents: bytemuck::bytes_of(&low_mach_params),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                }),
+            )
         } else {
             None
         };
@@ -316,11 +322,7 @@ impl UnifiedFieldResources {
 
     /// Add a gradient buffer to the resources.
     /// This can be used to add gradients that weren't specified in the recipe.
-    pub fn add_gradient(
-        &mut self,
-        device: &wgpu::Device,
-        field_name: &str,
-    ) {
+    pub fn add_gradient(&mut self, device: &wgpu::Device, field_name: &str) {
         if self.gradients.contains_key(field_name) {
             return;
         }

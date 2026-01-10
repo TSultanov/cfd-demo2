@@ -59,11 +59,8 @@ impl GpuScalarRuntime {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        self.time_integration.set_dt(
-            dt,
-            &mut self.constants,
-            &self.common.context.queue,
-        );
+        self.time_integration
+            .set_dt(dt, &mut self.constants, &self.common.context.queue);
     }
 
     pub fn set_scheme(&mut self, scheme: u32) {
@@ -83,10 +80,8 @@ impl GpuScalarRuntime {
     }
 
     pub fn advance_time(&mut self) {
-        self.time_integration.prepare_step(
-            &mut self.constants,
-            &self.common.context.queue,
-        );
+        self.time_integration
+            .prepare_step(&mut self.constants, &self.common.context.queue);
     }
 
     pub fn solve_linear_system_cg_with_size(

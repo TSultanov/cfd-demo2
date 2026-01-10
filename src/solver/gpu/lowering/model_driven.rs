@@ -2,7 +2,7 @@ use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanPa
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
-use crate::solver::model::{ModelFields, ModelSpec};
+use crate::solver::model::{KernelId, ModelSpec};
 use std::collections::HashMap;
 
 use super::models;
@@ -60,8 +60,68 @@ async fn lower_parts_for_model(
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
-    match &model.fields {
-        ModelFields::Compressible(_) => {
+    let has_kernel = |id: KernelId| recipe.kernels.iter().any(|k| k.id == id);
+
+    // Generic coupled plan currently has its own dedicated lowering path.
+    if has_kernel(KernelId::GENERIC_COUPLED_ASSEMBLY) {
+        return crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
+            mesh,
+            model.clone(),
+            recipe,
+            device,
+            queue,
+        )
+        .await;
+    }
+
+    // Otherwise, select the runtime backend based on the derived recipe structure.
+    match recipe.stepping {
+        crate::solver::gpu::recipe::SteppingMode::Coupled { .. } => {
+            let solver = crate::solver::gpu::structs::GpuSolver::new(
+                mesh,
+                model.clone(),
+                recipe.clone(),
+                device,
+                queue,
+            )
+            .await?;
+
+            let context = crate::solver::gpu::context::GpuContext {
+                device: solver.common.context.device.clone(),
+                queue: solver.common.context.queue.clone(),
+            };
+            let profiling_stats = std::sync::Arc::clone(&solver.common.profiling_stats);
+
+            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
+            resources.insert(models::universal::UniversalProgramResources::new_coupled(
+                solver,
+            ));
+
+            let mut ops = ProgramOpRegistry::new();
+            models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
+
+            Ok(LoweredProgramParts {
+                model: model.clone(),
+                context,
+                profiling_stats,
+                resources,
+                spec: ModelGpuProgramSpecParts {
+                    ops,
+                    num_cells: models::universal::spec_num_cells,
+                    time: models::universal::spec_time,
+                    dt: models::universal::spec_dt,
+                    state_buffer: models::universal::spec_state_buffer,
+                    write_state_bytes: models::universal::spec_write_state_bytes,
+                    initialize_history: Some(models::universal::init_history),
+                    params: HashMap::new(),
+                    set_param_fallback: Some(models::universal::set_param_fallback),
+                    step_stats: Some(models::universal::step_stats),
+                    step_with_stats: None,
+                    linear_debug: Some(models::universal::linear_debug_provider),
+                },
+            })
+        }
+        _ => {
             let plan = crate::solver::gpu::plans::compressible::CompressiblePlanResources::new(
                 mesh,
                 model.clone(),
@@ -78,85 +138,32 @@ async fn lower_parts_for_model(
             let profiling_stats = std::sync::Arc::clone(&plan.common.profiling_stats);
 
             let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::compressible::CompressibleProgramResources::new(
-                plan,
-            ));
+            resources
+                .insert(models::universal::UniversalProgramResources::new_explicit_implicit(plan));
 
             let mut ops = ProgramOpRegistry::new();
-            models::compressible::register_ops_from_recipe(&recipe, &mut ops)?;
+            models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
             Ok(LoweredProgramParts {
                 model: model.clone(),
-                recipe,
                 context,
                 profiling_stats,
                 resources,
                 spec: ModelGpuProgramSpecParts {
                     ops,
-                    num_cells: models::compressible::spec_num_cells,
-                    time: models::compressible::spec_time,
-                    dt: models::compressible::spec_dt,
-                    state_buffer: models::compressible::spec_state_buffer,
-                    write_state_bytes: models::compressible::spec_write_state_bytes,
-                    initialize_history: Some(models::compressible::init_history),
+                    num_cells: models::universal::spec_num_cells,
+                    time: models::universal::spec_time,
+                    dt: models::universal::spec_dt,
+                    state_buffer: models::universal::spec_state_buffer,
+                    write_state_bytes: models::universal::spec_write_state_bytes,
+                    initialize_history: Some(models::universal::init_history),
                     params: HashMap::new(),
-                    set_param_fallback: Some(models::compressible::set_param_fallback),
-                    step_stats: Some(models::compressible::step_stats),
-                    step_with_stats: Some(models::compressible::step_with_stats),
-                    linear_debug: Some(models::compressible::linear_debug_provider),
+                    set_param_fallback: Some(models::universal::set_param_fallback),
+                    step_stats: Some(models::universal::step_stats),
+                    step_with_stats: Some(models::universal::step_with_stats),
+                    linear_debug: Some(models::universal::linear_debug_provider),
                 },
             })
-        }
-        ModelFields::Incompressible(_) => {
-            let plan =
-                crate::solver::gpu::structs::GpuSolver::new(mesh, model.clone(), recipe.clone(), device, queue)
-                    .await?;
-
-            let context = crate::solver::gpu::context::GpuContext {
-                device: plan.common.context.device.clone(),
-                queue: plan.common.context.queue.clone(),
-            };
-            let profiling_stats = std::sync::Arc::clone(&plan.common.profiling_stats);
-
-            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::incompressible::IncompressibleProgramResources::new(
-                plan,
-            ));
-
-            let mut ops = ProgramOpRegistry::new();
-            models::incompressible::register_ops_from_recipe(&recipe, &mut ops)?;
-
-            Ok(LoweredProgramParts {
-                model: model.clone(),
-                recipe,
-                context,
-                profiling_stats,
-                resources,
-                spec: ModelGpuProgramSpecParts {
-                    ops,
-                    num_cells: models::incompressible::spec_num_cells,
-                    time: models::incompressible::spec_time,
-                    dt: models::incompressible::spec_dt,
-                    state_buffer: models::incompressible::spec_state_buffer,
-                    write_state_bytes: models::incompressible::spec_write_state_bytes,
-                    initialize_history: Some(models::incompressible::init_history),
-                    params: HashMap::new(),
-                    set_param_fallback: Some(models::incompressible::set_param_fallback),
-                    step_stats: Some(models::incompressible::step_stats),
-                    step_with_stats: None,
-                    linear_debug: Some(models::incompressible::linear_debug_provider),
-                },
-            })
-        }
-        ModelFields::GenericCoupled(_) => {
-            crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
-                mesh,
-                model.clone(),
-                recipe,
-                device,
-                queue,
-            )
-            .await
         }
     }
 }

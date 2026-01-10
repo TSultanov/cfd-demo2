@@ -24,7 +24,10 @@ pub struct CompressibleGraphs {
 impl CompressibleGraphs {
     /// Create graphs from a SolverRecipe, falling back to hardcoded graphs
     /// when the recipe doesn't define the needed phases.
-    pub fn from_recipe(recipe: &SolverRecipe, kernels: &ModelKernelsModule) -> Result<Self, String> {
+    pub fn from_recipe(
+        recipe: &SolverRecipe,
+        kernels: &ModelKernelsModule,
+    ) -> Result<Self, String> {
         // Explicit path: gradients (optional) -> flux -> explicit update -> primitive recovery
         let explicit_graph = build_optional_graph_for_phases(
             recipe,
@@ -57,15 +60,12 @@ impl CompressibleGraphs {
             kernels,
             "compressible",
         )?;
-        let implicit_assembly_graph_first_order = build_optional_graph_for_phase(
-            recipe,
-            KernelPhase::Assembly,
-            kernels,
-            "compressible",
-        )?;
+        let implicit_assembly_graph_first_order =
+            build_optional_graph_for_phase(recipe, KernelPhase::Assembly, kernels, "compressible")?;
 
         // These are used today; treat non-empty phases as required if present.
-        let apply_graph = build_optional_graph_for_phase(recipe, KernelPhase::Apply, kernels, "compressible")?;
+        let apply_graph =
+            build_optional_graph_for_phase(recipe, KernelPhase::Apply, kernels, "compressible")?;
         let primitive_update_graph = build_optional_graph_for_phase(
             recipe,
             KernelPhase::PrimitiveRecovery,

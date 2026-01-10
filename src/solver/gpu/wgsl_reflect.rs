@@ -13,7 +13,7 @@ pub(crate) struct WgslBinding {
     pub name: String,
 }
 
-pub(crate) trait WgslBindingLike {
+pub trait WgslBindingLike {
     fn group(&self) -> u32;
     fn binding(&self) -> u32;
     fn name(&self) -> &str;

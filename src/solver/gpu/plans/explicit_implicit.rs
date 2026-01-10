@@ -20,6 +20,7 @@ use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
+use wgpu::util::DeviceExt;
 
 use crate::solver::gpu::env_utils::{env_flag, env_usize};
 
@@ -133,6 +134,8 @@ pub(crate) struct ExplicitImplicitPlanResources {
     pub scalar_row_offsets_port: Port<BufU32>,
     pub port_space: PortSpace,
     pub kernels: ModelKernelsModule,
+    pub(crate) b_bc_kind: wgpu::Buffer,
+    pub(crate) b_bc_value: wgpu::Buffer,
     pub linear_solver: CompressibleLinearSolver,
     pub graphs: CompressibleGraphs,
     pub outer_iters: usize,
@@ -265,6 +268,27 @@ impl ExplicitImplicitPlanResources {
             initial_constants,
         );
 
+        let (bc_kind, bc_value) = model
+            .boundaries
+            .to_gpu_tables(&model.system)
+            .map_err(|e| format!("explicit_implicit: boundary table error: {e}"))?;
+        let b_bc_kind = common
+            .context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ExplicitImplicit bc_kind"),
+                contents: cast_slice(&bc_kind),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let b_bc_value = common
+            .context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ExplicitImplicit bc_value"),
+                contents: cast_slice(&bc_value),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+
         let kernels = ModelKernelsModule::new_from_recipe(
             &common.context.device,
             &common.mesh,
@@ -272,10 +296,12 @@ impl ExplicitImplicitPlanResources {
             &recipe,
             &fields_res,
             fields_res.step_handle(),
-            ModelKernelsInit::linear_system(
+            ModelKernelsInit::linear_system_with_bc(
                 &lowered.ports,
                 lowered.system_ports,
                 lowered.scalar_row_offsets_port,
+                &b_bc_kind,
+                &b_bc_value,
             ),
         );
 
@@ -296,6 +322,8 @@ impl ExplicitImplicitPlanResources {
             scalar_row_offsets_port: lowered.scalar_row_offsets_port,
             port_space,
             kernels,
+            b_bc_kind,
+            b_bc_value,
             linear_solver: CompressibleLinearSolver::new(),
             graphs,
             outer_iters,

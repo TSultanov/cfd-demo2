@@ -14,6 +14,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub id: &'static str,
+    pub method: crate::solver::model::method::MethodSpec,
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub boundaries: BoundarySpec,
@@ -78,7 +79,7 @@ impl ModelSpec {
     }
 
     pub fn kernel_plan(&self) -> KernelPlan {
-        super::kernel::derive_kernel_plan(&self.system)
+        super::kernel::derive_kernel_plan_for_model(self)
     }
 }
 
@@ -361,6 +362,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 
     ModelSpec {
         id: "incompressible_momentum",
+        method: crate::solver::model::method::MethodSpec::CoupledIncompressible,
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
@@ -382,6 +384,7 @@ pub fn compressible_model() -> ModelSpec {
 
     ModelSpec {
         id: "compressible",
+        method: crate::solver::model::method::MethodSpec::ExplicitImplicitConservative,
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
@@ -421,6 +424,7 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
     );
     ModelSpec {
         id: "generic_diffusion_demo",
+        method: crate::solver::model::method::MethodSpec::GenericCoupled,
         system,
         state_layout: layout,
         boundaries,
@@ -460,6 +464,7 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
     );
     ModelSpec {
         id: "generic_diffusion_demo_neumann",
+        method: crate::solver::model::method::MethodSpec::GenericCoupled,
         system,
         state_layout: layout,
         boundaries,

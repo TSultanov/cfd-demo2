@@ -1,12 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::compressible_apply::generate_ei_apply_wgsl;
-use super::compressible_assembly::generate_ei_assembly_wgsl;
-use super::compressible_explicit_update::generate_ei_explicit_update_wgsl;
-use super::compressible_flux_kt::generate_ei_flux_kt_wgsl;
-use super::compressible_gradients::generate_ei_gradients_wgsl;
-use super::compressible_update::generate_ei_update_wgsl;
+use super::method_ei;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
 use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use super::generic_coupled_kernels::{
@@ -21,7 +16,7 @@ use crate::solver::codegen::unified_assembly;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::incompressible_momentum_model;
 use crate::solver::model::{
-    CompressibleFields, IncompressibleMomentumFields, KernelKind, ModelSpec,
+    IncompressibleMomentumFields, KernelKind, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 
@@ -119,28 +114,22 @@ fn generate_kernel_wgsl(
         }
         KernelKind::SystemMain => generate_wgsl(&discrete),
         KernelKind::EiAssembly => {
-            let fields = CompressibleFields::new();
-            generate_ei_assembly_wgsl(&model.state_layout, &fields)
+            method_ei::generate_ei_assembly_wgsl(model)
         }
         KernelKind::EiApply => {
-            let fields = CompressibleFields::new();
-            generate_ei_apply_wgsl(&model.state_layout, &fields)
+            method_ei::generate_ei_apply_wgsl(model)
         }
         KernelKind::EiGradients => {
-            let fields = CompressibleFields::new();
-            generate_ei_gradients_wgsl(&model.state_layout, &fields)
+            method_ei::generate_ei_gradients_wgsl(model)
         }
         KernelKind::EiExplicitUpdate => {
-            let fields = CompressibleFields::new();
-            generate_ei_explicit_update_wgsl(&model.state_layout, &fields)
+            method_ei::generate_ei_explicit_update_wgsl(model)
         }
         KernelKind::EiUpdate => {
-            let fields = CompressibleFields::new();
-            generate_ei_update_wgsl(&model.state_layout, &fields)
+            method_ei::generate_ei_update_wgsl(model)
         }
         KernelKind::EiFluxKt => {
-            let fields = CompressibleFields::new();
-            generate_ei_flux_kt_wgsl(&model.state_layout, &fields)
+            method_ei::generate_ei_flux_kt_wgsl(model)
         }
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = expand_schemes(&model.system, schemes)

@@ -4,6 +4,8 @@ pub mod compressible_explicit_update;
 pub mod compressible_flux_kt;
 pub mod compressible_gradients;
 pub mod compressible_update;
+pub mod ei;
+pub mod method_ei;
 pub mod coupled_assembly;
 pub mod dsl;
 pub mod emit;

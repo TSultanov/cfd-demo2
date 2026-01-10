@@ -231,10 +231,10 @@ impl SolverRecipe {
 
         // Emit kernel specs in terms of stable KernelIds.
         //
-        // `derive_kernel_ids` is structural (based on the equation system); the recipe assigns
+        // Kernel selection is model-driven (based on `ModelSpec.method`); the recipe assigns
         // phase and dispatch as it constructs `KernelSpec`s.
         let mut kernels: Vec<KernelSpec> = Vec::new();
-        for id in crate::solver::model::kernel::derive_kernel_ids(&model.system) {
+        for id in crate::solver::model::kernel::derive_kernel_ids_for_model(model) {
             // Some models include a gradients kernel in the plan, but for schemes that do not
             // require gradients we can skip it (if nothing else forces gradients).
             if id == KernelId::EI_GRADIENTS && !needs_gradients {
@@ -301,9 +301,8 @@ impl SolverRecipe {
             });
         }
 
-        // Determine stepping mode from model structure
-        let kernel_ids: Vec<KernelId> = kernels.iter().map(|k| k.id).collect();
-        let stepping = derive_stepping_mode(model, &kernel_ids);
+        // Determine stepping mode from model method selection.
+        let stepping = derive_stepping_mode(model);
 
         // Linear solver spec
         let linear_solver = LinearSolverSpec {
@@ -552,29 +551,18 @@ impl SolverRecipe {
 // New recipes should assign phases explicitly when constructing KernelSpecs.
 #[allow(dead_code)]
 /// Derive stepping mode from model structure.
-fn derive_stepping_mode(_model: &ModelSpec, kernels: &[KernelId]) -> SteppingMode {
-    // Check for compressible (can be explicit or implicit)
-    if kernels.contains(&KernelId::EI_EXPLICIT_UPDATE) {
-        // Has explicit path, default to implicit with fallback
-        return SteppingMode::Implicit { outer_iters: 3 };
-    }
+fn derive_stepping_mode(model: &ModelSpec) -> SteppingMode {
+    use crate::solver::model::MethodSpec;
 
-    // Check for coupled incompressible
-    if kernels.contains(&KernelId::COUPLED_ASSEMBLY) {
-        return SteppingMode::Coupled {
+    match model.method {
+        MethodSpec::ExplicitImplicitConservative => SteppingMode::Implicit { outer_iters: 3 },
+        MethodSpec::CoupledIncompressible => SteppingMode::Coupled {
             outer_correctors: 3,
-        };
-    }
-
-    // Check for generic coupled scalar
-    if kernels.contains(&KernelId::GENERIC_COUPLED_ASSEMBLY) {
-        return SteppingMode::Coupled {
+        },
+        MethodSpec::GenericCoupled => SteppingMode::Coupled {
             outer_correctors: 1,
-        };
+        },
     }
-
-    // Default: implicit
-    SteppingMode::Implicit { outer_iters: 1 }
 }
 
 #[cfg(test)]

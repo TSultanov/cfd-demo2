@@ -162,8 +162,14 @@ impl KernelPlan {
 }
 
 pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem) -> KernelPlan {
-    let req = analyze_kernel_requirements(system);
-    synthesize_kernel_plan(&req)
+    // Back-compat shim: without a `ModelSpec` we cannot select a method.
+    // Prefer the generic coupled path as a conservative default.
+    let _ = system;
+    KernelPlan::new(vec![
+        KernelKind::GenericCoupledAssembly,
+        KernelKind::GenericCoupledApply,
+        KernelKind::GenericCoupledUpdate,
+    ])
 }
 
 /// Derive a kernel execution ordering in terms of stable `KernelId`s.
@@ -175,8 +181,70 @@ pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem
 /// - Phase assignment and dispatch kind are decided by the solver recipe.
 /// - `KernelKind` is retained as a legacy/debug bridge.
 pub fn derive_kernel_ids(system: &crate::solver::model::backend::EquationSystem) -> Vec<KernelId> {
-    let req = analyze_kernel_requirements(system);
-    synthesize_kernel_ids(&req)
+    // Back-compat shim: without a `ModelSpec` we cannot select a method.
+    // Prefer the generic coupled path as a conservative default.
+    let _ = system;
+    vec![
+        KernelId::GENERIC_COUPLED_ASSEMBLY,
+        KernelId::GENERIC_COUPLED_APPLY,
+        KernelId::GENERIC_COUPLED_UPDATE,
+    ]
+}
+
+/// Model-driven kernel plan: selected from `ModelSpec.method`.
+pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> KernelPlan {
+    use crate::solver::model::MethodSpec;
+
+    match model.method {
+        MethodSpec::ExplicitImplicitConservative => KernelPlan::new(vec![
+            KernelKind::EiGradients,
+            KernelKind::EiFluxKt,
+            KernelKind::EiExplicitUpdate,
+            KernelKind::EiAssembly,
+            KernelKind::EiApply,
+            KernelKind::EiUpdate,
+        ]),
+        MethodSpec::CoupledIncompressible => KernelPlan::new(vec![
+            KernelKind::PrepareCoupled,
+            KernelKind::FluxRhieChow,
+            KernelKind::CoupledAssembly,
+            KernelKind::PressureAssembly,
+            KernelKind::UpdateFieldsFromCoupled,
+        ]),
+        MethodSpec::GenericCoupled => KernelPlan::new(vec![
+            KernelKind::GenericCoupledAssembly,
+            KernelKind::GenericCoupledApply,
+            KernelKind::GenericCoupledUpdate,
+        ]),
+    }
+}
+
+/// Model-driven kernel id list: selected from `ModelSpec.method`.
+pub fn derive_kernel_ids_for_model(model: &crate::solver::model::ModelSpec) -> Vec<KernelId> {
+    use crate::solver::model::MethodSpec;
+
+    match model.method {
+        MethodSpec::ExplicitImplicitConservative => vec![
+            KernelId::EI_GRADIENTS,
+            KernelId::EI_FLUX_KT,
+            KernelId::EI_EXPLICIT_UPDATE,
+            KernelId::EI_ASSEMBLY,
+            KernelId::EI_APPLY,
+            KernelId::EI_UPDATE,
+        ],
+        MethodSpec::CoupledIncompressible => vec![
+            KernelId::PREPARE_COUPLED,
+            KernelId::FLUX_RHIE_CHOW,
+            KernelId::COUPLED_ASSEMBLY,
+            KernelId::PRESSURE_ASSEMBLY,
+            KernelId::UPDATE_FIELDS_FROM_COUPLED,
+        ],
+        MethodSpec::GenericCoupled => vec![
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+            KernelId::GENERIC_COUPLED_APPLY,
+            KernelId::GENERIC_COUPLED_UPDATE,
+        ],
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

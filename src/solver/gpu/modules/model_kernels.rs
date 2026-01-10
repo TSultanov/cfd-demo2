@@ -32,7 +32,9 @@ pub enum KernelPipeline {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum KernelBindGroups {
     MeshFields,
+    MeshFieldsBc,
     MeshFieldsSolver,
+    MeshFieldsSolverBc,
     FieldsOnly,
     ApplyFieldsSolver,
     UpdateFieldsSolution,
@@ -43,6 +45,8 @@ pub struct ModelKernelsInit<'a> {
     pub system_ports: Option<LinearSystemPorts>,
     pub scalar_row_offsets: Option<Port<BufU32>>,
     pub coupled: Option<&'a CoupledSolverResources>,
+    pub bc_kind: Option<&'a wgpu::Buffer>,
+    pub bc_value: Option<&'a wgpu::Buffer>,
 }
 
 impl<'a> ModelKernelsInit<'a> {
@@ -56,6 +60,25 @@ impl<'a> ModelKernelsInit<'a> {
             system_ports: Some(system_ports),
             scalar_row_offsets: Some(scalar_row_offsets),
             coupled: None,
+            bc_kind: None,
+            bc_value: None,
+        }
+    }
+
+    pub fn linear_system_with_bc(
+        port_space: &'a PortSpace,
+        system_ports: LinearSystemPorts,
+        scalar_row_offsets: Port<BufU32>,
+        bc_kind: &'a wgpu::Buffer,
+        bc_value: &'a wgpu::Buffer,
+    ) -> Self {
+        Self {
+            port_space: Some(port_space),
+            system_ports: Some(system_ports),
+            scalar_row_offsets: Some(scalar_row_offsets),
+            coupled: None,
+            bc_kind: Some(bc_kind),
+            bc_value: Some(bc_value),
         }
     }
 
@@ -65,6 +88,8 @@ impl<'a> ModelKernelsInit<'a> {
             system_ports: None,
             scalar_row_offsets: None,
             coupled: Some(coupled),
+            bc_kind: None,
+            bc_value: None,
         }
     }
 }
@@ -76,6 +101,8 @@ pub struct ModelKernelsModule {
     bg_mesh: Option<wgpu::BindGroup>,
     bg_fields_ping_pong: Vec<wgpu::BindGroup>,
     bg_solver: Option<wgpu::BindGroup>,
+    bg_bc_group2: Option<wgpu::BindGroup>,
+    bg_bc_group3: Option<wgpu::BindGroup>,
 
     bg_fields_group0_ping_pong: Option<Vec<wgpu::BindGroup>>,
 
@@ -121,7 +148,7 @@ impl ModelKernelsModule {
             panic!("ModelKernelsModule: no anchor kernel available for mesh/fields bind groups");
         };
 
-        let (bg_mesh, bg_fields_ping_pong, bg_solver) = match anchor_kernel {
+        let (bg_mesh, bg_fields_ping_pong, bg_solver, bg_bc_group3) = match anchor_kernel {
             KernelId::EI_ASSEMBLY => {
                 let Some(system) = system else {
                     panic!("ModelKernelsModule: compressible kernels require linear system ports");
@@ -199,7 +226,35 @@ impl ModelKernelsModule {
                     })
                 };
 
-                (Some(bg_mesh), bg_fields_ping_pong, Some(bg_solver))
+                let bg_bc_group3 = match (init.bc_kind, init.bc_value) {
+                    (Some(bc_kind), Some(bc_value)) => {
+                        let bgl = pipeline_assembly.get_bind_group_layout(3);
+                        Some(
+                            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                                device,
+                                "ModelKernels: bc bind group",
+                                &bgl,
+                                wgsl_meta::EI_ASSEMBLY_BINDINGS,
+                                3,
+                                |name| match name {
+                                    "bc_kind" => Some(wgpu::BindingResource::Buffer(
+                                        bc_kind.as_entire_buffer_binding(),
+                                    )),
+                                    "bc_value" => Some(wgpu::BindingResource::Buffer(
+                                        bc_value.as_entire_buffer_binding(),
+                                    )),
+                                    _ => None,
+                                },
+                            )
+                            .unwrap_or_else(|err| {
+                                panic!("ModelKernels bc bind group build failed: {err}")
+                            }),
+                        )
+                    }
+                    _ => None,
+                };
+
+                (Some(bg_mesh), bg_fields_ping_pong, Some(bg_solver), bg_bc_group3)
             }
 
             KernelId::PREPARE_COUPLED | KernelId::COUPLED_ASSEMBLY => {
@@ -246,14 +301,44 @@ impl ModelKernelsModule {
                     out
                 };
 
-                (
-                    Some(bg_mesh),
-                    bg_fields_ping_pong,
-                    Some(coupled.bg_solver.clone()),
-                )
+                (Some(bg_mesh), bg_fields_ping_pong, Some(coupled.bg_solver.clone()), None)
             }
 
             _ => unreachable!("anchor kernel must be one of the known anchors"),
+        };
+
+        let bg_bc_group2 = if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::EI_FLUX_KT))
+        {
+            match (init.bc_kind, init.bc_value) {
+                (Some(bc_kind), Some(bc_value)) => {
+                    let pipeline_flux = &pipelines[&KernelPipeline::Kernel(KernelId::EI_FLUX_KT)];
+                    let bgl = pipeline_flux.get_bind_group_layout(2);
+                    Some(
+                        crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                            device,
+                            "ModelKernels: bc bind group (group2)",
+                            &bgl,
+                            wgsl_meta::EI_FLUX_KT_BINDINGS,
+                            2,
+                            |name| match name {
+                                "bc_kind" => Some(wgpu::BindingResource::Buffer(
+                                    bc_kind.as_entire_buffer_binding(),
+                                )),
+                                "bc_value" => Some(wgpu::BindingResource::Buffer(
+                                    bc_value.as_entire_buffer_binding(),
+                                )),
+                                _ => None,
+                            },
+                        )
+                        .unwrap_or_else(|err| {
+                            panic!("ModelKernels bc bind group (group2) build failed: {err}")
+                        }),
+                    )
+                }
+                _ => None,
+            }
+        } else {
+            None
         };
 
         let bg_apply_fields_ping_pong =
@@ -373,6 +458,8 @@ impl ModelKernelsModule {
             bg_mesh,
             bg_fields_ping_pong,
             bg_solver,
+            bg_bc_group2,
+            bg_bc_group3,
             bg_fields_group0_ping_pong,
             bg_apply_fields_ping_pong,
             bg_apply_solver,
@@ -401,6 +488,18 @@ impl ModelKernelsModule {
 
     fn bg_solver(&self) -> &wgpu::BindGroup {
         self.bg_solver.as_ref().expect("missing solver bind group")
+    }
+
+    fn bg_bc_group2(&self) -> &wgpu::BindGroup {
+        self.bg_bc_group2
+            .as_ref()
+            .expect("missing bc bind group (group2)")
+    }
+
+    fn bg_bc_group3(&self) -> &wgpu::BindGroup {
+        self.bg_bc_group3
+            .as_ref()
+            .expect("missing bc bind group (group3)")
     }
 
     fn bg_fields_group0(&self) -> &wgpu::BindGroup {
@@ -444,10 +543,23 @@ impl ModelKernelsModule {
         pass.set_bind_group(1, self.bg_fields(), &[]);
     }
 
+    fn bind_mesh_fields_bc(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, self.bg_mesh(), &[]);
+        pass.set_bind_group(1, self.bg_fields(), &[]);
+        pass.set_bind_group(2, self.bg_bc_group2(), &[]);
+    }
+
     fn bind_mesh_fields_solver(&self, pass: &mut wgpu::ComputePass) {
         pass.set_bind_group(0, self.bg_mesh(), &[]);
         pass.set_bind_group(1, self.bg_fields(), &[]);
         pass.set_bind_group(2, self.bg_solver(), &[]);
+    }
+
+    fn bind_mesh_fields_solver_bc(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, self.bg_mesh(), &[]);
+        pass.set_bind_group(1, self.bg_fields(), &[]);
+        pass.set_bind_group(2, self.bg_solver(), &[]);
+        pass.set_bind_group(3, self.bg_bc_group3(), &[]);
     }
 
     fn bind_fields_only(&self, pass: &mut wgpu::ComputePass) {
@@ -478,7 +590,9 @@ impl GpuComputeModule for ModelKernelsModule {
     fn bind(&self, key: Self::BindKey, pass: &mut wgpu::ComputePass) {
         match key {
             KernelBindGroups::MeshFields => self.bind_mesh_fields(pass),
+            KernelBindGroups::MeshFieldsBc => self.bind_mesh_fields_bc(pass),
             KernelBindGroups::MeshFieldsSolver => self.bind_mesh_fields_solver(pass),
+            KernelBindGroups::MeshFieldsSolverBc => self.bind_mesh_fields_solver_bc(pass),
             KernelBindGroups::FieldsOnly => self.bind_fields_only(pass),
             KernelBindGroups::ApplyFieldsSolver => self.bind_apply_fields_solver(pass),
             KernelBindGroups::UpdateFieldsSolution => self.bind_update_fields_solution(pass),
@@ -508,11 +622,23 @@ impl UnifiedGraphModule for ModelKernelsModule {
         // Map kernel kinds to their bind group requirements
         match id {
             // EI kernels
-            KernelId::EI_ASSEMBLY => Some(KernelBindGroups::MeshFieldsSolver),
+            KernelId::EI_ASSEMBLY => {
+                if self.bg_bc_group3.is_some() {
+                    Some(KernelBindGroups::MeshFieldsSolverBc)
+                } else {
+                    Some(KernelBindGroups::MeshFieldsSolver)
+                }
+            }
             KernelId::EI_APPLY => Some(KernelBindGroups::ApplyFieldsSolver),
             KernelId::EI_EXPLICIT_UPDATE => Some(KernelBindGroups::MeshFields),
             KernelId::EI_GRADIENTS => Some(KernelBindGroups::MeshFields),
-            KernelId::EI_FLUX_KT => Some(KernelBindGroups::MeshFields),
+            KernelId::EI_FLUX_KT => {
+                if self.bg_bc_group2.is_some() {
+                    Some(KernelBindGroups::MeshFieldsBc)
+                } else {
+                    Some(KernelBindGroups::MeshFields)
+                }
+            }
             KernelId::EI_UPDATE => Some(KernelBindGroups::FieldsOnly),
             // Incompressible kernels
             KernelId::PREPARE_COUPLED => Some(KernelBindGroups::MeshFieldsSolver),

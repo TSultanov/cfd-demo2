@@ -104,6 +104,14 @@ var<storage, read> state_iter: array<f32>;
 @group(1) @binding(10) 
 var<uniform> low_mach: LowMachParams;
 
+// Group 2: Boundary conditions (per boundary type × unknown)
+
+@group(2) @binding(0) 
+var<storage, read> bc_kind: array<u32>;
+
+@group(2) @binding(1) 
+var<storage, read> bc_value: array<f32>;
+
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -147,14 +155,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         center_r = cell_centers[neigh_idx];
     } else {
         is_boundary = true;
-        if (boundary_type == 1u) {
-            rho_u_r = vec2<f32>(rho_r * constants.inlet_velocity, 0.0);
-        } else {
-            if (boundary_type == 3u) {
-                let m_dot_n = dot(rho_u_l, normal_vec);
-                rho_u_r = rho_u_l - normal_vec * m_dot_n * 2.0;
-            }
-        }
+        let bc_idx_rho = boundary_type * 4u + 0u;
+        let bc_idx_rho_u_x = boundary_type * 4u + 1u;
+        let bc_idx_rho_u_y = boundary_type * 4u + 2u;
+        let bc_idx_rho_e = boundary_type * 4u + 3u;
+        let bc_rho = bc_value[bc_idx_rho];
+        let bc_rho_u_x = bc_value[bc_idx_rho_u_x];
+        let bc_rho_u_y = bc_value[bc_idx_rho_u_y];
+        let bc_rho_e = bc_value[bc_idx_rho_e];
+        let bc_kind_rho: u32 = bc_kind[bc_idx_rho];
+        let bc_kind_rho_u_x: u32 = bc_kind[bc_idx_rho_u_x];
+        let bc_kind_rho_u_y: u32 = bc_kind[bc_idx_rho_u_y];
+        let bc_kind_rho_e: u32 = bc_kind[bc_idx_rho_e];
+        rho_r = select(rho_l, bc_rho, bc_kind_rho == 1u);
+        let rho_u_r_x = select(rho_u_l.x, bc_rho_u_x, bc_kind_rho_u_x == 1u);
+        let rho_u_r_y = select(rho_u_l.y, bc_rho_u_y, bc_kind_rho_u_y == 1u);
+        rho_u_r = vec2<f32>(rho_u_r_x, rho_u_r_y);
+        rho_e_r = select(rho_e_l, bc_rho_e, bc_kind_rho_e == 1u);
     }
     let rho_r_cell = rho_r;
     let rho_u_r_cell: vec2<f32> = rho_u_r;
@@ -328,7 +345,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     flux_rho_e = flux_rho_e + dot(diff_u, u_face);
     let base = idx * 4u;
-    fluxes[base] = flux_rho * area;
+    fluxes[base + 0u] = flux_rho * area;
     fluxes[base + 1u] = flux_rho_u.x * area;
     fluxes[base + 2u] = flux_rho_u.y * area;
     fluxes[base + 3u] = flux_rho_e * area;

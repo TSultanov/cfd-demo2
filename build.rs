@@ -20,6 +20,18 @@ mod solver {
         }
     }
     pub mod model {
+        pub mod method {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/method.rs"
+            ));
+        }
+        pub mod flux_layout {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/flux_layout.rs"
+            ));
+        }
         pub mod backend {
             pub mod ast {
                 include!(concat!(
@@ -82,6 +94,10 @@ mod solver {
             incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
             IncompressibleMomentumFields, ModelSpec,
         };
+        #[allow(unused_imports)]
+        pub use flux_layout::{FluxComponent, FluxLayout};
+        #[allow(unused_imports)]
+        pub use method::MethodSpec;
         #[allow(unused_imports)]
         pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
         #[allow(unused_imports)]
@@ -176,6 +192,50 @@ mod solver {
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/solver/codegen/compressible_update.rs"
             ));
+        }
+        pub mod method_ei {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/method_ei.rs"
+            ));
+        }
+        pub mod ei {
+            pub mod apply {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/ei/apply.rs"
+                ));
+            }
+            pub mod assembly {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/ei/assembly.rs"
+                ));
+            }
+            pub mod explicit_update {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/ei/explicit_update.rs"
+                ));
+            }
+            pub mod flux_kt {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/ei/flux_kt.rs"
+                ));
+            }
+            pub mod gradients {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/ei/gradients.rs"
+                ));
+            }
+            pub mod update {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/codegen/ei/update.rs"
+                ));
+            }
         }
         pub mod coupled_assembly {
             include!(concat!(

@@ -5,6 +5,7 @@ use crate::solver::gpu::modules::graph::{DispatchKind, GpuComputeModule, Runtime
 use crate::solver::gpu::modules::linear_system::{LinearSystemPorts, LinearSystemView};
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::unified_graph::UnifiedGraphModule;
+use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::structs::CoupledSolverResources;
 use crate::solver::gpu::wgsl_meta;
 use crate::solver::model::KernelId;
@@ -37,6 +38,37 @@ pub enum KernelBindGroups {
     UpdateFieldsSolution,
 }
 
+pub struct ModelKernelsInit<'a> {
+    pub port_space: Option<&'a PortSpace>,
+    pub system_ports: Option<LinearSystemPorts>,
+    pub scalar_row_offsets: Option<Port<BufU32>>,
+    pub coupled: Option<&'a CoupledSolverResources>,
+}
+
+impl<'a> ModelKernelsInit<'a> {
+    pub fn linear_system(
+        port_space: &'a PortSpace,
+        system_ports: LinearSystemPorts,
+        scalar_row_offsets: Port<BufU32>,
+    ) -> Self {
+        Self {
+            port_space: Some(port_space),
+            system_ports: Some(system_ports),
+            scalar_row_offsets: Some(scalar_row_offsets),
+            coupled: None,
+        }
+    }
+
+    pub fn coupled(coupled: &'a CoupledSolverResources) -> Self {
+        Self {
+            port_space: None,
+            system_ports: None,
+            scalar_row_offsets: None,
+            coupled: Some(coupled),
+        }
+    }
+}
+
 pub struct ModelKernelsModule {
     state_step_index: Arc<AtomicUsize>,
     pipelines: HashMap<KernelPipeline, wgpu::ComputePipeline>,
@@ -55,262 +87,302 @@ pub struct ModelKernelsModule {
 }
 
 impl ModelKernelsModule {
-    pub fn new_compressible<F: FieldProvider>(
+    pub fn new_from_recipe<F: FieldProvider>(
         device: &wgpu::Device,
         mesh: &MeshResources,
         model_id: &str,
+        recipe: &SolverRecipe,
         fields: &F,
         state_step_index: Arc<AtomicUsize>,
-        port_space: &PortSpace,
-        system_ports: LinearSystemPorts,
-        scalar_row_offsets: Port<BufU32>,
+        init: ModelKernelsInit<'_>,
     ) -> Self {
-        let system = LinearSystemView {
-            ports: system_ports,
-            space: port_space,
-        };
-        let b_scalar_row_offsets = port_space.buffer(scalar_row_offsets);
-
         let mut pipelines = HashMap::new();
-        for id in [
-            KernelId::COMPRESSIBLE_ASSEMBLY,
-            KernelId::COMPRESSIBLE_APPLY,
-            KernelId::COMPRESSIBLE_EXPLICIT_UPDATE,
-            KernelId::COMPRESSIBLE_GRADIENTS,
-            KernelId::COMPRESSIBLE_FLUX_KT,
-            KernelId::COMPRESSIBLE_UPDATE,
-        ] {
+        for k in &recipe.kernels {
+            let id = k.id;
             let source = kernel_registry::kernel_source_by_id(model_id, id)
                 .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
             pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
         }
-        let pipeline_assembly =
-            &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)];
-        let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
-        let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE)];
 
-        let bg_mesh = {
-            let bgl = pipeline_assembly.get_bind_group_layout(0);
-            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
-                device,
-                "Compressible Mesh Bind Group",
-                &bgl,
-                wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
-                0,
-                |name| {
-                    mesh.buffer_for_binding_name(name)
-                        .map(|buf| wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()))
-                },
-            )
-            .unwrap_or_else(|err| panic!("Compressible mesh bind group build failed: {err}"))
+        let system = match (init.port_space, init.system_ports) {
+            (Some(space), Some(ports)) => Some(LinearSystemView { ports, space }),
+            _ => None,
         };
 
-        let bg_fields_ping_pong = {
-            let bgl = pipeline_assembly.get_bind_group_layout(1);
+        // Base mesh+field bind groups (shared by most physics kernels).
+        // Choose the anchor kernel that defines the layout.
+        let anchor_kernel = if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)) {
+            KernelId::COMPRESSIBLE_ASSEMBLY
+        } else if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::PREPARE_COUPLED)) {
+            KernelId::PREPARE_COUPLED
+        } else if pipelines.contains_key(&KernelPipeline::Kernel(KernelId::COUPLED_ASSEMBLY)) {
+            KernelId::COUPLED_ASSEMBLY
+        } else {
+            panic!("ModelKernelsModule: no anchor kernel available for mesh/fields bind groups");
+        };
+
+        let (bg_mesh, bg_fields_ping_pong, bg_solver) = match anchor_kernel {
+            KernelId::COMPRESSIBLE_ASSEMBLY => {
+                let Some(system) = system else {
+                    panic!("ModelKernelsModule: compressible kernels require linear system ports");
+                };
+                let Some(space) = init.port_space else {
+                    panic!("ModelKernelsModule: missing port space for linear system ports");
+                };
+                let scalar_row_offsets_port = init
+                    .scalar_row_offsets
+                    .expect("ModelKernelsModule: missing scalar_row_offsets port");
+                let b_scalar_row_offsets = space.buffer(scalar_row_offsets_port);
+
+                let pipeline_assembly =
+                    &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_ASSEMBLY)];
+
+                let bg_mesh = {
+                    let bgl = pipeline_assembly.get_bind_group_layout(0);
+                    crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        "ModelKernels: mesh bind group",
+                        &bgl,
+                        wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                        0,
+                        |name| {
+                            mesh.buffer_for_binding_name(name).map(|buf| {
+                                wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding())
+                            })
+                        },
+                    )
+                    .unwrap_or_else(|err| panic!("ModelKernels mesh bind group build failed: {err}"))
+                };
+
+                let bg_fields_ping_pong = {
+                    let bgl = pipeline_assembly.get_bind_group_layout(1);
+                    let mut out = Vec::with_capacity(3);
+                    for i in 0..3 {
+                        let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                            device,
+                            &format!("ModelKernels: fields bind group {i}"),
+                            &bgl,
+                            wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                            1,
+                            |name| field_binding(fields, name, i),
+                        )
+                        .unwrap_or_else(|err| {
+                            panic!("ModelKernels fields bind group build failed: {err}")
+                        });
+                        out.push(bg);
+                    }
+                    out
+                };
+
+                let bg_solver = {
+                    let bgl = pipeline_assembly.get_bind_group_layout(2);
+                    crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        "ModelKernels: solver bind group",
+                        &bgl,
+                        wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
+                        2,
+                        |name| match name {
+                            "matrix_values" => Some(wgpu::BindingResource::Buffer(
+                                system.values().as_entire_buffer_binding(),
+                            )),
+                            "rhs" => Some(wgpu::BindingResource::Buffer(
+                                system.rhs().as_entire_buffer_binding(),
+                            )),
+                            "scalar_row_offsets" => Some(wgpu::BindingResource::Buffer(
+                                b_scalar_row_offsets.as_entire_buffer_binding(),
+                            )),
+                            _ => None,
+                        },
+                    )
+                    .unwrap_or_else(|err| {
+                        panic!("ModelKernels solver bind group build failed: {err}")
+                    })
+                };
+
+                (Some(bg_mesh), bg_fields_ping_pong, Some(bg_solver))
+            }
+
+            KernelId::PREPARE_COUPLED | KernelId::COUPLED_ASSEMBLY => {
+                let coupled = init
+                    .coupled
+                    .expect("ModelKernelsModule: coupled kernels require CoupledSolverResources");
+                let pipeline_prepare =
+                    &pipelines[&KernelPipeline::Kernel(KernelId::PREPARE_COUPLED)];
+
+                let bg_mesh = {
+                    let bgl = pipeline_prepare.get_bind_group_layout(0);
+                    crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        "ModelKernels: mesh bind group",
+                        &bgl,
+                        wgsl_meta::PREPARE_COUPLED_BINDINGS,
+                        0,
+                        |name| {
+                            mesh.buffer_for_binding_name(name).map(|buf| {
+                                wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding())
+                            })
+                        },
+                    )
+                    .unwrap_or_else(|err| panic!("ModelKernels mesh bind group build failed: {err}"))
+                };
+
+                let bg_fields_ping_pong = {
+                    let bgl = pipeline_prepare.get_bind_group_layout(1);
+                    let mut out = Vec::with_capacity(3);
+                    for i in 0..3 {
+                        let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                            device,
+                            &format!("ModelKernels: fields bind group {i}"),
+                            &bgl,
+                            wgsl_meta::PREPARE_COUPLED_BINDINGS,
+                            1,
+                            |name| field_binding(fields, name, i),
+                        )
+                        .unwrap_or_else(|err| {
+                            panic!("ModelKernels fields bind group build failed: {err}")
+                        });
+                        out.push(bg);
+                    }
+                    out
+                };
+
+                (
+                    Some(bg_mesh),
+                    bg_fields_ping_pong,
+                    Some(coupled.bg_solver.clone()),
+                )
+            }
+
+            _ => unreachable!("anchor kernel must be one of the known anchors"),
+        };
+
+        let bg_apply_fields_ping_pong = if pipelines
+            .contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY))
+        {
+            let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
+            let bgl = pipeline_apply.get_bind_group_layout(0);
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
                 let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
-                    &format!("Compressible Fields Bind Group {}", i),
-                    &bgl,
-                    wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
-                    1,
-                    |name| field_binding(fields, name, i),
-                )
-                .unwrap_or_else(|err| panic!("Compressible fields bind group build failed: {err}"));
-                out.push(bg);
-            }
-            out
-        };
-
-        let bg_solver = {
-            let bgl = pipeline_assembly.get_bind_group_layout(2);
-            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
-                device,
-                "Compressible Solver Bind Group",
-                &bgl,
-                wgsl_meta::COMPRESSIBLE_ASSEMBLY_BINDINGS,
-                2,
-                |name| match name {
-                    "matrix_values" => Some(wgpu::BindingResource::Buffer(
-                        system.values().as_entire_buffer_binding(),
-                    )),
-                    "rhs" => Some(wgpu::BindingResource::Buffer(
-                        system.rhs().as_entire_buffer_binding(),
-                    )),
-                    "scalar_row_offsets" => Some(wgpu::BindingResource::Buffer(
-                        b_scalar_row_offsets.as_entire_buffer_binding(),
-                    )),
-                    _ => None,
-                },
-            )
-            .unwrap_or_else(|err| panic!("Compressible solver bind group build failed: {err}"))
-        };
-
-        let bg_apply_fields_ping_pong = {
-            let bgl = pipeline_apply.get_bind_group_layout(0);
-            let mut out = Vec::new();
-            for i in 0..3 {
-                let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
-                    device,
-                    &format!("Compressible Apply Fields Bind Group {}", i),
+                    &format!("ModelKernels: apply fields bind group {i}"),
                     &bgl,
                     wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
                     0,
                     |name| field_binding(fields, name, i),
                 )
-                .unwrap_or_else(|err| {
-                    panic!("Compressible apply-fields bind group build failed: {err}")
-                });
+                .unwrap_or_else(|err| panic!("ModelKernels apply-fields bind group build failed: {err}"));
                 out.push(bg);
             }
-            out
+            Some(out)
+        } else {
+            None
         };
 
-        let bg_apply_solver = {
+        let bg_apply_solver = if pipelines
+            .contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY))
+        {
+            let Some(system) = system else {
+                panic!("ModelKernelsModule: apply kernel requires linear system ports");
+            };
+            let pipeline_apply = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_APPLY)];
             let bgl = pipeline_apply.get_bind_group_layout(1);
-            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
-                device,
-                "Compressible Apply Solver Bind Group",
-                &bgl,
-                wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
-                1,
-                |name| match name {
-                    "solution" => Some(wgpu::BindingResource::Buffer(
-                        system.x().as_entire_buffer_binding(),
-                    )),
-                    _ => None,
-                },
+            Some(
+                crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    "ModelKernels: apply solver bind group",
+                    &bgl,
+                    wgsl_meta::COMPRESSIBLE_APPLY_BINDINGS,
+                    1,
+                    |name| match name {
+                        "solution" => Some(wgpu::BindingResource::Buffer(
+                            system.x().as_entire_buffer_binding(),
+                        )),
+                        _ => None,
+                    },
+                )
+                .unwrap_or_else(|err| {
+                    panic!("ModelKernels apply-solver bind group build failed: {err}")
+                }),
             )
-            .unwrap_or_else(|err| {
-                panic!("Compressible apply-solver bind group build failed: {err}")
-            })
+        } else {
+            None
         };
 
-        let bg_fields_group0_ping_pong = {
+        let bg_fields_group0_ping_pong = if pipelines
+            .contains_key(&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE))
+        {
+            let pipeline_update = &pipelines[&KernelPipeline::Kernel(KernelId::COMPRESSIBLE_UPDATE)];
             let bgl = pipeline_update.get_bind_group_layout(0);
-            let mut out = Vec::new();
+            let mut out = Vec::with_capacity(3);
             for i in 0..3 {
                 let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
-                    &format!("Compressible Update Fields Bind Group {}", i),
+                    &format!("ModelKernels: fields-only bind group {i}"),
                     &bgl,
                     wgsl_meta::COMPRESSIBLE_UPDATE_BINDINGS,
                     0,
                     |name| field_binding(fields, name, i),
                 )
                 .unwrap_or_else(|err| {
-                    panic!("Compressible update-fields bind group build failed: {err}")
+                    panic!("ModelKernels fields-only bind group build failed: {err}")
                 });
                 out.push(bg);
             }
-            out
+            Some(out)
+        } else {
+            None
         };
 
-        Self {
-            state_step_index,
-            pipelines,
-            bg_mesh: Some(bg_mesh),
-            bg_fields_ping_pong,
-            bg_solver: Some(bg_solver),
-            bg_fields_group0_ping_pong: Some(bg_fields_group0_ping_pong),
-            bg_apply_fields_ping_pong: Some(bg_apply_fields_ping_pong),
-            bg_apply_solver: Some(bg_apply_solver),
-            bg_update_fields_ping_pong: None,
-            bg_update_solution: None,
-        }
-    }
-
-    pub fn new_incompressible(
-        device: &wgpu::Device,
-        mesh: &MeshResources,
-        model_id: &str,
-        fields: &impl FieldProvider,
-        state_step_index: Arc<AtomicUsize>,
-        coupled: &CoupledSolverResources,
-    ) -> Self {
-        let mut pipelines = HashMap::new();
-        for id in [
-            KernelId::PREPARE_COUPLED,
-            KernelId::COUPLED_ASSEMBLY,
-            KernelId::UPDATE_FIELDS_FROM_COUPLED,
-        ] {
-            let source = kernel_registry::kernel_source_by_id(model_id, id)
-                .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
-            pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
-        }
-
-        let pipeline_prepare = &pipelines[&KernelPipeline::Kernel(KernelId::PREPARE_COUPLED)];
-        let pipeline_update =
-            &pipelines[&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED)];
-
-        let bg_mesh = {
-            let bgl = pipeline_prepare.get_bind_group_layout(0);
-            crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
-                device,
-                "Incompressible: mesh bind group",
-                &bgl,
-                wgsl_meta::PREPARE_COUPLED_BINDINGS,
-                0,
-                |name| {
-                    mesh.buffer_for_binding_name(name)
-                        .map(|buf| wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()))
-                },
-            )
-            .unwrap_or_else(|err| panic!("Incompressible mesh bind group build failed: {err}"))
-        };
-
-        let bg_fields_ping_pong = {
-            let bgl = pipeline_prepare.get_bind_group_layout(1);
-            let mut out = Vec::with_capacity(3);
-            for i in 0..3 {
-                let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
-                    device,
-                    &format!("Incompressible fields bind group {i}"),
-                    &bgl,
-                    wgsl_meta::PREPARE_COUPLED_BINDINGS,
-                    1,
-                    |name| field_binding(fields, name, i),
-                )
-                .unwrap_or_else(|err| {
-                    panic!("Incompressible fields bind group build failed: {err}")
-                });
-                out.push(bg);
-            }
-            out
-        };
-
-        let bg_update_fields_ping_pong = {
+        let bg_update_fields_ping_pong = if pipelines
+            .contains_key(&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED))
+        {
+            let pipeline_update =
+                &pipelines[&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED)];
             let bgl = pipeline_update.get_bind_group_layout(0);
             let mut out = Vec::with_capacity(3);
             for i in 0..3 {
                 let bg = crate::solver::gpu::wgsl_reflect::create_bind_group_from_bindings(
                     device,
-                    &format!("Incompressible update fields bind group {i}"),
+                    &format!("ModelKernels: update fields bind group {i}"),
                     &bgl,
                     wgsl_meta::UPDATE_FIELDS_FROM_COUPLED_BINDINGS,
                     0,
                     |name| field_binding(fields, name, i),
                 )
                 .unwrap_or_else(|err| {
-                    panic!("Incompressible update-fields bind group build failed: {err}")
+                    panic!("ModelKernels update-fields bind group build failed: {err}")
                 });
                 out.push(bg);
             }
-            out
+            Some(out)
+        } else {
+            None
+        };
+
+        let bg_update_solution = if pipelines
+            .contains_key(&KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED))
+        {
+            let coupled = init
+                .coupled
+                .expect("ModelKernelsModule: update-from-coupled requires CoupledSolverResources");
+            Some(coupled.bg_coupled_solution.clone())
+        } else {
+            None
         };
 
         Self {
             state_step_index,
             pipelines,
-            bg_mesh: Some(bg_mesh),
+            bg_mesh,
             bg_fields_ping_pong,
-            bg_solver: Some(coupled.bg_solver.clone()),
-            bg_fields_group0_ping_pong: None,
-            bg_apply_fields_ping_pong: None,
-            bg_apply_solver: None,
-            bg_update_fields_ping_pong: Some(bg_update_fields_ping_pong),
-            bg_update_solution: Some(coupled.bg_coupled_solution.clone()),
+            bg_solver,
+            bg_fields_group0_ping_pong,
+            bg_apply_fields_ping_pong,
+            bg_apply_solver,
+            bg_update_fields_ping_pong,
+            bg_update_solution,
         }
     }
 

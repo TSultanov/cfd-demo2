@@ -7,7 +7,7 @@ use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 
 use crate::solver::gpu::explicit_implicit::fgmres::{CompressibleLinearSolver, LinearTopology};
 use crate::solver::gpu::explicit_implicit::graphs::CompressibleGraphs;
-use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
+use crate::solver::gpu::modules::model_kernels::{ModelKernelsInit, ModelKernelsModule};
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
@@ -265,15 +265,18 @@ impl ExplicitImplicitPlanResources {
             initial_constants,
         );
 
-        let kernels = ModelKernelsModule::new_compressible(
+        let kernels = ModelKernelsModule::new_from_recipe(
             &common.context.device,
             &common.mesh,
             model.id,
+            &recipe,
             &fields_res,
             fields_res.step_handle(),
-            &lowered.ports,
-            lowered.system_ports,
-            lowered.scalar_row_offsets_port,
+            ModelKernelsInit::linear_system(
+                &lowered.ports,
+                lowered.system_ports,
+                lowered.scalar_row_offsets_port,
+            ),
         );
 
         let port_space = lowered.ports;

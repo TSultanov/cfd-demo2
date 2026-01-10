@@ -6,7 +6,7 @@ use crate::solver::mesh::Mesh;
 use std::sync::Mutex;
 
 use crate::solver::gpu::coupled_backend::linear_solver::IncompressibleLinearSolver;
-use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
+use crate::solver::gpu::modules::model_kernels::{ModelKernelsInit, ModelKernelsModule};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::recipe::SolverRecipe;
@@ -77,13 +77,14 @@ impl GpuSolver {
             initial_constants,
         );
 
-        let kernels = ModelKernelsModule::new_incompressible(
+        let kernels = ModelKernelsModule::new_from_recipe(
             &common.context.device,
             &common.mesh,
             model.id,
+            &recipe,
             &fields_res,
             fields_res.step_handle(),
-            &linear_res.coupled_resources,
+            ModelKernelsInit::coupled(&linear_res.coupled_resources),
         );
 
         let solver = Self {

@@ -89,14 +89,16 @@ impl KernelPlan {
 }
 
 pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem) -> KernelPlan {
-    use crate::solver::model::backend::{FieldKind, TermOp};
+    use crate::solver::model::backend::{FieldKind, FieldRef, TermOp};
+    use std::collections::{HashMap, HashSet};
 
     let equations = system.equations();
 
+    // 1) Detect compressible-like systems: flux-divergence terms imply face-flux transport.
+    // This is a structural signal from the equation system (not model family).
     let has_div_flux = equations
         .iter()
         .any(|eq| eq.terms().iter().any(|t| t.op == TermOp::DivFlux));
-
     if has_div_flux {
         return KernelPlan::new(vec![
             KernelKind::CompressibleGradients,
@@ -108,35 +110,61 @@ pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem
         ]);
     }
 
-    // Heuristic for incompressible momentum+pressure:
-    // - exactly 2 equations
-    // - one vector target, one scalar target
-    // - vector equation contains a grad term (pressure gradient)
-    // - scalar equation contains a laplacian term (pressure Poisson)
-    if equations.len() == 2 {
-        let mut vector_eq = None;
-        let mut scalar_eq = None;
-        for eq in equations {
-            match eq.target().kind() {
-                FieldKind::Vector2 => vector_eq = Some(eq),
-                FieldKind::Scalar => scalar_eq = Some(eq),
+    // Build a lookup for equations by target field.
+    let mut eq_by_target: HashMap<FieldRef, usize> = HashMap::new();
+    for (idx, eq) in equations.iter().enumerate() {
+        eq_by_target.insert(*eq.target(), idx);
+    }
+
+    // 2) Detect incompressible momentum+pressure splitting structurally:
+    // - find a vector-target equation that takes a gradient of some scalar field p
+    // - find an equation that solves for that scalar p (target==p) and contains a Laplacian
+    // - require some transport operator (Div or Laplacian) on the vector equation
+    // This is more general than "two equations" and does not depend on specific field names.
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    for (vec_idx, eq) in equations.iter().enumerate() {
+        if eq.target().kind() != FieldKind::Vector2 {
+            continue;
+        }
+
+        let vec_has_transport = eq
+            .terms()
+            .iter()
+            .any(|t| matches!(t.op, TermOp::Div | TermOp::Laplacian));
+        if !vec_has_transport {
+            continue;
+        }
+
+        let mut grad_scalars: HashSet<FieldRef> = HashSet::new();
+        for term in eq.terms() {
+            if term.op != TermOp::Grad {
+                continue;
+            }
+            if term.field.kind() == FieldKind::Scalar {
+                grad_scalars.insert(term.field);
             }
         }
 
-        let vector_has_grad = vector_eq
-            .is_some_and(|eq| eq.terms().iter().any(|t| t.op == TermOp::Grad));
-        let scalar_has_laplacian = scalar_eq
-            .is_some_and(|eq| eq.terms().iter().any(|t| t.op == TermOp::Laplacian));
-
-        if vector_eq.is_some() && scalar_eq.is_some() && vector_has_grad && scalar_has_laplacian {
-            return KernelPlan::new(vec![
-                KernelKind::PrepareCoupled,
-                KernelKind::FluxRhieChow,
-                KernelKind::CoupledAssembly,
-                KernelKind::PressureAssembly,
-                KernelKind::UpdateFieldsFromCoupled,
-            ]);
+        for p in grad_scalars {
+            if let Some(&p_idx) = eq_by_target.get(&p) {
+                let p_eq = &equations[p_idx];
+                let p_has_laplacian = p_eq.terms().iter().any(|t| t.op == TermOp::Laplacian);
+                if p_has_laplacian {
+                    candidates.push((vec_idx, p_idx));
+                }
+            }
         }
+    }
+
+    // If there is an unambiguous pressure coupling, use the incompressible coupled pipeline.
+    if candidates.len() == 1 {
+        return KernelPlan::new(vec![
+            KernelKind::PrepareCoupled,
+            KernelKind::FluxRhieChow,
+            KernelKind::CoupledAssembly,
+            KernelKind::PressureAssembly,
+            KernelKind::UpdateFieldsFromCoupled,
+        ]);
     }
 
     // Default: generic coupled path.

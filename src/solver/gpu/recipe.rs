@@ -238,6 +238,11 @@ impl SolverRecipe {
 
         let mut gradient_fields: Vec<String> = match model.gpu.gradient_storage {
             GradientStorage::None => Vec::new(),
+            GradientStorage::PerFieldName => scheme_expansion
+                .gradient_fields()
+                .iter()
+                .map(|f| f.name().to_string())
+                .collect(),
             GradientStorage::PackedState => {
                 if scheme_expansion.needs_gradients() {
                     vec!["state".to_string()]

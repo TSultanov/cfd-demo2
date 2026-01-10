@@ -4,6 +4,7 @@ use super::backend::ast::{
 };
 use super::backend::state_layout::StateLayout;
 use super::kernel::{KernelKind, KernelPlan};
+use crate::solver::model::gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
@@ -26,6 +27,62 @@ pub enum ModelFields {
 }
 
 impl ModelSpec {
+    pub fn with_derived_gpu(mut self) -> Self {
+        self.gpu = self.derive_gpu_spec();
+        self
+    }
+
+    pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
+        let plan = self.kernel_plan();
+        let kernels = plan.kernels();
+
+        let has = |kind: KernelKind| kernels.contains(&kind);
+
+        let flux = if has(KernelKind::FluxRhieChow) {
+            Some(FluxSpec { stride: 1 })
+        } else if has(KernelKind::CompressibleFluxKt) {
+            Some(FluxSpec {
+                stride: self.system.unknowns_per_cell(),
+            })
+        } else {
+            None
+        };
+
+        let requires_low_mach_params = has(KernelKind::CompressibleFluxKt)
+            || has(KernelKind::CompressibleAssembly)
+            || has(KernelKind::CompressibleApply)
+            || has(KernelKind::CompressibleUpdate)
+            || has(KernelKind::CompressibleExplicitUpdate)
+            || has(KernelKind::CompressibleGradients);
+
+        let gradient_storage = if has(KernelKind::GenericCoupledAssembly) {
+            GradientStorage::PackedState
+        } else if has(KernelKind::CompressibleFluxKt) {
+            GradientStorage::PerFieldComponents
+        } else {
+            GradientStorage::PerFieldName
+        };
+
+        let required_gradient_fields = if gradient_storage == GradientStorage::PerFieldComponents
+            && (has(KernelKind::CompressibleFluxKt) || has(KernelKind::CompressibleGradients))
+        {
+            self.system
+                .equations()
+                .iter()
+                .flat_map(|eqn| expand_field_components(*eqn.target()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        ModelGpuSpec {
+            flux,
+            requires_low_mach_params,
+            gradient_storage,
+            required_gradient_fields,
+        }
+    }
+
     pub fn kernel_plan(&self) -> KernelPlan {
         match self.fields {
             ModelFields::Incompressible(_) => KernelPlan::new(vec![
@@ -352,21 +409,15 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_component,
     ]);
 
-    let gpu = crate::solver::model::gpu_spec::ModelGpuSpec {
-        flux: Some(crate::solver::model::gpu_spec::FluxSpec { stride: 1 }),
-        requires_low_mach_params: false,
-        gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PerFieldComponents,
-        required_gradient_fields: Vec::new(),
-    };
-
     ModelSpec {
         id: "incompressible_momentum",
         system,
         state_layout: layout,
         fields: ModelFields::Incompressible(fields),
         boundaries: BoundarySpec::default(),
-        gpu,
+        gpu: ModelGpuSpec::default(),
     }
+    .with_derived_gpu()
 }
 
 pub fn compressible_model() -> ModelSpec {
@@ -380,29 +431,15 @@ pub fn compressible_model() -> ModelSpec {
         fields.u,
     ]);
 
-    let required_gradient_fields = system
-        .equations()
-        .iter()
-        .flat_map(|eqn| crate::solver::model::gpu_spec::expand_field_components(*eqn.target()))
-        .collect();
-
-    let gpu = crate::solver::model::gpu_spec::ModelGpuSpec {
-        flux: Some(crate::solver::model::gpu_spec::FluxSpec {
-            stride: system.unknowns_per_cell(),
-        }),
-        requires_low_mach_params: true,
-        gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PerFieldComponents,
-        required_gradient_fields,
-    };
-
     ModelSpec {
         id: "compressible",
         system,
         state_layout: layout,
         fields: ModelFields::Compressible(fields),
         boundaries: BoundarySpec::default(),
-        gpu,
+        gpu: ModelGpuSpec::default(),
     }
+    .with_derived_gpu()
 }
 
 pub fn generic_diffusion_demo_model() -> ModelSpec {
@@ -440,13 +477,9 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         state_layout: layout,
         fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
         boundaries,
-        gpu: crate::solver::model::gpu_spec::ModelGpuSpec {
-            flux: None,
-            requires_low_mach_params: false,
-            gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
-            required_gradient_fields: Vec::new(),
-        },
+        gpu: ModelGpuSpec::default(),
     }
+    .with_derived_gpu()
 }
 
 pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
@@ -484,13 +517,9 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         state_layout: layout,
         fields: ModelFields::GenericCoupled(GenericCoupledFields::new(vec![phi])),
         boundaries,
-        gpu: crate::solver::model::gpu_spec::ModelGpuSpec {
-            flux: None,
-            requires_low_mach_params: false,
-            gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
-            required_gradient_fields: Vec::new(),
-        },
+        gpu: ModelGpuSpec::default(),
     }
+    .with_derived_gpu()
 }
 
 #[cfg(test)]

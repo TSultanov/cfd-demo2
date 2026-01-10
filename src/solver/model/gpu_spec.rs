@@ -4,6 +4,10 @@ use crate::solver::model::backend::FieldRef;
 pub enum GradientStorage {
     /// No gradient buffers are allocated/bound.
     None,
+    /// Gradients are stored per field name (e.g. `grad_U`, `grad_p`).
+    ///
+    /// This is the legacy convention used by incompressible/coupled kernels.
+    PerFieldName,
     /// Gradients are stored per field component (e.g. `grad_rho_u_x`).
     PerFieldComponents,
     /// Gradients are stored for the packed state vector (e.g. `grad_state`).

@@ -267,6 +267,179 @@ impl SolverRecipe {
     pub fn kernels_for_phase(&self, phase: KernelPhase) -> impl Iterator<Item = &KernelSpec> {
         self.kernels.iter().filter(move |k| k.phase == phase)
     }
+
+    /// Build a ProgramSpec from this recipe.
+    ///
+    /// This generates the execution sequence (prepare → assembly → solve → update → finalize)
+    /// based on the stepping mode and kernel requirements.
+    pub fn build_program_spec(&self) -> crate::solver::gpu::plans::program::ProgramSpec {
+        use crate::solver::gpu::execution_plan::GraphExecMode;
+        use crate::solver::gpu::plans::program::{
+            GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
+        };
+
+        let mut program = ProgramSpecBuilder::new();
+        let root = program.root();
+
+        match &self.stepping {
+            SteppingMode::Explicit => {
+                // Explicit: prepare → gradients (if needed) → explicit update → finalize
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "explicit:prepare",
+                        kind: HostOpKind("explicit:prepare"),
+                    },
+                );
+
+                if self.needs_gradients() {
+                    program.push(
+                        root,
+                        ProgramSpecNode::Graph {
+                            label: "explicit:gradients",
+                            kind: GraphOpKind("explicit:gradients"),
+                            mode: GraphExecMode::SingleSubmit,
+                        },
+                    );
+                }
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Graph {
+                        label: "explicit:update",
+                        kind: GraphOpKind("explicit:update"),
+                        mode: GraphExecMode::SingleSubmit,
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "explicit:finalize",
+                        kind: HostOpKind("explicit:finalize"),
+                    },
+                );
+            }
+
+            SteppingMode::Implicit { outer_iters } => {
+                // Implicit: prepare → newton loop (gradients → assembly → solve → apply) → finalize
+                let newton_block = program.new_block();
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "implicit:prepare",
+                        kind: HostOpKind("implicit:prepare"),
+                    },
+                );
+
+                // Newton iteration body
+                if self.needs_gradients() {
+                    program.push(
+                        newton_block,
+                        ProgramSpecNode::Graph {
+                            label: "implicit:gradients",
+                            kind: GraphOpKind("implicit:gradients"),
+                            mode: GraphExecMode::SingleSubmit,
+                        },
+                    );
+                }
+
+                program.push(
+                    newton_block,
+                    ProgramSpecNode::Graph {
+                        label: "implicit:assembly",
+                        kind: GraphOpKind("implicit:assembly"),
+                        mode: GraphExecMode::SplitTimed,
+                    },
+                );
+
+                program.push(
+                    newton_block,
+                    ProgramSpecNode::Host {
+                        label: "implicit:solve",
+                        kind: HostOpKind("implicit:solve"),
+                    },
+                );
+
+                program.push(
+                    newton_block,
+                    ProgramSpecNode::Graph {
+                        label: "implicit:apply",
+                        kind: GraphOpKind("implicit:apply"),
+                        mode: GraphExecMode::SingleSubmit,
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Repeat {
+                        label: "implicit:newton_loop",
+                        times: crate::solver::gpu::plans::program::CountOpKind(
+                            "implicit:outer_iters",
+                        ),
+                        body: newton_block,
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "implicit:finalize",
+                        kind: HostOpKind("implicit:finalize"),
+                    },
+                );
+            }
+
+            SteppingMode::Coupled { outer_correctors: _ } => {
+                // Coupled: prepare → assembly → solve → update → finalize
+                // (simple linear system, no Newton iteration needed)
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "coupled:prepare",
+                        kind: HostOpKind("coupled:prepare"),
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Graph {
+                        label: "coupled:assembly",
+                        kind: GraphOpKind("coupled:assembly"),
+                        mode: GraphExecMode::SplitTimed,
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "coupled:solve",
+                        kind: HostOpKind("coupled:solve"),
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Graph {
+                        label: "coupled:update",
+                        kind: GraphOpKind("coupled:update"),
+                        mode: GraphExecMode::SingleSubmit,
+                    },
+                );
+
+                program.push(
+                    root,
+                    ProgramSpecNode::Host {
+                        label: "coupled:finalize",
+                        kind: HostOpKind("coupled:finalize"),
+                    },
+                );
+            }
+        }
+
+        program.build()
+    }
 }
 
 /// Map kernel kind to execution phase.
@@ -408,5 +581,22 @@ mod tests {
     fn test_time_integration_spec_history_levels() {
         assert_eq!(TimeIntegrationSpec::for_scheme(TimeScheme::Euler).history_levels, 1);
         assert_eq!(TimeIntegrationSpec::for_scheme(TimeScheme::BDF2).history_levels, 2);
+    }
+
+    #[test]
+    fn test_build_program_spec_for_coupled() {
+        let model = generic_diffusion_demo_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+        )
+        .expect("should create recipe");
+
+        let spec = recipe.build_program_spec();
+        // Verify spec has expected structure for coupled solver
+        let root_block = spec.block(spec.root);
+        assert!(!root_block.nodes.is_empty(), "program spec should have nodes");
     }
 }

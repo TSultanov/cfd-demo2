@@ -1933,7 +1933,7 @@ mod tests {
     fn compressible_assembly_codegen_emits_bindings() {
         let model = compressible_model();
         let fields = CompressibleFields::new();
-        let wgsl = generate_compressible_assembly_wgsl(&model.state_layout, &fields);
+        let wgsl = generate_ei_assembly_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("matrix_values"));
         assert!(wgsl.contains("rhs"));
         assert!(wgsl.contains("scalar_row_offsets"));

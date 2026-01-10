@@ -473,7 +473,7 @@ mod tests {
     fn compressible_gradients_codegen_emits_grad_buffers() {
         let model = compressible_model();
         let fields = CompressibleFields::new();
-        let wgsl = generate_compressible_gradients_wgsl(&model.state_layout, &fields);
+        let wgsl = generate_ei_gradients_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("grad_rho"));
         assert!(wgsl.contains("grad_rho_u_x"));
         assert!(wgsl.contains("grad_rho_u_y"));

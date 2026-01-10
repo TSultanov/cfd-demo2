@@ -1276,7 +1276,7 @@ mod tests {
     fn compressible_flux_kt_codegen_emits_state_arrays() {
         let model = compressible_model();
         let fields = CompressibleFields::new();
-        let wgsl = generate_compressible_flux_kt_wgsl(&model.state_layout, &fields);
+        let wgsl = generate_ei_flux_kt_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("face_owner"));
         assert!(wgsl.contains("fluxes"));

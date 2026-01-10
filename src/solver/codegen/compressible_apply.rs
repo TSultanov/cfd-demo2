@@ -272,7 +272,7 @@ mod tests {
     fn compressible_apply_codegen_emits_solution_binding() {
         let model = compressible_model();
         let fields = CompressibleFields::new();
-        let wgsl = generate_compressible_apply_wgsl(&model.state_layout, &fields);
+            let wgsl = generate_ei_apply_wgsl(&model.state_layout, &fields);
         assert!(wgsl.contains("solution"));
         assert!(wgsl.contains("rho_new"));
         assert!(wgsl.contains("state_old"));

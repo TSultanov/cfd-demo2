@@ -194,19 +194,84 @@ impl SolverRecipe {
 
         let needs_gradients = !gradient_fields.is_empty();
 
-        // Derive kernel plan from model
-        let base_kernels = model.kernel_plan();
-        let mut kernels: Vec<KernelSpec> = base_kernels
-            .kernels()
-            .iter()
-            .map(|&kind| KernelSpec {
-                kind,
-                phase: phase_for_kernel(kind),
-            })
-            .collect();
+        // Assign phases as we emit KernelSpecs.
+        // This keeps ordering explicit in the recipe and avoids relying on a global
+        // `KernelKind -> phase` mapping for correctness.
+        let kernels: Vec<KernelSpec> = match &model.fields {
+            crate::solver::model::ModelFields::Incompressible(_) => vec![
+                KernelSpec {
+                    kind: KernelKind::PrepareCoupled,
+                    phase: KernelPhase::Preparation,
+                },
+                KernelSpec {
+                    kind: KernelKind::FluxRhieChow,
+                    phase: KernelPhase::Preparation,
+                },
+                KernelSpec {
+                    kind: KernelKind::CoupledAssembly,
+                    phase: KernelPhase::Assembly,
+                },
+                KernelSpec {
+                    kind: KernelKind::PressureAssembly,
+                    phase: KernelPhase::Assembly,
+                },
+                KernelSpec {
+                    kind: KernelKind::UpdateFieldsFromCoupled,
+                    phase: KernelPhase::Update,
+                },
+            ],
 
-        // Sort kernels by phase for proper execution order
-        kernels.sort_by_key(|k| phase_order(k.phase));
+            crate::solver::model::ModelFields::Compressible(_) => {
+                let mut out = Vec::new();
+
+                if needs_gradients {
+                    out.push(KernelSpec {
+                        kind: KernelKind::CompressibleGradients,
+                        phase: KernelPhase::Gradients,
+                    });
+                }
+
+                out.extend([
+                    KernelSpec {
+                        kind: KernelKind::CompressibleFluxKt,
+                        phase: KernelPhase::FluxComputation,
+                    },
+                    KernelSpec {
+                        kind: KernelKind::CompressibleExplicitUpdate,
+                        phase: KernelPhase::ExplicitUpdate,
+                    },
+                    KernelSpec {
+                        kind: KernelKind::CompressibleAssembly,
+                        phase: KernelPhase::Assembly,
+                    },
+                    KernelSpec {
+                        kind: KernelKind::CompressibleApply,
+                        phase: KernelPhase::Apply,
+                    },
+                    KernelSpec {
+                        kind: KernelKind::CompressibleUpdate,
+                        phase: KernelPhase::PrimitiveRecovery,
+                    },
+                ]);
+
+                out
+            }
+
+            crate::solver::model::ModelFields::GenericCoupled(_) => vec![
+                KernelSpec {
+                    kind: KernelKind::GenericCoupledAssembly,
+                    phase: KernelPhase::Assembly,
+                },
+                KernelSpec {
+                    kind: KernelKind::GenericCoupledApply,
+                    phase: KernelPhase::Apply,
+                },
+                KernelSpec {
+                    kind: KernelKind::GenericCoupledUpdate,
+                    phase: KernelPhase::Update,
+                },
+            ],
+        };
 
         // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();
@@ -233,7 +298,8 @@ impl SolverRecipe {
         }
 
         // Determine stepping mode from model structure
-        let stepping = derive_stepping_mode(model, &base_kernels.kernels());
+        let kernel_kinds: Vec<KernelKind> = kernels.iter().map(|k| k.kind).collect();
+        let stepping = derive_stepping_mode(model, &kernel_kinds);
 
         // Linear solver spec
         let linear_solver = LinearSolverSpec {
@@ -449,6 +515,9 @@ impl SolverRecipe {
 }
 
 /// Map kernel kind to execution phase.
+// Legacy mapping used by older/handwritten recipe constructors.
+// New recipes should assign phases explicitly when constructing KernelSpecs.
+#[allow(dead_code)]
 fn phase_for_kernel(kind: KernelKind) -> KernelPhase {
     match kind {
         KernelKind::PrepareCoupled => KernelPhase::Preparation,
@@ -475,21 +544,6 @@ fn phase_for_kernel(kind: KernelKind) -> KernelPhase {
         KernelKind::CompressibleUpdate => KernelPhase::PrimitiveRecovery,
 
         KernelKind::IncompressibleMomentum => KernelPhase::Assembly,
-    }
-}
-
-/// Order for sorting kernels by phase.
-fn phase_order(phase: KernelPhase) -> u8 {
-    match phase {
-        KernelPhase::Preparation => 0,
-        KernelPhase::Gradients => 1,
-        KernelPhase::FluxComputation => 2,
-        KernelPhase::ExplicitUpdate => 3,
-        KernelPhase::Assembly => 4,
-        KernelPhase::LinearSolve => 5,
-        KernelPhase::Apply => 6,
-        KernelPhase::Update => 7,
-        KernelPhase::PrimitiveRecovery => 8,
     }
 }
 

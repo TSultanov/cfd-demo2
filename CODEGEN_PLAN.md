@@ -103,10 +103,10 @@ This roadmap focuses on removing those glue points in small, testable steps.
 
 **Goal:** No handwritten `KernelKind -> phase` mapping is required for correct execution. The recipe explicitly describes kernel order for each solver mode.
 
-- [ ] **A1. Move phase assignment into recipe construction**
+- [x] **A1. Move phase assignment into recipe construction**
   - Today `phase_for_kernel()` in `src/solver/gpu/recipe.rs` is a central match on `KernelKind`. This should become an implementation detail of *legacy recipes only*.
   - New path: `SolverRecipe::from_model(...)` assigns phases when emitting `KernelSpec`s.
-- [ ] **A2. Validate required phases are non-empty**
+- [x] **A2. Validate required phases are non-empty**
   - `build_graph_for_phase()` should error on “required but empty” phases to avoid silent no-ops (the BDF2 acoustic regression was caused by an empty apply graph being accepted).
 
 ### Milestone B: Decouple orchestration from `KernelKind`

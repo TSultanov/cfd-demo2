@@ -58,6 +58,7 @@ impl ModelKernelsModule {
     pub fn new_compressible<F: FieldProvider>(
         device: &wgpu::Device,
         mesh: &MeshResources,
+        model_id: &str,
         fields: &F,
         state_step_index: Arc<AtomicUsize>,
         port_space: &PortSpace,
@@ -79,7 +80,7 @@ impl ModelKernelsModule {
             KernelId::COMPRESSIBLE_FLUX_KT,
             KernelId::COMPRESSIBLE_UPDATE,
         ] {
-            let source = kernel_registry::kernel_source_by_id("compressible", id)
+            let source = kernel_registry::kernel_source_by_id(model_id, id)
                 .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
             pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
         }
@@ -223,6 +224,7 @@ impl ModelKernelsModule {
     pub fn new_incompressible(
         device: &wgpu::Device,
         mesh: &MeshResources,
+        model_id: &str,
         fields: &impl FieldProvider,
         state_step_index: Arc<AtomicUsize>,
         coupled: &CoupledSolverResources,
@@ -233,7 +235,7 @@ impl ModelKernelsModule {
             KernelId::COUPLED_ASSEMBLY,
             KernelId::UPDATE_FIELDS_FROM_COUPLED,
         ] {
-            let source = kernel_registry::kernel_source_by_id("incompressible_momentum", id)
+            let source = kernel_registry::kernel_source_by_id(model_id, id)
                 .unwrap_or_else(|err| panic!("missing kernel source for {id:?}: {err}"));
             pipelines.insert(KernelPipeline::Kernel(id), (source.create_pipeline)(device));
         }

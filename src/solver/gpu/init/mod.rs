@@ -80,6 +80,7 @@ impl GpuSolver {
         let kernels = ModelKernelsModule::new_incompressible(
             &common.context.device,
             &common.mesh,
+            model.id,
             &fields_res,
             fields_res.step_handle(),
             &linear_res.coupled_resources,

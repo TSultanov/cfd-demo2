@@ -268,6 +268,7 @@ impl ExplicitImplicitPlanResources {
         let kernels = ModelKernelsModule::new_compressible(
             &common.context.device,
             &common.mesh,
+            model.id,
             &fields_res,
             fields_res.step_handle(),
             &lowered.ports,

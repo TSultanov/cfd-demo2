@@ -16,75 +16,73 @@ One model-driven GPU solver pipeline with:
 - **No handwritten bind groups:** host binding is assembled from generated binding metadata + a uniform resource registry.
 - **Extensibility contract:** adding a new PDE term or method should require edits only in codegen/model metadata + the term/method expander, not in runtime orchestration.
 
-## Current State (Implemented)
-- Single lowering entrypoint exists and is recipe-aware (`src/solver/gpu/lowering/model_driven.rs`).
-- `SolverRecipe` exists and already drives:
-  - many resource requirements (gradients/history/flux/low-mach params)
-  - `KernelId`-based kernel specs
-  - ProgramSpec derivation in some paths
-- Recipe-driven graph building exists (phase graphs + composite phase sequences).
-- Unified field allocation exists (`UnifiedFieldResources`) and bind-group building is partially unified via `FieldProvider` helpers.
-- `KernelId(&'static str)` exists and `kernel_registry::kernel_source_by_id` exists.
-- Kernel requirements are structurally derived (`derive_kernel_plan(system)`), and `ModelSpec::kernel_plan()` routes through it.
-- Generic linear solver infrastructure exists (`GenericLinearSolverModule<P>`) and FGMRES driver logic is extracted.
+## Status Snapshot (as of 2026-01)
 
-## Remaining Work (Single Prioritized List)
+### Landed / Working
+- Model-driven lowering is recipe-first (`src/solver/gpu/lowering/model_driven.rs`).
+- Template-driven orchestration is effectively gone: program structure is emitted by `SolverRecipe::build_program_spec()` and op registration is unified (`src/solver/gpu/lowering/unified_registry.rs`).
+- `KernelId` exists and runtime can look up generated kernel source via `kernel_registry::kernel_source_by_id` (with build-time generated tables).
+- Generated model WGSL exists under `src/solver/gpu/shaders/generated`, and generated binding metadata is available via `src/solver/gpu/wgsl_meta.rs`.
 
-1. **Make `SolverRecipe` authoritative for kernel ordering and phase assignment (no central matches).**
-   - Today: recipe still has `phase_for_id(...)` and `dispatch_for_id(...)` matches, and kernel planning still originates as `KernelKind`.
-   - Change: recipe construction assigns phase/dispatch as it emits `KernelSpec` from scheme expansion + method selection.
-   - Done when: no new kernel requires editing a central `match` in runtime to place it in a phase/dispatch.
+### Still Violating the Goal (remaining family-ness)
+- Kernel planning still performs structural “family selection” (e.g. `derive_kernel_ids` picks compressible vs coupled vs generic by heuristics in `src/solver/model/kernel.rs`).
+- Recipe still contains central mapping matches for phase/dispatch, and stepping mode selection is still inferred from kernel IDs (`src/solver/gpu/recipe.rs`).
+- Runtime kernel module construction still has explicit per-family constructors and hard-coded model ids (`ModelKernelsModule::new_compressible/new_incompressible`, and lookups like `kernel_source_by_id("compressible", ...)`).
+- Lowering still has an explicit special-case path for generic-coupled plan resources.
+- Bind group assembly is only partially unified: several kernels still rely on plan/module-specific wiring (e.g. solver buffers and per-kernel binding arrays).
 
-2. **Remove template-driven orchestration (`lowering/templates.rs`, `ProgramTemplateKind`) from the runtime path.**
-   - Today: model lowering still selects per-family “template op sets” (compressible/incompressible) and registers the full template ops.
-   - Change: ProgramSpec and op registration become recipe-driven for all models (including current compressible/incompressible).
-   - Done when: adding a new model does not require a new template kind or edits to template registries.
+## Remaining Work (Prioritized)
 
-3. **Eliminate `KernelKind` from orchestration (keep only as optional debug/UI bridge).**
-   - Today: `derive_kernel_plan` synthesizes `KernelKind`, and some runtime code still bridges through it.
-   - Change: kernel planning and recipes are in terms of `KernelId` end-to-end.
-   - Done when: graph building/execution never matches on or iterates `KernelKind`.
+1. **Stop inferring “families” from structure; emit kernels/stepping from (terms + selected numerics).**
+   - Today: `derive_kernel_ids` and `derive_stepping_mode` encode compressible/coupled/generic heuristics.
+   - Change: scheme/term expansion emits a recipe (or kernel list + stepping) directly; method selection decides Rhie–Chow vs KT vs generic, etc.
+   - Done when: adding a new method/term updates only expansion metadata + codegen; no structural “family selection” exists.
 
-4. **Make the kernel registry 100% codegen-derived and scheme-expanded (no handwritten kernel tables).**
-   - Today: there is still a build-time generated map, but it is not guaranteed to be the sole authoritative output of “model + numerics expansion”.
-   - Change: codegen emits, per model, the complete `KernelId -> (pipeline ctor, bindings, wgsl)` table for exactly the expanded kernels.
-   - Done when: introducing a new kernel requires only codegen output changes (and its generator), not runtime registry edits.
+2. **Make `SolverRecipe` authoritative for ordering/phase/dispatch without central ID matches.**
+   - Today: `SolverRecipe::from_model` assigns `KernelPhase` and `DispatchKind` with a central `match` on `KernelId`.
+   - Change: recipe construction assigns phase/dispatch as kernels are emitted (by the method/term expanders), not by a global mapping.
+   - Done when: a new kernel never requires editing a central mapping in `recipe.rs`.
 
-5. **Finish reflection-driven bind groups via a uniform resource registry (retire plan-specific binding logic).**
-   - Today: `FieldProvider` + helpers reduce boilerplate, but some bindings are still wired in plan/module code.
-   - Change: bind group layouts + entries are derived entirely from generated binding metadata, with a resolver that maps binding names to buffers/uniforms.
-   - Done when: adding a binding to a kernel never requires handwritten host-side bind-group assembly.
+3. **Unify runtime kernel module construction (remove per-family constructors + hard-coded model ids).**
+   - Today: `ModelKernelsModule::new_compressible/new_incompressible` hard-code kernel sets, binding arrays, and `kernel_source_by_id("compressible"|"incompressible_momentum", ...)`.
+   - Change: build pipelines + bind groups by iterating `recipe.kernels`, using generated binding metadata and a uniform resource resolver.
+   - Done when: runtime never contains lists like “compressible kernel ids” or strings like "compressible"/"incompressible_momentum".
 
-6. **Derive GPU resource requirements fully from recipe specs (minimize/retire handwritten GPU policies in models).**
-   - Today: some “always required” buffers/policies remain expressed as handwritten `ModelGpuSpec`/heuristics.
-   - Change: recipe/spec generation (from model terms + method selection) declares all required buffers and storage policies.
-   - Done when: model constructors no longer encode method-dependent resource policy, except for explicitly documented overrides.
+4. **Make kernel registry fully per-model and remove special-case lookups.**
+   - Today: `kernel_registry` is partly global-by-`KernelId`, with a special-case `generic_coupled_pair(model_id)` path.
+   - Change: codegen emits a single table keyed by `(model_id, KernelId)` for *all* kernels (including per-model generic coupled), so runtime lookup is uniform.
+   - Done when: there is one lookup API (no generic-coupled special case) and no handwritten kernel tables.
 
-7. **Replace `PlanParam` with typed config deltas (module-owned).**
-   - Today: `PlanParam` is still used to push ad-hoc config into plans.
-   - Change: generated (or strongly typed) `SolverConfigDelta` + module-specific deltas, routed to the owning module.
-   - Done when: configuration updates do not add new global enum cases or stringly plumbing.
+5. **Finish reflection-driven bind groups via a uniform resource registry.**
+   - Today: reflection helpers exist, but some bindings are still wired via per-kernel metadata constants and custom host matches.
+   - Change: bind group layouts + entries are derived from generated binding metadata; a `ResourceRegistry` resolves binding names to buffers/uniforms.
+   - Done when: adding a binding to a kernel never requires host-side bind-group edits.
 
-8. **Complete linear solver & preconditioner pluggability (family-agnostic).**
-   - Migrate compressible/incompressible linear solvers onto `GenericLinearSolverModule<P>`.
-   - Add/finish `PreconditionerFactory` for Jacobi, AMG, Schur.
-   - Done when: selecting a preconditioner is config-only and independent of model family.
+6. **Reduce codegen duplication: migrate per-family WGSL generators to term/method-driven emitters.**
+   - Today: codegen still has dedicated `compressible_*` generators and `emit.rs` matches on `KernelKind`.
+   - Change: emit WGSL by iterating recipe/kernel specs (prefer `KernelId`), and build kernel WGSL from the same IR expansion regardless of “family”.
+   - Done when: codegen doesn’t need separate “compressible vs incompressible” entrypoints to emit kernels.
 
-9. **Eliminate remaining handwritten WGSL (all kernels come from codegen output).**
-   - Migrate remaining solver-family shaders (e.g. `compressible_*`, `schur_precond`) into the codegen pipeline.
-   - Done when: runtime consumes generated WGSL only; no handwritten WGSL is required for correctness.
+7. **Eliminate remaining handwritten WGSL required for correctness (including solver infrastructure).**
+   - Today: several solver/preconditioner/GMRES shaders exist as handwritten WGSL under `src/solver/gpu/shaders`.
+   - Change: treat these as generated artifacts (same registry + binding metadata) or move them into the same codegen pipeline.
+   - Done when: runtime consumes generated WGSL only.
 
-10. **Delete legacy glue paths and enforce the contract with tests.**
-   - Remove unused init modules/exports and dead code paths.
+8. **Retire `PlanParam` as global plumbing; move to typed module-owned config deltas.**
+   - Today: `PlanParam` is still used to push ad-hoc config through plans.
+   - Change: route configuration updates to the owning module using strongly typed deltas.
+   - Done when: new configuration does not add global enum cases or stringly plumbing.
+
+9. **Delete legacy glue and enforce the contract with tests.**
    - Add regression tests that fail if:
-     - a required phase is empty but executed
-     - new kernels require edits to central phase/dispatch matches
-     - template kinds are needed for new models
+     - kernel planning uses structural “family selection” heuristics
+     - runtime contains solver-family switches / hard-coded model ids
+     - kernel phase/dispatch requires editing a central match
 
 ## Near-term recommended sequence (practical)
-1) (1)+(3): move phase/dispatch + planning to recipe in terms of `KernelId`.
-2) (2): rip out template-driven op sets and make all programs recipe-driven.
-3) (4)+(5): make codegen tables + bindings authoritative and bind-group assembly uniform.
+1) (1)+(2): remove family inference and central phase/dispatch matches.
+2) (3)+(4)+(5): unify runtime kernel creation + registry + bind groups (erase hard-coded "compressible"/"incompressible" paths).
+3) (6)+(7): collapse codegen duplication and remove remaining handwritten WGSL.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

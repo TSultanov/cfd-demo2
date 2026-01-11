@@ -5,11 +5,11 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::StateLayout;
-use crate::solver::model::IncompressibleMomentumFields;
+use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
 
 pub fn generate_update_fields_from_coupled_wgsl(
     layout: &StateLayout,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -143,7 +143,7 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
     ))
 }
 
-fn main_fn(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Function {
+fn main_fn(layout: &StateLayout, fields: &CodegenIncompressibleMomentumFields) -> Function {
     let params = vec![
         Param::new(
             "global_id",
@@ -170,7 +170,7 @@ fn main_fn(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Funct
     )
 }
 
-fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Block {
+fn main_body(layout: &StateLayout, fields: &CodegenIncompressibleMomentumFields) -> Block {
     let mut stmts = Vec::new();
     let stride = layout.stride();
     let u_field = fields.u.name();
@@ -364,17 +364,22 @@ fn main_body(layout: &StateLayout, fields: &IncompressibleMomentumFields) -> Blo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::incompressible_momentum_model;
-    use crate::solver::model::IncompressibleMomentumFields;
+    use crate::solver::ir::{vol_scalar, vol_vector};
+    use crate::solver::units::si;
 
     #[test]
     fn update_fields_codegen_emits_state_arrays() {
-        let model = incompressible_momentum_model();
-        let fields = IncompressibleMomentumFields::new();
-        let wgsl = generate_update_fields_from_coupled_wgsl(&model.state_layout, &fields);
+        let layout = StateLayout::new(vec![
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+            vol_scalar("d_p", si::D_P),
+            vol_vector("grad_p", si::PRESSURE_GRADIENT),
+        ]);
+        let fields = CodegenIncompressibleMomentumFields::new();
+        let wgsl = generate_update_fields_from_coupled_wgsl(&layout, &fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("atomicMax"));
-        let stride = model.state_layout.stride();
+        let stride = layout.stride();
         assert!(wgsl.contains(&format!("arrayLength(&state) / {stride}u")));
     }
 }

@@ -10,15 +10,15 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::ir::StateLayout;
-use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::scheme::Scheme;
 
 pub fn generate_coupled_assembly_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -274,7 +274,7 @@ fn safe_inverse_fn() -> Function {
 fn main_fn(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -294,7 +294,7 @@ fn main_fn(
 fn main_body(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> Block {
     let mut stmts = Vec::new();
     let u_field = fields.u.name();
@@ -1074,7 +1074,6 @@ mod tests {
     use crate::solver::ir::{
         fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, SchemeRegistry,
     };
-    use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
 
@@ -1088,8 +1087,8 @@ mod tests {
         ])
     }
 
-    fn default_fields() -> IncompressibleMomentumFields {
-        IncompressibleMomentumFields::new()
+    fn default_fields() -> CodegenIncompressibleMomentumFields {
+        CodegenIncompressibleMomentumFields::new()
     }
 
     #[test]

@@ -7,14 +7,14 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::ir::StateLayout;
-use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_pressure_assembly_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -197,7 +197,7 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
 fn main_fn(
     layout: &StateLayout,
     plan: &PressurePlan,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -251,7 +251,7 @@ fn pressure_plan(system: &DiscreteSystem, pressure_field: &str) -> PressurePlan 
 fn main_body(
     layout: &StateLayout,
     plan: &PressurePlan,
-    fields: &IncompressibleMomentumFields,
+    fields: &CodegenIncompressibleMomentumFields,
 ) -> Block {
     let mut stmts = Vec::new();
 
@@ -664,18 +664,29 @@ fn main_body(
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::ir::SchemeRegistry;
-    use crate::solver::model::incompressible_momentum_model;
-    use crate::solver::model::IncompressibleMomentumFields;
+    use crate::solver::ir::{fvm, vol_scalar, vol_vector, Coefficient, SchemeRegistry};
     use crate::solver::scheme::Scheme;
+    use crate::solver::units::si;
 
     #[test]
     fn pressure_assembly_codegen_emits_state_arrays() {
-        let model = incompressible_momentum_model();
         let registry = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&model.system, &registry).unwrap();
-        let fields = IncompressibleMomentumFields::new();
-        let wgsl = generate_pressure_assembly_wgsl(&discrete, &model.state_layout, &fields);
+        let p = vol_scalar("p", si::PRESSURE);
+        let d_p = vol_scalar("d_p", si::D_P);
+        let eqn_p = crate::solver::ir::Equation::new(p)
+            .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), vol_scalar("p", si::PRESSURE)));
+        let mut system = crate::solver::ir::EquationSystem::new();
+        system.add_equation(eqn_p);
+
+        let layout = StateLayout::new(vec![
+            vol_scalar("p", si::PRESSURE),
+            vol_scalar("d_p", si::D_P),
+            vol_vector("grad_p", si::PRESSURE_GRADIENT),
+        ]);
+
+        let discrete = lower_system(&system, &registry).unwrap();
+        let fields = CodegenIncompressibleMomentumFields::new();
+        let wgsl = generate_pressure_assembly_wgsl(&discrete, &layout, &fields);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("matrix_values"));
         assert!(wgsl.contains("rhs"));

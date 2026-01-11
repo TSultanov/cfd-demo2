@@ -257,6 +257,12 @@ mod solver {
                 "/src/solver/codegen/coupled_assembly.rs"
             ));
         }
+        pub mod incompressible_fields {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/incompressible_fields.rs"
+            ));
+        }
         pub mod generic_coupled_kernels {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

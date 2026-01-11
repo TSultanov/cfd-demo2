@@ -13,11 +13,10 @@ use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
 use crate::solver::codegen::unified_assembly;
+use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
 use crate::solver::ir::{expand_schemes, SchemeRegistry};
 use crate::solver::model::incompressible_momentum_model;
-use crate::solver::model::{
-    IncompressibleMomentumFields, KernelKind, ModelSpec,
-};
+use crate::solver::model::{KernelKind, ModelSpec};
 use crate::solver::scheme::Scheme;
 
 pub fn write_wgsl_file(
@@ -95,23 +94,23 @@ fn generate_kernel_wgsl(
 
     let wgsl = match kind {
         KernelKind::PrepareCoupled => {
-            let fields = IncompressibleMomentumFields::new();
+            let fields = CodegenIncompressibleMomentumFields::new();
             generate_prepare_coupled_wgsl(&discrete, &model.state_layout, &fields)
         }
         KernelKind::CoupledAssembly => {
-            let fields = IncompressibleMomentumFields::new();
+            let fields = CodegenIncompressibleMomentumFields::new();
             generate_coupled_assembly_wgsl(&discrete, &model.state_layout, &fields)
         }
         KernelKind::PressureAssembly => {
-            let fields = IncompressibleMomentumFields::new();
+            let fields = CodegenIncompressibleMomentumFields::new();
             generate_pressure_assembly_wgsl(&discrete, &model.state_layout, &fields)
         }
         KernelKind::UpdateFieldsFromCoupled => {
-            let fields = IncompressibleMomentumFields::new();
+            let fields = CodegenIncompressibleMomentumFields::new();
             generate_update_fields_from_coupled_wgsl(&model.state_layout, &fields)
         }
         KernelKind::FluxRhieChow => {
-            let fields = IncompressibleMomentumFields::new();
+            let fields = CodegenIncompressibleMomentumFields::new();
             generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &fields)
         }
         KernelKind::SystemMain => generate_wgsl(&discrete),

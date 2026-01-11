@@ -7,21 +7,22 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::lowering::models::generic_coupled::{
     linear_debug_provider, param_advection_scheme, param_detailed_profiling, param_dt,
-    param_preconditioner, param_time_scheme, register_ops_from_recipe, spec_dt, spec_num_cells,
-    spec_state_buffer, spec_time, spec_write_state_bytes, GenericCoupledProgramResources,
+    param_outer_iters, param_preconditioner, param_time_scheme, register_ops_from_recipe, spec_dt,
+    spec_num_cells, spec_state_buffer, spec_time, spec_write_state_bytes,
+    GenericCoupledProgramResources,
 };
 use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{ProgramOpRegistry, ProgramResources};
 use crate::solver::gpu::recipe::SolverRecipe;
-use crate::solver::gpu::runtime::GpuScalarRuntime;
+use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::{KernelId, ModelSpec};
 
 pub struct GenericCoupledPlanResources {
-    pub common: GpuScalarRuntime,
+    pub common: GpuCsrRuntime,
 }
 
 impl GenericCoupledPlanResources {
@@ -32,15 +33,8 @@ impl GenericCoupledPlanResources {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<LoweredProgramParts, String> {
-        let coupled_stride = model.system.unknowns_per_cell();
-        if coupled_stride != 1 {
-            return Err(format!(
-                "generic coupled currently supports scalar systems only (unknowns_per_cell=1), got {}",
-                coupled_stride
-            ));
-        }
-
-        let runtime = GpuScalarRuntime::new(mesh, device, queue).await;
+        let unknowns_per_cell = model.system.unknowns_per_cell();
+        let runtime = GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue).await;
         runtime.update_constants();
 
         let device = &runtime.common.context.device;
@@ -49,11 +43,23 @@ impl GenericCoupledPlanResources {
             kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_ASSEMBLY)?;
         let update =
             kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_UPDATE)?;
+
+        let has_flux = recipe.kernels.iter().any(|k| k.id == KernelId::FLUX_RHIE_CHOW);
+        let flux = if has_flux {
+            Some(kernel_registry::kernel_source_by_id(
+                model.id,
+                KernelId::FLUX_RHIE_CHOW,
+            )?)
+        } else {
+            None
+        };
         let assembly_bindings = assembly.bindings;
         let update_bindings = update.bindings;
 
         let pipeline_assembly = (assembly.create_pipeline)(device);
         let pipeline_update = (update.create_pipeline)(device);
+
+        let pipeline_flux = flux.as_ref().map(|src| (src.create_pipeline)(device));
 
         let bg_mesh = {
             let bgl = pipeline_assembly.get_bind_group_layout(0);
@@ -88,6 +94,62 @@ impl GenericCoupledPlanResources {
             initial_constants,
         );
 
+        let (bg_mesh_flux, bg_fields_flux_ping_pong) = if let (Some(flux), Some(pipeline_flux)) =
+            (flux.as_ref(), pipeline_flux.as_ref())
+        {
+            let bg_mesh_flux = {
+                let bgl = pipeline_flux.get_bind_group_layout(0);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    "GenericCoupled: flux mesh bind group",
+                    &bgl,
+                    flux.bindings,
+                    0,
+                    |name| {
+                        runtime
+                            .common
+                            .mesh
+                            .buffer_for_binding_name(name)
+                            .map(|buf| {
+                                wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding())
+                            })
+                    },
+                )?
+            };
+
+            let bg_fields_flux_ping_pong = {
+                let bgl = pipeline_flux.get_bind_group_layout(1);
+                let mut out = Vec::new();
+                for i in 0..3 {
+                    out.push(wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("GenericCoupled flux fields bind group {i}"),
+                        &bgl,
+                        flux.bindings,
+                        1,
+                        |name| {
+                            if let Some(buf) = fields.buffer_for_binding(name, i) {
+                                return Some(wgpu::BindingResource::Buffer(
+                                    buf.as_entire_buffer_binding(),
+                                ));
+                            }
+                            if name == "constants" {
+                                return Some(wgpu::BindingResource::Buffer(
+                                    runtime.constants.buffer().as_entire_buffer_binding(),
+                                ));
+                            }
+                            None
+                        },
+                    )?);
+                }
+                out
+            };
+
+            (Some(bg_mesh_flux), Some(bg_fields_flux_ping_pong))
+        } else {
+            (None, None)
+        };
+
         let bg_fields_ping_pong = {
             let bgl = pipeline_assembly.get_bind_group_layout(1);
             let mut out = Vec::new();
@@ -118,6 +180,20 @@ impl GenericCoupledPlanResources {
             out
         };
 
+        // Create buffer for scalar row offsets (mesh-level CSR structure)
+        // This is used by assembly kernels to iterate over cell neighbors
+        let b_scalar_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("GenericCoupled scalar_row_offsets"),
+            contents: cast_slice(&runtime.common.mesh.row_offsets),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let b_scalar_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("GenericCoupled scalar_col_indices"),
+            contents: cast_slice(&runtime.common.mesh.col_indices),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
         let bg_solver = {
             let bgl = pipeline_assembly.get_bind_group_layout(2);
             wgsl_reflect::create_bind_group_from_bindings(
@@ -139,11 +215,10 @@ impl GenericCoupledPlanResources {
                             .buffer(runtime.linear_ports.rhs)
                             .as_entire_buffer_binding(),
                     )),
+                    // The assembly kernel uses mesh-level scalar CSR row offsets to derive neighbor structure.
+                    // This is the cell-level connectivity pattern (before DOF expansion).
                     "scalar_row_offsets" => Some(wgpu::BindingResource::Buffer(
-                        runtime
-                            .linear_port_space
-                            .buffer(runtime.linear_ports.row_offsets)
-                            .as_entire_buffer_binding(),
+                        b_scalar_row_offsets.as_entire_buffer_binding(),
                     )),
                     _ => None,
                 },
@@ -239,12 +314,15 @@ impl GenericCoupledPlanResources {
         let kernels =
             crate::solver::gpu::modules::generic_coupled_kernels::GenericCoupledKernelsModule::new(
                 fields.step_handle(),
+                bg_mesh_flux,
+                bg_fields_flux_ping_pong,
                 bg_mesh,
                 bg_fields_ping_pong,
                 bg_solver,
                 bg_bc,
                 bg_update_state_ping_pong,
                 bg_update_solution,
+                pipeline_flux,
                 pipeline_assembly,
                 pipeline_update,
             );
@@ -257,14 +335,23 @@ impl GenericCoupledPlanResources {
 
         let mut resources = ProgramResources::new();
         resources.insert(GenericCoupledProgramResources::new(
-            runtime, fields, kernels, &recipe, b_bc_kind, b_bc_value,
-        ));
+            runtime,
+            fields,
+            kernels,
+            &model,
+            &recipe,
+            b_scalar_row_offsets,
+            b_scalar_col_indices,
+            b_bc_kind,
+            b_bc_value,
+        )?);
 
         let mut params = HashMap::new();
         params.insert(PlanParam::Dt, param_dt as _);
         params.insert(PlanParam::AdvectionScheme, param_advection_scheme as _);
         params.insert(PlanParam::TimeScheme, param_time_scheme as _);
         params.insert(PlanParam::Preconditioner, param_preconditioner as _);
+        params.insert(PlanParam::OuterIters, param_outer_iters as _);
         params.insert(
             PlanParam::DetailedProfilingEnabled,
             param_detailed_profiling as _,

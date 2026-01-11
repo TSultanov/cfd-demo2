@@ -3,7 +3,6 @@ use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::model::KernelId;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
-use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::PreconditionerType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,7 +49,9 @@ impl CoupledSchurModule {
         device: &wgpu::Device,
         fgmres: &FgmresWorkspace,
         num_cells: u32,
-        pressure: LinearSystemView<'_>,
+        pressure_row_offsets: &wgpu::Buffer,
+        pressure_col_indices: &wgpu::Buffer,
+        pressure_values: &wgpu::Buffer,
         pressure_kind: CoupledPressureSolveKind,
     ) -> Self {
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
@@ -114,15 +115,15 @@ impl CoupledSchurModule {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: pressure.row_offsets().as_entire_binding(),
+                    resource: pressure_row_offsets.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: pressure.col_indices().as_entire_binding(),
+                    resource: pressure_col_indices.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: pressure.values().as_entire_binding(),
+                    resource: pressure_values.as_entire_binding(),
                 },
             ],
         });

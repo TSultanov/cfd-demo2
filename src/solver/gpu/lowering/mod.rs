@@ -9,6 +9,8 @@ pub(crate) mod models;
 pub(crate) mod types;
 pub(crate) mod unified_registry;
 
+pub(crate) use model_driven::validate_model_owned_preconditioner_config;
+
 pub(crate) async fn lower_plan_instance(
     mesh: &Mesh,
     model: &ModelSpec,

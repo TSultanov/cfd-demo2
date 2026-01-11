@@ -1,11 +1,11 @@
-pub mod ei;
-pub mod method_ei;
 pub mod coupled_assembly;
 pub mod dsl;
+pub mod ei;
 pub mod emit;
 pub mod flux_rhie_chow;
 pub mod generic_coupled_kernels;
 pub mod ir;
+pub mod method_ei;
 pub mod plan;
 pub mod prepare_coupled;
 pub mod pressure_assembly;
@@ -17,12 +17,6 @@ pub mod wgsl;
 pub mod wgsl_ast;
 pub mod wgsl_dsl;
 
-pub use ei::apply::generate_ei_apply_wgsl;
-pub use ei::assembly::generate_ei_assembly_wgsl;
-pub use ei::explicit_update::generate_ei_explicit_update_wgsl;
-pub use ei::flux_kt::generate_ei_flux_kt_wgsl;
-pub use ei::gradients::generate_ei_gradients_wgsl;
-pub use ei::update::generate_ei_update_wgsl;
 pub use coupled_assembly::generate_coupled_assembly_wgsl;
 pub use emit::emit_coupled_assembly_codegen_wgsl;
 pub use emit::emit_coupled_assembly_codegen_wgsl_with_schemes;

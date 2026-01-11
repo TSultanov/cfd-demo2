@@ -2,7 +2,9 @@ use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
 };
-use crate::solver::model::{compressible_model, incompressible_momentum_model};
+use crate::solver::model::{
+    compressible_model, incompressible_momentum_model, ModelPreconditionerSpec,
+};
 use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
 use crate::solver::scheme::Scheme;
 use crate::solver::{SolverConfig, UnifiedSolver};
@@ -338,6 +340,19 @@ impl CFDApp {
         }
     }
 
+    fn active_model_owns_preconditioner(&self) -> bool {
+        let Some(solver) = &self.gpu_unified_solver else {
+            return false;
+        };
+        let Ok(solver) = solver.lock() else {
+            return false;
+        };
+        let Some(linear_solver) = solver.model().linear_solver else {
+            return false;
+        };
+        matches!(linear_solver.preconditioner, ModelPreconditionerSpec::Schur { .. })
+    }
+
     fn update_renderer_field(&self) {
         if let (Some(renderer), Some(device)) = (&self.cfd_renderer, &self.wgpu_device) {
             if let Ok(mut renderer) = renderer.lock() {
@@ -375,10 +390,26 @@ impl CFDApp {
             }
         };
 
+        let model_owns_preconditioner = model
+            .linear_solver
+            .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
+            .unwrap_or(false);
+
+        if model_owns_preconditioner {
+            // Keep UI state consistent with model-owned preconditioners (e.g. Schur).
+            self.selected_preconditioner = PreconditionerType::Jacobi;
+        }
+
+        let effective_preconditioner = if model_owns_preconditioner {
+            PreconditionerType::Jacobi
+        } else {
+            self.selected_preconditioner
+        };
+
         let config = SolverConfig {
             advection_scheme: self.selected_scheme,
             time_scheme: self.time_scheme,
-            preconditioner: self.selected_preconditioner,
+            preconditioner: effective_preconditioner,
         };
 
         let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
@@ -394,7 +425,9 @@ impl CFDApp {
         gpu_solver.set_inlet_velocity(self.inlet_velocity);
         gpu_solver.set_advection_scheme(self.selected_scheme);
         gpu_solver.set_time_scheme(self.time_scheme);
-        gpu_solver.set_preconditioner(self.selected_preconditioner);
+        if !model_owns_preconditioner {
+            gpu_solver.set_preconditioner(self.selected_preconditioner);
+        }
 
         match self.solver_kind {
             SolverKind::Incompressible => {
@@ -695,6 +728,9 @@ impl CFDApp {
     }
 
     fn update_gpu_preconditioner(&self) {
+        if self.active_model_owns_preconditioner() {
+            return;
+        }
         self.with_unified_solver(|solver| solver.set_preconditioner(self.selected_preconditioner));
     }
 }
@@ -950,28 +986,38 @@ impl eframe::App for CFDApp {
                         ui.separator();
                         if matches!(self.solver_kind, SolverKind::Incompressible) {
                             ui.label("Preconditioner");
-                            if ui
-                                .radio(
-                                    matches!(
-                                        self.selected_preconditioner,
-                                        PreconditionerType::Jacobi
-                                    ),
-                                    "Jacobi",
-                                )
-                                .clicked()
-                            {
-                                self.selected_preconditioner = PreconditionerType::Jacobi;
-                                self.update_gpu_preconditioner();
+                            let model_owns_preconditioner = self.active_model_owns_preconditioner();
+                            if model_owns_preconditioner {
+                                ui.weak("(model-owned; overrides disabled)");
                             }
-                            if ui
-                                .radio(
-                                    matches!(self.selected_preconditioner, PreconditionerType::Amg),
-                                    "AMG (Multigrid)",
-                                )
-                                .clicked()
-                            {
-                                self.selected_preconditioner = PreconditionerType::Amg;
-                                self.update_gpu_preconditioner();
+
+                            ui.add_enabled_ui(!model_owns_preconditioner, |ui| {
+                                if ui
+                                    .radio(
+                                        matches!(
+                                            self.selected_preconditioner,
+                                            PreconditionerType::Jacobi
+                                        ),
+                                        "Jacobi",
+                                    )
+                                    .clicked()
+                                {
+                                    self.selected_preconditioner = PreconditionerType::Jacobi;
+                                    self.update_gpu_preconditioner();
+                                }
+                                if ui
+                                    .radio(
+                                        matches!(self.selected_preconditioner, PreconditionerType::Amg),
+                                        "AMG (Multigrid)",
+                                    )
+                                    .clicked()
+                                {
+                                    self.selected_preconditioner = PreconditionerType::Amg;
+                                    self.update_gpu_preconditioner();
+                                }
+                            });
+                            if model_owns_preconditioner {
+                                ui.label("(Model-owned: Schur)");
                             }
 
                             ui.separator();

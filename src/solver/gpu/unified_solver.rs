@@ -51,6 +51,12 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
+        // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
+        crate::solver::gpu::lowering::validate_model_owned_preconditioner_config(
+            &model,
+            config.preconditioner,
+        )?;
+
         let plan = build_plan_instance(
             mesh,
             &model,
@@ -156,11 +162,18 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
-        self.config.preconditioner = preconditioner;
-        let _ = self.plan.set_param(
+        // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
+        // If the plan rejects this param, keep the config unchanged.
+        if self
+            .plan
+            .set_param(
             PlanParam::Preconditioner,
             PlanParamValue::Preconditioner(preconditioner),
-        );
+            )
+            .is_ok()
+        {
+            self.config.preconditioner = preconditioner;
+        }
     }
 
     pub fn set_outer_iters(&mut self, iters: usize) {

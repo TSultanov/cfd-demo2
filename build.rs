@@ -19,7 +19,31 @@ mod solver {
             ));
         }
     }
+
+    pub mod shared {
+        pub mod wgsl_ast {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/shared/wgsl_ast.rs"
+            ));
+        }
+
+        pub mod expr {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/shared/expr.rs"
+            ));
+        }
+
+        pub use expr::PrimitiveExpr;
+    }
     pub mod model {
+        pub mod linear_solver {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/linear_solver.rs"
+            ));
+        }
         pub mod method {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -33,6 +57,18 @@ mod solver {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/solver/model/flux_layout.rs"
+            ));
+        }
+        pub mod flux_module {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/flux_module.rs"
+            ));
+        }
+        pub mod primitives {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/primitives.rs"
             ));
         }
         pub mod backend {
@@ -94,11 +130,16 @@ mod solver {
         pub use definitions::{
             compressible_model, compressible_system, generic_diffusion_demo_model,
             generic_diffusion_demo_neumann_model, incompressible_momentum_model,
+            incompressible_momentum_generic_model,
             incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
             IncompressibleMomentumFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use flux_layout::{FluxComponent, FluxLayout};
+        #[allow(unused_imports)]
+        pub use flux_module::{FluxModuleSpec, ReconstructionSpec};
+        #[allow(unused_imports)]
+        pub use primitives::PrimitiveDerivations;
         #[allow(unused_imports)]
         pub use eos::EosSpec;
         #[allow(unused_imports)]
@@ -339,6 +380,13 @@ fn main() {
     {
         panic!("codegen failed: {}", err);
     }
+
+    let model_generic = solver::model::incompressible_momentum_generic_model();
+    if let Err(err) =
+        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &model_generic, &schemes)
+    {
+        panic!("codegen failed: {}", err);
+    }
     let compressible_model = solver::model::compressible_model();
     if let Err(err) =
         solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &compressible_model, &schemes)
@@ -510,30 +558,6 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             gen_dir.join("system_main.wgsl"),
         ),
         (
-            "ei_assembly",
-            gen_dir.join("ei_assembly.wgsl"),
-        ),
-        (
-            "ei_apply",
-            gen_dir.join("ei_apply.wgsl"),
-        ),
-        (
-            "ei_explicit_update",
-            gen_dir.join("ei_explicit_update.wgsl"),
-        ),
-        (
-            "ei_flux_kt",
-            gen_dir.join("ei_flux_kt.wgsl"),
-        ),
-        (
-            "ei_gradients",
-            gen_dir.join("ei_gradients.wgsl"),
-        ),
-        (
-            "ei_update",
-            gen_dir.join("ei_update.wgsl"),
-        ),
-        (
             "coupled_assembly_merged",
             gen_dir.join("coupled_assembly_merged.wgsl"),
         ),
@@ -548,6 +572,14 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             "update_fields_from_coupled",
             gen_dir.join("update_fields_from_coupled.wgsl"),
         ),
+
+        // Legacy EI family (still used as a transitional backend).
+        ("ei_apply", gen_dir.join("ei_apply.wgsl")),
+        ("ei_assembly", gen_dir.join("ei_assembly.wgsl")),
+        ("ei_explicit_update", gen_dir.join("ei_explicit_update.wgsl")),
+        ("ei_flux_kt", gen_dir.join("ei_flux_kt.wgsl")),
+        ("ei_gradients", gen_dir.join("ei_gradients.wgsl")),
+        ("ei_update", gen_dir.join("ei_update.wgsl")),
     ];
 
     let mut code = String::new();
@@ -597,40 +629,26 @@ fn generate_kernel_registry_map() {
         ),
         ("FluxRhieChow", "flux_rhie_chow", "flux_rhie_chow"),
         (
-            "EiAssembly",
-            "ei_assembly",
-            "ei_assembly",
-        ),
-        (
-            "EiApply",
-            "ei_apply",
-            "ei_apply",
-        ),
-        (
-            "EiExplicitUpdate",
-            "ei_explicit_update",
-            "ei_explicit_update",
-        ),
-        (
-            "EiGradients",
-            "ei_gradients",
-            "ei_gradients",
-        ),
-        (
-            "EiUpdate",
-            "ei_update",
-            "ei_update",
-        ),
-        (
-            "EiFluxKt",
-            "ei_flux_kt",
-            "ei_flux_kt",
-        ),
-        (
             "GenericCoupledApply",
             "generic_coupled_apply",
             "generic_coupled_apply",
         ),
+
+        // Transitional conservative (EI) kernels.
+        (
+            "ConservativeGradients",
+            "ei_gradients",
+            "ei_gradients",
+        ),
+        ("ConservativeFluxKt", "ei_flux_kt", "ei_flux_kt"),
+        (
+            "ConservativeExplicitUpdate",
+            "ei_explicit_update",
+            "ei_explicit_update",
+        ),
+        ("ConservativeAssembly", "ei_assembly", "ei_assembly"),
+        ("ConservativeApply", "ei_apply", "ei_apply"),
+        ("ConservativeUpdate", "ei_update", "ei_update"),
     ];
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)

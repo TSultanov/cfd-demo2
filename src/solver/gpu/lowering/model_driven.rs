@@ -15,6 +15,8 @@ pub(crate) async fn lower_program_model_driven(
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<GpuProgramPlan, String> {
+    validate_model_owned_preconditioner_config(model, config.preconditioner)?;
+
     // Derive the solver recipe from model + config
     let recipe = SolverRecipe::from_model(
         model,
@@ -45,12 +47,72 @@ pub(crate) async fn lower_program_model_driven(
         PlanParam::TimeScheme,
         PlanParamValue::TimeScheme(config.time_scheme),
     )?;
-    plan.set_param(
-        PlanParam::Preconditioner,
-        PlanParamValue::Preconditioner(config.preconditioner),
-    )?;
+
+    // If the model owns the preconditioner choice, do not allow runtime/config overrides.
+    if should_set_preconditioner_param(model) {
+        plan.set_param(
+            PlanParam::Preconditioner,
+            PlanParamValue::Preconditioner(config.preconditioner),
+        )?;
+    }
 
     Ok(plan)
+}
+
+fn should_set_preconditioner_param(model: &ModelSpec) -> bool {
+    let Some(solver) = model.linear_solver else {
+        return true;
+    };
+    // Any explicit model-owned selection disables plan/runtime overrides.
+    !matches!(solver.preconditioner, crate::solver::model::ModelPreconditionerSpec::Schur { .. })
+}
+
+pub(crate) fn validate_model_owned_preconditioner_config(
+    model: &ModelSpec,
+    config_preconditioner: crate::solver::gpu::structs::PreconditionerType,
+) -> Result<(), String> {
+    let Some(solver) = model.linear_solver else {
+        return Ok(());
+    };
+    match solver.preconditioner {
+        crate::solver::model::ModelPreconditionerSpec::Default => Ok(()),
+        crate::solver::model::ModelPreconditionerSpec::Schur { .. } => {
+            // SolverConfig's `PreconditionerType` is not the same concept as the model-owned
+            // Schur preconditioner. Until we remove SolverConfig-level preconditioners entirely,
+            // disallow non-default values when a model-owned preconditioner is active.
+            if config_preconditioner != crate::solver::gpu::structs::PreconditionerType::Jacobi {
+                return Err(
+                    "preconditioner is model-owned for this model; do not set SolverConfig.preconditioner".to_string(),
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::gpu::structs::PreconditionerType;
+    use crate::solver::model::{incompressible_momentum_generic_model, ModelPreconditionerSpec};
+
+    #[test]
+    fn model_owned_schur_rejects_nondefault_preconditioner_config() {
+        let model = incompressible_momentum_generic_model();
+        assert!(matches!(
+            model.linear_solver.unwrap().preconditioner,
+            ModelPreconditionerSpec::Schur { .. }
+        ));
+        assert!(validate_model_owned_preconditioner_config(&model, PreconditionerType::Amg)
+            .unwrap_err()
+            .contains("model-owned"));
+    }
+
+    #[test]
+    fn model_owned_schur_skips_setting_plan_preconditioner_param() {
+        let model = incompressible_momentum_generic_model();
+        assert!(!should_set_preconditioner_param(&model));
+    }
 }
 
 async fn lower_parts_for_model(

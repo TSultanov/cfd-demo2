@@ -229,44 +229,48 @@ impl SolverRecipe {
         let flux = model.gpu.flux;
         let requires_low_mach_params = model.gpu.requires_low_mach_params;
 
+        // Determine stepping mode from model method selection.
+        // This may influence how kernels are mapped into phases.
+        let stepping = derive_stepping_mode(model);
+
         // Emit kernel specs in terms of stable KernelIds.
         //
         // Kernel selection is model-driven (based on `ModelSpec.method`); the recipe assigns
         // phase and dispatch as it constructs `KernelSpec`s.
         let mut kernels: Vec<KernelSpec> = Vec::new();
         for id in crate::solver::model::kernel::derive_kernel_ids_for_model(model) {
-            // Some models include a gradients kernel in the plan, but for schemes that do not
-            // require gradients we can skip it (if nothing else forces gradients).
-            if id == KernelId::EI_GRADIENTS && !needs_gradients {
-                continue;
-            }
-
             let phase = match id {
-                KernelId::EI_GRADIENTS => KernelPhase::Gradients,
-                KernelId::EI_FLUX_KT => KernelPhase::FluxComputation,
-                KernelId::EI_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
+                KernelId::CONSERVATIVE_GRADIENTS => KernelPhase::Gradients,
+                KernelId::CONSERVATIVE_FLUX_KT => KernelPhase::FluxComputation,
+                KernelId::CONSERVATIVE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
+
+                KernelId::FLUX_RHIE_CHOW => KernelPhase::FluxComputation,
 
                 KernelId::COUPLED_ASSEMBLY
                 | KernelId::PRESSURE_ASSEMBLY
-                | KernelId::EI_ASSEMBLY
+                | KernelId::CONSERVATIVE_ASSEMBLY
                 | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
 
-                KernelId::EI_APPLY | KernelId::GENERIC_COUPLED_APPLY => {
+                KernelId::CONSERVATIVE_APPLY | KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
+
+                KernelId::UPDATE_FIELDS_FROM_COUPLED => KernelPhase::Update,
+
+                KernelId::GENERIC_COUPLED_UPDATE
+                    if matches!(stepping, SteppingMode::Implicit { .. }) =>
+                {
                     KernelPhase::Apply
                 }
 
-                KernelId::UPDATE_FIELDS_FROM_COUPLED | KernelId::GENERIC_COUPLED_UPDATE => {
-                    KernelPhase::Update
-                }
+                KernelId::GENERIC_COUPLED_UPDATE => KernelPhase::Update,
 
-                KernelId::EI_UPDATE => KernelPhase::PrimitiveRecovery,
+                KernelId::CONSERVATIVE_UPDATE => KernelPhase::PrimitiveRecovery,
 
                 // Preparation kernels (or legacy defaults)
                 _ => KernelPhase::Preparation,
             };
 
             let dispatch = match id {
-                KernelId::FLUX_RHIE_CHOW | KernelId::EI_FLUX_KT => DispatchKind::Faces,
+                KernelId::FLUX_RHIE_CHOW | KernelId::CONSERVATIVE_FLUX_KT => DispatchKind::Faces,
                 _ => DispatchKind::Cells,
             };
 
@@ -300,9 +304,6 @@ impl SolverRecipe {
                 purpose: BufferPurpose::History,
             });
         }
-
-        // Determine stepping mode from model method selection.
-        let stepping = derive_stepping_mode(model);
 
         // Linear solver spec
         let linear_solver = LinearSolverSpec {
@@ -555,13 +556,18 @@ fn derive_stepping_mode(model: &ModelSpec) -> SteppingMode {
     use crate::solver::model::MethodSpec;
 
     match model.method {
-        MethodSpec::ExplicitImplicitConservative => SteppingMode::Implicit { outer_iters: 3 },
         MethodSpec::CoupledIncompressible => SteppingMode::Coupled {
             outer_correctors: 3,
         },
+        MethodSpec::ConservativeCompressible { outer_iters } => {
+            SteppingMode::Implicit { outer_iters }
+        }
         MethodSpec::GenericCoupled => SteppingMode::Coupled {
             outer_correctors: 1,
         },
+        MethodSpec::GenericCoupledImplicit { outer_iters } => {
+            SteppingMode::Implicit { outer_iters }
+        }
     }
 }
 
@@ -570,7 +576,9 @@ mod tests {
     use super::*;
     use crate::solver::gpu::plans::program::ProgramSpecNode;
     use crate::solver::model::generic_diffusion_demo_model;
-    use crate::solver::model::{compressible_model, incompressible_momentum_model};
+    use crate::solver::model::{
+        compressible_model, incompressible_momentum_generic_model, incompressible_momentum_model,
+    };
 
     #[test]
     fn test_recipe_from_generic_diffusion_model() {
@@ -683,5 +691,28 @@ mod tests {
             has_while,
             "incompressible coupled spec should have a While loop"
         );
+    }
+
+    #[test]
+    fn test_recipe_for_incompressible_generic_includes_flux_and_generic_assembly() {
+        let model = incompressible_momentum_generic_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+        )
+        .expect("should create recipe");
+
+        assert!(recipe.flux.is_some(), "generic incompressible should allocate flux buffer");
+        assert_eq!(recipe.flux.unwrap().stride, 1);
+        assert!(recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::FLUX_RHIE_CHOW));
+        assert!(recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
     }
 }

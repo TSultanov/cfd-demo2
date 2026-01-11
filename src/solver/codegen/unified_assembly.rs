@@ -18,7 +18,7 @@ use crate::solver::scheme::Scheme;
 pub fn generate_unified_assembly_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
-    flux_layout: &StateLayout,
+    flux_stride: u32,
     needs_gradients: bool,
 ) -> String {
     let mut module = Module::new();
@@ -33,11 +33,15 @@ pub fn generate_unified_assembly_wgsl(
             .any(|op| op.kind == DiscreteOpKind::Convection)
     });
 
+    if needs_fluxes && flux_stride == 0 {
+        panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
+    }
+
     module.extend(base_assembly_items(needs_gradients, needs_fluxes));
     module.push(Item::Function(main_assembly_fn(
         system,
         layout,
-        flux_layout,
+        flux_stride,
         needs_gradients,
     )));
     module.to_wgsl()
@@ -300,7 +304,7 @@ fn coefficient_value_expr(
 fn main_assembly_fn(
     system: &DiscreteSystem,
     layout: &StateLayout,
-    flux_layout: &StateLayout,
+    flux_stride: u32,
     needs_gradients: bool,
 ) -> Function {
     let _stride = layout.stride();
@@ -745,41 +749,44 @@ fn main_assembly_fn(
                 op.kind == DiscreteOpKind::Convection
                     && op.discretization == Discretization::Implicit
             }) {
-                // Flux field
-                let flux_ref = conv_op.flux.as_ref().expect("convection term missing flux");
-                let flux_offset = flux_layout
-                    .offset_for(flux_ref.name())
-                    .expect("missing flux offset");
-                let flux_stride = flux_layout.stride();
-
-                let flux_val_expr = dsl::array_access_linear(
-                    "fluxes",
-                    Expr::ident("face_idx"),
-                    flux_stride,
-                    flux_offset as u32,
-                );
-
-                let flux_var = format!("phi_{}", flux_ref.name());
-
-                body.push(dsl::var_typed_expr(
-                    &flux_var,
-                    Type::F32,
-                    Some(flux_val_expr.clone()),
-                ));
-                body.push(dsl::if_block_expr(
-                    Expr::ident("owner").ne(Expr::ident("idx")),
-                    dsl::block(vec![dsl::assign_op_expr(
-                        AssignOp::Sub,
-                        Expr::ident(&flux_var),
-                        Expr::ident(&flux_var) * 2.0,
-                    )]),
-                    None,
-                ));
+                // Flux buffer is interpreted as a packed per-unknown-component face flux table.
+                // Indexing is `fluxes[face * flux_stride + u_idx]`, where `u_idx` is the packed
+                // unknown component index in the coupled system.
+                //
+                // Note: legacy models may still populate fluxes via method-specific kernels,
+                // but the codegen remains agnostic.
+                let flux_stride = flux_stride;
 
                 // Reconstruct field at face
                 for component in 0..equation.target.kind().component_count() as u32 {
                     let u_idx = base_offset + component;
                     let field_name = equation.target.name();
+
+                    let flux_var = format!("phi_{u_idx}");
+                    let flux_val_expr = if flux_stride == 1 {
+                        dsl::array_access("fluxes", Expr::ident("face_idx"))
+                    } else {
+                        dsl::array_access_linear(
+                            "fluxes",
+                            Expr::ident("face_idx"),
+                            flux_stride,
+                            u_idx,
+                        )
+                    };
+                    body.push(dsl::var_typed_expr(
+                        &flux_var,
+                        Type::F32,
+                        Some(flux_val_expr.clone()),
+                    ));
+                    body.push(dsl::if_block_expr(
+                        Expr::ident("owner").ne(Expr::ident("idx")),
+                        dsl::block(vec![dsl::assign_op_expr(
+                            AssignOp::Sub,
+                            Expr::ident(&flux_var),
+                            Expr::ident(&flux_var) * 2.0,
+                        )]),
+                        None,
+                    ));
 
                     let phi_own = state_component(layout, "state", "idx", field_name, component);
                     let phi_neigh =

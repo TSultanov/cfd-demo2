@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::method_ei;
 use super::coupled_assembly::generate_coupled_assembly_wgsl;
 use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use super::generic_coupled_kernels::{
     generate_generic_coupled_apply_wgsl, generate_generic_coupled_update_wgsl,
 };
 use super::ir::{lower_system, DiscreteSystem};
+use super::method_ei;
 use super::prepare_coupled::generate_prepare_coupled_wgsl;
 use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
@@ -70,12 +70,14 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
         KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl".to_string(),
         KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
         KernelKind::SystemMain => "system_main.wgsl".to_string(),
-        KernelKind::EiAssembly => "ei_assembly.wgsl".to_string(),
-        KernelKind::EiApply => "ei_apply.wgsl".to_string(),
-        KernelKind::EiGradients => "ei_gradients.wgsl".to_string(),
-        KernelKind::EiExplicitUpdate => "ei_explicit_update.wgsl".to_string(),
-        KernelKind::EiUpdate => "ei_update.wgsl".to_string(),
-        KernelKind::EiFluxKt => "ei_flux_kt.wgsl".to_string(),
+
+        KernelKind::ConservativeGradients => "ei_gradients.wgsl".to_string(),
+        KernelKind::ConservativeFluxKt => "ei_flux_kt.wgsl".to_string(),
+        KernelKind::ConservativeExplicitUpdate => "ei_explicit_update.wgsl".to_string(),
+        KernelKind::ConservativeAssembly => "ei_assembly.wgsl".to_string(),
+        KernelKind::ConservativeApply => "ei_apply.wgsl".to_string(),
+        KernelKind::ConservativeUpdate => "ei_update.wgsl".to_string(),
+
         KernelKind::GenericCoupledAssembly => {
             format!("generic_coupled_assembly_{}.wgsl", model.id)
         }
@@ -113,32 +115,23 @@ fn generate_kernel_wgsl(
             generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &fields)
         }
         KernelKind::SystemMain => generate_wgsl(&discrete),
-        KernelKind::EiAssembly => {
-            method_ei::generate_ei_assembly_wgsl(model)
-        }
-        KernelKind::EiApply => {
-            method_ei::generate_ei_apply_wgsl(model)
-        }
-        KernelKind::EiGradients => {
-            method_ei::generate_ei_gradients_wgsl(model)
-        }
-        KernelKind::EiExplicitUpdate => {
-            method_ei::generate_ei_explicit_update_wgsl(model)
-        }
-        KernelKind::EiUpdate => {
-            method_ei::generate_ei_update_wgsl(model)
-        }
-        KernelKind::EiFluxKt => {
-            method_ei::generate_ei_flux_kt_wgsl(model)
-        }
+
+        KernelKind::ConservativeGradients => method_ei::generate_ei_gradients_wgsl(model),
+        KernelKind::ConservativeFluxKt => method_ei::generate_ei_flux_kt_wgsl(model),
+        KernelKind::ConservativeExplicitUpdate => method_ei::generate_ei_explicit_update_wgsl(model),
+        KernelKind::ConservativeAssembly => method_ei::generate_ei_assembly_wgsl(model),
+        KernelKind::ConservativeApply => method_ei::generate_ei_apply_wgsl(model),
+        KernelKind::ConservativeUpdate => method_ei::generate_ei_update_wgsl(model),
+
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = expand_schemes(&model.system, schemes)
                 .map(|e| e.needs_gradients())
                 .unwrap_or(false);
+            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
             unified_assembly::generate_unified_assembly_wgsl(
                 &discrete,
                 &model.state_layout,
-                &model.state_layout,
+                flux_stride,
                 needs_gradients,
             )
         }

@@ -6,18 +6,23 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub enum GenericCoupledPipeline {
+    FluxRhieChow,
     Assembly,
     Update,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum GenericCoupledBindGroups {
+    FluxRhieChow,
     Assembly,
     Update,
 }
 
 pub struct GenericCoupledKernelsModule {
     state_step_index: Arc<AtomicUsize>,
+
+    bg_mesh_flux: Option<wgpu::BindGroup>,
+    bg_fields_flux_ping_pong: Option<Vec<wgpu::BindGroup>>,
 
     bg_mesh: wgpu::BindGroup,
     bg_fields_ping_pong: Vec<wgpu::BindGroup>,
@@ -27,6 +32,7 @@ pub struct GenericCoupledKernelsModule {
     bg_update_state_ping_pong: Vec<wgpu::BindGroup>,
     bg_update_solution: wgpu::BindGroup,
 
+    pipeline_flux: Option<wgpu::ComputePipeline>,
     pipeline_assembly: wgpu::ComputePipeline,
     pipeline_update: wgpu::ComputePipeline,
 }
@@ -34,23 +40,29 @@ pub struct GenericCoupledKernelsModule {
 impl GenericCoupledKernelsModule {
     pub fn new(
         state_step_index: Arc<AtomicUsize>,
+        bg_mesh_flux: Option<wgpu::BindGroup>,
+        bg_fields_flux_ping_pong: Option<Vec<wgpu::BindGroup>>,
         bg_mesh: wgpu::BindGroup,
         bg_fields_ping_pong: Vec<wgpu::BindGroup>,
         bg_solver: wgpu::BindGroup,
         bg_bc: wgpu::BindGroup,
         bg_update_state_ping_pong: Vec<wgpu::BindGroup>,
         bg_update_solution: wgpu::BindGroup,
+        pipeline_flux: Option<wgpu::ComputePipeline>,
         pipeline_assembly: wgpu::ComputePipeline,
         pipeline_update: wgpu::ComputePipeline,
     ) -> Self {
         Self {
             state_step_index,
+            bg_mesh_flux,
+            bg_fields_flux_ping_pong,
             bg_mesh,
             bg_fields_ping_pong,
             bg_solver,
             bg_bc,
             bg_update_state_ping_pong,
             bg_update_solution,
+            pipeline_flux,
             pipeline_assembly,
             pipeline_update,
         }
@@ -69,6 +81,20 @@ impl GenericCoupledKernelsModule {
         &self.bg_fields_ping_pong[idx]
     }
 
+    fn bg_mesh_flux(&self) -> &wgpu::BindGroup {
+        self.bg_mesh_flux
+            .as_ref()
+            .expect("missing flux mesh bind group")
+    }
+
+    fn bg_fields_flux(&self) -> &wgpu::BindGroup {
+        let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
+        &self
+            .bg_fields_flux_ping_pong
+            .as_ref()
+            .expect("missing flux fields bind groups")[idx]
+    }
+
     fn bg_update_state(&self) -> &wgpu::BindGroup {
         let idx = self.state_step_index.load(Ordering::Relaxed) % 3;
         &self.bg_update_state_ping_pong[idx]
@@ -79,6 +105,11 @@ impl GenericCoupledKernelsModule {
         pass.set_bind_group(1, self.bg_fields(), &[]);
         pass.set_bind_group(2, &self.bg_solver, &[]);
         pass.set_bind_group(3, &self.bg_bc, &[]);
+    }
+
+    fn bind_flux_rhie_chow(&self, pass: &mut wgpu::ComputePass) {
+        pass.set_bind_group(0, self.bg_mesh_flux(), &[]);
+        pass.set_bind_group(1, self.bg_fields_flux(), &[]);
     }
 
     fn bind_update(&self, pass: &mut wgpu::ComputePass) {
@@ -93,6 +124,10 @@ impl GpuComputeModule for GenericCoupledKernelsModule {
 
     fn pipeline(&self, key: Self::PipelineKey) -> &wgpu::ComputePipeline {
         match key {
+            GenericCoupledPipeline::FluxRhieChow => self
+                .pipeline_flux
+                .as_ref()
+                .expect("missing flux pipeline"),
             GenericCoupledPipeline::Assembly => &self.pipeline_assembly,
             GenericCoupledPipeline::Update => &self.pipeline_update,
         }
@@ -100,6 +135,7 @@ impl GpuComputeModule for GenericCoupledKernelsModule {
 
     fn bind(&self, key: Self::BindKey, pass: &mut wgpu::ComputePass) {
         match key {
+            GenericCoupledBindGroups::FluxRhieChow => self.bind_flux_rhie_chow(pass),
             GenericCoupledBindGroups::Assembly => self.bind_assembly(pass),
             GenericCoupledBindGroups::Update => self.bind_update(pass),
         }
@@ -117,6 +153,10 @@ impl GpuComputeModule for GenericCoupledKernelsModule {
 impl UnifiedGraphModule for GenericCoupledKernelsModule {
     fn pipeline_for_kernel(&self, id: KernelId) -> Option<Self::PipelineKey> {
         match id {
+            KernelId::FLUX_RHIE_CHOW => self
+                .pipeline_flux
+                .as_ref()
+                .map(|_| GenericCoupledPipeline::FluxRhieChow),
             KernelId::GENERIC_COUPLED_ASSEMBLY => Some(GenericCoupledPipeline::Assembly),
             KernelId::GENERIC_COUPLED_UPDATE => Some(GenericCoupledPipeline::Update),
             _ => None,
@@ -125,6 +165,10 @@ impl UnifiedGraphModule for GenericCoupledKernelsModule {
 
     fn bind_for_kernel(&self, id: KernelId) -> Option<Self::BindKey> {
         match id {
+            KernelId::FLUX_RHIE_CHOW => self
+                .pipeline_flux
+                .as_ref()
+                .map(|_| GenericCoupledBindGroups::FluxRhieChow),
             KernelId::GENERIC_COUPLED_ASSEMBLY => Some(GenericCoupledBindGroups::Assembly),
             KernelId::GENERIC_COUPLED_UPDATE => Some(GenericCoupledBindGroups::Update),
             _ => None,

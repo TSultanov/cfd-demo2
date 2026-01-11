@@ -8,6 +8,7 @@ pub mod model;
 pub mod options;
 pub mod profiling;
 pub mod scheme;
+pub mod shared;
 pub mod units;
 
 pub use backend::{FgmresSizing, SolverConfig, UnifiedSolver};

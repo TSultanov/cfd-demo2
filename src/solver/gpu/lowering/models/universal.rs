@@ -528,6 +528,17 @@ fn set_param_fallback_compressible(
     param: PlanParam,
     value: PlanParamValue,
 ) -> Result<(), String> {
+    let model_owns_preconditioner = plan
+        .model
+        .linear_solver
+        .map(|spec| {
+            matches!(
+                spec.preconditioner,
+                crate::solver::model::ModelPreconditionerSpec::Schur { .. }
+            )
+        })
+        .unwrap_or(false);
+
     let solver = explicit_implicit_mut(plan).expect("missing universal explicit/implicit backend");
     match (param, value) {
         (PlanParam::Dt, PlanParamValue::F32(dt)) => {
@@ -543,6 +554,9 @@ fn set_param_fallback_compressible(
             Ok(())
         }
         (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+            if model_owns_preconditioner {
+                return Err("preconditioner is model-owned for this model".to_string());
+            }
             solver.set_precond_type(preconditioner);
             Ok(())
         }
@@ -879,6 +893,17 @@ fn set_param_fallback_coupled(
     param: PlanParam,
     value: PlanParamValue,
 ) -> Result<(), String> {
+    let model_owns_preconditioner = plan
+        .model
+        .linear_solver
+        .map(|spec| {
+            matches!(
+                spec.preconditioner,
+                crate::solver::model::ModelPreconditionerSpec::Schur { .. }
+            )
+        })
+        .unwrap_or(false);
+
     let solver = coupled_mut(plan).expect("missing universal coupled backend");
     match (param, value) {
         (PlanParam::Dt, PlanParamValue::F32(dt)) => {
@@ -898,6 +923,9 @@ fn set_param_fallback_coupled(
             Ok(())
         }
         (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
+            if model_owns_preconditioner {
+                return Err("preconditioner is model-owned for this model".to_string());
+            }
             solver.set_precond_type(preconditioner);
             Ok(())
         }

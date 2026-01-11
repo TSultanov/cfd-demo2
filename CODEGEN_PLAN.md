@@ -8,6 +8,10 @@ One model-driven GPU solver pipeline with:
 - a single runtime orchestration path (no per-family step loops or templates)
 - solver features as pluggable modules that own their GPU resources
 - kernels + auxiliary passes derived automatically from model structure + method selection (no handwritten WGSL)
+- **system size = model definition**: `unknowns_per_cell` is always `EquationSystem`-derived
+- **derived primitives are model-defined** via an expression language (reuse the existing DSL/AST, but keep codegen physics-agnostic)
+- **fluxes are pluggable modules** configured in `src/solver/model/definitions.rs` (codegen emits generic loops; physics lives in model-spec configuration)
+- **preconditioner choice is model-owned** and validated (no env overrides, no silent fallback)
 
 ## Non-negotiable invariants (for “any model + any method”)
 - **No solver-family switches in orchestration:** runtime must not branch on “compressible vs incompressible vs generic”.
@@ -15,6 +19,7 @@ One model-driven GPU solver pipeline with:
 - **No handwritten kernel lookup tables:** runtime only asks for `KernelId` and receives generated WGSL + binding metadata.
 - **No handwritten bind groups:** host binding is assembled from generated binding metadata + a uniform resource registry.
 - **Codegen agnostic to the PDE model** - `src/solver/codegen` must ot have dependencies on `src/solver/model`. Adding new PDE should only require editing `src/solver/model` without touching the codegen.
+- **No specialized EI kernels**: EI becomes just a particular combination of generic modules (flux + primitive recovery + assembly/apply/update) derived from the model.
 
 ## Status Snapshot (as of 2026-01-11)
 
@@ -23,18 +28,36 @@ One model-driven GPU solver pipeline with:
 - Template-driven orchestration is effectively gone: program structure is emitted by `SolverRecipe::build_program_spec()` and op registration is unified (`src/solver/gpu/lowering/unified_registry.rs`).
 - `KernelId` exists and runtime can look up generated kernel source via `kernel_registry::kernel_source_by_id` (with build-time generated tables).
 - Generated model WGSL exists under `src/solver/gpu/shaders/generated`, and generated binding metadata is available via `src/solver/gpu/wgsl_meta.rs`.
-- EI method codegen is routed through `src/solver/codegen/method_ei.rs` and EI kernels emit through the unified emitter path.
+- **Transitional backend:** compressible uses `MethodSpec::ConservativeCompressible` and selects `KernelId::CONSERVATIVE_*` (mapped to legacy `ei_*` WGSL ids).
+- Build-time kernel registry now includes the legacy `ei_*` shaders so the transitional path can run without special host tables.
 - EI uses `FluxLayout` (named component offsets/stride) and unified BC tables (`bc_kind`/`bc_value`) with consecutive bind groups.
 - EI codegen no longer depends on `CompressibleFields` for EI kernel emission (still Euler-name-specific internally).
 - EI kernel implementations live under `src/solver/codegen/ei/*`; legacy `compressible_*` EI modules have been deleted.
 - Regression validation: `gpu_compressible_solver_preserves_uniform_state` passes.
 
+### Newly Landed (as of 2026-01-11)
+- Removed unused GPU env helper (`src/solver/gpu/env_utils.rs`); solver behavior is not env-driven.
+- Generic coupled GPU path now has an internal CSR runtime that can allocate the linear system for `num_dofs = num_cells * unknowns_per_cell` (still using scalar CSR kernels over the expanded system).
+- `ModelKernelsModule` no longer assumes a coupled-only anchor kernel; it can build pipelines/bind groups for conservative (legacy EI) kernels by iterating the recipe and using registry binding metadata.
+- **Model-owned Schur preconditioner (bridge):** `ModelSpec.linear_solver` can request `ModelPreconditionerSpec::Schur { omega, layout }`, which wires the generic-coupled path to FGMRES + a SIMPLE-like Schur preconditioner. Compatibility is validated at model load.
+
 ### Still Violating the Goal (remaining family-ness)
-- Kernel planning still performs structural “family selection” (e.g. `derive_kernel_ids` picks compressible vs coupled vs generic by heuristics in `src/solver/model/kernel.rs`).
-- Recipe still contains central mapping matches for phase/dispatch, and stepping mode selection is still inferred from kernel IDs (`src/solver/gpu/recipe.rs`).
-- Runtime kernel module construction still has explicit per-family constructors and hard-coded model ids (`ModelKernelsModule::new_compressible/new_incompressible`, and lookups like `kernel_source_by_id("compressible", ...)`).
+- Kernel planning still performs structural “family selection” (method enum variants imply solver families; eventually these should be emitted from term/module expansion).
+- Recipe still contains central mapping matches for phase/dispatch (`src/solver/gpu/recipe.rs`).
+- Runtime still has solver-family branches (coupled vs conservative vs generic) during module construction; goal is a single fully data-driven resource registry.
 - Lowering still has an explicit special-case path for generic-coupled plan resources.
 - Bind group assembly is only partially unified: several kernels still rely on plan/module-specific wiring (e.g. solver buffers and per-kernel binding arrays).
+
+### Still Violating the Goal (new invariant gaps)
+- Derived primitives are still hard-coded in a few places (e.g. Euler primitive recovery), but EOS parameters are now model-driven (no more `gamma=1.4` in kernels).
+- Derived primitive expressions must be dependency-safe. Today we require that each expression can be evaluated from **conserved/state fields only** (no references to other derived primitives) unless we add an explicit dependency DAG + topo sort.
+- Flux computation is still method-specific (EI KT flux and incompressible Rhie–Chow exist as dedicated kernels rather than pluggable “flux modules” configured in the model).
+- Incompressible still runs through a coupled-family path (pressure-correction / Rhie–Chow family) instead of the generic discretization pipeline.
+
+### Blockers / Known Limitations (generic incompressible bridge)
+- The model-owned Schur preconditioner is intentionally narrow: it assumes `unknowns_per_cell == 3` and a 2D saddle-point structure (Vector2 equation + Scalar equation). The unknown ordering is model-declared via `SchurBlockLayout` (no solver-side `[U_x,U_y,p]` assumption).
+- Generic-coupled rejects attempts to set `PlanParam::Preconditioner` when a model-owned preconditioner is active (e.g. Schur), and `GpuUnifiedSolver::new()` uses the same validation helper as lowering so config/runtime cannot override model-owned preconditioning.
+- The UI disables the preconditioner selector when the active model owns preconditioning (e.g. Schur), keeping UI state consistent with enforcement.
 
 ## Remaining Work (Prioritized)
 
@@ -85,18 +108,13 @@ One model-driven GPU solver pipeline with:
 
    **Remaining work (as of 2026-01-11):**
     - **Delete the legacy module names:** done (legacy `src/solver/codegen/compressible_*` EI modules removed).
-   - **Make EI assembly truly model-driven:** remove the Euler-specific 4×4 assumptions (currently the assembly validates `unknowns_per_cell == 4` and ordering).
-   - **Remove hard-coded EOS from kernels:** primitive recovery / update still hard-codes `gamma = 1.4`; introduce an EOS spec and plumb parameters into WGSL.
+   - ✅ **DONE (2026-01-11):** EI assembly no longer hard-codes the Euler 4×4 layout; it accepts `unknowns_per_cell >= 4` and derives ordering from `EquationSystem`.
+   - ✅ **DONE (2026-01-11):** EOS is model-driven via `ModelSpec.eos`; EI kernels consume `EosSpec` instead of hard-coding `gamma = 1.4`.
    - **Finalize recipe/module ownership:** the EI method module should declare its resources and emit its kernel list + phase/dispatch without central matches.
 
-    **Notes from latest scan (to unblock the next two items):**
-    - EOS is still hard-coded as `gamma = 1.4` in EI WGSL generators:
-       - `src/solver/codegen/ei/update.rs`
-       - `src/solver/codegen/ei/flux_kt.rs`
-       - `src/solver/codegen/ei/assembly.rs`
-    - EI assembly is still Euler-layout-specific:
-       - panics unless `unknowns_per_cell == 4`
-       - panics unless unknown ordering matches `(rho, rho_u_x, rho_u_y, rho_e)`
+    **Notes (updated 2026-01-12):**
+    - EOS is now plumbed through `ModelSpec.eos` into EI WGSL generators (no hard-coded `gamma`).
+    - EI assembly accepts `unknowns_per_cell >= 4` and derives component ordering from `EquationSystem`.
 
     **What replaces them:**
     - A method module, e.g. `ExplicitImplicitConservativeMethodModule`, that:
@@ -113,7 +131,7 @@ One model-driven GPU solver pipeline with:
     - `ModelSpec` must provide:
        - conserved unknown list (e.g. `[rho, rho_u_x, rho_u_y, rho_E]` for Euler)
        - primitive recovery requirements (which primitives must exist for method/terms)
-       - EOS spec (remove hard-coded `gamma = 1.4` in kernels)
+       - EOS spec (required for kernels; no hard-coded `gamma`)
     - `FluxLayout` provides named components and per-component packing (offset/stride)
 
     **BC unification requirement (do now):**
@@ -147,14 +165,21 @@ One model-driven GPU solver pipeline with:
      - kernel phase/dispatch requires editing a central match
 
 ## Near-term recommended sequence (practical)
-1) (1)+(2): remove family inference and central phase/dispatch matches.
-2) (3)+(4)+(5): unify runtime kernel creation + registry + bind groups (erase hard-coded "compressible"/"incompressible" paths).
-3) (6)+(7): collapse codegen duplication and remove remaining handwritten WGSL.
+1) Introduce the IR boundary: model lowering produces a physics-erased IR and codegen depends only on that IR.
+2) Make generic coupled fully size-generic (`unknowns_per_cell` everywhere), including solver allocations and CSR expansion.
+3) Convert incompressible to generic: represent pressure coupling, flux module, and derived primitives via model configuration (no special kernels).
+4) Convert EI/compressible to generic: KT/Riemann flux module + EOS/primitive recovery module + generic assembly/apply/update.
+5) Delete EI-specific kernel kinds, WGSL generators, and bindings once no model emits EI kernels.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).
 - Flux/EOS closures remain explicit plan/modules (not inline expressions).
 - Options selection uses typed enums.
+
+## Blockers / Unclear Requirements
+- **Expression language for derived primitives**: a neutral `src/solver/shared` module exists, but there is still duplication between `src/solver/shared/wgsl_ast.rs` and `src/solver/codegen/wgsl_ast.rs`. We should converge on a single AST to avoid type-split bugs.
+- **Generic incompressible solve**: the incompressible coupled system is typically indefinite; the current generic coupled plan still uses scalar-CG infrastructure. Routing incompressible through generic path requires a Krylov method (FGMRES) and a system-agnostic preconditioner that works for the expanded CSR.
+- **Generic flux modules**: compressible currently uses `DivFlux(phi_rho, rho)` etc. The generic pipeline wants a packed face-flux buffer with stable offsets; this implies replacing per-equation named flux fields with a model-provided flux module that writes a packed flux buffer consistent with a derived `FluxLayout`.
 
 ## Notes / Constraints
 - `build.rs` uses `include!()`; build-time-only modules must be wired there.

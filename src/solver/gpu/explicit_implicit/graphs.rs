@@ -1,16 +1,11 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
-use crate::solver::gpu::modules::graph::{
-    ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
-};
-use crate::solver::gpu::modules::model_kernels::{
-    KernelBindGroups, KernelPipeline, ModelKernelsModule,
-};
+use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
+use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
 use crate::solver::gpu::modules::unified_graph::{
     build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
-use crate::solver::model::KernelId;
 
 pub struct CompressibleGraphs {
     explicit_module_graph: ModuleGraph<ModelKernelsModule>,
@@ -22,8 +17,7 @@ pub struct CompressibleGraphs {
 }
 
 impl CompressibleGraphs {
-    /// Create graphs from a SolverRecipe, falling back to hardcoded graphs
-    /// when the recipe doesn't define the needed phases.
+    /// Create graphs from a SolverRecipe, requiring the necessary phases to be present.
     pub fn from_recipe(
         recipe: &SolverRecipe,
         kernels: &ModelKernelsModule,
@@ -39,7 +33,10 @@ impl CompressibleGraphs {
             ],
             kernels,
             "compressible",
-        )?;
+        )?
+        .ok_or_else(|| {
+            "compressible: missing recipe phases for explicit kernel sequence".to_string()
+        })?;
 
         // First-order variant: omit gradients even if available.
         let explicit_graph_first_order = build_optional_graph_for_phases(
@@ -51,7 +48,11 @@ impl CompressibleGraphs {
             ],
             kernels,
             "compressible",
-        )?;
+        )?
+        .ok_or_else(|| {
+            "compressible: missing recipe phases for first-order explicit kernel sequence"
+                .to_string()
+        })?;
 
         // Implicit path: gradients (optional) -> assembly
         let implicit_grad_assembly_graph = build_optional_graph_for_phases(
@@ -59,118 +60,40 @@ impl CompressibleGraphs {
             &[KernelPhase::Gradients, KernelPhase::Assembly],
             kernels,
             "compressible",
-        )?;
-        let implicit_assembly_graph_first_order =
-            build_optional_graph_for_phase(recipe, KernelPhase::Assembly, kernels, "compressible")?;
+        )?
+        .ok_or_else(|| "compressible: missing recipe phases for implicit assembly".to_string())?;
+        let implicit_assembly_graph_first_order = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::Assembly,
+            kernels,
+            "compressible",
+        )?
+        .ok_or_else(|| "compressible: missing recipe phase for assembly".to_string())?;
 
         // These are used today; treat non-empty phases as required if present.
-        let apply_graph =
-            build_optional_graph_for_phase(recipe, KernelPhase::Apply, kernels, "compressible")?;
+        let apply_graph = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::Apply,
+            kernels,
+            "compressible",
+        )?
+        .ok_or_else(|| "compressible: missing recipe phase for apply".to_string())?;
         let primitive_update_graph = build_optional_graph_for_phase(
             recipe,
             KernelPhase::PrimitiveRecovery,
             kernels,
             "compressible",
-        )?;
+        )?
+        .ok_or_else(|| "compressible: missing recipe phase for primitive recovery".to_string())?;
 
         Ok(Self {
-            explicit_module_graph: explicit_graph
-                .unwrap_or_else(|| Self::build_explicit_module_graph(true)),
-            explicit_module_graph_first_order: explicit_graph_first_order
-                .unwrap_or_else(|| Self::build_explicit_module_graph(false)),
-            implicit_grad_assembly_module_graph: implicit_grad_assembly_graph
-                .unwrap_or_else(|| Self::build_implicit_grad_assembly_module_graph(true)),
-            implicit_assembly_module_graph_first_order: implicit_assembly_graph_first_order
-                .unwrap_or_else(|| Self::build_implicit_grad_assembly_module_graph(false)),
-            implicit_apply_module_graph: apply_graph
-                .unwrap_or_else(|| Self::build_implicit_apply_module_graph()),
-            primitive_update_module_graph: primitive_update_graph
-                .unwrap_or_else(|| Self::build_primitive_update_module_graph()),
+            explicit_module_graph: explicit_graph,
+            explicit_module_graph_first_order: explicit_graph_first_order,
+            implicit_grad_assembly_module_graph: implicit_grad_assembly_graph,
+            implicit_assembly_module_graph_first_order: implicit_assembly_graph_first_order,
+            implicit_apply_module_graph: apply_graph,
+            primitive_update_module_graph: primitive_update_graph,
         })
-    }
-
-    pub fn new() -> Self {
-        Self {
-            explicit_module_graph: Self::build_explicit_module_graph(true),
-            explicit_module_graph_first_order: Self::build_explicit_module_graph(false),
-            implicit_grad_assembly_module_graph: Self::build_implicit_grad_assembly_module_graph(
-                true,
-            ),
-            implicit_assembly_module_graph_first_order:
-                Self::build_implicit_grad_assembly_module_graph(false),
-            implicit_apply_module_graph: Self::build_implicit_apply_module_graph(),
-            primitive_update_module_graph: Self::build_primitive_update_module_graph(),
-        }
-    }
-
-    fn build_explicit_module_graph(include_gradients: bool) -> ModuleGraph<ModelKernelsModule> {
-        let mut nodes = Vec::new();
-        if include_gradients {
-            nodes.push(ModuleNode::Compute(ComputeSpec {
-                label: "compressible:gradients",
-                pipeline: KernelPipeline::Kernel(KernelId::EI_GRADIENTS),
-                bind: KernelBindGroups::MeshFields,
-                dispatch: DispatchKind::Cells,
-            }));
-        }
-        nodes.push(ModuleNode::Compute(ComputeSpec {
-            label: "compressible:flux_kt",
-            pipeline: KernelPipeline::Kernel(KernelId::EI_FLUX_KT),
-            bind: KernelBindGroups::MeshFields,
-            dispatch: DispatchKind::Faces,
-        }));
-        nodes.push(ModuleNode::Compute(ComputeSpec {
-            label: "compressible:explicit_update",
-            pipeline: KernelPipeline::Kernel(KernelId::EI_EXPLICIT_UPDATE),
-            bind: KernelBindGroups::MeshFields,
-            dispatch: DispatchKind::Cells,
-        }));
-        nodes.push(ModuleNode::Compute(ComputeSpec {
-            label: "compressible:primitive_update",
-            pipeline: KernelPipeline::Kernel(KernelId::EI_UPDATE),
-            bind: KernelBindGroups::FieldsOnly,
-            dispatch: DispatchKind::Cells,
-        }));
-        ModuleGraph::new(nodes)
-    }
-
-    fn build_implicit_grad_assembly_module_graph(
-        include_gradients: bool,
-    ) -> ModuleGraph<ModelKernelsModule> {
-        let mut nodes = Vec::new();
-        if include_gradients {
-            nodes.push(ModuleNode::Compute(ComputeSpec {
-                label: "compressible:gradients",
-                pipeline: KernelPipeline::Kernel(KernelId::EI_GRADIENTS),
-                bind: KernelBindGroups::MeshFields,
-                dispatch: DispatchKind::Cells,
-            }));
-        }
-        nodes.push(ModuleNode::Compute(ComputeSpec {
-            label: "compressible:assembly",
-            pipeline: KernelPipeline::Kernel(KernelId::EI_ASSEMBLY),
-            bind: KernelBindGroups::MeshFieldsSolver,
-            dispatch: DispatchKind::Cells,
-        }));
-        ModuleGraph::new(nodes)
-    }
-
-    fn build_implicit_apply_module_graph() -> ModuleGraph<ModelKernelsModule> {
-        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
-            label: "compressible:apply",
-            pipeline: KernelPipeline::Kernel(KernelId::EI_APPLY),
-            bind: KernelBindGroups::ApplyFieldsSolver,
-            dispatch: DispatchKind::Cells,
-        })])
-    }
-
-    fn build_primitive_update_module_graph() -> ModuleGraph<ModelKernelsModule> {
-        ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
-            label: "compressible:primitive_update",
-            pipeline: KernelPipeline::Kernel(KernelId::EI_UPDATE),
-            bind: KernelBindGroups::FieldsOnly,
-            dispatch: DispatchKind::Cells,
-        })])
     }
 
     pub fn run_explicit(

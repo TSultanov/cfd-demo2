@@ -44,6 +44,20 @@ impl GenericCoupledPlanResources {
         let update =
             kernel_registry::kernel_source_by_id(model.id, KernelId::GENERIC_COUPLED_UPDATE)?;
 
+        let kt_gradients = recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::KT_GRADIENTS)
+            .then(|| kernel_registry::kernel_source_by_id(model.id, KernelId::KT_GRADIENTS))
+            .transpose()?;
+
+        let flux_kt = recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::FLUX_KT)
+            .then(|| kernel_registry::kernel_source_by_id(model.id, KernelId::FLUX_KT))
+            .transpose()?;
+
         let has_flux = recipe.kernels.iter().any(|k| k.id == KernelId::FLUX_RHIE_CHOW);
         let flux = if has_flux {
             Some(kernel_registry::kernel_source_by_id(
@@ -60,6 +74,10 @@ impl GenericCoupledPlanResources {
         let pipeline_update = (update.create_pipeline)(device);
 
         let pipeline_flux = flux.as_ref().map(|src| (src.create_pipeline)(device));
+
+        let pipeline_kt_gradients =
+            kt_gradients.as_ref().map(|src| (src.create_pipeline)(device));
+        let pipeline_flux_kt = flux_kt.as_ref().map(|src| (src.create_pipeline)(device));
 
         let bg_mesh = {
             let bgl = pipeline_assembly.get_bind_group_layout(0);
@@ -147,6 +165,84 @@ impl GenericCoupledPlanResources {
 
             (Some(bg_mesh_flux), Some(bg_fields_flux_ping_pong))
         } else {
+            (None, None)
+        };
+
+        // KT flux module bind groups.
+        //
+        // The current KT kernels are still backed by the legacy EI generator, but are
+        // selected by model structure (`FluxModuleSpec::KurganovTadmor`).
+        let (bg_mesh_kt, bg_fields_kt_ping_pong) = if let (
+            Some(kt_gradients),
+            Some(pipeline_kt_gradients),
+            Some(flux_kt),
+            Some(pipeline_flux_kt),
+        ) = (
+            kt_gradients.as_ref(),
+            pipeline_kt_gradients.as_ref(),
+            flux_kt.as_ref(),
+            pipeline_flux_kt.as_ref(),
+        ) {
+            // Group 0: mesh
+            let bg_mesh_kt = {
+                let bgl = pipeline_flux_kt.get_bind_group_layout(0);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    "GenericCoupled: KT mesh bind group",
+                    &bgl,
+                    flux_kt.bindings,
+                    0,
+                    |name| {
+                        runtime
+                            .common
+                            .mesh
+                            .buffer_for_binding_name(name)
+                            .map(|buf| {
+                                wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding())
+                            })
+                    },
+                )?
+            };
+
+            // Group 1: fields
+            let bg_fields_kt_ping_pong = {
+                let bgl = pipeline_kt_gradients.get_bind_group_layout(1);
+                let mut out = Vec::new();
+                for i in 0..3 {
+                    out.push(wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("GenericCoupled KT fields bind group {i}"),
+                        &bgl,
+                        kt_gradients.bindings,
+                        1,
+                        |name| {
+                            if let Some(buf) = fields.buffer_for_binding(name, i) {
+                                return Some(wgpu::BindingResource::Buffer(
+                                    buf.as_entire_buffer_binding(),
+                                ));
+                            }
+                            if name == "low_mach" {
+                                if let Some(buf) = fields.low_mach_params_buffer() {
+                                    return Some(wgpu::BindingResource::Buffer(
+                                        buf.as_entire_buffer_binding(),
+                                    ));
+                                }
+                            }
+                            if name == "constants" {
+                                return Some(wgpu::BindingResource::Buffer(
+                                    runtime.constants.buffer().as_entire_buffer_binding(),
+                                ));
+                            }
+                            None
+                        },
+                    )?);
+                }
+                out
+            };
+
+            (Some(bg_mesh_kt), Some(bg_fields_kt_ping_pong))
+        } else {
+            // KT expects both kernels present.
             (None, None)
         };
 
@@ -241,6 +337,32 @@ impl GenericCoupledPlanResources {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
+        let bg_bc_kt = if let (Some(flux_kt), Some(pipeline_flux_kt)) =
+            (flux_kt.as_ref(), pipeline_flux_kt.as_ref())
+        {
+            Some({
+                let bgl = pipeline_flux_kt.get_bind_group_layout(2);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    "GenericCoupled: KT BC bind group",
+                    &bgl,
+                    flux_kt.bindings,
+                    2,
+                    |name| match name {
+                        "bc_kind" => Some(wgpu::BindingResource::Buffer(
+                            b_bc_kind.as_entire_buffer_binding(),
+                        )),
+                        "bc_value" => Some(wgpu::BindingResource::Buffer(
+                            b_bc_value.as_entire_buffer_binding(),
+                        )),
+                        _ => None,
+                    },
+                )?
+            })
+        } else {
+            None
+        };
+
         let bg_bc = {
             let bgl = pipeline_assembly.get_bind_group_layout(3);
             wgsl_reflect::create_bind_group_from_bindings(
@@ -316,6 +438,9 @@ impl GenericCoupledPlanResources {
                 fields.step_handle(),
                 bg_mesh_flux,
                 bg_fields_flux_ping_pong,
+                bg_mesh_kt,
+                bg_fields_kt_ping_pong,
+                bg_bc_kt,
                 bg_mesh,
                 bg_fields_ping_pong,
                 bg_solver,
@@ -323,6 +448,8 @@ impl GenericCoupledPlanResources {
                 bg_update_state_ping_pong,
                 bg_update_solution,
                 pipeline_flux,
+                pipeline_kt_gradients,
+                pipeline_flux_kt,
                 pipeline_assembly,
                 pipeline_update,
             );

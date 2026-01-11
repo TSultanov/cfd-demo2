@@ -268,9 +268,6 @@ impl SolverRecipe {
 
                 KernelId::CONSERVATIVE_UPDATE => KernelPhase::PrimitiveRecovery,
 
-                // Generic-coupled plan does not currently have a dedicated PrimitiveRecovery
-                // phase. Treat model-declared primitive recovery as part of the Update stage.
-                KernelId::PRIMITIVE_RECOVERY => KernelPhase::Update,
 
                 // Preparation kernels (or legacy defaults)
                 _ => KernelPhase::Preparation,

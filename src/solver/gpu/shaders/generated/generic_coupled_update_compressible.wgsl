@@ -49,4 +49,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[idx * 7u + 1u] = x[idx * 4u + 1u];
     state[idx * 7u + 2u] = x[idx * 4u + 2u];
     state[idx * 7u + 3u] = x[idx * 4u + 3u];
+    state[idx * 7u + 4u] = 0.39999998 * (state[idx * 7u + 3u] - 0.5 * (state[idx * 7u + 1u] * state[idx * 7u + 1u] + state[idx * 7u + 2u] * state[idx * 7u + 2u]) / state[idx * 7u + 0u]);
+    state[idx * 7u + 0u] = state[idx * 7u + 0u];
+    state[idx * 7u + 5u] = state[idx * 7u + 1u] / state[idx * 7u + 0u];
+    state[idx * 7u + 6u] = state[idx * 7u + 2u] / state[idx * 7u + 0u];
 }

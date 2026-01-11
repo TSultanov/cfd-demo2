@@ -323,6 +323,12 @@ mod solver {
                 "/src/solver/codegen/plan.rs"
             ));
         }
+        pub mod primitive_expr {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/primitive_expr.rs"
+            ));
+        }
         pub mod state_access {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -682,7 +688,6 @@ fn generate_kernel_registry_map() {
         // These map to the existing generated shader modules while using non-ei stable ids.
         ("KtGradients", "ei_gradients", "kt_gradients"),
         ("FluxKt", "ei_flux_kt", "flux_kt"),
-        ("PrimitiveRecovery", "ei_update", "primitive_recovery"),
     ];
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)

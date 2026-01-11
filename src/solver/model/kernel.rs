@@ -22,7 +22,6 @@ pub enum KernelKind {
     // rather than by the EI method family.
     KtGradients,
     FluxKt,
-    PrimitiveRecovery,
 
     GenericCoupledAssembly,
     GenericCoupledApply,
@@ -62,7 +61,6 @@ impl KernelId {
     // without selecting any `ei_*` kernel ids directly.
     pub const KT_GRADIENTS: KernelId = KernelId("kt_gradients");
     pub const FLUX_KT: KernelId = KernelId("flux_kt");
-    pub const PRIMITIVE_RECOVERY: KernelId = KernelId("primitive_recovery");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
@@ -170,7 +168,6 @@ impl From<KernelKind> for KernelId {
 
             KernelKind::KtGradients => KernelId::KT_GRADIENTS,
             KernelKind::FluxKt => KernelId::FLUX_KT,
-            KernelKind::PrimitiveRecovery => KernelId::PRIMITIVE_RECOVERY,
 
             KernelKind::GenericCoupledAssembly => KernelId::GENERIC_COUPLED_ASSEMBLY,
             KernelKind::GenericCoupledApply => KernelId::GENERIC_COUPLED_APPLY,
@@ -269,10 +266,6 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
 
             kernels.push(KernelKind::GenericCoupledAssembly);
             kernels.push(KernelKind::GenericCoupledUpdate);
-
-            if !model.primitives.is_identity() {
-                kernels.push(KernelKind::PrimitiveRecovery);
-            }
             KernelPlan::new(kernels)
         }
         MethodSpec::GenericCoupledImplicit { .. } => {
@@ -297,11 +290,6 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
 
             kernels.push(KernelKind::GenericCoupledAssembly);
             kernels.push(KernelKind::GenericCoupledUpdate);
-
-            if !model.primitives.is_identity() {
-                kernels.push(KernelKind::PrimitiveRecovery);
-            }
-
             KernelPlan::new(kernels)
         }
     }
@@ -346,10 +334,6 @@ pub fn derive_kernel_ids_for_model(model: &crate::solver::model::ModelSpec) -> V
 
             ids.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
             ids.push(KernelId::GENERIC_COUPLED_UPDATE);
-
-            if !model.primitives.is_identity() {
-                ids.push(KernelId::PRIMITIVE_RECOVERY);
-            }
             ids
         }
         MethodSpec::GenericCoupledImplicit { .. } => {
@@ -372,11 +356,6 @@ pub fn derive_kernel_ids_for_model(model: &crate::solver::model::ModelSpec) -> V
 
             ids.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
             ids.push(KernelId::GENERIC_COUPLED_UPDATE);
-
-            if !model.primitives.is_identity() {
-                ids.push(KernelId::PRIMITIVE_RECOVERY);
-            }
-
             ids
         }
     }

@@ -80,7 +80,6 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
         // Transitional KT flux module bridge.
         KernelKind::KtGradients => "ei_gradients.wgsl".to_string(),
         KernelKind::FluxKt => "ei_flux_kt.wgsl".to_string(),
-        KernelKind::PrimitiveRecovery => "ei_update.wgsl".to_string(),
 
         KernelKind::GenericCoupledAssembly => {
             format!("generic_coupled_assembly_{}.wgsl", model.id)
@@ -129,7 +128,6 @@ fn generate_kernel_wgsl(
 
         KernelKind::KtGradients => method_ei::generate_ei_gradients_wgsl(model),
         KernelKind::FluxKt => method_ei::generate_ei_flux_kt_wgsl(model),
-        KernelKind::PrimitiveRecovery => method_ei::generate_ei_update_wgsl(model),
 
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = expand_schemes(&model.system, schemes)
@@ -145,7 +143,13 @@ fn generate_kernel_wgsl(
         }
         KernelKind::GenericCoupledApply => generate_generic_coupled_apply_wgsl(),
         KernelKind::GenericCoupledUpdate => {
-            generate_generic_coupled_update_wgsl(&discrete, &model.state_layout)
+            let mut prims: Vec<(String, crate::solver::shared::PrimitiveExpr)> = model
+                .primitives
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            prims.sort_by(|a, b| a.0.cmp(&b.0));
+            generate_generic_coupled_update_wgsl(&discrete, &model.state_layout, &prims)
         }
     };
 

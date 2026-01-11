@@ -8,6 +8,7 @@ pub mod ir;
 pub mod method_ei;
 pub mod plan;
 pub mod prepare_coupled;
+pub mod primitive_expr;
 pub mod pressure_assembly;
 pub mod reconstruction;
 pub mod state_access;

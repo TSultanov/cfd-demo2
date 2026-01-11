@@ -8,9 +8,11 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
+use crate::solver::codegen::primitive_expr::lower_primitive_expr;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::ir::{Coefficient, Discretization, StateLayout};
+use crate::solver::shared::PrimitiveExpr;
 
 pub fn generate_generic_coupled_assembly_wgsl(
     system: &DiscreteSystem,
@@ -30,6 +32,7 @@ pub fn generate_generic_coupled_assembly_wgsl(
 pub fn generate_generic_coupled_update_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
+    primitives: &[(String, PrimitiveExpr)],
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -37,7 +40,7 @@ pub fn generate_generic_coupled_update_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_update_items());
-    module.push(Item::Function(main_update_fn(system, layout)));
+    module.push(Item::Function(main_update_fn(system, layout, primitives)));
     module.to_wgsl()
 }
 
@@ -792,7 +795,21 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
     )
 }
 
-fn main_update_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
+fn resolve_state_offset(layout: &StateLayout, name: &str) -> Option<u32> {
+    if let Some(offset) = layout.offset_for(name) {
+        return Some(offset);
+    }
+    let (base, component) = name.rsplit_once('_')?;
+    let component = match component {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        _ => return None,
+    };
+    layout.component_offset(base, component)
+}
+
+fn main_update_fn(system: &DiscreteSystem, layout: &StateLayout, primitives: &[(String, PrimitiveExpr)]) -> Function {
     let stride = layout.stride();
     let unknowns = coupled_unknown_components(system);
     let coupled_stride = unknowns.len() as u32;
@@ -820,6 +837,22 @@ fn main_update_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
         let value = dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
         stmts.push(dsl::assign_expr(target, value));
     }
+
+     // Optional primitive recovery (derived primitives from conserved state).
+     //
+     // This is intentionally emitted inside the model-specific update kernel to avoid
+     // additional per-model registry plumbing.
+     if !primitives.is_empty() {
+         let cell_idx = Expr::ident("idx");
+         for (name, expr) in primitives {
+             let Some(offset) = resolve_state_offset(layout, name) else {
+                 continue;
+             };
+            let value = lower_primitive_expr(expr, layout, cell_idx.clone(), "state");
+            let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, offset);
+            stmts.push(dsl::assign_expr(target, value));
+         }
+     }
 
     Function::new(
         "main",

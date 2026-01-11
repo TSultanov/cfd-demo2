@@ -11,12 +11,12 @@ const SCHUR_SETUP_WGSL: &str = include_str!("../shaders/generic_coupled_schur_se
 pub(crate) struct SetupParams {
     dispatch_x: u32,
     num_cells: u32,
+    unknowns_per_cell: u32,
     u0: u32,
     u1: u32,
     p: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 
 pub struct GenericCoupledSchurPreconditioner {
@@ -25,6 +25,7 @@ pub struct GenericCoupledSchurPreconditioner {
     setup_bg: wgpu::BindGroup,
     setup_params: wgpu::Buffer,
     num_cells: u32,
+    unknowns_per_cell: u32,
     u0: u32,
     u1: u32,
     p: u32,
@@ -41,6 +42,7 @@ impl GenericCoupledSchurPreconditioner {
         setup_bg: wgpu::BindGroup,
         setup_pipeline: wgpu::ComputePipeline,
         setup_params: wgpu::Buffer,
+        unknowns_per_cell: u32,
         u0: u32,
         u1: u32,
         p: u32,
@@ -59,6 +61,7 @@ impl GenericCoupledSchurPreconditioner {
             setup_bg,
             setup_params,
             num_cells,
+            unknowns_per_cell,
             u0,
             u1,
             p,
@@ -247,12 +250,12 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         let params = SetupParams {
             dispatch_x: dispatch.cells.0 * WORKGROUP_SIZE,
             num_cells: self.num_cells,
+            unknowns_per_cell: self.unknowns_per_cell,
             u0: self.u0,
             u1: self.u1,
             p: self.p,
             _pad0: 0,
             _pad1: 0,
-            _pad2: 0,
         };
         queue.write_buffer(&self.setup_params, 0, bytemuck::bytes_of(&params));
 

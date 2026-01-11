@@ -55,7 +55,7 @@ One model-driven GPU solver pipeline with:
 - Incompressible still runs through a coupled-family path (pressure-correction / Rhie–Chow family) instead of the generic discretization pipeline.
 
 ### Blockers / Known Limitations (generic incompressible bridge)
-- The model-owned Schur preconditioner is intentionally narrow: it assumes `unknowns_per_cell == 3` and a 2D saddle-point structure (Vector2 equation + Scalar equation). The unknown ordering is model-declared via `SchurBlockLayout` (no solver-side `[U_x,U_y,p]` assumption).
+- The model-owned Schur preconditioner is intentionally narrow: it assumes a 2D saddle-point split (one Vector2 “velocity-like” block + one Scalar “pressure-like” unknown). The per-cell indices are model-declared via `SchurBlockLayout` (no solver-side `[U_x,U_y,p]` ordering assumption).
 - Generic-coupled rejects attempts to set `PlanParam::Preconditioner` when a model-owned preconditioner is active (e.g. Schur), and `GpuUnifiedSolver::new()` uses the same validation helper as lowering so config/runtime cannot override model-owned preconditioning.
 - The UI disables the preconditioner selector when the active model owns preconditioning (e.g. Schur), keeping UI state consistent with enforcement.
 

@@ -14,11 +14,11 @@ struct PrecondParams {
     n: u32,
     num_cells: u32,
     omega: f32, // Relaxation factor for pressure
+    unknowns_per_cell: u32,
     u0: u32,
     u1: u32,
     p: u32,
     _pad0: u32,
-    _pad1: u32,
 }
 
 // Group 0: Vectors
@@ -102,7 +102,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let base = cell * 3u;
+    let base = cell * params.unknowns_per_cell;
     let row_u = base + params.u0;
     let row_v = base + params.u1;
 
@@ -116,8 +116,8 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var correction_u = 0.0;
     for (var k = start_u; k < end_u; k++) {
         let col = col_indices[k];
-        if (col % 3u == params.p) { 
-            let p_cell = col / 3u;
+        if (col % params.unknowns_per_cell == params.p) {
+            let p_cell = col / params.unknowns_per_cell;
             // correction_u += matrix_values[k] * p_sol[p_cell]; 
             // We need random access to p_sol. 
             // Note: p_sol is binding 3.
@@ -132,8 +132,8 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var correction_v = 0.0;
     for (var k = start_v; k < end_v; k++) {
         let col = col_indices[k];
-        if (col % 3u == params.p) { 
-            let p_cell = col / 3u;
+        if (col % params.unknowns_per_cell == params.p) {
+            let p_cell = col / params.unknowns_per_cell;
             correction_v += matrix_values[k] * p_sol[p_cell];
         }
     }
@@ -152,10 +152,16 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Part 1: Predict Velocity (Local)
-    let base = cell * 3u;
+    let base = cell * params.unknowns_per_cell;
     let row_u = base + params.u0;
     let row_v = base + params.u1;
     let row_p = base + params.p;
+
+    // Default to identity for non-(u,p) components so the preconditioned vector is always valid
+    // even if unknowns_per_cell > 3.
+    for (var c = 0u; c < params.unknowns_per_cell; c++) {
+        z_out[base + c] = r_in[base + c];
+    }
 
     let r_u = r_in[row_u];
     let r_v = r_in[row_v];
@@ -172,14 +178,14 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     for (var k = start; k < end; k++) {
         let col = col_indices[k];
-        let rem = col % 3u;
+        let rem = col % params.unknowns_per_cell;
         
         var z_val = 0.0;
         if (rem == params.u0) {
-            let c = col / 3u;
+            let c = col / params.unknowns_per_cell;
             z_val = r_in[col] * diag_u_inv[c];
         } else if (rem == params.u1) {
-            let c = col / 3u;
+            let c = col / params.unknowns_per_cell;
             z_val = r_in[col] * diag_v_inv[c];
         }
 

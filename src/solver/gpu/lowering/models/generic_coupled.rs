@@ -147,60 +147,52 @@ fn validate_schur_model(
             "Schur preconditioner is only wired for the GenericCoupled pipeline".to_string(),
         );
     }
-    if model.system.unknowns_per_cell() != 3 {
+    if model.system.unknowns_per_cell() < 3 {
         return Err(format!(
-            "Schur preconditioner requires 3 unknowns per cell (got {})",
+            "Schur preconditioner requires unknowns_per_cell >= 3 (got {})",
             model.system.unknowns_per_cell()
         ));
     }
 
     layout.validate(model.system.unknowns_per_cell())?;
-    let eqs = model.system.equations();
-    if eqs.len() != 2 {
-        return Err(format!(
-            "Schur preconditioner currently requires exactly 2 equations (got {})",
-            eqs.len()
-        ));
-    }
-    let u = eqs[0].target();
-    let p = eqs[1].target();
-    if u.kind() != crate::solver::model::backend::ast::FieldKind::Vector2 {
-        return Err(format!(
-            "Schur preconditioner currently requires first equation target (Vector2), got {} ({})",
-            u.name(),
-            u.kind().as_str()
-        ));
-    }
-    if p.kind() != crate::solver::model::backend::ast::FieldKind::Scalar {
-        return Err(format!(
-            "Schur preconditioner currently requires second equation target (Scalar), got {} ({})",
-            p.name(),
-            p.kind().as_str()
-        ));
-    }
 
-    // Validate that the layout matches the model's state layout for the equation targets.
-    // (This keeps the Schur mapping model-owned, while preventing accidental mismatch.)
-    let expected_u0 = model
-        .state_layout
-        .component_offset(u.name(), 0)
-        .ok_or_else(|| format!("missing '{}' component 0 in state layout", u.name()))?;
-    let expected_u1 = model
-        .state_layout
-        .component_offset(u.name(), 1)
-        .ok_or_else(|| format!("missing '{}' component 1 in state layout", u.name()))?;
-    let expected_p = model
-        .state_layout
-        .offset_for(p.name())
-        .ok_or_else(|| format!("missing '{}' in state layout", p.name()))?;
-    let expected = crate::solver::model::SchurBlockLayout {
-        u: [expected_u0, expected_u1],
-        p: expected_p,
+    // Validate the layout against the model's state layout.
+    //
+    // This prevents a model from declaring indices that don't correspond to a Vector2 + Scalar
+    // saddle-point split, without requiring equation ordering or specific field names.
+    let u_set = {
+        let mut vals = [layout.u[0], layout.u[1]];
+        vals.sort_unstable();
+        vals
     };
-    if layout != expected {
+    let mut has_u = false;
+    let mut has_p = false;
+    for field in model.state_layout.fields() {
+        match field.kind() {
+            crate::solver::model::backend::ast::FieldKind::Vector2 => {
+                let mut offsets = [field.offset(), field.offset() + 1];
+                offsets.sort_unstable();
+                if offsets == u_set {
+                    has_u = true;
+                }
+            }
+            crate::solver::model::backend::ast::FieldKind::Scalar => {
+                if field.offset() == layout.p {
+                    has_p = true;
+                }
+            }
+        }
+    }
+    if !has_u {
         return Err(format!(
-            "SchurBlockLayout {:?} does not match state layout for equation targets (expected {:?})",
-            layout, expected
+            "SchurBlockLayout {:?} does not match any Vector2 field in the model state layout",
+            layout
+        ));
+    }
+    if !has_p {
+        return Err(format!(
+            "SchurBlockLayout {:?} pressure index does not match any Scalar field in the model state layout",
+            layout
         ));
     }
 
@@ -264,11 +256,11 @@ fn build_generic_schur(
         n: num_dofs,
         num_cells,
         omega,
+        unknowns_per_cell: model.system.unknowns_per_cell(),
         u0: layout.u[0],
         u1: layout.u[1],
         p: layout.p,
         _pad0: 0,
-        _pad1: 0,
     };
     runtime
         .common
@@ -343,6 +335,7 @@ fn build_generic_schur(
         setup_bg,
         setup_pipeline,
         b_setup_params,
+        model.system.unknowns_per_cell(),
         layout.u[0],
         layout.u[1],
         layout.p,
@@ -694,9 +687,10 @@ mod tests {
         let ModelPreconditionerSpec::Schur { layout, .. } = &mut spec.preconditioner else {
             panic!("expected Schur preconditioner");
         };
-        *layout = SchurBlockLayout { u: [0, 0], p: 2 };
+        // Distinct/in-range, but doesn't correspond to any Vector2 field in the state layout.
+        *layout = SchurBlockLayout { u: [0, 2], p: 1 };
 
         let err = validate_schur_model(&model).unwrap_err();
-        assert!(err.contains("distinct"), "unexpected error: {err}");
+        assert!(err.contains("Vector2"), "unexpected error: {err}");
     }
 }

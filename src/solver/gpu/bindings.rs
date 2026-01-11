@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 00a08dfa80e4be5ffcda4c01c5e663b9327f4557e974f739a228505b0e0b81a9
+// SourceHash: a71c15c7a68400c65460c60c0b3748876ae6e602b1c7c49becc3447dd30fba0f
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1067,12 +1067,14 @@ pub mod layout_asserts {
     const GENERIC_COUPLED_SCHUR_SETUP_SETUP_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, dispatch_x) == 0);
         assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, num_cells) == 4);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u0) == 8);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u1) == 12);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, p) == 16);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad0) == 20);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad1) == 24);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad2) == 28);
+        assert!(
+            std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, unknowns_per_cell) == 8
+        );
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u0) == 12);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u1) == 16);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, p) == 20);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad0) == 24);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad1) == 28);
         assert!(std::mem::size_of::<generic_coupled_schur_setup::SetupParams>() == 32);
     };
     const GMRES_CGS_PARAMS_ASSERTS: () = {
@@ -1171,11 +1173,11 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(schur_precond::PrecondParams, n) == 0);
         assert!(std::mem::offset_of!(schur_precond::PrecondParams, num_cells) == 4);
         assert!(std::mem::offset_of!(schur_precond::PrecondParams, omega) == 8);
-        assert!(std::mem::offset_of!(schur_precond::PrecondParams, u0) == 12);
-        assert!(std::mem::offset_of!(schur_precond::PrecondParams, u1) == 16);
-        assert!(std::mem::offset_of!(schur_precond::PrecondParams, p) == 20);
-        assert!(std::mem::offset_of!(schur_precond::PrecondParams, _pad0) == 24);
-        assert!(std::mem::offset_of!(schur_precond::PrecondParams, _pad1) == 28);
+        assert!(std::mem::offset_of!(schur_precond::PrecondParams, unknowns_per_cell) == 12);
+        assert!(std::mem::offset_of!(schur_precond::PrecondParams, u0) == 16);
+        assert!(std::mem::offset_of!(schur_precond::PrecondParams, u1) == 20);
+        assert!(std::mem::offset_of!(schur_precond::PrecondParams, p) == 24);
+        assert!(std::mem::offset_of!(schur_precond::PrecondParams, _pad0) == 28);
         assert!(std::mem::size_of::<schur_precond::PrecondParams>() == 32);
     };
 }
@@ -17703,38 +17705,38 @@ pub mod generic_coupled_schur_setup {
         #[doc = "offset: 4, size: 4, type: `u32`"]
         pub num_cells: u32,
         #[doc = "offset: 8, size: 4, type: `u32`"]
-        pub u0: u32,
+        pub unknowns_per_cell: u32,
         #[doc = "offset: 12, size: 4, type: `u32`"]
-        pub u1: u32,
+        pub u0: u32,
         #[doc = "offset: 16, size: 4, type: `u32`"]
-        pub p: u32,
+        pub u1: u32,
         #[doc = "offset: 20, size: 4, type: `u32`"]
-        pub _pad0: u32,
+        pub p: u32,
         #[doc = "offset: 24, size: 4, type: `u32`"]
-        pub _pad1: u32,
+        pub _pad0: u32,
         #[doc = "offset: 28, size: 4, type: `u32`"]
-        pub _pad2: u32,
+        pub _pad1: u32,
     }
     impl SetupParams {
         pub const fn new(
             dispatch_x: u32,
             num_cells: u32,
+            unknowns_per_cell: u32,
             u0: u32,
             u1: u32,
             p: u32,
             _pad0: u32,
             _pad1: u32,
-            _pad2: u32,
         ) -> Self {
             Self {
                 dispatch_x,
                 num_cells,
+                unknowns_per_cell,
                 u0,
                 u1,
                 p,
                 _pad0,
                 _pad1,
-                _pad2,
             }
         }
     }
@@ -17992,12 +17994,12 @@ pub mod generic_coupled_schur_setup {
 struct SetupParams {
     dispatch_x: u32,
     num_cells: u32,
+    unknowns_per_cell: u32,
     u0_: u32,
     u1_: u32,
     p: u32,
     _pad0_: u32,
     _pad1_: u32,
-    _pad2_: u32,
 }
 
 @group(0) @binding(0) 
@@ -18039,42 +18041,50 @@ fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) 
     let num_neighbors = (scalar_end - scalar_offset);
     let _e24 = diagonal_indices[cell];
     let diag_rank = (_e24 - scalar_offset);
-    let start_row_0_ = (scalar_offset * 9u);
-    let row_stride = (num_neighbors * 3u);
-    let _e32 = params.u0_;
-    let start_row_u = (start_row_0_ + (_e32 * row_stride));
-    let _e37 = params.u1_;
-    let start_row_v = (start_row_0_ + (_e37 * row_stride));
-    let _e42 = params.p;
-    let start_row_p = (start_row_0_ + (_e42 * row_stride));
-    let _e51 = params.u0_;
-    let diag_u = matrix_values[((start_row_u + (diag_rank * 3u)) + _e51)];
-    let _e61 = params.u1_;
-    let diag_v = matrix_values[((start_row_v + (diag_rank * 3u)) + _e61)];
-    let _e71 = params.p;
-    let diag_p = matrix_values[((start_row_p + (diag_rank * 3u)) + _e71)];
-    let _e77 = safe_inverse(diag_u);
-    diag_u_inv[cell] = _e77;
-    let _e80 = safe_inverse(diag_v);
-    diag_v_inv[cell] = _e80;
-    let _e83 = safe_inverse(diag_p);
-    diag_p_inv[cell] = _e83;
+    let _e28 = params.unknowns_per_cell;
+    let _e31 = params.unknowns_per_cell;
+    let block_stride = (_e28 * _e31);
+    let start_row_0_ = (scalar_offset * block_stride);
+    let _e36 = params.unknowns_per_cell;
+    let row_stride = (num_neighbors * _e36);
+    let _e40 = params.u0_;
+    let start_row_u = (start_row_0_ + (_e40 * row_stride));
+    let _e45 = params.u1_;
+    let start_row_v = (start_row_0_ + (_e45 * row_stride));
+    let _e50 = params.p;
+    let start_row_p = (start_row_0_ + (_e50 * row_stride));
+    let _e55 = params.unknowns_per_cell;
+    let _e61 = params.u0_;
+    let diag_u = matrix_values[((start_row_u + (diag_rank * _e55)) + _e61)];
+    let _e67 = params.unknowns_per_cell;
+    let _e73 = params.u1_;
+    let diag_v = matrix_values[((start_row_v + (diag_rank * _e67)) + _e73)];
+    let _e79 = params.unknowns_per_cell;
+    let _e85 = params.p;
+    let diag_p = matrix_values[((start_row_p + (diag_rank * _e79)) + _e85)];
+    let _e91 = safe_inverse(diag_u);
+    diag_u_inv[cell] = _e91;
+    let _e94 = safe_inverse(diag_v);
+    diag_v_inv[cell] = _e94;
+    let _e97 = safe_inverse(diag_p);
+    diag_p_inv[cell] = _e97;
     loop {
-        let _e85 = rank;
-        if (_e85 < num_neighbors) {
+        let _e99 = rank;
+        if (_e99 < num_neighbors) {
         } else {
             break;
         }
         {
-            let _e88 = rank;
-            let _e91 = rank;
-            let _e98 = params.p;
-            let _e101 = matrix_values[((start_row_p + (_e91 * 3u)) + _e98)];
-            p_matrix_values[(scalar_offset + _e88)] = _e101;
+            let _e102 = rank;
+            let _e105 = rank;
+            let _e108 = params.unknowns_per_cell;
+            let _e114 = params.p;
+            let _e117 = matrix_values[((start_row_p + (_e105 * _e108)) + _e114)];
+            p_matrix_values[(scalar_offset + _e102)] = _e117;
         }
         continuing {
-            let _e103 = rank;
-            rank = (_e103 + 1u);
+            let _e119 = rank;
+            rank = (_e119 + 1u);
         }
     }
     return;
@@ -22657,36 +22667,36 @@ pub mod schur_precond {
         #[doc = "offset: 8, size: 4, type: `f32`"]
         pub omega: f32,
         #[doc = "offset: 12, size: 4, type: `u32`"]
-        pub u0: u32,
+        pub unknowns_per_cell: u32,
         #[doc = "offset: 16, size: 4, type: `u32`"]
-        pub u1: u32,
+        pub u0: u32,
         #[doc = "offset: 20, size: 4, type: `u32`"]
-        pub p: u32,
+        pub u1: u32,
         #[doc = "offset: 24, size: 4, type: `u32`"]
-        pub _pad0: u32,
+        pub p: u32,
         #[doc = "offset: 28, size: 4, type: `u32`"]
-        pub _pad1: u32,
+        pub _pad0: u32,
     }
     impl PrecondParams {
         pub const fn new(
             n: u32,
             num_cells: u32,
             omega: f32,
+            unknowns_per_cell: u32,
             u0: u32,
             u1: u32,
             p: u32,
             _pad0: u32,
-            _pad1: u32,
         ) -> Self {
             Self {
                 n,
                 num_cells,
                 omega,
+                unknowns_per_cell,
                 u0,
                 u1,
                 p,
                 _pad0,
-                _pad1,
             }
         }
     }
@@ -23235,11 +23245,11 @@ struct PrecondParams {
     n: u32,
     num_cells: u32,
     omega: f32,
+    unknowns_per_cell: u32,
     u0_: u32,
     u1_: u32,
     p: u32,
     _pad0_: u32,
-    _pad1_: u32,
 }
 
 @group(0) @binding(0) 
@@ -23338,151 +23348,179 @@ fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     if (cell_1 >= _e5) {
         return;
     }
-    let base = (cell_1 * 3u);
-    let _e11 = params.u0_;
-    let row_u = (base + _e11);
-    let _e15 = params.u1_;
-    let row_v = (base + _e15);
+    let _e9 = params.unknowns_per_cell;
+    let base = (cell_1 * _e9);
+    let _e13 = params.u0_;
+    let row_u = (base + _e13);
+    let _e17 = params.u1_;
+    let row_v = (base + _e17);
     let p_val = p_sol[cell_1];
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[(row_u + 1u)];
     k_1 = start_u;
     loop {
-        let _e29 = k_1;
-        if (_e29 < end_u) {
+        let _e31 = k_1;
+        if (_e31 < end_u) {
         } else {
             break;
         }
         {
-            let _e32 = k_1;
-            let col = col_indices[_e32];
-            let _e39 = params.p;
-            if ((col % 3u) == _e39) {
-                let p_cell = (col / 3u);
-                let _e44 = k_1;
-                let _e46 = matrix_values[_e44];
-                let _e50 = p_sol[p_cell];
-                let _e52 = correction_u;
-                correction_u = (_e52 + (_e46 * _e50));
+            let _e34 = k_1;
+            let col = col_indices[_e34];
+            let _e39 = params.unknowns_per_cell;
+            let _e43 = params.p;
+            if ((col % _e39) == _e43) {
+                let _e47 = params.unknowns_per_cell;
+                let p_cell = (col / _e47);
+                let _e50 = k_1;
+                let _e52 = matrix_values[_e50];
+                let _e56 = p_sol[p_cell];
+                let _e58 = correction_u;
+                correction_u = (_e58 + (_e52 * _e56));
             }
         }
         continuing {
-            let _e55 = k_1;
-            k_1 = (_e55 + 1u);
+            let _e61 = k_1;
+            k_1 = (_e61 + 1u);
         }
     }
-    let _e61 = diag_u_inv[cell_1];
-    let _e62 = correction_u;
-    let _e64 = z_out[row_u];
-    z_out[row_u] = (_e64 - (_e61 * _e62));
+    let _e67 = diag_u_inv[cell_1];
+    let _e68 = correction_u;
+    let _e70 = z_out[row_u];
+    z_out[row_u] = (_e70 - (_e67 * _e68));
     let start_v = row_offsets[row_v];
     let end_v = row_offsets[(row_v + 1u)];
     k_2 = start_v;
     loop {
-        let _e75 = k_2;
-        if (_e75 < end_v) {
+        let _e81 = k_2;
+        if (_e81 < end_v) {
         } else {
             break;
         }
         {
-            let _e78 = k_2;
-            let col_1 = col_indices[_e78];
-            let _e85 = params.p;
-            if ((col_1 % 3u) == _e85) {
-                let p_cell_1 = (col_1 / 3u);
-                let _e90 = k_2;
-                let _e92 = matrix_values[_e90];
-                let _e96 = p_sol[p_cell_1];
-                let _e98 = correction_v;
-                correction_v = (_e98 + (_e92 * _e96));
+            let _e84 = k_2;
+            let col_1 = col_indices[_e84];
+            let _e89 = params.unknowns_per_cell;
+            let _e93 = params.p;
+            if ((col_1 % _e89) == _e93) {
+                let _e97 = params.unknowns_per_cell;
+                let p_cell_1 = (col_1 / _e97);
+                let _e100 = k_2;
+                let _e102 = matrix_values[_e100];
+                let _e106 = p_sol[p_cell_1];
+                let _e108 = correction_v;
+                correction_v = (_e108 + (_e102 * _e106));
             }
         }
         continuing {
-            let _e101 = k_2;
-            k_2 = (_e101 + 1u);
+            let _e111 = k_2;
+            k_2 = (_e111 + 1u);
         }
     }
-    let _e107 = diag_v_inv[cell_1];
-    let _e108 = correction_v;
-    let _e110 = z_out[row_v];
-    z_out[row_v] = (_e110 - (_e107 * _e108));
-    let _e115 = params.p;
-    z_out[(base + _e115)] = p_val;
+    let _e117 = diag_v_inv[cell_1];
+    let _e118 = correction_v;
+    let _e120 = z_out[row_v];
+    z_out[row_v] = (_e120 - (_e117 * _e118));
+    let _e125 = params.p;
+    z_out[(base + _e125)] = p_val;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
 fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+    var c: u32 = 0u;
     var rhs_p: f32;
     var k_3: u32;
     var z_val: f32;
 
     let cell_2 = global_id_2.x;
-    let _e4 = params.num_cells;
-    if (cell_2 >= _e4) {
+    let _e5 = params.num_cells;
+    if (cell_2 >= _e5) {
         return;
     }
-    let base_1 = (cell_2 * 3u);
-    let _e10 = params.u0_;
-    let row_u_1 = (base_1 + _e10);
-    let _e14 = params.u1_;
-    let row_v_1 = (base_1 + _e14);
-    let _e18 = params.p;
-    let row_p = (base_1 + _e18);
-    let r_u = r_in[row_u_1];
-    let r_v = r_in[row_v_1];
-    let _e30 = diag_u_inv[cell_2];
-    z_out[row_u_1] = (_e30 * r_u);
-    let _e36 = diag_v_inv[cell_2];
-    z_out[row_v_1] = (_e36 * r_v);
-    z_out[row_p] = 0f;
-    let _e43 = r_in[row_p];
-    rhs_p = _e43;
-    let start_1 = row_offsets[row_p];
-    let end_1 = row_offsets[(row_p + 1u)];
-    k_3 = start_1;
+    let _e9 = params.unknowns_per_cell;
+    let base_1 = (cell_2 * _e9);
+    let _e13 = params.u0_;
+    let row_u_1 = (base_1 + _e13);
+    let _e17 = params.u1_;
+    let row_v_1 = (base_1 + _e17);
+    let _e21 = params.p;
+    let row_p = (base_1 + _e21);
     loop {
-        let _e54 = k_3;
-        if (_e54 < end_1) {
+        let _e24 = c;
+        let _e27 = params.unknowns_per_cell;
+        if (_e24 < _e27) {
         } else {
             break;
         }
         {
-            let _e57 = k_3;
-            let col_2 = col_indices[_e57];
-            let rem = (col_2 % 3u);
-            z_val = 0f;
-            let _e66 = params.u0_;
-            if (rem == _e66) {
-                let c = (col_2 / 3u);
-                let _e72 = r_in[col_2];
-                let _e75 = diag_u_inv[c];
-                z_val = (_e72 * _e75);
-            } else {
-                let _e79 = params.u1_;
-                if (rem == _e79) {
-                    let c_1 = (col_2 / 3u);
-                    let _e85 = r_in[col_2];
-                    let _e88 = diag_v_inv[c_1];
-                    z_val = (_e85 * _e88);
-                }
-            }
-            let _e91 = k_3;
-            let _e93 = matrix_values[_e91];
-            let _e94 = z_val;
-            let _e96 = rhs_p;
-            rhs_p = (_e96 - (_e93 * _e94));
+            let _e30 = c;
+            let _e34 = c;
+            let _e37 = r_in[(base_1 + _e34)];
+            z_out[(base_1 + _e30)] = _e37;
         }
         continuing {
-            let _e99 = k_3;
-            k_3 = (_e99 + 1u);
+            let _e39 = c;
+            c = (_e39 + 1u);
         }
     }
-    let _e103 = rhs_p;
-    temp_p[cell_2] = _e103;
-    let _e108 = diag_p_inv[cell_2];
-    let _e109 = rhs_p;
-    p_sol[cell_2] = (_e108 * _e109);
+    let r_u = r_in[row_u_1];
+    let r_v = r_in[row_v_1];
+    let _e51 = diag_u_inv[cell_2];
+    z_out[row_u_1] = (_e51 * r_u);
+    let _e57 = diag_v_inv[cell_2];
+    z_out[row_v_1] = (_e57 * r_v);
+    z_out[row_p] = 0f;
+    let _e64 = r_in[row_p];
+    rhs_p = _e64;
+    let start_1 = row_offsets[row_p];
+    let end_1 = row_offsets[(row_p + 1u)];
+    k_3 = start_1;
+    loop {
+        let _e75 = k_3;
+        if (_e75 < end_1) {
+        } else {
+            break;
+        }
+        {
+            let _e78 = k_3;
+            let col_2 = col_indices[_e78];
+            let _e83 = params.unknowns_per_cell;
+            let rem = (col_2 % _e83);
+            z_val = 0f;
+            let _e89 = params.u0_;
+            if (rem == _e89) {
+                let _e93 = params.unknowns_per_cell;
+                let c_1 = (col_2 / _e93);
+                let _e97 = r_in[col_2];
+                let _e100 = diag_u_inv[c_1];
+                z_val = (_e97 * _e100);
+            } else {
+                let _e104 = params.u1_;
+                if (rem == _e104) {
+                    let _e108 = params.unknowns_per_cell;
+                    let c_2 = (col_2 / _e108);
+                    let _e112 = r_in[col_2];
+                    let _e115 = diag_v_inv[c_2];
+                    z_val = (_e112 * _e115);
+                }
+            }
+            let _e118 = k_3;
+            let _e120 = matrix_values[_e118];
+            let _e121 = z_val;
+            let _e123 = rhs_p;
+            rhs_p = (_e123 - (_e120 * _e121));
+        }
+        continuing {
+            let _e126 = k_3;
+            k_3 = (_e126 + 1u);
+        }
+    }
+    let _e130 = rhs_p;
+    temp_p[cell_2] = _e130;
+    let _e135 = diag_p_inv[cell_2];
+    let _e136 = rhs_p;
+    p_sol[cell_2] = (_e135 * _e136);
     p_prev[cell_2] = 0f;
     return;
 }

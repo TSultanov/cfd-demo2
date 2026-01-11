@@ -15,12 +15,12 @@
 struct SetupParams {
     dispatch_x: u32,
     num_cells: u32,
+    unknowns_per_cell: u32,
     u0: u32,
     u1: u32,
     p: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 @group(0) @binding(7) var<uniform> params: SetupParams;
 
@@ -44,21 +44,23 @@ fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) 
     let num_neighbors = scalar_end - scalar_offset;
     let diag_rank = diagonal_indices[cell] - scalar_offset;
 
-    let start_row_0 = scalar_offset * 9u;
-    let row_stride = num_neighbors * 3u;
+    let block_stride = params.unknowns_per_cell * params.unknowns_per_cell;
+    let start_row_0 = scalar_offset * block_stride;
+    let row_stride = num_neighbors * params.unknowns_per_cell;
     let start_row_u = start_row_0 + params.u0 * row_stride;
     let start_row_v = start_row_0 + params.u1 * row_stride;
     let start_row_p = start_row_0 + params.p * row_stride;
 
-    let diag_u = matrix_values[start_row_u + diag_rank * 3u + params.u0];
-    let diag_v = matrix_values[start_row_v + diag_rank * 3u + params.u1];
-    let diag_p = matrix_values[start_row_p + diag_rank * 3u + params.p];
+    let diag_u = matrix_values[start_row_u + diag_rank * params.unknowns_per_cell + params.u0];
+    let diag_v = matrix_values[start_row_v + diag_rank * params.unknowns_per_cell + params.u1];
+    let diag_p = matrix_values[start_row_p + diag_rank * params.unknowns_per_cell + params.p];
 
     diag_u_inv[cell] = safe_inverse(diag_u);
     diag_v_inv[cell] = safe_inverse(diag_v);
     diag_p_inv[cell] = safe_inverse(diag_p);
 
     for (var rank = 0u; rank < num_neighbors; rank++) {
-        p_matrix_values[scalar_offset + rank] = matrix_values[start_row_p + rank * 3u + params.p];
+        p_matrix_values[scalar_offset + rank] =
+            matrix_values[start_row_p + rank * params.unknowns_per_cell + params.p];
     }
 }

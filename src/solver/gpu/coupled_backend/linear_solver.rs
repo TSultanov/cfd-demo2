@@ -251,11 +251,11 @@ impl IncompressibleLinearSolver {
                 n: 0,
                 num_cells,
                 omega: 1.2,
+                unknowns_per_cell: 3,
                 u0: 0,
                 u1: 1,
                 p: 2,
                 _pad0: 0,
-                _pad1: 0,
             };
             let precond_write_start = Instant::now();
             context.queue.write_buffer(

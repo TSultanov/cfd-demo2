@@ -26,7 +26,7 @@ One model-driven GPU solver pipeline with:
 - EI method codegen is routed through `src/solver/codegen/method_ei.rs` and EI kernels emit through the unified emitter path.
 - EI uses `FluxLayout` (named component offsets/stride) and unified BC tables (`bc_kind`/`bc_value`) with consecutive bind groups.
 - EI codegen no longer depends on `CompressibleFields` for EI kernel emission (still Euler-name-specific internally).
-- EI kernel implementations live under `src/solver/codegen/ei/*`; legacy `compressible_*` EI modules are compatibility wrappers.
+- EI kernel implementations live under `src/solver/codegen/ei/*`; legacy `compressible_*` EI modules have been deleted.
 - Regression validation: `gpu_compressible_solver_preserves_uniform_state` passes.
 
 ### Still Violating the Goal (remaining family-ness)
@@ -84,10 +84,19 @@ One model-driven GPU solver pipeline with:
     - `src/solver/codegen/compressible_update.rs`
 
    **Remaining work (as of 2026-01-11):**
-   - **Delete the legacy module names:** remove `src/solver/codegen/compressible_*` EI modules once all call sites have moved to method-owned entrypoints.
+    - **Delete the legacy module names:** done (legacy `src/solver/codegen/compressible_*` EI modules removed).
    - **Make EI assembly truly model-driven:** remove the Euler-specific 4×4 assumptions (currently the assembly validates `unknowns_per_cell == 4` and ordering).
    - **Remove hard-coded EOS from kernels:** primitive recovery / update still hard-codes `gamma = 1.4`; introduce an EOS spec and plumb parameters into WGSL.
    - **Finalize recipe/module ownership:** the EI method module should declare its resources and emit its kernel list + phase/dispatch without central matches.
+
+    **Notes from latest scan (to unblock the next two items):**
+    - EOS is still hard-coded as `gamma = 1.4` in EI WGSL generators:
+       - `src/solver/codegen/ei/update.rs`
+       - `src/solver/codegen/ei/flux_kt.rs`
+       - `src/solver/codegen/ei/assembly.rs`
+    - EI assembly is still Euler-layout-specific:
+       - panics unless `unknowns_per_cell == 4`
+       - panics unless unknown ordering matches `(rho, rho_u_x, rho_u_y, rho_e)`
 
     **What replaces them:**
     - A method module, e.g. `ExplicitImplicitConservativeMethodModule`, that:

@@ -1,0 +1,29 @@
+name: Check generated WGSL
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  check-generated-wgsl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps (winit/wgpu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxkbcommon-dev libwayland-dev \
+            libxrandr-dev libxi-dev libxcursor-dev libxfixes-dev \
+            libegl1-mesa-dev
+
+      - name: Check generated WGSL is up to date
+        run: ./scripts/check_generated_wgsl.sh

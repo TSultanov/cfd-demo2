@@ -1,24 +1,10 @@
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
-use bytemuck::{Pod, Zeroable};
-
 const WORKGROUP_SIZE: u32 = 64;
 const SCHUR_SETUP_WGSL: &str = include_str!("../shaders/generic_coupled_schur_setup.wgsl");
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub(crate) struct SetupParams {
-    dispatch_x: u32,
-    num_cells: u32,
-    unknowns_per_cell: u32,
-    p: u32,
-    u_len: u32,
-    _pad0: u32,
-    _pad1: u32,
-    u0123: [u32; 4],
-    u4567: [u32; 4],
-}
+use crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams;
 
 pub struct GenericCoupledSchurPreconditioner {
     schur: CoupledSchurModule,
@@ -237,17 +223,17 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         _rhs: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
-        let params = SetupParams {
-            dispatch_x: dispatch.cells.0 * WORKGROUP_SIZE,
-            num_cells: self.num_cells,
-            unknowns_per_cell: self.unknowns_per_cell,
-            p: self.p,
-            u_len: self.u_len,
-            _pad0: 0,
-            _pad1: 0,
-            u0123: self.u0123,
-            u4567: self.u4567,
-        };
+        let params = SetupParams::new(
+            dispatch.cells.0 * WORKGROUP_SIZE,
+            self.num_cells,
+            self.unknowns_per_cell,
+            self.p,
+            self.u_len,
+            0,
+            0,
+            self.u0123,
+            self.u4567,
+        );
         queue.write_buffer(&self.setup_params, 0, bytemuck::bytes_of(&params));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

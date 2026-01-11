@@ -292,7 +292,7 @@ fn build_generic_schur(
 
     let b_setup_params = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur setup_params"),
-        size: std::mem::size_of::<crate::solver::gpu::modules::generic_coupled_schur::SetupParams>()
+        size: std::mem::size_of::<crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams>()
             as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,

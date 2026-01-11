@@ -25,13 +25,6 @@ pub fn generate_ei_flux_kt_wgsl(
     module.to_wgsl()
 }
 
-pub fn generate_compressible_flux_kt_wgsl(
-    layout: &StateLayout,
-    flux_layout: &FluxLayout,
-) -> String {
-    generate_ei_flux_kt_wgsl(layout, flux_layout)
-}
-
 fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));

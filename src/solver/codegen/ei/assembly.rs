@@ -21,13 +21,6 @@ pub fn generate_ei_assembly_wgsl(layout: &StateLayout, system: &EquationSystem) 
     module.to_wgsl()
 }
 
-pub fn generate_compressible_assembly_wgsl(
-    layout: &StateLayout,
-    system: &EquationSystem,
-) -> String {
-    generate_ei_assembly_wgsl(layout, system)
-}
-
 fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));

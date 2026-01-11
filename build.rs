@@ -157,42 +157,6 @@ mod solver {
             pub use types::{DslType, ScalarType, Shape};
             pub use units::UnitDim;
         }
-        pub mod compressible_assembly {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/compressible_assembly.rs"
-            ));
-        }
-        pub mod compressible_apply {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/compressible_apply.rs"
-            ));
-        }
-        pub mod compressible_explicit_update {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/compressible_explicit_update.rs"
-            ));
-        }
-        pub mod compressible_gradients {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/compressible_gradients.rs"
-            ));
-        }
-        pub mod compressible_flux_kt {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/compressible_flux_kt.rs"
-            ));
-        }
-        pub mod compressible_update {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/compressible_update.rs"
-            ));
-        }
         pub mod method_ei {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

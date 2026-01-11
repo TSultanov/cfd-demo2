@@ -1,35 +1,88 @@
+pub const SCHUR_MAX_U: usize = 8;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SchurBlockLayout {
+    /// Number of velocity-like unknown components in the Schur block.
+    ///
+    /// This is typically 2 (2D) or 3 (3D), but is model-defined.
+    pub u_len: u32,
     /// Indices of the velocity-like unknowns within the per-cell unknown vector.
     ///
-    /// For the current 2D incompressible bridge, this is `[u_x, u_y]`.
-    pub u: [u32; 2],
+    /// Only the first `u_len` entries are used.
+    pub u: [u32; SCHUR_MAX_U],
     /// Index of the pressure-like unknown within the per-cell unknown vector.
     pub p: u32,
 }
 
 impl SchurBlockLayout {
-    pub fn validate(self, unknowns_per_cell: u32) -> Result<(), String> {
-        let [u0, u1] = self.u;
-        let p = self.p;
+    pub fn from_u_p(u: &[u32], p: u32) -> Result<Self, String> {
+        if u.is_empty() {
+            return Err("SchurBlockLayout requires at least one u index".to_string());
+        }
+        if u.len() > SCHUR_MAX_U {
+            return Err(format!(
+                "SchurBlockLayout supports at most {} u indices (got {})",
+                SCHUR_MAX_U,
+                u.len()
+            ));
+        }
+        let mut out = [0u32; SCHUR_MAX_U];
+        out[..u.len()].copy_from_slice(u);
+        Ok(Self {
+            u_len: u.len() as u32,
+            u: out,
+            p,
+        })
+    }
 
+    pub fn u_indices(&self) -> &[u32] {
+        let n = (self.u_len as usize).min(SCHUR_MAX_U);
+        &self.u[..n]
+    }
+
+    pub fn validate(self, unknowns_per_cell: u32) -> Result<(), String> {
         if unknowns_per_cell == 0 {
             return Err("SchurBlockLayout requires unknowns_per_cell > 0".to_string());
         }
-        for (name, idx) in [("u[0]", u0), ("u[1]", u1), ("p", p)] {
+        if self.u_len == 0 {
+            return Err("SchurBlockLayout requires u_len > 0".to_string());
+        }
+        if self.u_len as usize > SCHUR_MAX_U {
+            return Err(format!(
+                "SchurBlockLayout u_len={} exceeds SCHUR_MAX_U={}",
+                self.u_len, SCHUR_MAX_U
+            ));
+        }
+
+        let mut seen = std::collections::BTreeSet::new();
+        for (i, &idx) in self.u_indices().iter().enumerate() {
             if idx >= unknowns_per_cell {
                 return Err(format!(
-                    "SchurBlockLayout index {}={} is out of range for unknowns_per_cell={}.",
-                    name, idx, unknowns_per_cell
+                    "SchurBlockLayout index u[{}]={} is out of range for unknowns_per_cell={}.",
+                    i, idx, unknowns_per_cell
+                ));
+            }
+            if !seen.insert(idx) {
+                return Err(format!(
+                    "SchurBlockLayout indices must be distinct (duplicate u index {}).",
+                    idx
                 ));
             }
         }
-        if u0 == u1 || u0 == p || u1 == p {
+
+        if self.p >= unknowns_per_cell {
             return Err(format!(
-                "SchurBlockLayout indices must be distinct (got u=[{},{}], p={}).",
-                u0, u1, p
+                "SchurBlockLayout index p={} is out of range for unknowns_per_cell={}.",
+                self.p, unknowns_per_cell
             ));
         }
+        if !seen.insert(self.p) {
+            return Err(format!(
+                "SchurBlockLayout indices must be distinct (p={} overlaps u indices).",
+                self.p
+            ));
+        }
+
         Ok(())
     }
 }
@@ -42,9 +95,7 @@ pub enum ModelPreconditionerSpec {
     /// migrated to be fully model-owned.
     Default,
 
-    /// SIMPLE-like Schur complement preconditioner for 2D incompressible systems.
-    ///
-    /// Assumes unknown ordering `[U_x, U_y, p]` (3 unknowns per cell).
+    /// SIMPLE-like Schur complement preconditioner for saddle-point systems.
     Schur {
         /// Relaxation factor used in the pressure smoother.
         omega: f32,

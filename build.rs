@@ -558,6 +558,10 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
         ("scalars", shader_dir.join("scalars.wgsl")),
         ("schur_precond", shader_dir.join("schur_precond.wgsl")),
         (
+            "schur_precond_generic",
+            shader_dir.join("schur_precond_generic.wgsl"),
+        ),
+        (
             "system_main",
             gen_dir.join("system_main.wgsl"),
         ),
@@ -804,6 +808,23 @@ fn generate_kernel_registry_map() {
         (
             "schur_precond/correct_velocity",
             "schur_precond",
+            "create_correct_velocity_pipeline_embed_source",
+        ),
+
+        // Generic schur preconditioner (model-owned layout)
+        (
+            "schur_precond_generic/predict_and_form_schur",
+            "schur_precond_generic",
+            "create_predict_and_form_schur_pipeline_embed_source",
+        ),
+        (
+            "schur_precond_generic/relax_pressure",
+            "schur_precond_generic",
+            "create_relax_pressure_pipeline_embed_source",
+        ),
+        (
+            "schur_precond_generic/correct_velocity",
+            "schur_precond_generic",
             "create_correct_velocity_pipeline_embed_source",
         ),
 

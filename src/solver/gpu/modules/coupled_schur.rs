@@ -53,6 +53,7 @@ impl CoupledSchurModule {
         pressure_col_indices: &wgpu::Buffer,
         pressure_values: &wgpu::Buffer,
         pressure_kind: CoupledPressureSolveKind,
+        shader_id: KernelId,
     ) -> Self {
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Schur temp_p"),
@@ -196,12 +197,8 @@ impl CoupledSchurModule {
                 push_constant_ranges: &[],
             });
 
-        let shader_schur = kernel_registry::kernel_shader_module_by_id(
-            device,
-            "",
-            KernelId::SCHUR_PRECOND_PREDICT_AND_FORM,
-        )
-        .expect("schur_precond shader missing from kernel registry");
+        let shader_schur = kernel_registry::kernel_shader_module_by_id(device, "", shader_id)
+            .expect("schur_precond shader missing from kernel registry");
         let make_schur_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),

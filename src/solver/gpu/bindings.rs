@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: a71c15c7a68400c65460c60c0b3748876ae6e602b1c7c49becc3447dd30fba0f
+// SourceHash: 7f401f70920e58d462395b1a6414aa7079322ed6148b5f97344694b798323829
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,13 +39,14 @@ pub enum ShaderEntry {
     Preconditioner,
     Scalars,
     SchurPrecond,
+    SchurPrecondGeneric,
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedCoupledAssemblyMerged => generated :: coupled_assembly_merged :: create_pipeline_layout (device) , Self :: GeneratedEiApply => generated :: ei_apply :: create_pipeline_layout (device) , Self :: GeneratedEiAssembly => generated :: ei_assembly :: create_pipeline_layout (device) , Self :: GeneratedEiExplicitUpdate => generated :: ei_explicit_update :: create_pipeline_layout (device) , Self :: GeneratedEiFluxKt => generated :: ei_flux_kt :: create_pipeline_layout (device) , Self :: GeneratedEiGradients => generated :: ei_gradients :: create_pipeline_layout (device) , Self :: GeneratedEiUpdate => generated :: ei_update :: create_pipeline_layout (device) , Self :: GeneratedFluxRhieChow => generated :: flux_rhie_chow :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedPrepareCoupled => generated :: prepare_coupled :: create_pipeline_layout (device) , Self :: GeneratedPressureAssembly => generated :: pressure_assembly :: create_pipeline_layout (device) , Self :: GeneratedSystemMain => generated :: system_main :: create_pipeline_layout (device) , Self :: GeneratedUpdateFieldsFromCoupled => generated :: update_fields_from_coupled :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Preconditioner => preconditioner :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedCoupledAssemblyMerged => generated :: coupled_assembly_merged :: create_pipeline_layout (device) , Self :: GeneratedEiApply => generated :: ei_apply :: create_pipeline_layout (device) , Self :: GeneratedEiAssembly => generated :: ei_assembly :: create_pipeline_layout (device) , Self :: GeneratedEiExplicitUpdate => generated :: ei_explicit_update :: create_pipeline_layout (device) , Self :: GeneratedEiFluxKt => generated :: ei_flux_kt :: create_pipeline_layout (device) , Self :: GeneratedEiGradients => generated :: ei_gradients :: create_pipeline_layout (device) , Self :: GeneratedEiUpdate => generated :: ei_update :: create_pipeline_layout (device) , Self :: GeneratedFluxRhieChow => generated :: flux_rhie_chow :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedPrepareCoupled => generated :: prepare_coupled :: create_pipeline_layout (device) , Self :: GeneratedPressureAssembly => generated :: pressure_assembly :: create_pipeline_layout (device) , Self :: GeneratedSystemMain => generated :: system_main :: create_pipeline_layout (device) , Self :: GeneratedUpdateFieldsFromCoupled => generated :: update_fields_from_coupled :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Preconditioner => preconditioner :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedCoupledAssemblyMerged => { generated :: coupled_assembly_merged :: create_shader_module_embed_source (device) } , Self :: GeneratedEiApply => { generated :: ei_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedEiAssembly => { generated :: ei_assembly :: create_shader_module_embed_source (device) } , Self :: GeneratedEiExplicitUpdate => { generated :: ei_explicit_update :: create_shader_module_embed_source (device) } , Self :: GeneratedEiFluxKt => { generated :: ei_flux_kt :: create_shader_module_embed_source (device) } , Self :: GeneratedEiGradients => { generated :: ei_gradients :: create_shader_module_embed_source (device) } , Self :: GeneratedEiUpdate => { generated :: ei_update :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxRhieChow => { generated :: flux_rhie_chow :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedPrepareCoupled => { generated :: prepare_coupled :: create_shader_module_embed_source (device) } , Self :: GeneratedPressureAssembly => { generated :: pressure_assembly :: create_shader_module_embed_source (device) } , Self :: GeneratedSystemMain => { generated :: system_main :: create_shader_module_embed_source (device) } , Self :: GeneratedUpdateFieldsFromCoupled => { generated :: update_fields_from_coupled :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Preconditioner => { preconditioner :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedCoupledAssemblyMerged => { generated :: coupled_assembly_merged :: create_shader_module_embed_source (device) } , Self :: GeneratedEiApply => { generated :: ei_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedEiAssembly => { generated :: ei_assembly :: create_shader_module_embed_source (device) } , Self :: GeneratedEiExplicitUpdate => { generated :: ei_explicit_update :: create_shader_module_embed_source (device) } , Self :: GeneratedEiFluxKt => { generated :: ei_flux_kt :: create_shader_module_embed_source (device) } , Self :: GeneratedEiGradients => { generated :: ei_gradients :: create_shader_module_embed_source (device) } , Self :: GeneratedEiUpdate => { generated :: ei_update :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxRhieChow => { generated :: flux_rhie_chow :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedPrepareCoupled => { generated :: prepare_coupled :: create_shader_module_embed_source (device) } , Self :: GeneratedPressureAssembly => { generated :: pressure_assembly :: create_shader_module_embed_source (device) } , Self :: GeneratedSystemMain => { generated :: system_main :: create_shader_module_embed_source (device) } , Self :: GeneratedUpdateFieldsFromCoupled => { generated :: update_fields_from_coupled :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Preconditioner => { preconditioner :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -1070,12 +1071,13 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, unknowns_per_cell) == 8
         );
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u0) == 12);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u1) == 16);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, p) == 20);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad0) == 24);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad1) == 28);
-        assert!(std::mem::size_of::<generic_coupled_schur_setup::SetupParams>() == 32);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, p) == 12);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u_len) == 16);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad0) == 20);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, _pad1) == 24);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u0123) == 32);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u4567) == 48);
+        assert!(std::mem::size_of::<generic_coupled_schur_setup::SetupParams>() == 64);
     };
     const GMRES_CGS_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(gmres_cgs::Params, n) == 0);
@@ -1179,6 +1181,21 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(schur_precond::PrecondParams, p) == 24);
         assert!(std::mem::offset_of!(schur_precond::PrecondParams, _pad0) == 28);
         assert!(std::mem::size_of::<schur_precond::PrecondParams>() == 32);
+    };
+    const SCHUR_PRECOND_GENERIC_PRECOND_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, n) == 0);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, num_cells) == 4);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, omega) == 8);
+        assert!(
+            std::mem::offset_of!(schur_precond_generic::PrecondParams, unknowns_per_cell) == 12
+        );
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, p) == 16);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, u_len) == 20);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, _pad0) == 24);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, _pad1) == 28);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, u0123) == 32);
+        assert!(std::mem::offset_of!(schur_precond_generic::PrecondParams, u4567) == 48);
+        assert!(std::mem::size_of::<schur_precond_generic::PrecondParams>() == 64);
     };
 }
 pub mod amg {
@@ -2019,6 +2036,8 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for scalars::ReduceParams {}
     unsafe impl bytemuck::Zeroable for schur_precond::PrecondParams {}
     unsafe impl bytemuck::Pod for schur_precond::PrecondParams {}
+    unsafe impl bytemuck::Zeroable for schur_precond_generic::PrecondParams {}
+    unsafe impl bytemuck::Pod for schur_precond_generic::PrecondParams {}
 }
 pub mod amg_pack {
     use super::{_root, _root::*};
@@ -17697,7 +17716,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
 }
 pub mod generic_coupled_schur_setup {
     use super::{_root, _root::*};
-    #[repr(C, align(4))]
+    #[repr(C, align(16))]
     #[derive(Debug, PartialEq, Clone, Copy)]
     pub struct SetupParams {
         #[doc = "offset: 0, size: 4, type: `u32`"]
@@ -17707,37 +17726,77 @@ pub mod generic_coupled_schur_setup {
         #[doc = "offset: 8, size: 4, type: `u32`"]
         pub unknowns_per_cell: u32,
         #[doc = "offset: 12, size: 4, type: `u32`"]
-        pub u0: u32,
-        #[doc = "offset: 16, size: 4, type: `u32`"]
-        pub u1: u32,
-        #[doc = "offset: 20, size: 4, type: `u32`"]
         pub p: u32,
-        #[doc = "offset: 24, size: 4, type: `u32`"]
+        #[doc = "offset: 16, size: 4, type: `u32`"]
+        pub u_len: u32,
+        #[doc = "offset: 20, size: 4, type: `u32`"]
         pub _pad0: u32,
-        #[doc = "offset: 28, size: 4, type: `u32`"]
+        #[doc = "offset: 24, size: 4, type: `u32`"]
         pub _pad1: u32,
+        pub _pad__pad1: [u8; 0x4],
+        #[doc = "offset: 32, size: 16, type: `vec4<u32>`"]
+        pub u0123: [u32; 4],
+        #[doc = "offset: 48, size: 16, type: `vec4<u32>`"]
+        pub u4567: [u32; 4],
     }
     impl SetupParams {
         pub const fn new(
             dispatch_x: u32,
             num_cells: u32,
             unknowns_per_cell: u32,
-            u0: u32,
-            u1: u32,
             p: u32,
+            u_len: u32,
             _pad0: u32,
             _pad1: u32,
+            u0123: [u32; 4],
+            u4567: [u32; 4],
         ) -> Self {
             Self {
                 dispatch_x,
                 num_cells,
                 unknowns_per_cell,
-                u0,
-                u1,
                 p,
+                u_len,
                 _pad0,
                 _pad1,
+                _pad__pad1: [0; 0x4],
+                u0123,
+                u4567,
             }
+        }
+    }
+    #[repr(C)]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct SetupParamsInit {
+        pub dispatch_x: u32,
+        pub num_cells: u32,
+        pub unknowns_per_cell: u32,
+        pub p: u32,
+        pub u_len: u32,
+        pub _pad0: u32,
+        pub _pad1: u32,
+        pub u0123: [u32; 4],
+        pub u4567: [u32; 4],
+    }
+    impl SetupParamsInit {
+        pub fn build(&self) -> SetupParams {
+            SetupParams {
+                dispatch_x: self.dispatch_x,
+                num_cells: self.num_cells,
+                unknowns_per_cell: self.unknowns_per_cell,
+                p: self.p,
+                u_len: self.u_len,
+                _pad0: self._pad0,
+                _pad1: self._pad1,
+                _pad__pad1: [0; 0x4],
+                u0123: self.u0123,
+                u4567: self.u4567,
+            }
+        }
+    }
+    impl From<SetupParamsInit> for SetupParams {
+        fn from(data: SetupParamsInit) -> Self {
+            data.build()
         }
     }
     pub mod compute {
@@ -17765,7 +17824,6 @@ pub mod generic_coupled_schur_setup {
         pub diagonal_indices: wgpu::BufferBinding<'a>,
         pub matrix_values: wgpu::BufferBinding<'a>,
         pub diag_u_inv: wgpu::BufferBinding<'a>,
-        pub diag_v_inv: wgpu::BufferBinding<'a>,
         pub diag_p_inv: wgpu::BufferBinding<'a>,
         pub p_matrix_values: wgpu::BufferBinding<'a>,
         pub params: wgpu::BufferBinding<'a>,
@@ -17776,7 +17834,6 @@ pub mod generic_coupled_schur_setup {
         pub diagonal_indices: wgpu::BindGroupEntry<'a>,
         pub matrix_values: wgpu::BindGroupEntry<'a>,
         pub diag_u_inv: wgpu::BindGroupEntry<'a>,
-        pub diag_v_inv: wgpu::BindGroupEntry<'a>,
         pub diag_p_inv: wgpu::BindGroupEntry<'a>,
         pub p_matrix_values: wgpu::BindGroupEntry<'a>,
         pub params: wgpu::BindGroupEntry<'a>,
@@ -17800,31 +17857,26 @@ pub mod generic_coupled_schur_setup {
                     binding: 3,
                     resource: wgpu::BindingResource::Buffer(params.diag_u_inv),
                 },
-                diag_v_inv: wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Buffer(params.diag_v_inv),
-                },
                 diag_p_inv: wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 4,
                     resource: wgpu::BindingResource::Buffer(params.diag_p_inv),
                 },
                 p_matrix_values: wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 5,
                     resource: wgpu::BindingResource::Buffer(params.p_matrix_values),
                 },
                 params: wgpu::BindGroupEntry {
-                    binding: 7,
+                    binding: 6,
                     resource: wgpu::BindingResource::Buffer(params.params),
                 },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 8] {
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 7] {
             [
                 self.scalar_row_offsets,
                 self.diagonal_indices,
                 self.matrix_values,
                 self.diag_u_inv,
-                self.diag_v_inv,
                 self.diag_p_inv,
                 self.p_matrix_values,
                 self.params,
@@ -17885,7 +17937,7 @@ pub mod generic_coupled_schur_setup {
                         },
                         count: None,
                     },
-                    #[doc = " @binding(4): \"diag_v_inv\""]
+                    #[doc = " @binding(4): \"diag_p_inv\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -17896,7 +17948,7 @@ pub mod generic_coupled_schur_setup {
                         },
                         count: None,
                     },
-                    #[doc = " @binding(5): \"diag_p_inv\""]
+                    #[doc = " @binding(5): \"p_matrix_values\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 5,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -17907,20 +17959,9 @@ pub mod generic_coupled_schur_setup {
                         },
                         count: None,
                     },
-                    #[doc = " @binding(6): \"p_matrix_values\""]
+                    #[doc = " @binding(6): \"params\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 6,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(7): \"params\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 7,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -17995,11 +18036,12 @@ struct SetupParams {
     dispatch_x: u32,
     num_cells: u32,
     unknowns_per_cell: u32,
-    u0_: u32,
-    u1_: u32,
     p: u32,
+    u_len: u32,
     _pad0_: u32,
     _pad1_: u32,
+    u0123_: vec4<u32>,
+    u4567_: vec4<u32>,
 }
 
 @group(0) @binding(0) 
@@ -18011,13 +18053,20 @@ var<storage> matrix_values: array<f32>;
 @group(0) @binding(3) 
 var<storage, read_write> diag_u_inv: array<f32>;
 @group(0) @binding(4) 
-var<storage, read_write> diag_v_inv: array<f32>;
-@group(0) @binding(5) 
 var<storage, read_write> diag_p_inv: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(5) 
 var<storage, read_write> p_matrix_values: array<f32>;
-@group(0) @binding(7) 
+@group(0) @binding(6) 
 var<uniform> params: SetupParams;
+
+fn u_index(i_1: u32) -> u32 {
+    if (i_1 < 4u) {
+        let _e6 = params.u0123_[i_1];
+        return _e6;
+    }
+    let _e12 = params.u4567_[(i_1 - 4u)];
+    return _e12;
+}
 
 fn safe_inverse(val: f32) -> f32 {
     if (abs(val) > 0.00000000000001f) {
@@ -18028,6 +18077,7 @@ fn safe_inverse(val: f32) -> f32 {
 
 @compute @workgroup_size(64, 1, 1) 
 fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var i: u32 = 0u;
     var rank: u32 = 0u;
 
     let _e5 = params.dispatch_x;
@@ -18047,44 +18097,53 @@ fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) 
     let start_row_0_ = (scalar_offset * block_stride);
     let _e36 = params.unknowns_per_cell;
     let row_stride = (num_neighbors * _e36);
-    let _e40 = params.u0_;
-    let start_row_u = (start_row_0_ + (_e40 * row_stride));
-    let _e45 = params.u1_;
-    let start_row_v = (start_row_0_ + (_e45 * row_stride));
-    let _e50 = params.p;
-    let start_row_p = (start_row_0_ + (_e50 * row_stride));
-    let _e55 = params.unknowns_per_cell;
-    let _e61 = params.u0_;
-    let diag_u = matrix_values[((start_row_u + (diag_rank * _e55)) + _e61)];
-    let _e67 = params.unknowns_per_cell;
-    let _e73 = params.u1_;
-    let diag_v = matrix_values[((start_row_v + (diag_rank * _e67)) + _e73)];
-    let _e79 = params.unknowns_per_cell;
-    let _e85 = params.p;
-    let diag_p = matrix_values[((start_row_p + (diag_rank * _e79)) + _e85)];
-    let _e91 = safe_inverse(diag_u);
-    diag_u_inv[cell] = _e91;
-    let _e94 = safe_inverse(diag_v);
-    diag_v_inv[cell] = _e94;
-    let _e97 = safe_inverse(diag_p);
-    diag_p_inv[cell] = _e97;
+    let _e40 = params.p;
+    let start_row_p = (start_row_0_ + (_e40 * row_stride));
+    let _e45 = params.unknowns_per_cell;
+    let _e51 = params.p;
+    let diag_p = matrix_values[((start_row_p + (diag_rank * _e45)) + _e51)];
     loop {
-        let _e99 = rank;
-        if (_e99 < num_neighbors) {
+        let _e56 = i;
+        let _e59 = params.u_len;
+        if (_e56 < _e59) {
         } else {
             break;
         }
         {
-            let _e102 = rank;
-            let _e105 = rank;
-            let _e108 = params.unknowns_per_cell;
-            let _e114 = params.p;
-            let _e117 = matrix_values[((start_row_p + (_e105 * _e108)) + _e114)];
-            p_matrix_values[(scalar_offset + _e102)] = _e117;
+            let _e61 = i;
+            let _e62 = u_index(_e61);
+            let start_row_u = (start_row_0_ + (_e62 * row_stride));
+            let _e68 = params.unknowns_per_cell;
+            let diag_u = matrix_values[((start_row_u + (diag_rank * _e68)) + _e62)];
+            let _e77 = params.u_len;
+            let _e79 = i;
+            let _e82 = safe_inverse(diag_u);
+            diag_u_inv[((cell * _e77) + _e79)] = _e82;
         }
         continuing {
-            let _e119 = rank;
-            rank = (_e119 + 1u);
+            let _e84 = i;
+            i = (_e84 + 1u);
+        }
+    }
+    let _e88 = safe_inverse(diag_p);
+    diag_p_inv[cell] = _e88;
+    loop {
+        let _e90 = rank;
+        if (_e90 < num_neighbors) {
+        } else {
+            break;
+        }
+        {
+            let _e93 = rank;
+            let _e96 = rank;
+            let _e99 = params.unknowns_per_cell;
+            let _e105 = params.p;
+            let _e108 = matrix_values[((start_row_p + (_e96 * _e99)) + _e105)];
+            p_matrix_values[(scalar_offset + _e93)] = _e108;
+        }
+        continuing {
+            let _e110 = rank;
+            rank = (_e110 + 1u);
         }
     }
     return;
@@ -23521,6 +23580,878 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>)
     let _e135 = diag_p_inv[cell_2];
     let _e136 = rhs_p;
     p_sol[cell_2] = (_e135 * _e136);
+    p_prev[cell_2] = 0f;
+    return;
+}
+"#;
+}
+pub mod schur_precond_generic {
+    use super::{_root, _root::*};
+    #[repr(C, align(16))]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct PrecondParams {
+        #[doc = "offset: 0, size: 4, type: `u32`"]
+        pub n: u32,
+        #[doc = "offset: 4, size: 4, type: `u32`"]
+        pub num_cells: u32,
+        #[doc = "offset: 8, size: 4, type: `f32`"]
+        pub omega: f32,
+        #[doc = "offset: 12, size: 4, type: `u32`"]
+        pub unknowns_per_cell: u32,
+        #[doc = "offset: 16, size: 4, type: `u32`"]
+        pub p: u32,
+        #[doc = "offset: 20, size: 4, type: `u32`"]
+        pub u_len: u32,
+        #[doc = "offset: 24, size: 4, type: `u32`"]
+        pub _pad0: u32,
+        #[doc = "offset: 28, size: 4, type: `u32`"]
+        pub _pad1: u32,
+        #[doc = "offset: 32, size: 16, type: `vec4<u32>`"]
+        pub u0123: [u32; 4],
+        #[doc = "offset: 48, size: 16, type: `vec4<u32>`"]
+        pub u4567: [u32; 4],
+    }
+    impl PrecondParams {
+        pub const fn new(
+            n: u32,
+            num_cells: u32,
+            omega: f32,
+            unknowns_per_cell: u32,
+            p: u32,
+            u_len: u32,
+            _pad0: u32,
+            _pad1: u32,
+            u0123: [u32; 4],
+            u4567: [u32; 4],
+        ) -> Self {
+            Self {
+                n,
+                num_cells,
+                omega,
+                unknowns_per_cell,
+                p,
+                u_len,
+                _pad0,
+                _pad1,
+                u0123,
+                u4567,
+            }
+        }
+    }
+    pub mod compute {
+        use super::{_root, _root::*};
+        pub const RELAX_PRESSURE_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_relax_pressure_pipeline_embed_source(
+            device: &wgpu::Device,
+        ) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline relax_pressure"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("relax_pressure"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+        pub const CORRECT_VELOCITY_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_correct_velocity_pipeline_embed_source(
+            device: &wgpu::Device,
+        ) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline correct_velocity"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("correct_velocity"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+        pub const PREDICT_AND_FORM_SCHUR_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_predict_and_form_schur_pipeline_embed_source(
+            device: &wgpu::Device,
+        ) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline predict_and_form_schur"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("predict_and_form_schur"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+    }
+    pub const ENTRY_RELAX_PRESSURE: &str = "relax_pressure";
+    pub const ENTRY_CORRECT_VELOCITY: &str = "correct_velocity";
+    pub const ENTRY_PREDICT_AND_FORM_SCHUR: &str = "predict_and_form_schur";
+    #[derive(Debug)]
+    pub struct WgpuBindGroup0EntriesParams<'a> {
+        pub r_in: wgpu::BufferBinding<'a>,
+        pub z_out: wgpu::BufferBinding<'a>,
+        pub temp_p: wgpu::BufferBinding<'a>,
+        pub p_sol: wgpu::BufferBinding<'a>,
+        pub p_prev: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup0Entries<'a> {
+        pub r_in: wgpu::BindGroupEntry<'a>,
+        pub z_out: wgpu::BindGroupEntry<'a>,
+        pub temp_p: wgpu::BindGroupEntry<'a>,
+        pub p_sol: wgpu::BindGroupEntry<'a>,
+        pub p_prev: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup0Entries<'a> {
+        pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+            Self {
+                r_in: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.r_in),
+                },
+                z_out: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.z_out),
+                },
+                temp_p: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.temp_p),
+                },
+                p_sol: wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(params.p_sol),
+                },
+                p_prev: wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(params.p_prev),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            [self.r_in, self.z_out, self.temp_p, self.p_sol, self.p_prev]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup0(wgpu::BindGroup);
+    impl WgpuBindGroup0 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup0::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"r_in\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"z_out\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"temp_p\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(3): \"p_sol\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(4): \"p_prev\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup0"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(0, &self.0, &[]);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup1EntriesParams<'a> {
+        pub row_offsets: wgpu::BufferBinding<'a>,
+        pub col_indices: wgpu::BufferBinding<'a>,
+        pub matrix_values: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup1Entries<'a> {
+        pub row_offsets: wgpu::BindGroupEntry<'a>,
+        pub col_indices: wgpu::BindGroupEntry<'a>,
+        pub matrix_values: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup1Entries<'a> {
+        pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+            Self {
+                row_offsets: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.row_offsets),
+                },
+                col_indices: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.col_indices),
+                },
+                matrix_values: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.matrix_values),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+            [self.row_offsets, self.col_indices, self.matrix_values]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup1(wgpu::BindGroup);
+    impl WgpuBindGroup1 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup1::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"row_offsets\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"col_indices\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"matrix_values\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup1"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(1, &self.0, &[]);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup2EntriesParams<'a> {
+        pub diag_u_inv: wgpu::BufferBinding<'a>,
+        pub diag_p_inv: wgpu::BufferBinding<'a>,
+        pub params: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup2Entries<'a> {
+        pub diag_u_inv: wgpu::BindGroupEntry<'a>,
+        pub diag_p_inv: wgpu::BindGroupEntry<'a>,
+        pub params: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup2Entries<'a> {
+        pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+            Self {
+                diag_u_inv: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.diag_u_inv),
+                },
+                diag_p_inv: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.diag_p_inv),
+                },
+                params: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.params),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+            [self.diag_u_inv, self.diag_p_inv, self.params]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup2(wgpu::BindGroup);
+    impl WgpuBindGroup2 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup2::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"diag_u_inv\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"diag_p_inv\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"params\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                _root::schur_precond_generic::PrecondParams,
+                            >(
+                            )
+                                as _),
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup2"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(2, &self.0, &[]);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup3EntriesParams<'a> {
+        pub p_row_offsets: wgpu::BufferBinding<'a>,
+        pub p_col_indices: wgpu::BufferBinding<'a>,
+        pub p_matrix_values: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup3Entries<'a> {
+        pub p_row_offsets: wgpu::BindGroupEntry<'a>,
+        pub p_col_indices: wgpu::BindGroupEntry<'a>,
+        pub p_matrix_values: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup3Entries<'a> {
+        pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
+            Self {
+                p_row_offsets: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.p_row_offsets),
+                },
+                p_col_indices: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.p_col_indices),
+                },
+                p_matrix_values: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.p_matrix_values),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+            [self.p_row_offsets, self.p_col_indices, self.p_matrix_values]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup3(wgpu::BindGroup);
+    impl WgpuBindGroup3 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup3::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"p_row_offsets\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"p_col_indices\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"p_matrix_values\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("SchurPrecondGeneric::BindGroup3"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(3, &self.0, &[]);
+        }
+    }
+    #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+    #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+    #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+    #[doc = "   - Bind group 1: More frequent updates"]
+    #[doc = "   - Bind group 2: More frequent updates"]
+    #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+    #[derive(Debug, Copy, Clone)]
+    pub struct WgpuBindGroups<'a> {
+        pub bind_group0: &'a WgpuBindGroup0,
+        pub bind_group1: &'a WgpuBindGroup1,
+        pub bind_group2: &'a WgpuBindGroup2,
+        pub bind_group3: &'a WgpuBindGroup3,
+    }
+    impl<'a> WgpuBindGroups<'a> {
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            self.bind_group0.set(pass);
+            self.bind_group1.set(pass);
+            self.bind_group2.set(pass);
+            self.bind_group3.set(pass);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuPipelineLayout;
+    impl WgpuPipelineLayout {
+        pub fn bind_group_layout_entries(
+            entries: [wgpu::BindGroupLayout; 4],
+        ) -> [wgpu::BindGroupLayout; 4] {
+            entries
+        }
+    }
+    pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("SchurPrecondGeneric::PipelineLayout"),
+            bind_group_layouts: &[
+                &WgpuBindGroup0::get_bind_group_layout(device),
+                &WgpuBindGroup1::get_bind_group_layout(device),
+                &WgpuBindGroup2::get_bind_group_layout(device),
+                &WgpuBindGroup3::get_bind_group_layout(device),
+            ],
+            push_constant_ranges: &[],
+        })
+    }
+    pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+        let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("schur_precond_generic.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(source),
+        })
+    }
+    pub const SHADER_STRING: &str = r#"
+struct PrecondParams {
+    n: u32,
+    num_cells: u32,
+    omega: f32,
+    unknowns_per_cell: u32,
+    p: u32,
+    u_len: u32,
+    _pad0_: u32,
+    _pad1_: u32,
+    u0123_: vec4<u32>,
+    u4567_: vec4<u32>,
+}
+
+@group(0) @binding(0) 
+var<storage> r_in: array<f32>;
+@group(0) @binding(1) 
+var<storage, read_write> z_out: array<f32>;
+@group(0) @binding(2) 
+var<storage, read_write> temp_p: array<f32>;
+@group(0) @binding(3) 
+var<storage, read_write> p_sol: array<f32>;
+@group(0) @binding(4) 
+var<storage, read_write> p_prev: array<f32>;
+@group(1) @binding(0) 
+var<storage> row_offsets: array<u32>;
+@group(1) @binding(1) 
+var<storage> col_indices: array<u32>;
+@group(1) @binding(2) 
+var<storage> matrix_values: array<f32>;
+@group(2) @binding(0) 
+var<storage, read_write> diag_u_inv: array<f32>;
+@group(2) @binding(1) 
+var<storage, read_write> diag_p_inv: array<f32>;
+@group(2) @binding(2) 
+var<uniform> params: PrecondParams;
+@group(3) @binding(0) 
+var<storage> p_row_offsets: array<u32>;
+@group(3) @binding(1) 
+var<storage> p_col_indices: array<u32>;
+@group(3) @binding(2) 
+var<storage> p_matrix_values: array<f32>;
+
+fn safe_inverse(val: f32) -> f32 {
+    if (abs(val) > 0.00000000000001f) {
+        return (1f / val);
+    }
+    return 0f;
+}
+
+fn u_index(i_3: u32) -> u32 {
+    if (i_3 < 4u) {
+        let _e6 = params.u0123_[i_3];
+        return _e6;
+    }
+    let _e12 = params.u4567_[(i_3 - 4u)];
+    return _e12;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var sigma: f32 = 0f;
+    var k: u32;
+
+    let cell = global_id.x;
+    let _e5 = params.num_cells;
+    if (cell >= _e5) {
+        return;
+    }
+    let start = p_row_offsets[cell];
+    let end = p_row_offsets[(cell + 1u)];
+    k = start;
+    loop {
+        let _e16 = k;
+        if (_e16 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e19 = k;
+            let col_cell = p_col_indices[_e19];
+            if (col_cell != cell) {
+                let _e24 = k;
+                let _e26 = p_matrix_values[_e24];
+                let _e30 = p_sol[col_cell];
+                let _e32 = sigma;
+                sigma = (_e32 + (_e26 * _e30));
+            }
+        }
+        continuing {
+            let _e35 = k;
+            k = (_e35 + 1u);
+        }
+    }
+    let d_inv = diag_p_inv[cell];
+    let rhs = temp_p[cell];
+    let _e43 = sigma;
+    let hat_x = (d_inv * (rhs - _e43));
+    let x_prev = p_prev[cell];
+    let _e51 = params.omega;
+    let x_new = mix(x_prev, hat_x, _e51);
+    p_prev[cell] = x_new;
+    return;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+    var i: u32 = 0u;
+    var correction_u: f32;
+    var k_1: u32;
+
+    let cell_1 = global_id_1.x;
+    let _e5 = params.num_cells;
+    if (cell_1 >= _e5) {
+        return;
+    }
+    let _e9 = params.unknowns_per_cell;
+    let base = (cell_1 * _e9);
+    let p_val = p_sol[cell_1];
+    loop {
+        let _e15 = i;
+        let _e18 = params.u_len;
+        if (_e15 < _e18) {
+        } else {
+            break;
+        }
+        {
+            let _e20 = i;
+            let _e21 = u_index(_e20);
+            let row_u = (base + _e21);
+            let start_u = row_offsets[row_u];
+            let end_u = row_offsets[(row_u + 1u)];
+            correction_u = 0f;
+            k_1 = start_u;
+            loop {
+                let _e34 = k_1;
+                if (_e34 < end_u) {
+                } else {
+                    break;
+                }
+                {
+                    let _e37 = k_1;
+                    let col = col_indices[_e37];
+                    let _e42 = params.unknowns_per_cell;
+                    let _e46 = params.p;
+                    if ((col % _e42) == _e46) {
+                        let _e50 = params.unknowns_per_cell;
+                        let p_cell = (col / _e50);
+                        let _e53 = k_1;
+                        let _e55 = matrix_values[_e53];
+                        let _e58 = p_sol[p_cell];
+                        let _e60 = correction_u;
+                        correction_u = (_e60 + (_e55 * _e58));
+                    }
+                }
+                continuing {
+                    let _e63 = k_1;
+                    k_1 = (_e63 + 1u);
+                }
+            }
+            let _e70 = params.u_len;
+            let _e72 = i;
+            let _e75 = diag_u_inv[((cell_1 * _e70) + _e72)];
+            let _e76 = correction_u;
+            let _e78 = z_out[row_u];
+            z_out[row_u] = (_e78 - (_e75 * _e76));
+        }
+        continuing {
+            let _e81 = i;
+            i = (_e81 + 1u);
+        }
+    }
+    let _e86 = params.p;
+    z_out[(base + _e86)] = p_val;
+    return;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+    var c: u32 = 0u;
+    var i_1: u32 = 0u;
+    var rhs_p: f32;
+    var k_2: u32;
+    var z_val: f32;
+    var i_2: u32;
+
+    let cell_2 = global_id_2.x;
+    let _e5 = params.num_cells;
+    if (cell_2 >= _e5) {
+        return;
+    }
+    let _e9 = params.unknowns_per_cell;
+    let base_1 = (cell_2 * _e9);
+    let _e13 = params.p;
+    let row_p = (base_1 + _e13);
+    loop {
+        let _e16 = c;
+        let _e19 = params.unknowns_per_cell;
+        if (_e16 < _e19) {
+        } else {
+            break;
+        }
+        {
+            let _e22 = c;
+            let _e26 = c;
+            let _e29 = r_in[(base_1 + _e26)];
+            z_out[(base_1 + _e22)] = _e29;
+        }
+        continuing {
+            let _e31 = c;
+            c = (_e31 + 1u);
+        }
+    }
+    loop {
+        let _e34 = i_1;
+        let _e37 = params.u_len;
+        if (_e34 < _e37) {
+        } else {
+            break;
+        }
+        {
+            let _e39 = i_1;
+            let _e40 = u_index(_e39);
+            let row_u_1 = (base_1 + _e40);
+            let _e47 = params.u_len;
+            let _e49 = i_1;
+            let _e52 = diag_u_inv[((cell_2 * _e47) + _e49)];
+            let _e55 = r_in[row_u_1];
+            z_out[row_u_1] = (_e52 * _e55);
+        }
+        continuing {
+            let _e58 = i_1;
+            i_1 = (_e58 + 1u);
+        }
+    }
+    z_out[row_p] = 0f;
+    let _e65 = r_in[row_p];
+    rhs_p = _e65;
+    let start_1 = row_offsets[row_p];
+    let end_1 = row_offsets[(row_p + 1u)];
+    k_2 = start_1;
+    loop {
+        let _e76 = k_2;
+        if (_e76 < end_1) {
+        } else {
+            break;
+        }
+        {
+            let _e79 = k_2;
+            let col_1 = col_indices[_e79];
+            let _e84 = params.unknowns_per_cell;
+            let rem = (col_1 % _e84);
+            z_val = 0f;
+            i_2 = 0u;
+            loop {
+                let _e90 = i_2;
+                let _e93 = params.u_len;
+                if (_e90 < _e93) {
+                } else {
+                    break;
+                }
+                {
+                    let _e95 = i_2;
+                    let _e96 = u_index(_e95);
+                    if (rem == _e96) {
+                        let _e100 = params.unknowns_per_cell;
+                        let c_1 = (col_1 / _e100);
+                        let _e104 = r_in[col_1];
+                        let _e108 = params.u_len;
+                        let _e110 = i_2;
+                        let _e113 = diag_u_inv[((c_1 * _e108) + _e110)];
+                        z_val = (_e104 * _e113);
+                        break;
+                    }
+                }
+                continuing {
+                    let _e116 = i_2;
+                    i_2 = (_e116 + 1u);
+                }
+            }
+            let _e119 = k_2;
+            let _e121 = matrix_values[_e119];
+            let _e122 = z_val;
+            let _e124 = rhs_p;
+            rhs_p = (_e124 - (_e121 * _e122));
+        }
+        continuing {
+            let _e127 = k_2;
+            k_2 = (_e127 + 1u);
+        }
+    }
+    let _e131 = rhs_p;
+    temp_p[cell_2] = _e131;
+    let _e136 = diag_p_inv[cell_2];
+    let _e137 = rhs_p;
+    p_sol[cell_2] = (_e136 * _e137);
     p_prev[cell_2] = 0f;
     return;
 }

@@ -439,7 +439,8 @@ pub fn incompressible_momentum_generic_model() -> ModelSpec {
     model.linear_solver = Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
         preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
             omega: 1.0,
-            layout: crate::solver::model::linear_solver::SchurBlockLayout { u: [u0, u1], p },
+            layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[u0, u1], p)
+                .expect("invalid SchurBlockLayout"),
         },
     });
 

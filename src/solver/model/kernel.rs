@@ -94,6 +94,13 @@ impl KernelId {
     pub const SCHUR_PRECOND_CORRECT_VELOCITY: KernelId =
         KernelId("schur_precond/correct_velocity");
 
+    pub const SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM: KernelId =
+        KernelId("schur_precond_generic/predict_and_form_schur");
+    pub const SCHUR_GENERIC_PRECOND_RELAX_PRESSURE: KernelId =
+        KernelId("schur_precond_generic/relax_pressure");
+    pub const SCHUR_GENERIC_PRECOND_CORRECT_VELOCITY: KernelId =
+        KernelId("schur_precond_generic/correct_velocity");
+
     pub const PRECONDITIONER_BUILD_SCHUR_RHS: KernelId =
         KernelId("preconditioner/build_schur_rhs");
     pub const PRECONDITIONER_FINALIZE_PRECOND: KernelId =

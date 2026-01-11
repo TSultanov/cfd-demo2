@@ -12,11 +12,12 @@ pub(crate) struct SetupParams {
     dispatch_x: u32,
     num_cells: u32,
     unknowns_per_cell: u32,
-    u0: u32,
-    u1: u32,
     p: u32,
+    u_len: u32,
     _pad0: u32,
     _pad1: u32,
+    u0123: [u32; 4],
+    u4567: [u32; 4],
 }
 
 pub struct GenericCoupledSchurPreconditioner {
@@ -26,9 +27,10 @@ pub struct GenericCoupledSchurPreconditioner {
     setup_params: wgpu::Buffer,
     num_cells: u32,
     unknowns_per_cell: u32,
-    u0: u32,
-    u1: u32,
     p: u32,
+    u_len: u32,
+    u0123: [u32; 4],
+    u4567: [u32; 4],
 }
 
 impl GenericCoupledSchurPreconditioner {
@@ -43,9 +45,10 @@ impl GenericCoupledSchurPreconditioner {
         setup_pipeline: wgpu::ComputePipeline,
         setup_params: wgpu::Buffer,
         unknowns_per_cell: u32,
-        u0: u32,
-        u1: u32,
         p: u32,
+        u_len: u32,
+        u0123: [u32; 4],
+        u4567: [u32; 4],
     ) -> Self {
         Self {
             schur: CoupledSchurModule::new(
@@ -56,15 +59,17 @@ impl GenericCoupledSchurPreconditioner {
                 pressure_col_indices,
                 pressure_values,
                 CoupledPressureSolveKind::Chebyshev,
+                crate::solver::model::KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
             ),
             setup_pipeline,
             setup_bg,
             setup_params,
             num_cells,
             unknowns_per_cell,
-            u0,
-            u1,
             p,
+            u_len,
+            u0123,
+            u4567,
         }
     }
 
@@ -141,16 +146,6 @@ impl GenericCoupledSchurPreconditioner {
                     binding: 6,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -183,7 +178,6 @@ impl GenericCoupledSchurPreconditioner {
         diagonal_indices: &wgpu::Buffer,
         matrix_values: &wgpu::Buffer,
         diag_u_inv: &wgpu::Buffer,
-        diag_v_inv: &wgpu::Buffer,
         diag_p_inv: &wgpu::Buffer,
         p_matrix_values: &wgpu::Buffer,
         setup_params: &wgpu::Buffer,
@@ -211,18 +205,14 @@ impl GenericCoupledSchurPreconditioner {
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: diag_v_inv.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
                     resource: diag_p_inv.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 5,
                     resource: p_matrix_values.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 7,
+                    binding: 6,
                     resource: setup_params.as_entire_binding(),
                 },
             ],
@@ -251,11 +241,12 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
             dispatch_x: dispatch.cells.0 * WORKGROUP_SIZE,
             num_cells: self.num_cells,
             unknowns_per_cell: self.unknowns_per_cell,
-            u0: self.u0,
-            u1: self.u1,
             p: self.p,
+            u_len: self.u_len,
             _pad0: 0,
             _pad1: 0,
+            u0123: self.u0123,
+            u4567: self.u4567,
         };
         queue.write_buffer(&self.setup_params, 0, bytemuck::bytes_of(&params));
 

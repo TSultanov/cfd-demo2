@@ -102,6 +102,7 @@ impl IncompressibleLinearSolver {
             pressure_port_space.buffer(pressure_ports.col_indices),
             pressure_port_space.buffer(pressure_ports.values),
             CoupledPressureSolveKind::Chebyshev,
+            crate::solver::model::KernelId::SCHUR_PRECOND_PREDICT_AND_FORM,
         );
 
         let resources = KrylovSolveModule::new(fgmres, precond);

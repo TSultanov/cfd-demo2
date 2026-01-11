@@ -19,7 +19,7 @@ use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
-use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerParams};
+use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
@@ -44,7 +44,6 @@ struct GenericCoupledSchurResources {
     solver: KrylovSolveModule<GenericCoupledSchurPreconditioner>,
     dispatch: KrylovDispatch,
     _b_diag_u: wgpu::Buffer,
-    _b_diag_v: wgpu::Buffer,
     _b_diag_p: wgpu::Buffer,
     _b_precond_params: wgpu::Buffer,
     _b_p_matrix_values: wgpu::Buffer,
@@ -147,69 +146,59 @@ fn validate_schur_model(
             "Schur preconditioner is only wired for the GenericCoupled pipeline".to_string(),
         );
     }
-    if model.system.unknowns_per_cell() < 3 {
-        return Err(format!(
-            "Schur preconditioner requires unknowns_per_cell >= 3 (got {})",
-            model.system.unknowns_per_cell()
-        ));
-    }
-
     layout.validate(model.system.unknowns_per_cell())?;
 
     // Validate the layout against the equation targets used to assemble the system.
     //
-    // This prevents a model from declaring indices that don't correspond to the actual
-    // vector+scalar targets solved by the linear system, without relying on equation ordering.
-    let u_set = {
-        let mut vals = [layout.u[0], layout.u[1]];
-        vals.sort_unstable();
-        vals
-    };
-    let mut has_u = false;
-    let mut has_p = false;
+    // For the current Schur bridge, the linear system is assumed to consist only of a
+    // velocity-like block and a single pressure-like scalar.
+    let mut target_indices = std::collections::BTreeSet::new();
+    let mut scalar_targets = std::collections::BTreeSet::new();
     for eq in model.system.equations() {
         let target = eq.target();
         match target.kind() {
-            crate::solver::model::backend::ast::FieldKind::Vector2 => {
-                let u0 = model
-                    .state_layout
-                    .component_offset(target.name(), 0)
-                    .ok_or_else(|| {
-                        format!("missing '{}' component 0 in state layout", target.name())
-                    })?;
-                let u1 = model
-                    .state_layout
-                    .component_offset(target.name(), 1)
-                    .ok_or_else(|| {
-                        format!("missing '{}' component 1 in state layout", target.name())
-                    })?;
-                let mut offsets = [u0, u1];
-                offsets.sort_unstable();
-                if offsets == u_set {
-                    has_u = true;
-                }
-            }
             crate::solver::model::backend::ast::FieldKind::Scalar => {
-                let p_offset = model
+                let idx = model
                     .state_layout
                     .offset_for(target.name())
                     .ok_or_else(|| format!("missing '{}' in state layout", target.name()))?;
-                if p_offset == layout.p {
-                    has_p = true;
+                target_indices.insert(idx);
+                scalar_targets.insert(idx);
+            }
+            kind => {
+                for comp in 0..kind.component_count() {
+                    let comp = comp as u32;
+                    let idx = model
+                        .state_layout
+                        .component_offset(target.name(), comp)
+                        .ok_or_else(|| {
+                            format!("missing '{}' component {} in state layout", target.name(), comp)
+                        })?;
+                    target_indices.insert(idx);
                 }
             }
         }
     }
-    if !has_u {
+
+    if !scalar_targets.contains(&layout.p) {
         return Err(format!(
-            "SchurBlockLayout {:?} does not match any Vector2 equation target in the model",
+            "SchurBlockLayout {:?} pressure index does not match any scalar equation target",
             layout
         ));
     }
-    if !has_p {
+
+    let mut layout_indices = std::collections::BTreeSet::new();
+    for &u in layout.u_indices() {
+        layout_indices.insert(u);
+    }
+    layout_indices.insert(layout.p);
+
+    if layout_indices != target_indices {
         return Err(format!(
-            "SchurBlockLayout {:?} pressure index does not match any Scalar equation target in the model",
-            layout
+            "SchurBlockLayout {:?} must cover exactly the model equation targets (layout={:?}, targets={:?})",
+            layout,
+            layout_indices,
+            target_indices
         ));
     }
 
@@ -244,15 +233,20 @@ fn build_generic_schur(
     let num_dofs = runtime.num_dofs;
     let scalar_nnz = runtime.common.mesh.col_indices.len() as u64;
 
+    let u_len = layout.u_len;
+    let mut u0123 = [0u32; 4];
+    let mut u4567 = [0u32; 4];
+    for (i, &u) in layout.u_indices().iter().enumerate() {
+        if i < 4 {
+            u0123[i] = u;
+        } else {
+            u4567[i - 4] = u;
+        }
+    }
+
     let b_diag_u = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur diag_u_inv"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let b_diag_v = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("GenericCoupled Schur diag_v_inv"),
-        size: (num_cells as u64) * 4,
+        size: (num_cells as u64) * (u_len as u64) * 4,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -265,19 +259,23 @@ fn build_generic_schur(
 
     let b_precond_params = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur precond_params"),
-        size: std::mem::size_of::<PreconditionerParams>() as u64,
+        size: std::mem::size_of::<crate::solver::gpu::bindings::schur_precond_generic::PrecondParams>()
+            as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let params = PreconditionerParams {
+
+    let params = crate::solver::gpu::bindings::schur_precond_generic::PrecondParams {
         n: num_dofs,
         num_cells,
         omega,
         unknowns_per_cell: model.system.unknowns_per_cell(),
-        u0: layout.u[0],
-        u1: layout.u[1],
         p: layout.p,
+        u_len,
         _pad0: 0,
+        _pad1: 0,
+        u0123,
+        u4567,
     };
     runtime
         .common
@@ -294,7 +292,8 @@ fn build_generic_schur(
 
     let b_setup_params = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur setup_params"),
-        size: (std::mem::size_of::<u32>() * 8) as u64,
+        size: std::mem::size_of::<crate::solver::gpu::modules::generic_coupled_schur::SetupParams>()
+            as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -315,7 +314,6 @@ fn build_generic_schur(
         diagonal_indices,
         matrix_values,
         &b_diag_u,
-        &b_diag_v,
         &b_diag_p,
         &b_p_matrix_values,
         &b_setup_params,
@@ -326,9 +324,8 @@ fn build_generic_schur(
         space: &runtime.linear_port_space,
     };
 
-    let precond_bindings = FgmresPrecondBindings::DiagWithParams {
+    let precond_bindings = FgmresPrecondBindings::SchurWithParams {
         diag_u: &b_diag_u,
-        diag_v: &b_diag_v,
         diag_p: &b_diag_p,
         precond_params: &b_precond_params,
     };
@@ -353,9 +350,10 @@ fn build_generic_schur(
         setup_pipeline,
         b_setup_params,
         model.system.unknowns_per_cell(),
-        layout.u[0],
-        layout.u[1],
         layout.p,
+        u_len,
+        u0123,
+        u4567,
     );
 
     let dispatch = DispatchGrids::for_sizes(num_dofs, num_cells);
@@ -364,7 +362,6 @@ fn build_generic_schur(
         solver: KrylovSolveModule::new(fgmres, precond),
         dispatch,
         _b_diag_u: b_diag_u,
-        _b_diag_v: b_diag_v,
         _b_diag_p: b_diag_p,
         _b_precond_params: b_precond_params,
         _b_p_matrix_values: b_p_matrix_values,
@@ -704,10 +701,10 @@ mod tests {
         let ModelPreconditionerSpec::Schur { layout, .. } = &mut spec.preconditioner else {
             panic!("expected Schur preconditioner");
         };
-        // Distinct/in-range, but doesn't correspond to any Vector2 field in the state layout.
-        *layout = SchurBlockLayout { u: [0, 2], p: 1 };
+        // Distinct/in-range, but doesn't cover the full set of equation target indices.
+        *layout = SchurBlockLayout::from_u_p(&[0], 2).expect("layout build failed");
 
         let err = validate_schur_model(&model).unwrap_err();
-        assert!(err.contains("Vector2"), "unexpected error: {err}");
+        assert!(err.contains("equation targets"), "unexpected error: {err}");
     }
 }

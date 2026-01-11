@@ -8,7 +8,7 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_pressure_assembly_wgsl(
@@ -664,7 +664,7 @@ fn main_body(
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::ir::SchemeRegistry;
     use crate::solver::model::incompressible_momentum_model;
     use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::scheme::Scheme;

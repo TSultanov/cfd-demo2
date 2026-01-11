@@ -37,6 +37,10 @@ mod solver {
 
         pub use expr::PrimitiveExpr;
     }
+
+    pub mod ir {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/ir/mod.rs"));
+    }
     pub mod model {
         pub mod linear_solver {
             include!(concat!(

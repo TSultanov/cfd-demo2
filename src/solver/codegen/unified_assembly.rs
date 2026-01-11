@@ -11,8 +11,7 @@ use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::model::backend::ast::{Coefficient, Discretization};
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::{Coefficient, Discretization, StateLayout};
 use crate::solver::scheme::Scheme;
 
 pub fn generate_unified_assembly_wgsl(
@@ -252,7 +251,7 @@ fn base_assembly_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
 
 fn coupled_unknown_components(
     system: &DiscreteSystem,
-) -> Vec<(crate::solver::model::backend::ast::FieldRef, u32)> {
+) -> Vec<(crate::solver::ir::FieldRef, u32)> {
     let mut out = Vec::new();
     for equation in &system.equations {
         let count = equation.target.kind().component_count() as u32;

@@ -4,7 +4,7 @@ use super::super::wgsl_ast::{
     StructDef, StructField, Type,
 };
 use super::super::wgsl_dsl as dsl;
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::FluxLayout;
 
 pub fn generate_ei_explicit_update_wgsl(layout: &StateLayout, flux_layout: &FluxLayout) -> String {

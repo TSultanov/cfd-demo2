@@ -11,7 +11,7 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::IncompressibleMomentumFields;
 use crate::solver::scheme::Scheme;
 
@@ -1071,10 +1071,9 @@ fn main_body(
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::backend::ast::{
-        fvm, surface_scalar, vol_scalar, vol_vector, Coefficient,
+    use crate::solver::ir::{
+        fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, SchemeRegistry,
     };
-    use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
@@ -1100,13 +1099,13 @@ mod tests {
         let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
         let p = vol_scalar("p", si::PRESSURE);
         let d_p = vol_scalar("d_p", si::D_P);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone())
+            crate::solver::ir::Equation::new(p.clone())
                 .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
@@ -1127,18 +1126,18 @@ mod tests {
         let phi = surface_scalar("phi", si::MASS_FLUX);
         let p = vol_scalar("p", si::PRESSURE);
         let d_p = vol_scalar("d_p", si::D_P);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone())
+            crate::solver::ir::Equation::new(p.clone())
                 .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(
-            crate::solver::model::backend::ast::TermOp::Div,
+            crate::solver::ir::TermOp::Div,
             Some(&phi),
             &u,
             Scheme::QUICK,
@@ -1156,12 +1155,12 @@ mod tests {
         let u = vol_vector("U", si::VELOCITY);
         let p = vol_scalar("p", si::PRESSURE);
         let d_p = vol_scalar("d_p", si::D_P);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone())
+            crate::solver::ir::Equation::new(p.clone())
                 .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 
@@ -1180,13 +1179,13 @@ mod tests {
         let rho = vol_scalar("rho", si::DENSITY);
         let p = vol_scalar("p", si::PRESSURE);
         let d_p = vol_scalar("d_p", si::D_P);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()))
             .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
         system.add_equation(
-            crate::solver::model::backend::ast::Equation::new(p.clone())
+            crate::solver::ir::Equation::new(p.clone())
                 .with_term(fvm::laplacian(Coefficient::field(d_p).unwrap(), p)),
         );
 

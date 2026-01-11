@@ -1,10 +1,9 @@
 use crate::solver::scheme::Scheme;
 
-use crate::solver::model::backend::ast::{
-    Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, Term, TermOp,
+use crate::solver::ir::{
+    Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, SchemeRegistry, Term, TermOp,
     UnitValidationError,
 };
-use crate::solver::model::backend::SchemeRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiscreteOpKind {
@@ -90,7 +89,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
+    use crate::solver::ir::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
     use crate::solver::units::si;
 
     #[test]
@@ -102,7 +101,7 @@ mod tests {
         let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
         let source_u = vol_vector("Su", si::PRESSURE_GRADIENT);
 
-        let mut eqn = crate::solver::model::backend::ast::Equation::new(u.clone());
+        let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()));
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
         eqn.add_term(fvc::grad(p.clone()));
@@ -131,7 +130,7 @@ mod tests {
         let u = vol_vector("U", si::VELOCITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
 
-        let mut eqn = crate::solver::model::backend::ast::Equation::new(u.clone());
+        let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
 
         let mut system = EquationSystem::new();

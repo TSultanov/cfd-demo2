@@ -5,7 +5,7 @@ use super::super::wgsl_ast::{
     StructDef, StructField, Type,
 };
 use super::super::wgsl_dsl as dsl;
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 
 pub fn generate_ei_gradients_wgsl(layout: &StateLayout) -> String {
     let mut module = Module::new();

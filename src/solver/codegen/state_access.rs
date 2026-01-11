@@ -1,7 +1,6 @@
 use crate::solver::codegen::dsl::{DslType, TypedExpr};
 use crate::solver::codegen::wgsl_ast::Expr;
-use crate::solver::model::backend::FieldKind;
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::{FieldKind, StateLayout};
 
 pub fn state_component_expr(
     layout: &StateLayout,
@@ -106,7 +105,7 @@ pub fn state_vec2_typed(layout: &StateLayout, buffer: &str, idx: &str, field: &s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
+    use crate::solver::ir::{vol_scalar, vol_vector};
     use crate::solver::units::si;
 
     #[test]

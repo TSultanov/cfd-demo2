@@ -1,6 +1,6 @@
 use crate::solver::codegen::state_access::state_scalar;
 use crate::solver::codegen::wgsl_ast::Expr;
-use crate::solver::model::backend::{Coefficient, FieldKind, StateLayout};
+use crate::solver::ir::{Coefficient, FieldKind, StateLayout};
 
 #[derive(Clone)]
 enum CoeffSample<'a> {
@@ -102,7 +102,7 @@ pub fn coeff_face_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
+    use crate::solver::ir::{vol_scalar, vol_vector};
     use crate::solver::units::si;
 
     #[test]
@@ -134,7 +134,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            crate::solver::model::backend::ast::CodegenError::NonScalarCoefficient { .. }
+            crate::solver::ir::CodegenError::NonScalarCoefficient { .. }
         ));
 
         let coeff = Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap();

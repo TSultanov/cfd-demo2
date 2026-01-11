@@ -9,7 +9,7 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_prepare_coupled_wgsl(
@@ -1015,7 +1015,7 @@ fn main_body(
 mod tests {
     use super::*;
     use crate::solver::codegen::lower_system;
-    use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::ir::SchemeRegistry;
     use crate::solver::model::incompressible_momentum_model;
     use crate::solver::model::IncompressibleMomentumFields;
     use crate::solver::scheme::Scheme;

@@ -13,7 +13,7 @@ use super::pressure_assembly::generate_pressure_assembly_wgsl;
 use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use super::wgsl::generate_wgsl;
 use crate::solver::codegen::unified_assembly;
-use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
+use crate::solver::ir::{expand_schemes, SchemeRegistry};
 use crate::solver::model::incompressible_momentum_model;
 use crate::solver::model::{
     IncompressibleMomentumFields, KernelKind, ModelSpec,
@@ -247,11 +247,9 @@ pub fn emit_system_main_wgsl_with_schemes(
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::backend::ast::TermOp;
-    use crate::solver::model::backend::ast::{
-        fvm, surface_scalar, vol_vector, Equation, EquationSystem,
+    use crate::solver::ir::{
+        fvm, surface_scalar, vol_vector, Equation, EquationSystem, SchemeRegistry, TermOp,
     };
-    use crate::solver::model::backend::SchemeRegistry;
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
     use std::sync::atomic::{AtomicUsize, Ordering};

@@ -4,8 +4,7 @@ use super::super::wgsl_ast::{
     StructField, Type,
 };
 use super::super::wgsl_dsl as dsl;
-use crate::solver::model::backend::{EquationSystem, FieldKind};
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::{EquationSystem, FieldKind, StateLayout};
 
 pub fn generate_ei_apply_wgsl(layout: &StateLayout, system: &EquationSystem) -> String {
     let mut module = Module::new();

@@ -4,7 +4,7 @@ use super::wgsl_ast::{
     StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::IncompressibleMomentumFields;
 
 pub fn generate_update_fields_from_coupled_wgsl(

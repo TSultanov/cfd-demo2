@@ -5,7 +5,7 @@ use super::super::wgsl_ast::{
     StructField, Type,
 };
 use super::super::wgsl_dsl as dsl;
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::EosSpec;
 
 pub fn generate_ei_update_wgsl(layout: &StateLayout, eos: &EosSpec) -> String {

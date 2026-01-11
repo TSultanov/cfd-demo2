@@ -7,7 +7,7 @@ use super::super::wgsl_ast::{
 };
 use super::super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::{GpuBcKind, GpuLowMachPrecondModel, TimeScheme};
-use crate::solver::model::backend::{EquationSystem, FieldKind, StateLayout};
+use crate::solver::ir::{EquationSystem, FieldKind, StateLayout};
 use crate::solver::model::EosSpec;
 use crate::solver::scheme::Scheme;
 

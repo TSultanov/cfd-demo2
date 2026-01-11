@@ -7,7 +7,7 @@ use super::super::wgsl_ast::{
 };
 use super::super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::{GpuBcKind, GpuLowMachPrecondModel};
-use crate::solver::model::backend::StateLayout;
+use crate::solver::ir::StateLayout;
 use crate::solver::model::EosSpec;
 use crate::solver::model::FluxLayout;
 use crate::solver::scheme::Scheme;

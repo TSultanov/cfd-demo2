@@ -47,11 +47,11 @@ impl WgslEnum for crate::solver::scheme::Scheme {
     }
 }
 
-impl WgslEnum for crate::solver::model::backend::ast::Discretization {
+impl WgslEnum for crate::solver::ir::Discretization {
     fn wgsl_id(self) -> u32 {
         match self {
-            crate::solver::model::backend::ast::Discretization::Implicit => 0,
-            crate::solver::model::backend::ast::Discretization::Explicit => 1,
+            crate::solver::ir::Discretization::Implicit => 0,
+            crate::solver::ir::Discretization::Explicit => 1,
         }
     }
 }

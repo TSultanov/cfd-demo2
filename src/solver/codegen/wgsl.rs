@@ -5,7 +5,7 @@ use super::dsl::EnumExpr;
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::wgsl_ast::{Block, Expr, Function, Item, Module, Param, Stmt, Type};
 use super::wgsl_dsl as dsl;
-use crate::solver::model::backend::ast::{Coefficient, Discretization, FieldKind};
+use crate::solver::ir::{Coefficient, Discretization, FieldKind};
 
 pub fn generate_wgsl(system: &DiscreteSystem) -> String {
     generate_wgsl_module(system).to_wgsl()
@@ -826,11 +826,11 @@ fn term_function_name(op: &DiscreteOp) -> String {
     name
 }
 
-fn equation_function_name(field: &crate::solver::model::backend::ast::FieldRef) -> String {
+fn equation_function_name(field: &crate::solver::ir::FieldRef) -> String {
     format!("assemble_{}", sanitize_ident(field.name()))
 }
 
-fn codegen_assemble_function_name(field: &crate::solver::model::backend::ast::FieldRef) -> String {
+fn codegen_assemble_function_name(field: &crate::solver::ir::FieldRef) -> String {
     format!("codegen_assemble_{}", sanitize_ident(field.name()))
 }
 
@@ -854,8 +854,7 @@ fn has_diffusion(system: &DiscreteSystem) -> bool {
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::model::backend::ast::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
-    use crate::solver::model::backend::SchemeRegistry;
+    use crate::solver::ir::{fvc, fvm, surface_scalar, vol_scalar, vol_vector, SchemeRegistry};
     use crate::solver::units::{si, UnitDim};
 
     #[test]
@@ -865,17 +864,17 @@ mod tests {
         let phi = surface_scalar("phi", si::MASS_FLUX);
         let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
 
-        let mut eqn = crate::solver::model::backend::ast::Equation::new(u.clone());
+        let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
         eqn.add_term(fvc::grad(p.clone()));
         eqn.add_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(
-            crate::solver::model::backend::ast::TermOp::Div,
+            crate::solver::ir::TermOp::Div,
             Some(&phi),
             &u,
             Scheme::QUICK,
@@ -920,10 +919,10 @@ mod tests {
     #[test]
     fn generated_line_omits_optional_fields_when_absent() {
         let u = vol_vector("U", si::VELOCITY);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvc::grad(u.clone()));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -939,11 +938,11 @@ mod tests {
     fn generate_wgsl_includes_ddt_and_source_terms() {
         let u = vol_vector("U", si::VELOCITY);
         let source_u = vol_vector("Su", UnitDim::new(0, 1, -2));
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()))
             .with_term(fvc::source(source_u));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -966,15 +965,15 @@ mod tests {
     fn term_function_name_includes_flux_and_scheme() {
         let u = vol_vector("U", si::VELOCITY);
         let phi = surface_scalar("phi.face", si::MASS_FLUX);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);
         registry.set_for_term(
-            crate::solver::model::backend::ast::TermOp::Div,
+            crate::solver::ir::TermOp::Div,
             Some(&phi),
             &u,
             Scheme::QUICK,
@@ -991,7 +990,7 @@ mod tests {
         let rho = vol_scalar("rho", si::DENSITY);
         let p = vol_scalar("p", si::PRESSURE);
         let phi = surface_scalar("phi", si::MASS_FLUX);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()))
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvc::grad(p))
@@ -1000,7 +999,7 @@ mod tests {
                 u.clone(),
             ));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -1028,11 +1027,11 @@ mod tests {
         let u = vol_vector("U", si::VELOCITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
         let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -1048,10 +1047,10 @@ mod tests {
     #[test]
     fn generate_wgsl_library_omits_conv_coeff_when_no_convection() {
         let u = vol_vector("U", si::VELOCITY);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
@@ -1066,10 +1065,10 @@ mod tests {
     fn generate_wgsl_library_emits_diff_coeff_for_laplacian() {
         let u = vol_vector("U", si::VELOCITY);
         let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
-        let eqn = crate::solver::model::backend::ast::Equation::new(u.clone())
+        let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
 
-        let mut system = crate::solver::model::backend::ast::EquationSystem::new();
+        let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
 
         let registry = SchemeRegistry::new(Scheme::Upwind);

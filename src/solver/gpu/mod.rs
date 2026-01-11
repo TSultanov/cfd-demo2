@@ -5,7 +5,6 @@ pub mod context;
 pub(crate) mod coupled_backend;
 pub mod csr;
 pub mod enums;
-pub(crate) mod env_utils;
 pub mod execution_plan;
 pub(crate) mod explicit_implicit;
 pub mod init;

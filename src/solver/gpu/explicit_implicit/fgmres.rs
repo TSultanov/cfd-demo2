@@ -1,5 +1,4 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::env_utils::env_flag;
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::modules::compressible_krylov::{
@@ -196,8 +195,8 @@ impl CompressibleLinearSolver {
 
         let precond_kind = CompressibleKrylovPreconditionerKind::select(
             preconditioner,
-            env_flag("CFD2_COMP_AMG", false),
-            env_flag("CFD2_COMP_BLOCK_PRECOND", true),
+            false, // no env overrides
+            true,  // keep block-Jacobi as the Jacobi implementation for compressible
         );
         if precond_kind == CompressibleKrylovPreconditionerKind::Amg {
             pollster::block_on(self.ensure_amg_resources(

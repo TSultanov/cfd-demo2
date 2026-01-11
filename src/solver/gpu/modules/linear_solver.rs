@@ -117,7 +117,8 @@ fn zero_buffer(context: &GpuContext, buffer: &wgpu::Buffer, n: u32) {
 }
 
 fn debug_log(iters: u32, rhs_norm: f32, residual: f32, converged: bool) {
-    if std::env::var("CFD2_DEBUG_FGMRES").ok().as_deref() == Some("1") {
+    const DEBUG_FGMRES: bool = false;
+    if DEBUG_FGMRES {
         eprintln!(
             "fgmres: iters={} rhs_norm={:.3e} residual={:.3e} converged={}",
             iters, rhs_norm, residual, converged

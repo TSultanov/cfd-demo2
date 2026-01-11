@@ -159,7 +159,8 @@ impl IncompressibleLinearSolver {
         preconditioner: PreconditionerType,
     ) -> LinearSolverStats {
         let start_time = Instant::now();
-        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
+        // Env overrides are intentionally not supported.
+        let quiet = false;
 
         let n = coupled_resources.num_unknowns;
         let max_restart = 50usize;

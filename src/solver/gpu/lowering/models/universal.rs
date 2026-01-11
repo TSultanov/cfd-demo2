@@ -1,4 +1,3 @@
-use crate::solver::gpu::env_utils::{env_f32, env_usize};
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources;
@@ -396,12 +395,13 @@ fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
 }
 
 fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {
-    let tol_base = env_f32("CFD2_COMP_FGMRES_TOL", 1e-8);
-    let warm_scale = env_f32("CFD2_COMP_FGMRES_WARM_SCALE", 100.0).max(1.0);
-    let warm_iters = env_usize("CFD2_COMP_FGMRES_WARM_ITERS", 4);
-    let retry_scale = env_f32("CFD2_COMP_FGMRES_RETRY_SCALE", 0.5).clamp(0.0, 1.0);
-    let max_restart = env_usize("CFD2_COMP_FGMRES_MAX_RESTART", 80).max(1);
-    let retry_restart = env_usize("CFD2_COMP_FGMRES_RETRY_RESTART", 160).max(1);
+    // Env overrides are intentionally not supported. These should be driven by recipe/model.
+    let tol_base = 1e-8f32;
+    let warm_scale = 100.0f32;
+    let warm_iters = 4usize;
+    let retry_scale = 0.5f32;
+    let max_restart = 80usize;
+    let retry_restart = 160usize;
 
     let idx = explicit_implicit_backend_mut(plan)
         .expect("missing universal explicit/implicit backend")

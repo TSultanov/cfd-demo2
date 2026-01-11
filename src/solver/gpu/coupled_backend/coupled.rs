@@ -68,7 +68,8 @@ impl GpuSolver {
     }
 
     pub(crate) fn check_evolution(&mut self) {
-        let quiet = std::env::var("CFD2_QUIET").ok().as_deref() == Some("1");
+        // Env overrides are intentionally not supported.
+        let quiet = false;
 
         // Read velocity field to check for evolution and variance
         // This involves a GPU->CPU read, so it has some overhead.

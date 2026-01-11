@@ -22,7 +22,6 @@ use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
-use crate::solver::gpu::env_utils::{env_flag, env_usize};
 
 #[derive(Clone, Copy, Debug)]
 struct ExplicitImplicitOffsets {
@@ -51,11 +50,11 @@ struct ExplicitImplicitProfile {
 
 impl ExplicitImplicitProfile {
     fn new() -> Self {
-        let enabled = env_flag("CFD2_COMP_PROFILE", false);
-        let stride = env_usize("CFD2_COMP_PROFILE_STRIDE", 25).max(1);
+        // Env overrides are intentionally not supported. Profiling can be plumbed through
+        // model/recipe parameters instead.
         ExplicitImplicitProfile {
-            enabled,
-            stride,
+            enabled: false,
+            stride: 25,
             ..Default::default()
         }
     }

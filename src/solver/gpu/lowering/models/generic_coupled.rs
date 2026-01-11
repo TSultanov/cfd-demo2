@@ -156,10 +156,10 @@ fn validate_schur_model(
 
     layout.validate(model.system.unknowns_per_cell())?;
 
-    // Validate the layout against the model's state layout.
+    // Validate the layout against the equation targets used to assemble the system.
     //
-    // This prevents a model from declaring indices that don't correspond to a Vector2 + Scalar
-    // saddle-point split, without requiring equation ordering or specific field names.
+    // This prevents a model from declaring indices that don't correspond to the actual
+    // vector+scalar targets solved by the linear system, without relying on equation ordering.
     let u_set = {
         let mut vals = [layout.u[0], layout.u[1]];
         vals.sort_unstable();
@@ -167,17 +167,34 @@ fn validate_schur_model(
     };
     let mut has_u = false;
     let mut has_p = false;
-    for field in model.state_layout.fields() {
-        match field.kind() {
+    for eq in model.system.equations() {
+        let target = eq.target();
+        match target.kind() {
             crate::solver::model::backend::ast::FieldKind::Vector2 => {
-                let mut offsets = [field.offset(), field.offset() + 1];
+                let u0 = model
+                    .state_layout
+                    .component_offset(target.name(), 0)
+                    .ok_or_else(|| {
+                        format!("missing '{}' component 0 in state layout", target.name())
+                    })?;
+                let u1 = model
+                    .state_layout
+                    .component_offset(target.name(), 1)
+                    .ok_or_else(|| {
+                        format!("missing '{}' component 1 in state layout", target.name())
+                    })?;
+                let mut offsets = [u0, u1];
                 offsets.sort_unstable();
                 if offsets == u_set {
                     has_u = true;
                 }
             }
             crate::solver::model::backend::ast::FieldKind::Scalar => {
-                if field.offset() == layout.p {
+                let p_offset = model
+                    .state_layout
+                    .offset_for(target.name())
+                    .ok_or_else(|| format!("missing '{}' in state layout", target.name()))?;
+                if p_offset == layout.p {
                     has_p = true;
                 }
             }
@@ -185,13 +202,13 @@ fn validate_schur_model(
     }
     if !has_u {
         return Err(format!(
-            "SchurBlockLayout {:?} does not match any Vector2 field in the model state layout",
+            "SchurBlockLayout {:?} does not match any Vector2 equation target in the model",
             layout
         ));
     }
     if !has_p {
         return Err(format!(
-            "SchurBlockLayout {:?} pressure index does not match any Scalar field in the model state layout",
+            "SchurBlockLayout {:?} pressure index does not match any Scalar equation target in the model",
             layout
         ));
     }

@@ -1,7 +1,6 @@
 pub mod coupled_assembly;
 pub mod dsl;
 pub mod ei;
-pub mod emit;
 pub mod flux_rhie_chow;
 pub mod generic_coupled_kernels;
 pub mod incompressible_fields;
@@ -19,18 +18,6 @@ pub mod wgsl_ast;
 pub mod wgsl_dsl;
 
 pub use coupled_assembly::generate_coupled_assembly_wgsl;
-pub use emit::emit_coupled_assembly_codegen_wgsl;
-pub use emit::emit_coupled_assembly_codegen_wgsl_with_schemes;
-pub use emit::emit_flux_rhie_chow_codegen_wgsl;
-pub use emit::emit_system_main_wgsl;
-pub use emit::emit_system_main_wgsl_with_schemes;
-pub use emit::emit_model_kernel_wgsl;
-pub use emit::emit_model_kernel_wgsl_with_schemes;
-pub use emit::emit_model_kernels_wgsl;
-pub use emit::emit_prepare_coupled_codegen_wgsl;
-pub use emit::emit_pressure_assembly_codegen_wgsl;
-pub use emit::emit_update_fields_from_coupled_codegen_wgsl;
-pub use emit::write_wgsl_file;
 pub use flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 pub use incompressible_fields::CodegenIncompressibleMomentumFields;
 pub use ir::{lower_system, DiscreteEquation, DiscreteOp, DiscreteOpKind, DiscreteSystem};

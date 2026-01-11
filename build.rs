@@ -347,12 +347,16 @@ mod solver {
                 "/src/solver/codegen/wgsl_dsl.rs"
             ));
         }
+    }
+
+    pub mod compiler {
         pub mod emit {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/emit.rs"
+                "/src/solver/compiler/emit.rs"
             ));
         }
+        pub use emit::*;
     }
 }
 
@@ -370,6 +374,12 @@ fn main() {
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
+    for entry in glob("src/solver/compiler/**/*.rs").expect("Failed to read compiler glob") {
+        match entry {
+            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
+            Err(e) => println!("cargo:warning=Glob error: {:?}", e),
+        }
+    }
     println!("cargo:rerun-if-changed=src/solver/gpu/shaders");
 
     let mut builder = WgslBindgenOptionBuilder::default();
@@ -380,37 +390,41 @@ fn main() {
         .output("src/solver/gpu/bindings.rs");
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    if let Err(err) = solver::codegen::emit::emit_system_main_wgsl(&manifest_dir) {
+    if let Err(err) = solver::compiler::emit_system_main_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
     let model = solver::model::incompressible_momentum_model();
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
     if let Err(err) =
-        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
+        solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
     {
         panic!("codegen failed: {}", err);
     }
 
     let model_generic = solver::model::incompressible_momentum_generic_model();
     if let Err(err) =
-        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &model_generic, &schemes)
+        solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &model_generic, &schemes)
     {
         panic!("codegen failed: {}", err);
     }
     let compressible_model = solver::model::compressible_model();
     if let Err(err) =
-        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &compressible_model, &schemes)
+        solver::compiler::emit_model_kernels_wgsl(
+            &manifest_dir,
+            &compressible_model,
+            &schemes,
+        )
     {
         panic!("codegen failed: {}", err);
     }
     let generic_model = solver::model::generic_diffusion_demo_model();
     if let Err(err) =
-        solver::codegen::emit::emit_model_kernels_wgsl(&manifest_dir, &generic_model, &schemes)
+        solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &generic_model, &schemes)
     {
         panic!("codegen failed: {}", err);
     }
     let generic_neumann_model = solver::model::generic_diffusion_demo_neumann_model();
-    if let Err(err) = solver::codegen::emit::emit_model_kernels_wgsl(
+    if let Err(err) = solver::compiler::emit_model_kernels_wgsl(
         &manifest_dir,
         &generic_neumann_model,
         &schemes,
@@ -440,7 +454,7 @@ fn generate_generic_coupled_registry(manifest_dir: &str) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("generic_coupled_registry.rs");
 
-    let gen_dir = solver::codegen::emit::generated_dir_for(manifest_dir);
+    let gen_dir = solver::compiler::generated_dir_for(manifest_dir);
     let mut model_ids = Vec::new();
 
     let pattern = gen_dir
@@ -544,7 +558,7 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("wgsl_binding_meta.rs");
 
-    let gen_dir = solver::codegen::emit::generated_dir_for(manifest_dir);
+    let gen_dir = solver::compiler::generated_dir_for(manifest_dir);
     let shader_dir = PathBuf::from(manifest_dir)
         .join("src")
         .join("solver")

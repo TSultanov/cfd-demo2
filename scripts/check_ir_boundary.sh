@@ -34,7 +34,7 @@ echo "✓ IR boundary check passed (no model backend imports in codegen)"
 MODEL_IMPORTS=$(grep -R --line-number --fixed-string "crate::solver::model::" "$CODEGEN_DIR" --include='*.rs' || true)
 if [ -n "$MODEL_IMPORTS" ]; then
   # Allowlist the transitional files that still depend on model data.
-  FILTERED=$(echo "$MODEL_IMPORTS" | grep -v "/codegen/ei/" | grep -v "/codegen/emit.rs" | grep -v "/codegen/method_ei.rs" || true)
+  FILTERED=$(echo "$MODEL_IMPORTS" | grep -v "/codegen/ei/" | grep -v "/codegen/method_ei.rs" || true)
   if [ -n "$FILTERED" ]; then
     echo "ERROR: IR boundary violation: codegen imports model types outside the EI bridge." >&2
     echo "Move model-dependent orchestration out of codegen, or plumb data via solver::ir." >&2

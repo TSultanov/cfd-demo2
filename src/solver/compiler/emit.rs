@@ -1,19 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::coupled_assembly::generate_coupled_assembly_wgsl;
-use super::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
-use super::generic_coupled_kernels::{
+use crate::solver::codegen::coupled_assembly::generate_coupled_assembly_wgsl;
+use crate::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
+use crate::solver::codegen::generic_coupled_kernels::{
     generate_generic_coupled_apply_wgsl, generate_generic_coupled_update_wgsl,
 };
-use super::ir::{lower_system, DiscreteSystem};
-use super::method_ei;
-use super::prepare_coupled::generate_prepare_coupled_wgsl;
-use super::pressure_assembly::generate_pressure_assembly_wgsl;
-use super::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
-use super::wgsl::generate_wgsl;
-use crate::solver::codegen::unified_assembly;
 use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
+use crate::solver::codegen::ir::{lower_system, DiscreteSystem};
+use crate::solver::codegen::method_ei;
+use crate::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl;
+use crate::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl;
+use crate::solver::codegen::unified_assembly;
+use crate::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
+use crate::solver::codegen::wgsl::generate_wgsl;
 use crate::solver::ir::{expand_schemes, SchemeRegistry};
 use crate::solver::model::incompressible_momentum_model;
 use crate::solver::model::{KernelKind, ModelSpec};

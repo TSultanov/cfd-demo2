@@ -5,9 +5,7 @@ use super::backend::ast::{
 use super::backend::state_layout::StateLayout;
 use super::kernel::{KernelKind, KernelPlan};
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
-use crate::solver::model::gpu_spec::{
-    expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec,
-};
+use crate::solver::model::gpu_spec::{FluxSpec, GradientStorage, ModelGpuSpec};
 use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
 
@@ -19,6 +17,19 @@ pub struct ModelSpec {
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub boundaries: BoundarySpec,
+
+    /// Optional model-owned linear solver configuration.
+    ///
+    /// When present, this is treated as authoritative by solver families that
+    /// support model-driven solver selection.
+    pub linear_solver: Option<crate::solver::model::linear_solver::ModelLinearSolverSpec>,
+
+    /// Flux computation module (optional: for pure diffusion models, set to None)
+    pub flux_module: Option<crate::solver::model::flux_module::FluxModuleSpec>,
+
+    /// Derived primitive recovery expressions (empty if primitives = conserved state)
+    pub primitives: crate::solver::model::primitives::PrimitiveDerivations,
+
     pub gpu: crate::solver::model::gpu_spec::ModelGpuSpec,
 }
 
@@ -29,44 +40,61 @@ impl ModelSpec {
     }
 
     pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
+        use crate::solver::model::method::MethodSpec;
+
         let plan = self.kernel_plan();
         let kernels = plan.kernels();
 
         let has = |kind: KernelKind| kernels.contains(&kind);
 
-        let flux = if has(KernelKind::FluxRhieChow) {
-            Some(FluxSpec { stride: 1 })
-        } else if has(KernelKind::EiFluxKt) {
-            Some(FluxSpec {
-                stride: self.system.unknowns_per_cell(),
-            })
-        } else {
-            None
+        // Flux storage is model-driven.
+        //
+        // - If the model has an explicit flux module, store face fluxes for each coupled
+        //   unknown component.
+        // - Otherwise, fall back to legacy family inference.
+        let flux = match &self.flux_module {
+            Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. }) => {
+                // Rhie–Chow computes a single scalar face flux (phi).
+                Some(FluxSpec { stride: 1 })
+            }
+            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
+                // Conservative KT fluxes are stored per-unknown component.
+                Some(FluxSpec {
+                    stride: self.system.unknowns_per_cell(),
+                })
+            }
+            Some(crate::solver::model::flux_module::FluxModuleSpec::Convective { .. }) => {
+                // Generic convective flux uses a scalar face flux.
+                Some(FluxSpec { stride: 1 })
+            }
+            None => {
+                // Legacy fallback.
+                if has(KernelKind::FluxRhieChow) {
+                    Some(FluxSpec { stride: 1 })
+                } else {
+                    None
+                }
+            }
         };
 
-        let requires_low_mach_params = has(KernelKind::EiFluxKt)
-            || has(KernelKind::EiAssembly)
-            || has(KernelKind::EiApply)
-            || has(KernelKind::EiUpdate)
-            || has(KernelKind::EiExplicitUpdate)
-            || has(KernelKind::EiGradients);
+        let requires_low_mach_params = matches!(self.method, MethodSpec::ConservativeCompressible { .. });
 
-        let gradient_storage = if has(KernelKind::GenericCoupledAssembly) {
-            GradientStorage::PackedState
-        } else if has(KernelKind::EiFluxKt) {
+        let gradient_storage = if matches!(self.method, MethodSpec::ConservativeCompressible { .. }) {
+            // Legacy EI kernels expect per-component gradient buffers (e.g. grad_rho_u_x).
             GradientStorage::PerFieldComponents
+        } else if has(KernelKind::GenericCoupledAssembly) {
+            GradientStorage::PackedState
         } else {
             GradientStorage::PerFieldName
         };
 
-        let required_gradient_fields = if gradient_storage == GradientStorage::PerFieldComponents
-            && (has(KernelKind::EiFluxKt) || has(KernelKind::EiGradients))
-        {
-            self.system
-                .equations()
-                .iter()
-                .flat_map(|eqn| expand_field_components(*eqn.target()))
-                .collect()
+        let required_gradient_fields = if matches!(self.method, MethodSpec::ConservativeCompressible { .. }) {
+            vec![
+                "rho".to_string(),
+                "rho_u_x".to_string(),
+                "rho_u_y".to_string(),
+                "rho_e".to_string(),
+            ]
         } else {
             Vec::new()
         };
@@ -368,9 +396,54 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
+
+        linear_solver: None,
+        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow {
+            alpha_u: None,
+        }),
+        primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
+}
+
+/// Transitional: incompressible model routed through the generic coupled pipeline.
+///
+/// This keeps the same state layout (including auxiliary fields like `d_p`, `grad_p`) so
+/// existing flux kernels (e.g. Rhie–Chow) remain usable while generic assembly/solve is
+/// brought up.
+pub fn incompressible_momentum_generic_model() -> ModelSpec {
+    let mut model = incompressible_momentum_model();
+    model.id = "incompressible_momentum_generic";
+    model.method = crate::solver::model::method::MethodSpec::GenericCoupled;
+
+    let u0 = model
+        .state_layout
+        .component_offset("U", 0)
+        .ok_or_else(|| "incompressible_momentum_generic_model missing U[0] in state layout".to_string())
+        .expect("state layout validation failed");
+    let u1 = model
+        .state_layout
+        .component_offset("U", 1)
+        .ok_or_else(|| "incompressible_momentum_generic_model missing U[1] in state layout".to_string())
+        .expect("state layout validation failed");
+    let p = model
+        .state_layout
+        .offset_for("p")
+        .ok_or_else(|| "incompressible_momentum_generic_model missing p in state layout".to_string())
+        .expect("state layout validation failed");
+
+    // The generic coupled path needs a saddle-point-capable preconditioner.
+    // Keep the legacy incompressible model on the specialized coupled solver
+    // until this preconditioner is stable.
+    model.linear_solver = Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
+        preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
+            omega: 1.0,
+            layout: crate::solver::model::linear_solver::SchurBlockLayout { u: [u0, u1], p },
+        },
+    });
+
+    model.with_derived_gpu()
 }
 
 pub fn compressible_model() -> ModelSpec {
@@ -384,13 +457,21 @@ pub fn compressible_model() -> ModelSpec {
         fields.u,
     ]);
 
+    let gamma = 1.4;
+
     ModelSpec {
         id: "compressible",
-        method: crate::solver::model::method::MethodSpec::ExplicitImplicitConservative,
-        eos: crate::solver::model::eos::EosSpec::IdealGas { gamma: 1.4 },
+        method: crate::solver::model::method::MethodSpec::ConservativeCompressible { outer_iters: 1 },
+        eos: crate::solver::model::eos::EosSpec::IdealGas { gamma },
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
+
+        linear_solver: None,
+        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor {
+            reconstruction: crate::solver::model::flux_module::ReconstructionSpec::FirstOrder,
+        }),
+        primitives: crate::solver::model::primitives::PrimitiveDerivations::euler_ideal_gas(gamma),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
@@ -432,6 +513,10 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         system,
         state_layout: layout,
         boundaries,
+
+        linear_solver: None,
+        flux_module: None,
+        primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
@@ -473,6 +558,10 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         system,
         state_layout: layout,
         boundaries,
+
+        linear_solver: None,
+        flux_module: None,
+        primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
@@ -528,7 +617,7 @@ mod tests {
         assert_eq!(model.system.equations().len(), 3);
         assert_eq!(model.system.equations()[1].terms().len(), 2);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
-        assert!(model.kernel_plan().contains(KernelKind::EiFluxKt));
+        assert!(model.kernel_plan().contains(KernelKind::ConservativeAssembly));
     }
 
     #[test]

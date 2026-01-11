@@ -138,7 +138,11 @@ pub struct PreconditionerParams {
     pub n: u32,
     pub num_cells: u32,
     pub omega: f32,
+    pub u0: u32,
+    pub u1: u32,
+    pub p: u32,
     pub _pad0: u32,
+    pub _pad1: u32,
 }
 
 impl Default for PreconditionerParams {
@@ -147,7 +151,11 @@ impl Default for PreconditionerParams {
             n: 0,
             num_cells: 0,
             omega: 1.0,
+            u0: 0,
+            u1: 1,
+            p: 2,
             _pad0: 0,
+            _pad1: 0,
         }
     }
 }

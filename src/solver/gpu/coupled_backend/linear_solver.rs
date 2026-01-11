@@ -94,15 +94,13 @@ impl IncompressibleLinearSolver {
             },
             "Coupled",
         );
-        let pressure_system = LinearSystemView {
-            ports: pressure_ports,
-            space: pressure_port_space,
-        };
         let precond = CoupledSchurModule::new(
             device,
             &fgmres,
             num_cells,
-            pressure_system,
+            pressure_port_space.buffer(pressure_ports.row_offsets),
+            pressure_port_space.buffer(pressure_ports.col_indices),
+            pressure_port_space.buffer(pressure_ports.values),
             CoupledPressureSolveKind::Chebyshev,
         );
 
@@ -253,7 +251,11 @@ impl IncompressibleLinearSolver {
                 n: 0,
                 num_cells,
                 omega: 1.2,
+                u0: 0,
+                u1: 1,
+                p: 2,
                 _pad0: 0,
+                _pad1: 0,
             };
             let precond_write_start = Instant::now();
             context.queue.write_buffer(

@@ -14,6 +14,11 @@ struct PrecondParams {
     n: u32,
     num_cells: u32,
     omega: f32, // Relaxation factor for pressure
+    u0: u32,
+    u1: u32,
+    p: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 // Group 0: Vectors
@@ -98,8 +103,8 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let base = cell * 3u;
-    let row_u = base + 0u;
-    let row_v = base + 1u;
+    let row_u = base + params.u0;
+    let row_v = base + params.u1;
 
     // Use p_sol (binding 3) as the pressure field.
     // Ensure the final result of relaxation is in the buffer bound to Binding 3.
@@ -111,7 +116,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var correction_u = 0.0;
     for (var k = start_u; k < end_u; k++) {
         let col = col_indices[k];
-        if (col % 3u == 2u) { 
+        if (col % 3u == params.p) { 
             let p_cell = col / 3u;
             // correction_u += matrix_values[k] * p_sol[p_cell]; 
             // We need random access to p_sol. 
@@ -127,7 +132,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var correction_v = 0.0;
     for (var k = start_v; k < end_v; k++) {
         let col = col_indices[k];
-        if (col % 3u == 2u) { 
+        if (col % 3u == params.p) { 
             let p_cell = col / 3u;
             correction_v += matrix_values[k] * p_sol[p_cell];
         }
@@ -135,7 +140,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
     z_out[row_v] -= diag_v_inv[cell] * correction_v;
     
     // Update z_out pressure component
-    z_out[base + 2u] = p_val;
+    z_out[base + params.p] = p_val;
 }
 
 // Kernel 6: Merged Predict Velocity + Form Schur RHS
@@ -148,15 +153,18 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Part 1: Predict Velocity (Local)
     let base = cell * 3u;
-    let r_u = r_in[base + 0u];
-    let r_v = r_in[base + 1u];
+    let row_u = base + params.u0;
+    let row_v = base + params.u1;
+    let row_p = base + params.p;
 
-    z_out[base + 0u] = diag_u_inv[cell] * r_u;
-    z_out[base + 1u] = diag_v_inv[cell] * r_v;
-    z_out[base + 2u] = 0.0;
+    let r_u = r_in[row_u];
+    let r_v = r_in[row_v];
+
+    z_out[row_u] = diag_u_inv[cell] * r_u;
+    z_out[row_v] = diag_v_inv[cell] * r_v;
+    z_out[row_p] = 0.0;
 
     // Part 2: Form Schur RHS
-    let row_p = base + 2u;
     var rhs_p = r_in[row_p];
 
     let start = row_offsets[row_p];
@@ -167,10 +175,10 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let rem = col % 3u;
         
         var z_val = 0.0;
-        if (rem == 0u) {
+        if (rem == params.u0) {
             let c = col / 3u;
             z_val = r_in[col] * diag_u_inv[c];
-        } else if (rem == 1u) {
+        } else if (rem == params.u1) {
             let c = col / 3u;
             z_val = r_in[col] * diag_v_inv[c];
         }

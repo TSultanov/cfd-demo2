@@ -1,6 +1,6 @@
 use super::super::dsl as typed;
 use super::super::reconstruction::limited_linear_reconstruct_face;
-use super::super::state_access::{state_scalar, state_vec2};
+use super::super::state_access::{state_component, state_scalar, state_vec2};
 use super::super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StructDef, StructField, Type,
@@ -281,12 +281,19 @@ fn main_body(layout: &StateLayout, system: &EquationSystem, eos: &EosSpec) -> Bl
     let rho_u_field = "rho_u";
     let rho_e_field = "rho_e";
 
-    // EI assembly currently emits a fixed 4x4 Jacobian for conservative 2D Euler variables.
-    // Unlike the previous implementation, we do NOT assume a specific EquationSystem ordering.
+    // EI assembly computes the Euler conservative (rho, rho_u_x, rho_u_y, rho_e) Jacobian.
+    // This kernel can embed that 4x4 block into a larger system by constraining any extra
+    // unknowns (diag=1, rhs=state, no face coupling).
     let unknowns_per_cell = system.unknowns_per_cell();
-    if unknowns_per_cell != 4 {
+    if unknowns_per_cell < 4 {
         panic!(
-            "EI assembly currently supports exactly 4 unknown components per cell (rho, rho_u_x, rho_u_y, rho_e); got unknowns_per_cell={unknowns_per_cell}"
+            "EI assembly requires at least 4 unknown components per cell for (rho, rho_u_x, rho_u_y, rho_e); got unknowns_per_cell={unknowns_per_cell}"
+        );
+    }
+    if unknowns_per_cell > u8::MAX as u32 {
+        panic!(
+            "EI assembly supports up to {} unknown components per cell; got unknowns_per_cell={unknowns_per_cell}",
+            u8::MAX
         );
     }
 
@@ -323,49 +330,37 @@ fn main_body(layout: &StateLayout, system: &EquationSystem, eos: &EosSpec) -> Bl
         .unwrap_or_else(|| panic!("EI assembly missing scalar '{}' in EquationSystem", rho_e_field));
 
     // Map from Euler component order [rho, ru, rv, re] -> EquationSystem packed component index.
-    let euler_to_sys = [idx_rho as usize, idx_ru as usize, idx_rv as usize, idx_re as usize];
-    let mut sorted = euler_to_sys;
-    sorted.sort_unstable();
-    if sorted != [0, 1, 2, 3] {
+    let euler_to_sys = [idx_rho, idx_ru, idx_rv, idx_re];
+    for idx in euler_to_sys {
+        if idx >= unknowns_per_cell {
+            panic!(
+                "EI assembly Euler component index out of bounds (idx={idx}, unknowns_per_cell={unknowns_per_cell})"
+            );
+        }
+    }
+    if idx_rho == idx_ru || idx_rho == idx_rv || idx_rho == idx_re || idx_ru == idx_rv || idx_ru == idx_re || idx_rv == idx_re {
         panic!(
-            "EI assembly requires EquationSystem unknowns to be a permutation of [rho, rho_u_x, rho_u_y, rho_e]. Got offsets: rho={idx_rho}, rho_u_x={idx_ru}, rho_u_y={idx_rv}, rho_e={idx_re}"
+            "EI assembly requires distinct indices for (rho, rho_u_x, rho_u_y, rho_e); got rho={idx_rho}, rho_u_x={idx_ru}, rho_u_y={idx_rv}, rho_e={idx_re}"
         );
     }
-    // Inverse map: EquationSystem packed index -> Euler component order index.
-    let mut sys_to_euler = [0usize; 4];
-    for (euler_idx, &sys_idx) in euler_to_sys.iter().enumerate() {
-        sys_to_euler[sys_idx] = euler_idx;
-    }
 
-    let permute_euler_mat_into_system =
-        |mat: &typed::MatExpr<4, 4>| -> typed::MatExpr<4, 4> {
-            typed::MatExpr::<4, 4>::from_entries([
-                [
-                    mat.entry(sys_to_euler[0], sys_to_euler[0]),
-                    mat.entry(sys_to_euler[0], sys_to_euler[1]),
-                    mat.entry(sys_to_euler[0], sys_to_euler[2]),
-                    mat.entry(sys_to_euler[0], sys_to_euler[3]),
-                ],
-                [
-                    mat.entry(sys_to_euler[1], sys_to_euler[0]),
-                    mat.entry(sys_to_euler[1], sys_to_euler[1]),
-                    mat.entry(sys_to_euler[1], sys_to_euler[2]),
-                    mat.entry(sys_to_euler[1], sys_to_euler[3]),
-                ],
-                [
-                    mat.entry(sys_to_euler[2], sys_to_euler[0]),
-                    mat.entry(sys_to_euler[2], sys_to_euler[1]),
-                    mat.entry(sys_to_euler[2], sys_to_euler[2]),
-                    mat.entry(sys_to_euler[2], sys_to_euler[3]),
-                ],
-                [
-                    mat.entry(sys_to_euler[3], sys_to_euler[0]),
-                    mat.entry(sys_to_euler[3], sys_to_euler[1]),
-                    mat.entry(sys_to_euler[3], sys_to_euler[2]),
-                    mat.entry(sys_to_euler[3], sys_to_euler[3]),
-                ],
-            ])
-        };
+    let mut unknown_components: Vec<(&str, u32)> = Vec::new();
+    for eqn in system.equations() {
+        let target = eqn.target();
+        match target.kind() {
+            FieldKind::Scalar => unknown_components.push((target.name(), 0)),
+            FieldKind::Vector2 => {
+                unknown_components.push((target.name(), 0));
+                unknown_components.push((target.name(), 1));
+            }
+        }
+    }
+    if unknown_components.len() != unknowns_per_cell as usize {
+        panic!(
+            "EI assembly internal error: unknown_components length mismatch (len={}, unknowns_per_cell={unknowns_per_cell})",
+            unknown_components.len()
+        );
+    }
 
     let gamma_value = eos
         .ideal_gas_gamma()
@@ -420,28 +415,52 @@ fn main_body(layout: &StateLayout, system: &EquationSystem, eos: &EosSpec) -> Bl
         "start_row_0",
         Expr::ident("scalar_offset") * block_stride,
     ));
+    for row in 1..(block_size as usize) {
+        let row_stride = block_size * row as u32;
+        stmts.push(dsl::let_expr(
+            &format!("start_row_{row}"),
+            Expr::ident("start_row_0")
+                + Expr::ident("num_neighbors") * Expr::from(row_stride),
+        ));
+    }
+
+    // Diagonal block entry for this cell (write directly into matrix_values).
     stmts.push(dsl::let_expr(
-        "start_row_1",
-        Expr::ident("start_row_0") + Expr::ident("num_neighbors") * block_size,
+        "scalar_diag_idx",
+        dsl::array_access("diagonal_indices", Expr::ident("idx")),
     ));
     stmts.push(dsl::let_expr(
-        "start_row_2",
-        Expr::ident("start_row_0") + Expr::ident("num_neighbors") * (block_size * 2),
+        "diag_rank",
+        Expr::ident("scalar_diag_idx") - Expr::ident("scalar_offset"),
     ));
-    stmts.push(dsl::let_expr(
-        "start_row_3",
-        Expr::ident("start_row_0") + Expr::ident("num_neighbors") * (block_size * 3),
-    ));
+    let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
+
+    // Initialize diagonal block: zero everything, then identity constraints for non-Euler unknowns.
+    for row in 0..(block_size as usize) {
+        for col in 0..(block_size as usize) {
+            stmts.push(dsl::assign_expr(
+                diag_entry.entry(row as u8, col as u8).expr,
+                0.0,
+            ));
+        }
+    }
+    let euler_sys_indices = [idx_rho as usize, idx_ru as usize, idx_rv as usize, idx_re as usize];
+    for sys_i in 0..(block_size as usize) {
+        if !euler_sys_indices.contains(&sys_i) {
+            stmts.push(dsl::assign_expr(
+                diag_entry.entry(sys_i as u8, sys_i as u8).expr,
+                1.0,
+            ));
+        }
+    }
     stmts.push(dsl::let_expr(
         "scheme_id",
         Expr::ident("constants").field("scheme"),
     ));
 
     stmts.push(dsl::comment(
-        "Jacobian rows/cols: EquationSystem packed component order (permutes [rho, rho_u_x, rho_u_y, rho_e])",
+        "Jacobian rows/cols: EquationSystem packed component order (Euler 4x4 embedded; extra unknowns constrained)",
     ));
-    stmts.extend(typed::MatExpr::<4, 4>::var_prefix("diag", 0.0.into()));
-    let diag_mat = typed::MatExpr::<4, 4>::from_prefix("diag");
 
     stmts.push(dsl::var_typed_expr("sum_rho", Type::F32, Some(0.0.into())));
     stmts.push(dsl::var_typed_expr(
@@ -1893,10 +1912,6 @@ fn main_body(layout: &StateLayout, system: &EquationSystem, eos: &EosSpec) -> Bl
     let jac_l = a_l_mat.mul_scalar(a_l).add(&visc_l).sub(&diag_term);
     let jac_r = a_r_mat.mul_scalar(a_r).add(&visc_r).add(&diag_term);
 
-    // Permute Jacobians into EquationSystem packed component order before scattering.
-    let jac_l = permute_euler_mat_into_system(&jac_l);
-    let jac_r = permute_euler_mat_into_system(&jac_r);
-
     let mut interior_matrix_stmts = vec![
         dsl::let_expr(
             "scalar_mat_idx",
@@ -1909,56 +1924,100 @@ fn main_body(layout: &StateLayout, system: &EquationSystem, eos: &EosSpec) -> Bl
     ];
 
     let neighbor_entry = block_matrix.row_entry(&Expr::ident("neighbor_rank"));
-    interior_matrix_stmts.extend(
-        jac_r.scatter_assign_to_block_entry_scaled(&neighbor_entry, Some(Expr::ident("area"))),
-    );
-    interior_matrix_stmts.extend(jac_l.assign_op_to_prefix_scaled(
-        AssignOp::Add,
-        "diag",
-        Some(Expr::ident("area")),
-    ));
+    // Write full neighbor block to avoid stale values.
+    for row in 0..(block_size as usize) {
+        for col in 0..(block_size as usize) {
+            interior_matrix_stmts.push(dsl::assign_expr(
+                neighbor_entry.entry(row as u8, col as u8).expr,
+                0.0,
+            ));
+        }
+    }
+    // Scatter the Euler 4x4 off-diagonal block into system indices.
+    for e_r in 0..4usize {
+        for e_c in 0..4usize {
+            let sys_r = euler_sys_indices[e_r];
+            let sys_c = euler_sys_indices[e_c];
+            interior_matrix_stmts.push(dsl::assign_expr(
+                neighbor_entry.entry(sys_r as u8, sys_c as u8).expr,
+                jac_r.entry(e_r, e_c) * Expr::ident("area"),
+            ));
+        }
+    }
+    // Add Euler 4x4 contribution to the diagonal block.
+    for e_r in 0..4usize {
+        for e_c in 0..4usize {
+            let sys_r = euler_sys_indices[e_r];
+            let sys_c = euler_sys_indices[e_c];
+            interior_matrix_stmts.push(dsl::assign_op_expr(
+                AssignOp::Add,
+                diag_entry.entry(sys_r as u8, sys_c as u8).expr,
+                jac_l.entry(e_r, e_c) * Expr::ident("area"),
+            ));
+        }
+    }
 
     let interior_matrix = dsl::block(interior_matrix_stmts);
 
     let boundary_matrix = {
         let area = Expr::ident("area");
 
-        // Diagonal transmissive mask in EquationSystem packed component order.
-        // (Dirichlet => 0, otherwise 1) applied to the *columns* of jac_r.
+        // Dirichlet => 0, otherwise 1 (applied to columns of jac_r in Euler ordering).
         let bc_base = Expr::ident("boundary_type") * Expr::from(unknowns_per_cell);
-        let t_0 = dsl::select(
+        let t_rho = dsl::select(
             one,
             zero,
-            typed::EnumExpr::<GpuBcKind>::from_expr(Expr::ident("bc_kind").index(bc_base + 0u32))
-                .eq(GpuBcKind::Dirichlet),
+            typed::EnumExpr::<GpuBcKind>::from_expr(
+                Expr::ident("bc_kind").index(bc_base + idx_rho),
+            )
+            .eq(GpuBcKind::Dirichlet),
         );
-        let t_1 = dsl::select(
+        let t_ru = dsl::select(
             one,
             zero,
-            typed::EnumExpr::<GpuBcKind>::from_expr(Expr::ident("bc_kind").index(bc_base + 1u32))
-                .eq(GpuBcKind::Dirichlet),
+            typed::EnumExpr::<GpuBcKind>::from_expr(
+                Expr::ident("bc_kind").index(bc_base + idx_ru),
+            )
+            .eq(GpuBcKind::Dirichlet),
         );
-        let t_2 = dsl::select(
+        let t_rv = dsl::select(
             one,
             zero,
-            typed::EnumExpr::<GpuBcKind>::from_expr(Expr::ident("bc_kind").index(bc_base + 2u32))
-                .eq(GpuBcKind::Dirichlet),
+            typed::EnumExpr::<GpuBcKind>::from_expr(
+                Expr::ident("bc_kind").index(bc_base + idx_rv),
+            )
+            .eq(GpuBcKind::Dirichlet),
         );
-        let t_3 = dsl::select(
+        let t_re = dsl::select(
             one,
             zero,
-            typed::EnumExpr::<GpuBcKind>::from_expr(Expr::ident("bc_kind").index(bc_base + 3u32))
-                .eq(GpuBcKind::Dirichlet),
+            typed::EnumExpr::<GpuBcKind>::from_expr(
+                Expr::ident("bc_kind").index(bc_base + idx_re),
+            )
+            .eq(GpuBcKind::Dirichlet),
         );
 
         let t_bc = typed::MatExpr::<4, 4>::from_entries([
-            [t_0, zero, zero, zero],
-            [zero, t_1, zero, zero],
-            [zero, zero, t_2, zero],
-            [zero, zero, zero, t_3],
+            [t_rho, zero, zero, zero],
+            [zero, t_ru, zero, zero],
+            [zero, zero, t_rv, zero],
+            [zero, zero, zero, t_re],
         ]);
         let eff_bc = jac_l.add(&jac_r.mul_mat(&t_bc));
-        dsl::block(eff_bc.assign_op_to_prefix_scaled(AssignOp::Add, "diag", Some(area)))
+
+        let mut b_stmts = Vec::new();
+        for e_r in 0..4usize {
+            for e_c in 0..4usize {
+                let sys_r = euler_sys_indices[e_r];
+                let sys_c = euler_sys_indices[e_c];
+                b_stmts.push(dsl::assign_op_expr(
+                    AssignOp::Add,
+                    diag_entry.entry(sys_r as u8, sys_c as u8).expr,
+                    eff_bc.entry(e_r, e_c) * area,
+                ));
+            }
+        }
+        dsl::block(b_stmts)
     };
 
     loop_body.push(dsl::if_block_expr(
@@ -2013,48 +2072,43 @@ fn main_body(layout: &StateLayout, system: &EquationSystem, eos: &EosSpec) -> Bl
         ),
     ));
 
-    stmts.extend(diag_mat.assign_op_diag(AssignOp::Add, Expr::ident("coeff_time")));
-    stmts.extend(diag_mat.assign_op_diag(AssignOp::Add, Expr::ident("coeff_pseudo")));
+    // Add time/pseudo diagonal terms for the Euler components.
+    for &sys_i in &euler_sys_indices {
+        stmts.push(dsl::assign_op_expr(
+            AssignOp::Add,
+            diag_entry.entry(sys_i as u8, sys_i as u8).expr,
+            Expr::ident("coeff_time"),
+        ));
+        stmts.push(dsl::assign_op_expr(
+            AssignOp::Add,
+            diag_entry.entry(sys_i as u8, sys_i as u8).expr,
+            Expr::ident("coeff_pseudo"),
+        ));
+    }
 
-    stmts.push(dsl::let_expr(
-        "scalar_diag_idx",
-        dsl::array_access("diagonal_indices", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "diag_rank",
-        Expr::ident("scalar_diag_idx") - Expr::ident("scalar_offset"),
-    ));
-    let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
-    stmts.extend(diag_mat.scatter_assign_to_block_entry_scaled(&diag_entry, None));
+    // Write RHS for all system components.
+    for sys_i in 0..(unknowns_per_cell as usize) {
+        let rhs_value = if sys_i as u32 == idx_rho {
+            Expr::ident("rhs_rho")
+        } else if sys_i as u32 == idx_ru {
+            Expr::ident("rhs_rho_u_x")
+        } else if sys_i as u32 == idx_rv {
+            Expr::ident("rhs_rho_u_y")
+        } else if sys_i as u32 == idx_re {
+            Expr::ident("rhs_rho_e")
+        } else {
+            let (field_name, component) = unknown_components[sys_i];
+            state_component(layout, "state", "idx", field_name, component)
+        };
 
-    stmts.push(dsl::assign_array_access_linear(
-        "rhs",
-        Expr::ident("idx"),
-        unknowns_per_cell,
-        idx_rho,
-        Expr::ident("rhs_rho"),
-    ));
-    stmts.push(dsl::assign_array_access_linear(
-        "rhs",
-        Expr::ident("idx"),
-        unknowns_per_cell,
-        idx_ru,
-        Expr::ident("rhs_rho_u_x"),
-    ));
-    stmts.push(dsl::assign_array_access_linear(
-        "rhs",
-        Expr::ident("idx"),
-        unknowns_per_cell,
-        idx_rv,
-        Expr::ident("rhs_rho_u_y"),
-    ));
-    stmts.push(dsl::assign_array_access_linear(
-        "rhs",
-        Expr::ident("idx"),
-        unknowns_per_cell,
-        idx_re,
-        Expr::ident("rhs_rho_e"),
-    ));
+        stmts.push(dsl::assign_array_access_linear(
+            "rhs",
+            Expr::ident("idx"),
+            unknowns_per_cell,
+            sys_i as u32,
+            rhs_value,
+        ));
+    }
 
     Block::new(stmts)
 }

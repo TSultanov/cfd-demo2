@@ -28,6 +28,10 @@ impl PrimitiveDerivations {
         }
     }
 
+    pub fn is_identity(&self) -> bool {
+        self.derivations.is_empty()
+    }
+
     /// Euler ideal gas primitive recovery.
     ///
     /// Conserved: rho, rho_u, rho_e

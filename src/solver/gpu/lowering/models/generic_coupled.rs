@@ -61,13 +61,33 @@ impl GenericCoupledProgramResources {
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
     ) -> Result<Self, String> {
-        // Build graphs from recipe using unified graph builder
-        let assembly_graph = build_graph_for_phases(
-            recipe,
-            &[KernelPhase::FluxComputation, KernelPhase::Assembly],
-            &kernels,
-            "generic_coupled",
-        )
+        // Build graphs from recipe using unified graph builder.
+        //
+        // Some models (e.g., compressible KT flux) require a gradient stage before flux.
+        // Keep gradients optional so diffusion-only models don't fail graph construction.
+        let has_gradients = recipe
+            .kernels
+            .iter()
+            .any(|k| k.phase == KernelPhase::Gradients);
+        let assembly_graph = if has_gradients {
+            build_graph_for_phases(
+                recipe,
+                &[
+                    KernelPhase::Gradients,
+                    KernelPhase::FluxComputation,
+                    KernelPhase::Assembly,
+                ],
+                &kernels,
+                "generic_coupled",
+            )
+        } else {
+            build_graph_for_phases(
+                recipe,
+                &[KernelPhase::FluxComputation, KernelPhase::Assembly],
+                &kernels,
+                "generic_coupled",
+            )
+        }
         .unwrap_or_else(|_| build_assembly_graph_fallback());
 
         // Apply and update are optional depending on the stepping mode.

@@ -677,6 +677,12 @@ fn generate_kernel_registry_map() {
         ("ConservativeAssembly", "ei_assembly", "ei_assembly"),
         ("ConservativeApply", "ei_apply", "ei_apply"),
         ("ConservativeUpdate", "ei_update", "ei_update"),
+
+        // KT flux module bridge for generic-coupled models.
+        // These map to the existing generated shader modules while using non-ei stable ids.
+        ("KtGradients", "ei_gradients", "kt_gradients"),
+        ("FluxKt", "ei_flux_kt", "flux_kt"),
+        ("PrimitiveRecovery", "ei_update", "primitive_recovery"),
     ];
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)

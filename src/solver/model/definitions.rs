@@ -42,6 +42,11 @@ impl ModelSpec {
     pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
         use crate::solver::model::method::MethodSpec;
 
+        let has_kt_flux = matches!(
+            self.flux_module,
+            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
+        );
+
         let plan = self.kernel_plan();
         let kernels = plan.kernels();
 
@@ -77,9 +82,13 @@ impl ModelSpec {
             }
         };
 
-        let requires_low_mach_params = matches!(self.method, MethodSpec::ConservativeCompressible { .. });
+        // Low-Mach parameters are currently required by the KT flux kernel bridge.
+        let requires_low_mach_params = has_kt_flux
+            || matches!(self.method, MethodSpec::ConservativeCompressible { .. });
 
-        let gradient_storage = if matches!(self.method, MethodSpec::ConservativeCompressible { .. }) {
+        let gradient_storage = if has_kt_flux
+            || matches!(self.method, MethodSpec::ConservativeCompressible { .. })
+        {
             // Legacy EI kernels expect per-component gradient buffers (e.g. grad_rho_u_x).
             GradientStorage::PerFieldComponents
         } else if has(KernelKind::GenericCoupledAssembly) {
@@ -88,7 +97,9 @@ impl ModelSpec {
             GradientStorage::PerFieldName
         };
 
-        let required_gradient_fields = if matches!(self.method, MethodSpec::ConservativeCompressible { .. }) {
+        let required_gradient_fields = if has_kt_flux
+            || matches!(self.method, MethodSpec::ConservativeCompressible { .. })
+        {
             vec![
                 "rho".to_string(),
                 "rho_u_x".to_string(),
@@ -462,7 +473,9 @@ pub fn compressible_model() -> ModelSpec {
 
     ModelSpec {
         id: "compressible",
-        method: crate::solver::model::method::MethodSpec::ConservativeCompressible { outer_iters: 1 },
+        // Route compressible through the generic coupled pipeline; KT flux + primitive recovery
+        // remain transitional kernels behind model-driven IDs.
+        method: crate::solver::model::method::MethodSpec::GenericCoupledImplicit { outer_iters: 1 },
         eos: crate::solver::model::eos::EosSpec::IdealGas { gamma },
         system,
         state_layout: layout,

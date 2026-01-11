@@ -244,6 +244,9 @@ impl SolverRecipe {
                 KernelId::CONSERVATIVE_FLUX_KT => KernelPhase::FluxComputation,
                 KernelId::CONSERVATIVE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
 
+                KernelId::KT_GRADIENTS => KernelPhase::Gradients,
+                KernelId::FLUX_KT => KernelPhase::FluxComputation,
+
                 KernelId::FLUX_RHIE_CHOW => KernelPhase::FluxComputation,
 
                 KernelId::COUPLED_ASSEMBLY
@@ -265,12 +268,18 @@ impl SolverRecipe {
 
                 KernelId::CONSERVATIVE_UPDATE => KernelPhase::PrimitiveRecovery,
 
+                // Generic-coupled plan does not currently have a dedicated PrimitiveRecovery
+                // phase. Treat model-declared primitive recovery as part of the Update stage.
+                KernelId::PRIMITIVE_RECOVERY => KernelPhase::Update,
+
                 // Preparation kernels (or legacy defaults)
                 _ => KernelPhase::Preparation,
             };
 
             let dispatch = match id {
-                KernelId::FLUX_RHIE_CHOW | KernelId::CONSERVATIVE_FLUX_KT => DispatchKind::Faces,
+                KernelId::FLUX_RHIE_CHOW | KernelId::CONSERVATIVE_FLUX_KT | KernelId::FLUX_KT => {
+                    DispatchKind::Faces
+                }
                 _ => DispatchKind::Cells,
             };
 

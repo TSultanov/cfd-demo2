@@ -77,6 +77,11 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
         KernelKind::ConservativeApply => "ei_apply.wgsl".to_string(),
         KernelKind::ConservativeUpdate => "ei_update.wgsl".to_string(),
 
+        // Transitional KT flux module bridge.
+        KernelKind::KtGradients => "ei_gradients.wgsl".to_string(),
+        KernelKind::FluxKt => "ei_flux_kt.wgsl".to_string(),
+        KernelKind::PrimitiveRecovery => "ei_update.wgsl".to_string(),
+
         KernelKind::GenericCoupledAssembly => {
             format!("generic_coupled_assembly_{}.wgsl", model.id)
         }
@@ -121,6 +126,10 @@ fn generate_kernel_wgsl(
         KernelKind::ConservativeAssembly => method_ei::generate_ei_assembly_wgsl(model),
         KernelKind::ConservativeApply => method_ei::generate_ei_apply_wgsl(model),
         KernelKind::ConservativeUpdate => method_ei::generate_ei_update_wgsl(model),
+
+        KernelKind::KtGradients => method_ei::generate_ei_gradients_wgsl(model),
+        KernelKind::FluxKt => method_ei::generate_ei_flux_kt_wgsl(model),
+        KernelKind::PrimitiveRecovery => method_ei::generate_ei_update_wgsl(model),
 
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = expand_schemes(&model.system, schemes)

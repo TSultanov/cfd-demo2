@@ -15,6 +15,15 @@ pub enum KernelKind {
     ConservativeApply,
     ConservativeUpdate,
 
+    // Transitional: KT flux module bridge for the generic-coupled pipeline.
+    //
+    // These are currently backed by the legacy EI shader generators and bindings,
+    // but are selected by model structure (FluxModuleSpec + PrimitiveDerivations)
+    // rather than by the EI method family.
+    KtGradients,
+    FluxKt,
+    PrimitiveRecovery,
+
     GenericCoupledAssembly,
     GenericCoupledApply,
     GenericCoupledUpdate,
@@ -46,6 +55,14 @@ impl KernelId {
     pub const CONSERVATIVE_ASSEMBLY: KernelId = KernelId("ei_assembly");
     pub const CONSERVATIVE_APPLY: KernelId = KernelId("ei_apply");
     pub const CONSERVATIVE_UPDATE: KernelId = KernelId("ei_update");
+
+    // Transitional stable ids for KT flux module + primitive recovery.
+    //
+    // These allow routing compressible models through the generic-coupled pipeline
+    // without selecting any `ei_*` kernel ids directly.
+    pub const KT_GRADIENTS: KernelId = KernelId("kt_gradients");
+    pub const FLUX_KT: KernelId = KernelId("flux_kt");
+    pub const PRIMITIVE_RECOVERY: KernelId = KernelId("primitive_recovery");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
@@ -151,6 +168,10 @@ impl From<KernelKind> for KernelId {
             KernelKind::ConservativeApply => KernelId::CONSERVATIVE_APPLY,
             KernelKind::ConservativeUpdate => KernelId::CONSERVATIVE_UPDATE,
 
+            KernelKind::KtGradients => KernelId::KT_GRADIENTS,
+            KernelKind::FluxKt => KernelId::FLUX_KT,
+            KernelKind::PrimitiveRecovery => KernelId::PRIMITIVE_RECOVERY,
+
             KernelKind::GenericCoupledAssembly => KernelId::GENERIC_COUPLED_ASSEMBLY,
             KernelKind::GenericCoupledApply => KernelId::GENERIC_COUPLED_APPLY,
             KernelKind::GenericCoupledUpdate => KernelId::GENERIC_COUPLED_UPDATE,
@@ -238,15 +259,51 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
                 kernels.push(KernelKind::FluxRhieChow);
             }
 
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
+            ) {
+                kernels.push(KernelKind::KtGradients);
+                kernels.push(KernelKind::FluxKt);
+            }
+
             kernels.push(KernelKind::GenericCoupledAssembly);
             kernels.push(KernelKind::GenericCoupledUpdate);
+
+            if !model.primitives.is_identity() {
+                kernels.push(KernelKind::PrimitiveRecovery);
+            }
             KernelPlan::new(kernels)
         }
-        MethodSpec::GenericCoupledImplicit { .. } => KernelPlan::new(vec![
-            // For implicit outer iterations, update is executed in the loop body.
-            KernelKind::GenericCoupledAssembly,
-            KernelKind::GenericCoupledUpdate,
-        ]),
+        MethodSpec::GenericCoupledImplicit { .. } => {
+            // For implicit outer iterations, update may be executed in the loop body.
+            // Keep kernel ordering stable; phases are assigned by the recipe.
+            let mut kernels = Vec::new();
+
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
+            ) {
+                kernels.push(KernelKind::FluxRhieChow);
+            }
+
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
+            ) {
+                kernels.push(KernelKind::KtGradients);
+                kernels.push(KernelKind::FluxKt);
+            }
+
+            kernels.push(KernelKind::GenericCoupledAssembly);
+            kernels.push(KernelKind::GenericCoupledUpdate);
+
+            if !model.primitives.is_identity() {
+                kernels.push(KernelKind::PrimitiveRecovery);
+            }
+
+            KernelPlan::new(kernels)
+        }
     }
 }
 
@@ -278,12 +335,49 @@ pub fn derive_kernel_ids_for_model(model: &crate::solver::model::ModelSpec) -> V
             ) {
                 ids.push(KernelId::FLUX_RHIE_CHOW);
             }
+
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
+            ) {
+                ids.push(KernelId::KT_GRADIENTS);
+                ids.push(KernelId::FLUX_KT);
+            }
+
             ids.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
             ids.push(KernelId::GENERIC_COUPLED_UPDATE);
+
+            if !model.primitives.is_identity() {
+                ids.push(KernelId::PRIMITIVE_RECOVERY);
+            }
             ids
         }
         MethodSpec::GenericCoupledImplicit { .. } => {
-            vec![KernelId::GENERIC_COUPLED_ASSEMBLY, KernelId::GENERIC_COUPLED_UPDATE]
+            let mut ids = Vec::new();
+
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
+            ) {
+                ids.push(KernelId::FLUX_RHIE_CHOW);
+            }
+
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
+            ) {
+                ids.push(KernelId::KT_GRADIENTS);
+                ids.push(KernelId::FLUX_KT);
+            }
+
+            ids.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
+            ids.push(KernelId::GENERIC_COUPLED_UPDATE);
+
+            if !model.primitives.is_identity() {
+                ids.push(KernelId::PRIMITIVE_RECOVERY);
+            }
+
+            ids
         }
     }
 }

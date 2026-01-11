@@ -141,7 +141,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start_row_2 = start_row_0 + num_neighbors * 8u;
     let start_row_3 = start_row_0 + num_neighbors * 12u;
     let scheme_id = constants.scheme;
-    // Jacobian rows/cols: rho, rho_u_x, rho_u_y, rho_e
+    // Jacobian rows/cols: EquationSystem packed component order (permutes [rho, rho_u_x, rho_u_y, rho_e])
     var diag_00 = 0.0;
     var diag_01 = 0.0;
     var diag_02 = 0.0;

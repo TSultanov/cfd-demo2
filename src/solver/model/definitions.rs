@@ -15,6 +15,7 @@ use std::collections::HashMap;
 pub struct ModelSpec {
     pub id: &'static str,
     pub method: crate::solver::model::method::MethodSpec,
+    pub eos: crate::solver::model::eos::EosSpec,
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub boundaries: BoundarySpec,
@@ -363,6 +364,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     ModelSpec {
         id: "incompressible_momentum",
         method: crate::solver::model::method::MethodSpec::CoupledIncompressible,
+        eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
@@ -385,6 +387,7 @@ pub fn compressible_model() -> ModelSpec {
     ModelSpec {
         id: "compressible",
         method: crate::solver::model::method::MethodSpec::ExplicitImplicitConservative,
+        eos: crate::solver::model::eos::EosSpec::IdealGas { gamma: 1.4 },
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
@@ -425,6 +428,7 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
     ModelSpec {
         id: "generic_diffusion_demo",
         method: crate::solver::model::method::MethodSpec::GenericCoupled,
+        eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,
@@ -465,6 +469,7 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
     ModelSpec {
         id: "generic_diffusion_demo_neumann",
         method: crate::solver::model::method::MethodSpec::GenericCoupled,
+        eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,

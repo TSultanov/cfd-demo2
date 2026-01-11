@@ -26,6 +26,9 @@ mod solver {
                 "/src/solver/model/method.rs"
             ));
         }
+        pub mod eos {
+            include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/model/eos.rs"));
+        }
         pub mod flux_layout {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -96,6 +99,8 @@ mod solver {
         };
         #[allow(unused_imports)]
         pub use flux_layout::{FluxComponent, FluxLayout};
+        #[allow(unused_imports)]
+        pub use eos::EosSpec;
         #[allow(unused_imports)]
         pub use method::MethodSpec;
         #[allow(unused_imports)]

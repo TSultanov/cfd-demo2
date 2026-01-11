@@ -8,12 +8,14 @@ use super::super::wgsl_ast::{
 use super::super::wgsl_dsl as dsl;
 use crate::solver::gpu::enums::{GpuBcKind, GpuLowMachPrecondModel};
 use crate::solver::model::backend::StateLayout;
+use crate::solver::model::EosSpec;
 use crate::solver::model::FluxLayout;
 use crate::solver::scheme::Scheme;
 
 pub fn generate_ei_flux_kt_wgsl(
     layout: &StateLayout,
     flux_layout: &FluxLayout,
+    eos: &EosSpec,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -21,7 +23,7 @@ pub fn generate_ei_flux_kt_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
-    module.push(Item::Function(main_fn(layout, flux_layout)));
+    module.push(Item::Function(main_fn(layout, flux_layout, eos)));
     module.to_wgsl()
 }
 
@@ -237,7 +239,7 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
     ))
 }
 
-fn main_fn(layout: &StateLayout, flux_layout: &FluxLayout) -> Function {
+fn main_fn(layout: &StateLayout, flux_layout: &FluxLayout, eos: &EosSpec) -> Function {
     let params = vec![Param::new(
         "global_id",
         Type::vec3_u32(),
@@ -248,16 +250,18 @@ fn main_fn(layout: &StateLayout, flux_layout: &FluxLayout) -> Function {
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(layout, flux_layout),
+        main_body(layout, flux_layout, eos),
     )
 }
 
-fn main_body(layout: &StateLayout, flux_layout: &FluxLayout) -> Block {
+fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, eos: &EosSpec) -> Block {
     let mut stmts = Vec::new();
     let rho_field = "rho";
     let rho_u_field = "rho_u";
     let rho_e_field = "rho_e";
-    let gamma = 1.4_f32;
+    let gamma = eos
+        .ideal_gas_gamma()
+        .unwrap_or_else(|| panic!("EI flux_kt requires IdealGas EOS; got {eos:?}"));
     let gamma_minus_1 = gamma - 1.0;
     let flux_stride = flux_layout.stride;
     let off_rho = flux_layout
@@ -1367,7 +1371,7 @@ mod tests {
     fn compressible_flux_kt_codegen_emits_state_arrays() {
         let model = compressible_model();
         let flux_layout = FluxLayout::from_system(&model.system);
-        let wgsl = generate_ei_flux_kt_wgsl(&model.state_layout, &flux_layout);
+        let wgsl = generate_ei_flux_kt_wgsl(&model.state_layout, &flux_layout, &model.eos);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("face_owner"));
         assert!(wgsl.contains("fluxes"));

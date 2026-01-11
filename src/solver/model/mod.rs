@@ -5,6 +5,7 @@ pub mod gpu_spec;
 pub mod kernel;
 pub mod method;
 pub mod flux_layout;
+pub mod eos;
 
 pub use definitions::{
     compressible_model, compressible_system, generic_diffusion_demo_model,
@@ -17,3 +18,4 @@ pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuS
 pub use kernel::derive_kernel_plan_for_model;
 pub use kernel::{KernelId, KernelKind, KernelPlan};
 pub use method::MethodSpec;
+pub use eos::EosSpec;

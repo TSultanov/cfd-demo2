@@ -69,7 +69,7 @@ impl GenericCoupledProgramResources {
             .kernels
             .iter()
             .any(|k| k.phase == KernelPhase::Gradients);
-        let assembly_graph = if has_gradients {
+        let assembly_graph_result = if has_gradients {
             build_graph_for_phases(
                 recipe,
                 &[
@@ -87,8 +87,15 @@ impl GenericCoupledProgramResources {
                 &kernels,
                 "generic_coupled",
             )
-        }
-        .unwrap_or_else(|_| build_assembly_graph_fallback());
+        };
+
+        let assembly_graph = match assembly_graph_result {
+            Ok(graph) => graph,
+            Err(e) if e.starts_with("no kernels found for phases") => {
+                build_assembly_graph_fallback()
+            }
+            Err(e) => return Err(e),
+        };
 
         // Apply and update are optional depending on the stepping mode.
         // (For implicit outer-iteration recipes, update may be executed in the "apply" stage.)
@@ -97,8 +104,7 @@ impl GenericCoupledProgramResources {
             KernelPhase::Apply,
             &kernels,
             "generic_coupled",
-        )
-        .unwrap_or(None)
+        )?
         .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
 
         let update_graph = build_optional_graph_for_phase(
@@ -106,8 +112,7 @@ impl GenericCoupledProgramResources {
             KernelPhase::Update,
             &kernels,
             "generic_coupled",
-        )
-        .unwrap_or(None)
+        )?
         .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
 
         let outer_iters = match recipe.stepping {

@@ -26,6 +26,7 @@ One model-driven GPU solver pipeline with:
 - EI method codegen is routed through `src/solver/codegen/method_ei.rs` and EI kernels emit through the unified emitter path.
 - EI uses `FluxLayout` (named component offsets/stride) and unified BC tables (`bc_kind`/`bc_value`) with consecutive bind groups.
 - EI codegen no longer depends on `CompressibleFields` for EI kernel emission (still Euler-name-specific internally).
+- EI kernel implementations live under `src/solver/codegen/ei/*`; legacy `compressible_*` EI modules are compatibility wrappers.
 - Regression validation: `gpu_compressible_solver_preserves_uniform_state` passes.
 
 ### Still Violating the Goal (remaining family-ness)
@@ -83,7 +84,7 @@ One model-driven GPU solver pipeline with:
     - `src/solver/codegen/compressible_update.rs`
 
    **Remaining work (as of 2026-01-11):**
-   - **Retire the legacy module names:** move EI kernel implementations under a method-owned namespace (e.g. `src/solver/codegen/ei/*`) and turn `compressible_*` EI modules into thin wrappers (or delete them once unused).
+   - **Delete the legacy module names:** remove `src/solver/codegen/compressible_*` EI modules once all call sites have moved to method-owned entrypoints.
    - **Make EI assembly truly model-driven:** remove the Euler-specific 4×4 assumptions (currently the assembly validates `unknowns_per_cell == 4` and ordering).
    - **Remove hard-coded EOS from kernels:** primitive recovery / update still hard-codes `gamma = 1.4`; introduce an EOS spec and plumb parameters into WGSL.
    - **Finalize recipe/module ownership:** the EI method module should declare its resources and emit its kernel list + phase/dispatch without central matches.
@@ -111,9 +112,9 @@ One model-driven GPU solver pipeline with:
     - "Special" EI BC handling is not allowed as an intermediate state.
 
    **Next steps (practical):**
-   1) Move EI kernel implementations into `src/solver/codegen/ei/*` and keep `compressible_*` as compatibility wrappers.
-   2) Replace Euler-specific primitive recovery and assembly with EOS/unknown-driven variants (or make the constraints explicit in `MethodSpec`).
-   3) Make the EI method module the authoritative source of its kernel list + phase/dispatch in the recipe.
+   1) Replace Euler-specific primitive recovery and assembly with EOS/unknown-driven variants (or make the constraints explicit in `MethodSpec`).
+   2) Make the EI method module the authoritative source of its kernel list + phase/dispatch in the recipe.
+   3) Delete the legacy `compressible_*` EI modules once unused.
 
     **Done when:**
     - Kernel planning no longer infers EI from "compressible" structure.

@@ -27,3 +27,6 @@ jobs:
 
       - name: Check generated WGSL is up to date
         run: ./scripts/check_generated_wgsl.sh
+
+      - name: Check IR boundary (codegen imports)
+        run: ./scripts/check_ir_boundary.sh

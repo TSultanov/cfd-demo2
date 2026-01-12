@@ -235,45 +235,28 @@ impl SolverRecipe {
 
         // Emit kernel specs in terms of stable KernelIds.
         //
-        // Kernel selection is model-driven (based on `ModelSpec.method`); the recipe assigns
-        // phase and dispatch as it constructs `KernelSpec`s.
+        // Kernel selection, phase membership, and dispatch kind are model-owned and derived
+        // from the method + module configuration.
         let mut kernels: Vec<KernelSpec> = Vec::new();
-        for id in crate::solver::model::kernel::derive_kernel_ids_for_model(model) {
-            let phase = match id {
-                KernelId::KT_GRADIENTS => KernelPhase::Gradients,
-                KernelId::FLUX_KT => KernelPhase::FluxComputation,
-
-                KernelId::FLUX_RHIE_CHOW => KernelPhase::FluxComputation,
-
-                KernelId::COUPLED_ASSEMBLY
-                | KernelId::PRESSURE_ASSEMBLY
-                | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
-
-                KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
-
-                KernelId::UPDATE_FIELDS_FROM_COUPLED => KernelPhase::Update,
-
-                KernelId::GENERIC_COUPLED_UPDATE
-                    if matches!(stepping, SteppingMode::Implicit { .. }) =>
-                {
-                    KernelPhase::Apply
+        for spec in crate::solver::model::kernel::derive_kernel_specs_for_model(model)? {
+            let phase = match spec.phase {
+                crate::solver::model::kernel::KernelPhaseId::Preparation => KernelPhase::Preparation,
+                crate::solver::model::kernel::KernelPhaseId::Gradients => KernelPhase::Gradients,
+                crate::solver::model::kernel::KernelPhaseId::FluxComputation => {
+                    KernelPhase::FluxComputation
                 }
-
-                KernelId::GENERIC_COUPLED_UPDATE => KernelPhase::Update,
-
-                // Preparation kernels (or legacy defaults)
-                _ => KernelPhase::Preparation,
+                crate::solver::model::kernel::KernelPhaseId::Assembly => KernelPhase::Assembly,
+                crate::solver::model::kernel::KernelPhaseId::Apply => KernelPhase::Apply,
+                crate::solver::model::kernel::KernelPhaseId::Update => KernelPhase::Update,
             };
 
-            let dispatch = match id {
-                KernelId::FLUX_RHIE_CHOW | KernelId::FLUX_KT => {
-                    DispatchKind::Faces
-                }
-                _ => DispatchKind::Cells,
+            let dispatch = match spec.dispatch {
+                crate::solver::model::kernel::DispatchKindId::Cells => DispatchKind::Cells,
+                crate::solver::model::kernel::DispatchKindId::Faces => DispatchKind::Faces,
             };
 
             kernels.push(KernelSpec {
-                id,
+                id: spec.id,
                 phase,
                 dispatch,
             });

@@ -197,6 +197,35 @@ pub fn derive_kernel_ids(system: &crate::solver::model::backend::EquationSystem)
     ]
 }
 
+/// Model-owned kernel phase classification (GPU-agnostic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KernelPhaseId {
+    Preparation,
+    Gradients,
+    FluxComputation,
+    Assembly,
+    Apply,
+    Update,
+}
+
+/// Model-owned dispatch kind (GPU-agnostic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DispatchKindId {
+    Cells,
+    Faces,
+}
+
+/// A fully specified kernel pass derived from the model + method selection.
+///
+/// This is the "model side" of a recipe: phase/dispatch are decided here so the
+/// GPU recipe does not need per-kernel `match` arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ModelKernelSpec {
+    pub id: KernelId,
+    pub phase: KernelPhaseId,
+    pub dispatch: DispatchKindId,
+}
+
 /// Model-driven kernel plan: selected from `ModelSpec.method`.
 pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> KernelPlan {
     use crate::solver::model::MethodSpec;
@@ -261,60 +290,127 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
     }
 }
 
-/// Model-driven kernel id list: selected from `ModelSpec.method`.
-pub fn derive_kernel_ids_for_model(model: &crate::solver::model::ModelSpec) -> Vec<KernelId> {
+pub fn derive_kernel_specs_for_model(
+    model: &crate::solver::model::ModelSpec,
+) -> Result<Vec<ModelKernelSpec>, String> {
+    use crate::solver::model::flux_module::FluxModuleSpec;
     use crate::solver::model::MethodSpec;
 
     match model.method {
-        MethodSpec::CoupledIncompressible => vec![
-            KernelId::PREPARE_COUPLED,
-            KernelId::FLUX_RHIE_CHOW,
-            KernelId::COUPLED_ASSEMBLY,
-            KernelId::PRESSURE_ASSEMBLY,
-            KernelId::UPDATE_FIELDS_FROM_COUPLED,
-        ],
+        MethodSpec::CoupledIncompressible => {
+            if !matches!(model.flux_module, Some(FluxModuleSpec::RhieChow { .. })) {
+                return Err(
+                    "CoupledIncompressible requires flux_module = RhieChow in ModelSpec".to_string(),
+                );
+            }
+
+            Ok(vec![
+                ModelKernelSpec {
+                    id: KernelId::PREPARE_COUPLED,
+                    phase: KernelPhaseId::Preparation,
+                    dispatch: DispatchKindId::Cells,
+                },
+                ModelKernelSpec {
+                    id: KernelId::FLUX_RHIE_CHOW,
+                    phase: KernelPhaseId::FluxComputation,
+                    dispatch: DispatchKindId::Faces,
+                },
+                ModelKernelSpec {
+                    id: KernelId::COUPLED_ASSEMBLY,
+                    phase: KernelPhaseId::Assembly,
+                    dispatch: DispatchKindId::Cells,
+                },
+                ModelKernelSpec {
+                    id: KernelId::PRESSURE_ASSEMBLY,
+                    phase: KernelPhaseId::Assembly,
+                    dispatch: DispatchKindId::Cells,
+                },
+                ModelKernelSpec {
+                    id: KernelId::UPDATE_FIELDS_FROM_COUPLED,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                },
+            ])
+        }
         MethodSpec::GenericCoupled => {
-            let mut ids = Vec::new();
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
-            ) {
-                ids.push(KernelId::FLUX_RHIE_CHOW);
+            let mut kernels = Vec::new();
+
+            match &model.flux_module {
+                Some(FluxModuleSpec::RhieChow { .. }) => {
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::FLUX_RHIE_CHOW,
+                        phase: KernelPhaseId::FluxComputation,
+                        dispatch: DispatchKindId::Faces,
+                    });
+                }
+                Some(FluxModuleSpec::KurganovTadmor { .. }) => {
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::KT_GRADIENTS,
+                        phase: KernelPhaseId::Gradients,
+                        dispatch: DispatchKindId::Cells,
+                    });
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::FLUX_KT,
+                        phase: KernelPhaseId::FluxComputation,
+                        dispatch: DispatchKindId::Faces,
+                    });
+                }
+                Some(FluxModuleSpec::Convective { .. }) | None => {}
             }
 
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
-            ) {
-                ids.push(KernelId::KT_GRADIENTS);
-                ids.push(KernelId::FLUX_KT);
-            }
+            kernels.push(ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_ASSEMBLY,
+                phase: KernelPhaseId::Assembly,
+                dispatch: DispatchKindId::Cells,
+            });
+            kernels.push(ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_UPDATE,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+            });
 
-            ids.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
-            ids.push(KernelId::GENERIC_COUPLED_UPDATE);
-            ids
+            Ok(kernels)
         }
         MethodSpec::GenericCoupledImplicit { .. } => {
-            let mut ids = Vec::new();
+            let mut kernels = Vec::new();
 
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
-            ) {
-                ids.push(KernelId::FLUX_RHIE_CHOW);
+            match &model.flux_module {
+                Some(FluxModuleSpec::RhieChow { .. }) => {
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::FLUX_RHIE_CHOW,
+                        phase: KernelPhaseId::FluxComputation,
+                        dispatch: DispatchKindId::Faces,
+                    });
+                }
+                Some(FluxModuleSpec::KurganovTadmor { .. }) => {
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::KT_GRADIENTS,
+                        phase: KernelPhaseId::Gradients,
+                        dispatch: DispatchKindId::Cells,
+                    });
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::FLUX_KT,
+                        phase: KernelPhaseId::FluxComputation,
+                        dispatch: DispatchKindId::Faces,
+                    });
+                }
+                Some(FluxModuleSpec::Convective { .. }) | None => {}
             }
 
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
-            ) {
-                ids.push(KernelId::KT_GRADIENTS);
-                ids.push(KernelId::FLUX_KT);
-            }
+            kernels.push(ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_ASSEMBLY,
+                phase: KernelPhaseId::Assembly,
+                dispatch: DispatchKindId::Cells,
+            });
 
-            ids.push(KernelId::GENERIC_COUPLED_ASSEMBLY);
-            ids.push(KernelId::GENERIC_COUPLED_UPDATE);
-            ids
+            // For implicit outer iterations, the update kernel is executed in the "apply" stage.
+            kernels.push(ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_UPDATE,
+                phase: KernelPhaseId::Apply,
+                dispatch: DispatchKindId::Cells,
+            });
+
+            Ok(kernels)
         }
     }
 }

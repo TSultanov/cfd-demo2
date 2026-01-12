@@ -3,7 +3,7 @@ use super::backend::ast::{
     FieldRef, FluxRef,
 };
 use super::backend::state_layout::StateLayout;
-use super::kernel::{KernelKind, KernelPlan};
+use super::kernel::KernelPlan;
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::gpu_spec::{FluxSpec, GradientStorage, ModelGpuSpec};
 use crate::solver::units::{si, UnitDim};
@@ -45,16 +45,10 @@ impl ModelSpec {
             Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
         );
 
-        let plan = self.kernel_plan();
-        let kernels = plan.kernels();
-
-        let has = |kind: KernelKind| kernels.contains(&kind);
-
         // Flux storage is model-driven.
         //
         // - If the model has an explicit flux module, store face fluxes for each coupled
         //   unknown component.
-        // - Otherwise, fall back to legacy family inference.
         let flux = match &self.flux_module {
             Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. }) => {
                 // Rhie–Chow computes a single scalar face flux (phi).
@@ -70,14 +64,7 @@ impl ModelSpec {
                 // Generic convective flux uses a scalar face flux.
                 Some(FluxSpec { stride: 1 })
             }
-            None => {
-                // Legacy fallback.
-                if has(KernelKind::FluxRhieChow) {
-                    Some(FluxSpec { stride: 1 })
-                } else {
-                    None
-                }
-            }
+            None => None,
         };
 
         // Low-Mach parameters are currently required by the KT flux kernel bridge.
@@ -86,19 +73,34 @@ impl ModelSpec {
         let gradient_storage = if has_kt_flux {
             // Legacy EI kernels expect per-component gradient buffers (e.g. grad_rho_u_x).
             GradientStorage::PerFieldComponents
-        } else if has(KernelKind::GenericCoupledAssembly) {
-            GradientStorage::PackedState
         } else {
-            GradientStorage::PerFieldName
+            match self.method {
+                crate::solver::model::method::MethodSpec::GenericCoupled
+                | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. } => {
+                    GradientStorage::PackedState
+                }
+                crate::solver::model::method::MethodSpec::CoupledIncompressible => {
+                    GradientStorage::PerFieldName
+                }
+            }
         };
 
         let required_gradient_fields = if has_kt_flux {
-            vec![
-                "rho".to_string(),
-                "rho_u_x".to_string(),
-                "rho_u_y".to_string(),
-                "rho_e".to_string(),
-            ]
+            use crate::solver::model::gpu_spec::expand_field_components;
+            use std::collections::HashSet;
+
+            // KT uses per-component gradients of the coupled unknowns (conserved variables),
+            // derived from the equation targets in the model's `EquationSystem`.
+            let mut out = Vec::new();
+            let mut seen = HashSet::new();
+            for eq in self.system.equations() {
+                for name in expand_field_components(*eq.target()) {
+                    if seen.insert(name.clone()) {
+                        out.push(name);
+                    }
+                }
+            }
+            out
         } else {
             Vec::new()
         };
@@ -578,6 +580,7 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::TermOp;
+    use crate::solver::model::KernelKind;
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {

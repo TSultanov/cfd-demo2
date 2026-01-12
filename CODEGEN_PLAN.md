@@ -31,7 +31,6 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Done when: `lower_program_model_driven` never switches lowering paths based on kernel presence or “stepping family”.
 
 ### 2) Kernel Registry (one uniform lookup path)
-- Remove the generic-coupled special-case (`generated::generic_coupled_pair(model_id)`) in `src/solver/gpu/lowering/kernel_registry.rs`.
 - Emit a single table keyed by `(model_id, KernelId)` for *all* kernels (including per-model kernels and “infrastructure” kernels; use a sentinel model id like `__global__` for non-model kernels).
 - Done when: `kernel_registry` has exactly one lookup function and no special cases.
 

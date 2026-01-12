@@ -27,7 +27,6 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
 ### 1) Lowering (stop per-family plan selection)
-- Delete the dedicated generic-coupled lowering branch in `src/solver/gpu/lowering/model_driven.rs:lower_parts_for_model`.
 - Converge `ExplicitImplicitPlanResources` and `GenericCoupledPlanResources` into a single universal plan/resources path (recipe-driven graphs + shared resource registry).
 - Done when: `lower_program_model_driven` never switches lowering paths based on kernel presence or “stepping family”.
 

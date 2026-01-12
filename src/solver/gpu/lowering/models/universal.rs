@@ -1,4 +1,6 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::lowering::models::generic_coupled as generic_coupled_model;
+use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources;
 use crate::solver::gpu::plans::plan_instance::{
@@ -162,6 +164,14 @@ fn coupled_backend_mut(plan: &mut GpuProgramPlan) -> Option<&mut CoupledBackend>
     }
 }
 
+fn generic_coupled(plan: &GpuProgramPlan) -> Option<&GenericCoupledProgramResources> {
+    plan.resources.get::<GenericCoupledProgramResources>()
+}
+
+fn generic_coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GenericCoupledProgramResources> {
+    plan.resources.get_mut::<GenericCoupledProgramResources>()
+}
+
 // --- Universal op registration ---
 
 /// Single universal lowering path: register the unified op kinds emitted by `SolverRecipe::build_program_spec()`.
@@ -239,6 +249,9 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
 // --- Universal program spec callbacks ---
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::spec_num_cells(plan);
+    }
     if let Some(solver) = explicit_implicit(plan) {
         return solver.num_cells;
     }
@@ -249,6 +262,9 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::spec_time(plan);
+    }
     if let Some(solver) = explicit_implicit(plan) {
         return solver.time_integration.time as f32;
     }
@@ -259,6 +275,9 @@ pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::spec_dt(plan);
+    }
     if let Some(solver) = explicit_implicit(plan) {
         return solver.time_integration.dt;
     }
@@ -269,6 +288,9 @@ pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::spec_state_buffer(plan);
+    }
     if let Some(solver) = explicit_implicit(plan) {
         return solver.fields.state.state();
     }
@@ -282,6 +304,9 @@ pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     plan: &GpuProgramPlan,
     bytes: &[u8],
 ) -> Result<(), String> {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::spec_write_state_bytes(plan, bytes);
+    }
     if let Some(solver) = explicit_implicit(plan) {
         solver.write_state_bytes(bytes);
         return Ok(());
@@ -317,6 +342,9 @@ pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     param: PlanParam,
     value: PlanParamValue,
 ) -> Result<(), String> {
+    if generic_coupled_mut(plan).is_some() {
+        return set_param_fallback_generic_coupled(plan, param, value);
+    }
     if explicit_implicit_mut(plan).is_some() {
         return set_param_fallback_compressible(plan, param, value);
     }
@@ -338,7 +366,12 @@ pub(in crate::solver::gpu::lowering) fn step_with_stats(
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     plan: &mut GpuProgramPlan,
 ) -> Option<&mut dyn PlanLinearSystemDebug> {
-    Some(plan.resources.get_mut::<UniversalProgramResources>()? as &mut dyn PlanLinearSystemDebug)
+    if plan.resources.has::<GenericCoupledProgramResources>() {
+        let gc = plan.resources.get_mut::<GenericCoupledProgramResources>()?;
+        return Some(gc as &mut dyn PlanLinearSystemDebug);
+    }
+    let u = plan.resources.get_mut::<UniversalProgramResources>()?;
+    Some(u as &mut dyn PlanLinearSystemDebug)
 }
 
 // --- Compressible handlers (explicit/implicit) ---
@@ -377,12 +410,19 @@ fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
 }
 
 fn implicit_outer_iters(plan: &GpuProgramPlan) -> usize {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::count_outer_iters(plan);
+    }
     explicit_implicit(plan)
         .expect("missing universal explicit/implicit backend")
         .outer_iters
 }
 
 fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        generic_coupled_model::host_prepare_step(plan);
+        return;
+    }
     let solver = explicit_implicit_mut(plan).expect("missing universal explicit/implicit backend");
     solver.advance_ping_pong_and_time();
     solver.pre_step_copy();
@@ -395,6 +435,9 @@ fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
 }
 
 fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     // Env overrides are intentionally not supported. These should be driven by recipe/model.
     let tol_base = 1e-8f32;
     let warm_scale = 100.0f32;
@@ -423,6 +466,9 @@ fn implicit_grad_assembly_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::assembly_graph_run(plan, context, mode);
+    }
     let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
     solver.graphs.run_implicit_grad_assembly(
         context,
@@ -434,12 +480,19 @@ fn implicit_grad_assembly_graph_run(
 }
 
 fn host_implicit_solve_fgmres(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        generic_coupled_model::host_solve_linear_system(plan);
+        return;
+    }
     explicit_implicit_mut(plan)
         .expect("missing universal explicit/implicit backend")
         .implicit_solve_fgmres();
 }
 
 fn host_implicit_record_stats(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     let stats = explicit_implicit(plan)
         .expect("missing universal explicit/implicit backend")
         .implicit_last_stats();
@@ -454,6 +507,16 @@ fn implicit_snapshot_run(
     _context: &crate::solver::gpu::context::GpuContext,
     _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::implicit_snapshot_run(
+            plan,
+            &crate::solver::gpu::context::GpuContext {
+                device: plan.context.device.clone(),
+                queue: plan.context.queue.clone(),
+            },
+            GraphExecMode::SingleSubmit,
+        );
+    }
     let start = std::time::Instant::now();
     explicit_implicit(plan)
         .expect("missing universal explicit/implicit backend")
@@ -462,6 +525,9 @@ fn implicit_snapshot_run(
 }
 
 fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     explicit_implicit_mut(plan)
         .expect("missing universal explicit/implicit backend")
         .implicit_set_alpha_for_apply();
@@ -472,6 +538,9 @@ fn implicit_apply_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::apply_graph_run(plan, context, mode);
+    }
     let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
     solver
         .graphs
@@ -479,12 +548,18 @@ fn implicit_apply_graph_run(
 }
 
 fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     explicit_implicit_mut(plan)
         .expect("missing universal explicit/implicit backend")
         .implicit_restore_alpha();
 }
 
 fn host_implicit_advance_outer_idx(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     explicit_implicit_backend_mut(plan)
         .expect("missing universal explicit/implicit backend")
         .implicit_outer_idx += 1;
@@ -495,6 +570,9 @@ fn primitive_update_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::update_graph_run(plan, context, mode);
+    }
     let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
     solver
         .graphs
@@ -502,6 +580,10 @@ fn primitive_update_graph_run(
 }
 
 fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        generic_coupled_model::host_finalize_step(plan);
+        return;
+    }
     explicit_implicit_mut(plan)
         .expect("missing universal explicit/implicit backend")
         .finalize_dt_old();
@@ -607,6 +689,9 @@ fn set_param_fallback_compressible(
 // --- Coupled handlers ---
 
 fn has_coupled_resources(plan: &GpuProgramPlan) -> bool {
+    if generic_coupled(plan).is_some() {
+        return true;
+    }
     coupled(plan)
         .expect("missing universal coupled backend")
         .coupled_resources
@@ -626,6 +711,9 @@ fn coupled_graph_init_prepare_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return (0.0, None);
+    }
     let solver = coupled(plan).expect("missing universal coupled backend");
     run_module_graph(
         &solver.coupled_init_prepare_graph,
@@ -641,6 +729,9 @@ fn coupled_graph_prepare_assembly_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::assembly_graph_run(plan, context, mode);
+    }
     let solver = coupled(plan).expect("missing universal coupled backend");
     run_module_graph(
         &solver.coupled_prepare_assembly_graph,
@@ -656,6 +747,9 @@ fn coupled_graph_assembly_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::assembly_graph_run(plan, context, mode);
+    }
     let solver = coupled(plan).expect("missing universal coupled backend");
     run_module_graph(
         &solver.coupled_assembly_graph,
@@ -671,6 +765,9 @@ fn coupled_graph_update_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    if generic_coupled(plan).is_some() {
+        return generic_coupled_model::update_graph_run(plan, context, mode);
+    }
     let solver = coupled(plan).expect("missing universal coupled backend");
     run_module_graph(
         &solver.coupled_update_graph,
@@ -682,6 +779,9 @@ fn coupled_graph_update_run(
 }
 
 fn coupled_needs_prepare(plan: &GpuProgramPlan) -> bool {
+    if generic_coupled(plan).is_some() {
+        return false;
+    }
     let wrap = coupled_backend(plan).expect("missing universal coupled backend");
     wrap.coupled_outer_iter > 0
         || coupled(plan)
@@ -690,17 +790,27 @@ fn coupled_needs_prepare(plan: &GpuProgramPlan) -> bool {
 }
 
 fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
+    if generic_coupled(plan).is_some() {
+        return 1;
+    }
     let solver = coupled(plan).expect("missing universal coupled backend");
     (solver.n_outer_correctors.max(10)) as usize
 }
 
 fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
+    if generic_coupled(plan).is_some() {
+        return true;
+    }
     coupled_backend(plan)
         .expect("missing universal coupled backend")
         .coupled_continue
 }
 
 fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        generic_coupled_model::host_prepare_step(plan);
+        return;
+    }
     let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
     let solver = &mut wrap.plan;
 
@@ -735,6 +845,9 @@ fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
     let iter = wrap.coupled_outer_iter;
     let solver = &mut wrap.plan;
@@ -748,6 +861,10 @@ fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        generic_coupled_model::host_solve_linear_system(plan);
+        return;
+    }
     let solver = coupled_mut(plan).expect("missing universal coupled backend");
     let stats = solver.solve_coupled_system();
     solver.coupled_last_linear_stats = stats;
@@ -758,6 +875,9 @@ fn host_coupled_solve(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
     let iter = wrap.coupled_outer_iter;
     let solver = &mut wrap.plan;
@@ -775,6 +895,9 @@ fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        return;
+    }
     let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
     let solver = &mut wrap.plan;
     let iter = wrap.coupled_outer_iter;
@@ -854,6 +977,10 @@ fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
+    if generic_coupled_mut(plan).is_some() {
+        generic_coupled_model::host_finalize_step(plan);
+        return;
+    }
     let solver = coupled_mut(plan).expect("missing universal coupled backend");
     if solver.coupled_resources.is_none() {
         return;
@@ -873,6 +1000,9 @@ fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
 }
 
 fn step_stats_coupled(plan: &GpuProgramPlan) -> PlanStepStats {
+    if generic_coupled(plan).is_some() {
+        return PlanStepStats::default();
+    }
     let solver = coupled(plan).expect("missing universal coupled backend");
     PlanStepStats {
         should_stop: Some(solver.should_stop),
@@ -964,6 +1094,35 @@ fn set_param_fallback_coupled(
         (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
             solver.enable_detailed_profiling(enable);
             Ok(())
+        }
+        _ => Err("parameter is not supported by this plan".into()),
+    }
+}
+
+fn set_param_fallback_generic_coupled(
+    plan: &mut GpuProgramPlan,
+    param: PlanParam,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    match param {
+        PlanParam::Dt => generic_coupled_model::param_dt(plan, value),
+        PlanParam::Dtau => generic_coupled_model::param_dtau(plan, value),
+        PlanParam::AdvectionScheme => generic_coupled_model::param_advection_scheme(plan, value),
+        PlanParam::TimeScheme => generic_coupled_model::param_time_scheme(plan, value),
+        PlanParam::Preconditioner => generic_coupled_model::param_preconditioner(plan, value),
+        PlanParam::Viscosity => generic_coupled_model::param_viscosity(plan, value),
+        PlanParam::Density => generic_coupled_model::param_density(plan, value),
+        PlanParam::AlphaU => generic_coupled_model::param_alpha_u(plan, value),
+        PlanParam::AlphaP => generic_coupled_model::param_alpha_p(plan, value),
+        PlanParam::InletVelocity => generic_coupled_model::param_inlet_velocity(plan, value),
+        PlanParam::RampTime => generic_coupled_model::param_ramp_time(plan, value),
+        PlanParam::LowMachModel => generic_coupled_model::param_low_mach_model(plan, value),
+        PlanParam::LowMachThetaFloor => {
+            generic_coupled_model::param_low_mach_theta_floor(plan, value)
+        }
+        PlanParam::OuterIters => generic_coupled_model::param_outer_iters(plan, value),
+        PlanParam::DetailedProfilingEnabled => {
+            generic_coupled_model::param_detailed_profiling(plan, value)
         }
         _ => Err("parameter is not supported by this plan".into()),
     }

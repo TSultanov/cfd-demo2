@@ -2,7 +2,7 @@ use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanPa
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
-use crate::solver::model::{KernelId, ModelSpec};
+use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
 
 use super::models;
@@ -122,23 +122,45 @@ async fn lower_parts_for_model(
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
-    let has_kernel = |id: KernelId| recipe.kernels.iter().any(|k| k.id == id);
-
-    // Generic coupled plan currently has its own dedicated lowering path.
-    if has_kernel(KernelId::GENERIC_COUPLED_ASSEMBLY) {
-        return crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
-            mesh,
-            model.clone(),
-            recipe,
-            device,
-            queue,
-        )
-        .await;
-    }
-
     // Otherwise, select the runtime backend based on the derived recipe structure.
     match recipe.stepping {
         crate::solver::gpu::recipe::SteppingMode::Coupled { .. } => {
+            if model.method != crate::solver::model::MethodSpec::CoupledIncompressible {
+                let parts =
+                    crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
+                        mesh,
+                        model.clone(),
+                        recipe.clone(),
+                        device,
+                        queue,
+                    )
+                    .await?;
+
+                let mut ops = ProgramOpRegistry::new();
+                models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
+
+                return Ok(LoweredProgramParts {
+                    model: parts.model,
+                    context: parts.context,
+                    profiling_stats: parts.profiling_stats,
+                    resources: parts.resources,
+                    spec: ModelGpuProgramSpecParts {
+                        ops,
+                        num_cells: models::universal::spec_num_cells,
+                        time: models::universal::spec_time,
+                        dt: models::universal::spec_dt,
+                        state_buffer: models::universal::spec_state_buffer,
+                        write_state_bytes: models::universal::spec_write_state_bytes,
+                        initialize_history: None,
+                        params: HashMap::new(),
+                        set_param_fallback: Some(models::universal::set_param_fallback),
+                        step_stats: Some(models::universal::step_stats),
+                        step_with_stats: None,
+                        linear_debug: Some(models::universal::linear_debug_provider),
+                    },
+                });
+            }
+
             let solver = crate::solver::gpu::structs::GpuSolver::new(
                 mesh,
                 model.clone(),
@@ -183,7 +205,41 @@ async fn lower_parts_for_model(
                 },
             })
         }
-        _ => {
+        crate::solver::gpu::recipe::SteppingMode::Implicit { .. } => {
+            let parts = crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
+                mesh,
+                model.clone(),
+                recipe.clone(),
+                device,
+                queue,
+            )
+            .await?;
+
+            let mut ops = ProgramOpRegistry::new();
+            models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
+
+            Ok(LoweredProgramParts {
+                model: parts.model,
+                context: parts.context,
+                profiling_stats: parts.profiling_stats,
+                resources: parts.resources,
+                spec: ModelGpuProgramSpecParts {
+                    ops,
+                    num_cells: models::universal::spec_num_cells,
+                    time: models::universal::spec_time,
+                    dt: models::universal::spec_dt,
+                    state_buffer: models::universal::spec_state_buffer,
+                    write_state_bytes: models::universal::spec_write_state_bytes,
+                    initialize_history: None,
+                    params: HashMap::new(),
+                    set_param_fallback: Some(models::universal::set_param_fallback),
+                    step_stats: Some(models::universal::step_stats),
+                    step_with_stats: None,
+                    linear_debug: Some(models::universal::linear_debug_provider),
+                },
+            })
+        }
+        crate::solver::gpu::recipe::SteppingMode::Explicit => {
             let plan =
                 crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources::new(
                     mesh,

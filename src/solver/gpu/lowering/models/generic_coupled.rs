@@ -751,6 +751,22 @@ pub(crate) fn apply_graph_run(
     run_module_graph(&r.apply_graph, context, &r.kernels, r.runtime_dims(), mode)
 }
 
+pub(crate) fn implicit_snapshot_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    _mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    let r = res(plan);
+    let mut encoder = context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("generic_coupled:implicit_snapshot"),
+        });
+    r.fields.snapshot_for_iteration(&mut encoder);
+    context.queue.submit(Some(encoder.finish()));
+    (0.0, None)
+}
+
 pub(crate) fn count_outer_iters(plan: &GpuProgramPlan) -> usize {
     res(plan).outer_iters.max(1)
 }

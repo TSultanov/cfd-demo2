@@ -232,6 +232,8 @@ fn main_body(layout: &StateLayout) -> Block {
     let rho_u_field = "rho_u";
     let rho_e_field = "rho_e";
 
+    // Use the current iterate (`state`) so implicit outer iterations can
+    // re-evaluate gradients based on the updated solution.
     let rho_expr = state_scalar(layout, "state", "idx", rho_field);
     let rho_u_expr = state_vec2(layout, "state", "idx", rho_u_field);
     let rho_e_expr = state_scalar(layout, "state", "idx", rho_e_field);

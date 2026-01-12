@@ -133,9 +133,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     var is_boundary: bool = false;
     var other_idx: u32 = owner;
-    let rho_l_cell = state_old[owner * 7u + 0u];
-    let rho_u_l_cell: vec2<f32> = vec2<f32>(state_old[owner * 7u + 1u], state_old[owner * 7u + 2u]);
-    let rho_e_l_cell = state_old[owner * 7u + 3u];
+    let rho_l_cell = state[owner * 7u + 0u];
+    let rho_u_l_cell: vec2<f32> = vec2<f32>(state[owner * 7u + 1u], state[owner * 7u + 2u]);
+    let rho_e_l_cell = state[owner * 7u + 3u];
     var rho_l: f32 = rho_l_cell;
     var rho_u_l: vec2<f32> = rho_u_l_cell;
     var rho_e_l: f32 = rho_e_l_cell;
@@ -146,9 +146,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (neighbor != -1) {
         let neigh_idx: u32 = u32(neighbor);
         other_idx = neigh_idx;
-        let rho_neigh = state_old[neigh_idx * 7u + 0u];
-        let rho_u_neigh: vec2<f32> = vec2<f32>(state_old[neigh_idx * 7u + 1u], state_old[neigh_idx * 7u + 2u]);
-        let rho_e_neigh = state_old[neigh_idx * 7u + 3u];
+        let rho_neigh = state[neigh_idx * 7u + 0u];
+        let rho_u_neigh: vec2<f32> = vec2<f32>(state[neigh_idx * 7u + 1u], state[neigh_idx * 7u + 2u]);
+        let rho_e_neigh = state[neigh_idx * 7u + 3u];
         rho_r = rho_neigh;
         rho_u_r = rho_u_neigh;
         rho_e_r = rho_e_neigh;

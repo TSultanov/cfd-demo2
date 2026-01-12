@@ -7,6 +7,7 @@ use crate::solver::gpu::modules::graph::{
     ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
 };
 use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
+use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::solve_fgmres;
@@ -34,6 +35,7 @@ pub(crate) struct GenericCoupledProgramResources {
     outer_iters: usize,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
+    krylov: Option<GenericCoupledKrylovResources>,
     _b_scalar_row_offsets: wgpu::Buffer,
     _b_scalar_col_indices: wgpu::Buffer,
     _b_bc_kind: wgpu::Buffer,
@@ -47,6 +49,14 @@ struct GenericCoupledSchurResources {
     _b_diag_p: wgpu::Buffer,
     _b_precond_params: wgpu::Buffer,
     _b_p_matrix_values: wgpu::Buffer,
+}
+
+struct GenericCoupledKrylovResources {
+    solver: KrylovSolveModule<IdentityPreconditioner>,
+    dispatch: KrylovDispatch,
+    _b_diag_u: wgpu::Buffer,
+    _b_diag_v: wgpu::Buffer,
+    _b_diag_p: wgpu::Buffer,
 }
 
 impl GenericCoupledProgramResources {
@@ -128,6 +138,11 @@ impl GenericCoupledProgramResources {
             &b_scalar_row_offsets,
             &b_scalar_col_indices,
         )?;
+        let krylov = if schur.is_some() {
+            None
+        } else {
+            build_generic_krylov(recipe, &runtime)?
+        };
 
         Ok(Self {
             runtime,
@@ -139,6 +154,7 @@ impl GenericCoupledProgramResources {
             outer_iters,
             linear_solver,
             schur,
+            krylov,
             _b_scalar_row_offsets: b_scalar_row_offsets,
             _b_scalar_col_indices: b_scalar_col_indices,
             _b_bc_kind: b_bc_kind,
@@ -393,6 +409,70 @@ fn build_generic_schur(
     }))
 }
 
+fn build_generic_krylov(
+    recipe: &SolverRecipe,
+    runtime: &GpuCsrRuntime,
+) -> Result<Option<GenericCoupledKrylovResources>, String> {
+    let LinearSolverType::Fgmres { max_restart } = recipe.linear_solver.solver_type else {
+        return Ok(None);
+    };
+
+    let device = &runtime.common.context.device;
+    let num_cells = runtime.common.num_cells;
+    let n = runtime.num_dofs;
+
+    let b_diag_u = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("generic_coupled:identity_diag_u"),
+        size: 4,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let b_diag_v = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("generic_coupled:identity_diag_v"),
+        size: 4,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let b_diag_p = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("generic_coupled:identity_diag_p"),
+        size: 4,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let system = LinearSystemView {
+        ports: runtime.linear_ports,
+        space: &runtime.linear_port_space,
+    };
+
+    let precond_bindings = FgmresPrecondBindings::Diag {
+        diag_u: &b_diag_u,
+        diag_v: &b_diag_v,
+        diag_p: &b_diag_p,
+    };
+
+    let fgmres = FgmresWorkspace::new_from_system(
+        device,
+        n,
+        num_cells,
+        max_restart.max(1),
+        system,
+        precond_bindings,
+        "generic_coupled",
+    );
+
+    let solver = KrylovSolveModule::new(fgmres, IdentityPreconditioner::new());
+    let dispatch = DispatchGrids::for_sizes(n, num_cells);
+
+    Ok(Some(GenericCoupledKrylovResources {
+        solver,
+        dispatch,
+        _b_diag_u: b_diag_u,
+        _b_diag_v: b_diag_v,
+        _b_diag_p: b_diag_p,
+    }))
+}
+
 impl PlanLinearSystemDebug for GenericCoupledProgramResources {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         self.runtime.set_linear_system(matrix_values, rhs)
@@ -433,6 +513,28 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                 tol,
                 tol * 1e-4,
                 "GenericCoupled Schur (debug)",
+            ))
+        } else if let Some(krylov) = &mut self.krylov {
+            let system = LinearSystemView {
+                ports: self.runtime.linear_ports,
+                space: &self.runtime.linear_port_space,
+            };
+
+            let max_restart = match self.linear_solver.solver_type {
+                LinearSolverType::Fgmres { max_restart } => max_restart,
+                _ => 30,
+            };
+            Ok(solve_fgmres(
+                &self.runtime.common.context,
+                &mut krylov.solver,
+                system,
+                n,
+                self.runtime.common.num_cells,
+                krylov.dispatch,
+                max_restart.max(1),
+                tol,
+                tol * 1e-4,
+                "GenericCoupled FGMRES (debug)",
             ))
         } else {
             Ok(self.runtime.solve_linear_system_cg(max_iters, tol))
@@ -520,8 +622,24 @@ pub(crate) fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Res
 }
 
 pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
+    let device = plan.context.device.clone();
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     r.fields.advance_step();
+    // Seed the writable `state` buffer with the previous state so kernels that
+    // read from `state` (e.g. gradient/flux stages during implicit outer
+    // iterations) start from a consistent iterate.
+    //
+    // This mirrors the EI solver's pre-step copy and avoids reading stale data
+    // from the rotated ping-pong buffer.
+    let size = r.fields.state_size_bytes();
+    let src = r.fields.previous_state();
+    let dst = r.fields.current_state();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("generic_coupled:pre_step_copy"),
+    });
+    encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
+    queue.submit(Some(encoder.finish()));
     r.runtime.advance_time();
 }
 
@@ -563,6 +681,33 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
             r.linear_solver.tolerance,
             r.linear_solver.tolerance_abs,
             "generic_coupled:schur",
+        );
+        plan.last_linear_stats = stats;
+        return;
+    }
+
+    if let Some(krylov) = &mut r.krylov {
+        let system = LinearSystemView {
+            ports: r.runtime.linear_ports,
+            space: &r.runtime.linear_port_space,
+        };
+
+        let max_restart = match r.linear_solver.solver_type {
+            LinearSolverType::Fgmres { max_restart } => max_restart,
+            _ => 30,
+        };
+
+        let stats = solve_fgmres(
+            &context,
+            &mut krylov.solver,
+            system,
+            r.runtime.num_dofs,
+            r.runtime.common.num_cells,
+            krylov.dispatch,
+            max_restart.max(1),
+            r.linear_solver.tolerance,
+            r.linear_solver.tolerance_abs,
+            "generic_coupled:fgmres",
         );
         plan.last_linear_stats = stats;
         return;
@@ -629,6 +774,19 @@ pub(crate) fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Resu
     Ok(())
 }
 
+pub(crate) fn param_dtau(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+    let PlanParamValue::F32(dtau) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.dtau = dtau;
+    }
+    r.runtime.update_constants();
+    Ok(())
+}
+
 pub(crate) fn param_advection_scheme(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,
@@ -648,6 +806,93 @@ pub(crate) fn param_time_scheme(
         return Err("invalid value type".into());
     };
     res_mut(plan).runtime.set_time_scheme(scheme as u32);
+    Ok(())
+}
+
+pub(crate) fn param_viscosity(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(mu) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.viscosity = mu;
+    }
+    r.runtime.update_constants();
+    Ok(())
+}
+
+pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+    let PlanParamValue::F32(rho) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.density = rho;
+    }
+    r.runtime.update_constants();
+    Ok(())
+}
+
+pub(crate) fn param_alpha_u(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+    let PlanParamValue::F32(alpha) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.alpha_u = alpha;
+    }
+    r.runtime.update_constants();
+    Ok(())
+}
+
+pub(crate) fn param_alpha_p(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+    let PlanParamValue::F32(alpha) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.alpha_p = alpha;
+    }
+    r.runtime.update_constants();
+    Ok(())
+}
+
+pub(crate) fn param_inlet_velocity(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(velocity) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.inlet_velocity = velocity;
+    }
+    r.runtime.update_constants();
+    Ok(())
+}
+
+pub(crate) fn param_ramp_time(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(time) = value else {
+        return Err("invalid value type".into());
+    };
+    let r = res_mut(plan);
+    {
+        let values = r.runtime.constants.values_mut();
+        values.ramp_time = time;
+    }
+    r.runtime.update_constants();
     Ok(())
 }
 
@@ -683,6 +928,40 @@ pub(crate) fn param_detailed_profiling(
     } else {
         plan.profiling_stats.disable();
     }
+    Ok(())
+}
+
+pub(crate) fn param_low_mach_model(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::LowMachModel(model) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    let Some(_) = r.fields.low_mach_params_buffer() else {
+        return Err("model does not allocate low-mach params".to_string());
+    };
+    r.fields.low_mach_params_mut().model = model as u32;
+    r.fields.update_low_mach_params(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_low_mach_theta_floor(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(theta) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    let Some(_) = r.fields.low_mach_params_buffer() else {
+        return Err("model does not allocate low-mach params".to_string());
+    };
+    r.fields.low_mach_params_mut().theta_floor = theta;
+    r.fields.update_low_mach_params(&queue);
     Ok(())
 }
 

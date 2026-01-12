@@ -11,7 +11,7 @@ use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::ir::{Coefficient, Discretization, StateLayout};
+use crate::solver::ir::{Coefficient, Discretization, StateLayout, TermOp};
 use crate::solver::scheme::Scheme;
 
 pub fn generate_unified_assembly_wgsl(
@@ -756,132 +756,173 @@ fn main_assembly_fn(
                 // but the codegen remains agnostic.
                 let flux_stride = flux_stride;
 
-                // Reconstruct field at face
-                for component in 0..equation.target.kind().component_count() as u32 {
-                    let u_idx = base_offset + component;
-                    let field_name = equation.target.name();
+                // `DivFlux` terms represent conservative flux divergence:
+                // the face flux is precomputed (e.g., KT) and should contribute RHS-only:
+                //   RHS -= sum_face(sign * flux_face_component)
+                // This must not be treated like a scalar convection operator.
+                if conv_op.term_op == TermOp::DivFlux {
+                    for component in 0..equation.target.kind().component_count() as u32 {
+                        let u_idx = base_offset + component;
+                        let flux_var = format!("phi_{u_idx}");
+                        let flux_val_expr = if flux_stride == 1 {
+                            dsl::array_access("fluxes", Expr::ident("face_idx"))
+                        } else {
+                            dsl::array_access_linear(
+                                "fluxes",
+                                Expr::ident("face_idx"),
+                                flux_stride,
+                                u_idx,
+                            )
+                        };
 
-                    let flux_var = format!("phi_{u_idx}");
-                    let flux_val_expr = if flux_stride == 1 {
-                        dsl::array_access("fluxes", Expr::ident("face_idx"))
-                    } else {
-                        dsl::array_access_linear(
-                            "fluxes",
-                            Expr::ident("face_idx"),
-                            flux_stride,
-                            u_idx,
-                        )
-                    };
-                    body.push(dsl::var_typed_expr(
-                        &flux_var,
-                        Type::F32,
-                        Some(flux_val_expr.clone()),
-                    ));
-                    body.push(dsl::if_block_expr(
-                        Expr::ident("owner").ne(Expr::ident("idx")),
-                        dsl::block(vec![dsl::assign_op_expr(
-                            AssignOp::Sub,
-                            Expr::ident(&flux_var),
-                            Expr::ident(&flux_var) * 2.0,
-                        )]),
-                        None,
-                    ));
-
-                    let phi_own = state_component(layout, "state", "idx", field_name, component);
-                    let phi_neigh =
-                        state_component(layout, "state", "other_idx", field_name, component);
-
-                    let scheme_lit =
-                        typed::EnumExpr::<Scheme>::from_expr(conv_op.scheme.gpu_id().into());
-
-                    let mut grad_own = dsl::vec2_f32(0.0, 0.0);
-                    let mut grad_neigh = dsl::vec2_f32(0.0, 0.0);
-
-                    if needs_gradients {
-                        grad_own = dsl::array_access_linear(
-                            "grad_state",
-                            Expr::ident("idx"),
-                            layout.stride(),
-                            layout.offset_for(field_name).unwrap() as u32 + component,
-                        );
-                        grad_neigh = dsl::array_access_linear(
-                            "grad_state",
-                            Expr::ident("other_idx"),
-                            layout.stride(),
-                            layout.offset_for(field_name).unwrap() as u32 + component,
-                        );
-                    }
-
-                    let rec = scalar_reconstruction(
-                        scheme_lit,
-                        Expr::ident(&flux_var),
-                        phi_own,
-                        phi_neigh,
-                        grad_own,
-                        grad_neigh,
-                        Expr::ident("center"),
-                        Expr::ident("other_center"),
-                        Expr::ident("f_center"),
-                    );
-
-                    let flux_pos = dsl::max(Expr::ident(&flux_var), 0.0);
-                    let flux_neg = dsl::min(Expr::ident(&flux_var), 0.0);
-
-                    let dc_term = Expr::ident(&flux_var) * (rec.phi_ho - rec.phi_upwind);
-
-                    let interior_contrib = dsl::block(vec![
-                        dsl::assign_op_expr(
-                            AssignOp::Add,
-                            Expr::ident(format!("diag_{u_idx}")),
-                            flux_pos.clone(),
-                        ),
-                        dsl::assign_op_expr(
-                            AssignOp::Add,
-                            block_matrix
-                                .entry(&Expr::ident("neighbor_rank"), u_idx as u8, u_idx as u8)
-                                .expr,
-                            flux_neg.clone(),
-                        ),
-                        dsl::assign_op_expr(
+                        body.push(dsl::var_typed_expr(
+                            &flux_var,
+                            Type::F32,
+                            Some(flux_val_expr.clone()),
+                        ));
+                        body.push(dsl::if_block_expr(
+                            Expr::ident("owner").ne(Expr::ident("idx")),
+                            dsl::block(vec![dsl::assign_op_expr(
+                                AssignOp::Sub,
+                                Expr::ident(&flux_var),
+                                Expr::ident(&flux_var) * 2.0,
+                            )]),
+                            None,
+                        ));
+                        body.push(dsl::assign_op_expr(
                             AssignOp::Sub,
                             Expr::ident(format!("rhs_{u_idx}")),
-                            dc_term.clone(),
-                        ),
-                    ]);
+                            Expr::ident(&flux_var),
+                        ));
+                    }
+                } else {
+                    // Reconstruct field at face (scalar convection operator)
+                    for component in 0..equation.target.kind().component_count() as u32 {
+                        let u_idx = base_offset + component;
+                        let field_name = equation.target.name();
 
-                    let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
-                    let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
-                        "bc_kind",
-                        bc_table_idx,
-                    ));
-                    let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+                        let flux_var = format!("phi_{u_idx}");
+                        let flux_val_expr = if flux_stride == 1 {
+                            dsl::array_access("fluxes", Expr::ident("face_idx"))
+                        } else {
+                            dsl::array_access_linear(
+                                "fluxes",
+                                Expr::ident("face_idx"),
+                                flux_stride,
+                                u_idx,
+                            )
+                        };
+                        body.push(dsl::var_typed_expr(
+                            &flux_var,
+                            Type::F32,
+                            Some(flux_val_expr.clone()),
+                        ));
+                        body.push(dsl::if_block_expr(
+                            Expr::ident("owner").ne(Expr::ident("idx")),
+                            dsl::block(vec![dsl::assign_op_expr(
+                                AssignOp::Sub,
+                                Expr::ident(&flux_var),
+                                Expr::ident(&flux_var) * 2.0,
+                            )]),
+                            None,
+                        ));
 
-                    let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
-                        bc_kind_expr.eq(GpuBcKind::Dirichlet),
-                        dsl::block(vec![
+                        let phi_own = state_component(layout, "state", "idx", field_name, component);
+                        let phi_neigh =
+                            state_component(layout, "state", "other_idx", field_name, component);
+
+                        let scheme_lit =
+                            typed::EnumExpr::<Scheme>::from_expr(conv_op.scheme.gpu_id().into());
+
+                        let mut grad_own = dsl::vec2_f32(0.0, 0.0);
+                        let mut grad_neigh = dsl::vec2_f32(0.0, 0.0);
+
+                        if needs_gradients {
+                            grad_own = dsl::array_access_linear(
+                                "grad_state",
+                                Expr::ident("idx"),
+                                layout.stride(),
+                                layout.offset_for(field_name).unwrap() as u32 + component,
+                            );
+                            grad_neigh = dsl::array_access_linear(
+                                "grad_state",
+                                Expr::ident("other_idx"),
+                                layout.stride(),
+                                layout.offset_for(field_name).unwrap() as u32 + component,
+                            );
+                        }
+
+                        let rec = scalar_reconstruction(
+                            scheme_lit,
+                            Expr::ident(&flux_var),
+                            phi_own,
+                            phi_neigh,
+                            grad_own,
+                            grad_neigh,
+                            Expr::ident("center"),
+                            Expr::ident("other_center"),
+                            Expr::ident("f_center"),
+                        );
+
+                        let flux_pos = dsl::max(Expr::ident(&flux_var), 0.0);
+                        let flux_neg = dsl::min(Expr::ident(&flux_var), 0.0);
+
+                        let dc_term = Expr::ident(&flux_var) * (rec.phi_ho - rec.phi_upwind);
+
+                        let interior_contrib = dsl::block(vec![
                             dsl::assign_op_expr(
                                 AssignOp::Add,
                                 Expr::ident(format!("diag_{u_idx}")),
                                 flux_pos.clone(),
                             ),
                             dsl::assign_op_expr(
+                                AssignOp::Add,
+                                block_matrix
+                                    .entry(&Expr::ident("neighbor_rank"), u_idx as u8, u_idx as u8)
+                                    .expr,
+                                flux_neg.clone(),
+                            ),
+                            dsl::assign_op_expr(
                                 AssignOp::Sub,
                                 Expr::ident(format!("rhs_{u_idx}")),
-                                flux_neg.clone() * bc_value_expr.clone(),
+                                dc_term.clone(),
                             ),
-                        ]),
-                        Some(dsl::block(vec![dsl::assign_op_expr(
-                            AssignOp::Add,
-                            Expr::ident(format!("diag_{u_idx}")),
-                            Expr::ident(&flux_var),
-                        )])),
-                    )]);
+                        ]);
 
-                    body.push(dsl::if_block_expr(
-                        !Expr::ident("is_boundary"),
-                        interior_contrib,
-                        Some(boundary_contrib),
-                    ));
+                        let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
+                        let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
+                            "bc_kind",
+                            bc_table_idx,
+                        ));
+                        let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+
+                        let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
+                            bc_kind_expr.eq(GpuBcKind::Dirichlet),
+                            dsl::block(vec![
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    Expr::ident(format!("diag_{u_idx}")),
+                                    flux_pos.clone(),
+                                ),
+                                dsl::assign_op_expr(
+                                    AssignOp::Sub,
+                                    Expr::ident(format!("rhs_{u_idx}")),
+                                    flux_neg.clone() * bc_value_expr.clone(),
+                                ),
+                            ]),
+                            Some(dsl::block(vec![dsl::assign_op_expr(
+                                AssignOp::Add,
+                                Expr::ident(format!("diag_{u_idx}")),
+                                Expr::ident(&flux_var),
+                            )])),
+                        )]);
+
+                        body.push(dsl::if_block_expr(
+                            !Expr::ident("is_boundary"),
+                            interior_contrib,
+                            Some(boundary_contrib),
+                        ));
+                    }
                 }
             }
 

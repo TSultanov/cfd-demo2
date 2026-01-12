@@ -359,9 +359,11 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, eos: &EosSpec) -> B
         Some(Expr::ident("owner")),
     ));
 
-    let rho_l_expr = state_scalar(layout, "state_old", "owner", rho_field);
-    let rho_u_l_expr = state_vec2(layout, "state_old", "owner", rho_u_field);
-    let rho_e_l_expr = state_scalar(layout, "state_old", "owner", rho_e_field);
+    // Use the current iterate (`state`) so implicit outer iterations can
+    // re-evaluate fluxes based on the updated solution.
+    let rho_l_expr = state_scalar(layout, "state", "owner", rho_field);
+    let rho_u_l_expr = state_vec2(layout, "state", "owner", rho_u_field);
+    let rho_e_l_expr = state_scalar(layout, "state", "owner", rho_e_field);
     stmts.push(dsl::let_expr("rho_l_cell", rho_l_expr));
     stmts.push(dsl::let_typed_expr(
         "rho_u_l_cell",
@@ -406,9 +408,9 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, eos: &EosSpec) -> B
     ));
 
     let interior_block = {
-        let rho_neigh_expr = state_scalar(layout, "state_old", "neigh_idx", rho_field);
-        let rho_u_neigh_expr = state_vec2(layout, "state_old", "neigh_idx", rho_u_field);
-        let rho_e_neigh_expr = state_scalar(layout, "state_old", "neigh_idx", rho_e_field);
+        let rho_neigh_expr = state_scalar(layout, "state", "neigh_idx", rho_field);
+        let rho_u_neigh_expr = state_vec2(layout, "state", "neigh_idx", rho_u_field);
+        let rho_e_neigh_expr = state_scalar(layout, "state", "neigh_idx", rho_e_field);
         dsl::block(vec![
             dsl::let_typed_expr(
                 "neigh_idx",

@@ -6,9 +6,11 @@ use wgpu::util::DeviceExt;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::lowering::models::generic_coupled::{
-    linear_debug_provider, param_advection_scheme, param_detailed_profiling, param_dt,
-    param_outer_iters, param_preconditioner, param_time_scheme, register_ops_from_recipe, spec_dt,
-    spec_num_cells, spec_state_buffer, spec_time, spec_write_state_bytes,
+    linear_debug_provider, param_advection_scheme, param_alpha_p, param_alpha_u, param_density,
+    param_detailed_profiling, param_dt, param_dtau, param_inlet_velocity, param_low_mach_model,
+    param_low_mach_theta_floor, param_outer_iters, param_preconditioner, param_ramp_time,
+    param_time_scheme, param_viscosity, register_ops_from_recipe, spec_dt, spec_num_cells,
+    spec_state_buffer, spec_time, spec_write_state_bytes,
     GenericCoupledProgramResources,
 };
 use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
@@ -475,9 +477,18 @@ impl GenericCoupledPlanResources {
 
         let mut params = HashMap::new();
         params.insert(PlanParam::Dt, param_dt as _);
+        params.insert(PlanParam::Dtau, param_dtau as _);
         params.insert(PlanParam::AdvectionScheme, param_advection_scheme as _);
         params.insert(PlanParam::TimeScheme, param_time_scheme as _);
         params.insert(PlanParam::Preconditioner, param_preconditioner as _);
+        params.insert(PlanParam::Viscosity, param_viscosity as _);
+        params.insert(PlanParam::Density, param_density as _);
+        params.insert(PlanParam::AlphaU, param_alpha_u as _);
+        params.insert(PlanParam::AlphaP, param_alpha_p as _);
+        params.insert(PlanParam::InletVelocity, param_inlet_velocity as _);
+        params.insert(PlanParam::RampTime, param_ramp_time as _);
+        params.insert(PlanParam::LowMachModel, param_low_mach_model as _);
+        params.insert(PlanParam::LowMachThetaFloor, param_low_mach_theta_floor as _);
         params.insert(PlanParam::OuterIters, param_outer_iters as _);
         params.insert(
             PlanParam::DetailedProfilingEnabled,

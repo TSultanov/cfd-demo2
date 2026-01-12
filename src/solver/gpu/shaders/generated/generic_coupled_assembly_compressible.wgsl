@@ -223,66 +223,22 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
-        if (!is_boundary) {
-            diag_0 += max(phi_0, 0.0);
-            matrix_values[start_row_0 + neighbor_rank * 4u + 0u] += min(phi_0, 0.0);
-            rhs_0 -= phi_0 * (select(select(select(state[idx * 7u + 0u], state[other_idx * 7u + 0u], phi_0 < 0.0), select(state[other_idx * 7u + 0u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 7u + 0u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_0 > 0.0), 0u == 1u), select(state[other_idx * 7u + 0u] * 0.625 + state[idx * 7u + 0u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125, state[idx * 7u + 0u] * 0.625 + state[other_idx * 7u + 0u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125, phi_0 > 0.0), 0u == 2u) - select(state[idx * 7u + 0u], state[other_idx * 7u + 0u], phi_0 < 0.0));
-        } else {
-            if (bc_kind[boundary_type * 4u + 0u] == 1u) {
-                diag_0 += max(phi_0, 0.0);
-                rhs_0 -= min(phi_0, 0.0) * bc_value[boundary_type * 4u + 0u];
-            } else {
-                diag_0 += phi_0;
-            }
-        }
+        rhs_0 -= phi_0;
         var phi_1: f32 = fluxes[face_idx * 4u + 1u];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }
-        if (!is_boundary) {
-            diag_1 += max(phi_1, 0.0);
-            matrix_values[start_row_1 + neighbor_rank * 4u + 1u] += min(phi_1, 0.0);
-            rhs_1 -= phi_1 * (select(select(select(state[idx * 7u + 1u], state[other_idx * 7u + 1u], phi_1 < 0.0), select(state[other_idx * 7u + 1u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 7u + 1u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_1 > 0.0), 0u == 1u), select(state[other_idx * 7u + 1u] * 0.625 + state[idx * 7u + 1u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125, state[idx * 7u + 1u] * 0.625 + state[other_idx * 7u + 1u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125, phi_1 > 0.0), 0u == 2u) - select(state[idx * 7u + 1u], state[other_idx * 7u + 1u], phi_1 < 0.0));
-        } else {
-            if (bc_kind[boundary_type * 4u + 1u] == 1u) {
-                diag_1 += max(phi_1, 0.0);
-                rhs_1 -= min(phi_1, 0.0) * bc_value[boundary_type * 4u + 1u];
-            } else {
-                diag_1 += phi_1;
-            }
-        }
+        rhs_1 -= phi_1;
         var phi_2: f32 = fluxes[face_idx * 4u + 2u];
         if (owner != idx) {
             phi_2 -= phi_2 * 2.0;
         }
-        if (!is_boundary) {
-            diag_2 += max(phi_2, 0.0);
-            matrix_values[start_row_2 + neighbor_rank * 4u + 2u] += min(phi_2, 0.0);
-            rhs_2 -= phi_2 * (select(select(select(state[idx * 7u + 2u], state[other_idx * 7u + 2u], phi_2 < 0.0), select(state[other_idx * 7u + 2u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 7u + 2u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_2 > 0.0), 0u == 1u), select(state[other_idx * 7u + 2u] * 0.625 + state[idx * 7u + 2u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125, state[idx * 7u + 2u] * 0.625 + state[other_idx * 7u + 2u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125, phi_2 > 0.0), 0u == 2u) - select(state[idx * 7u + 2u], state[other_idx * 7u + 2u], phi_2 < 0.0));
-        } else {
-            if (bc_kind[boundary_type * 4u + 2u] == 1u) {
-                diag_2 += max(phi_2, 0.0);
-                rhs_2 -= min(phi_2, 0.0) * bc_value[boundary_type * 4u + 2u];
-            } else {
-                diag_2 += phi_2;
-            }
-        }
+        rhs_2 -= phi_2;
         var phi_3: f32 = fluxes[face_idx * 4u + 3u];
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }
-        if (!is_boundary) {
-            diag_3 += max(phi_3, 0.0);
-            matrix_values[start_row_3 + neighbor_rank * 4u + 3u] += min(phi_3, 0.0);
-            rhs_3 -= phi_3 * (select(select(select(state[idx * 7u + 3u], state[other_idx * 7u + 3u], phi_3 < 0.0), select(state[other_idx * 7u + 3u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 7u + 3u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_3 > 0.0), 0u == 1u), select(state[other_idx * 7u + 3u] * 0.625 + state[idx * 7u + 3u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125, state[idx * 7u + 3u] * 0.625 + state[other_idx * 7u + 3u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125, phi_3 > 0.0), 0u == 2u) - select(state[idx * 7u + 3u], state[other_idx * 7u + 3u], phi_3 < 0.0));
-        } else {
-            if (bc_kind[boundary_type * 4u + 3u] == 1u) {
-                diag_3 += max(phi_3, 0.0);
-                rhs_3 -= min(phi_3, 0.0) * bc_value[boundary_type * 4u + 3u];
-            } else {
-                diag_3 += phi_3;
-            }
-        }
+        rhs_3 -= phi_3;
     }
     matrix_values[start_row_0 + diag_rank * 4u + 0u] += diag_0;
     rhs[idx * 4u + 0u] = rhs_0;

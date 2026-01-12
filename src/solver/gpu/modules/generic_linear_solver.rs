@@ -207,13 +207,28 @@ impl FgmresPreconditionerModule for IdentityPreconditioner {
         output: &wgpu::Buffer,
         dispatch: DispatchGrids,
     ) {
-        // For identity preconditioning in FGMRES, we use the scale pipeline with scale=1.0
-        // This effectively copies input to output
-        // Note: This is a simplified version - in production, use a dedicated copy pipeline
-        let _ = (device, encoder, fgmres, input, output, dispatch);
-        // The actual copy would need access to FGMRES's scale pipeline
-        // For now, this is a placeholder that does nothing
-        // Real implementations should use a proper copy mechanism
+        let _ = &self.copy_pipeline;
+
+        let vector_bg = fgmres.create_vector_bind_group(
+            device,
+            input,
+            output.as_entire_binding(),
+            output.as_entire_binding(),
+            "Identity preconditioner copy BG",
+        );
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Identity preconditioner copy"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(fgmres.pipeline_copy());
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+        }
     }
 }
 

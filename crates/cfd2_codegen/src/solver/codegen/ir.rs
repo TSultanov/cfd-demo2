@@ -30,6 +30,7 @@ impl DiscreteOpKind {
 pub struct DiscreteOp {
     pub target: FieldRef,
     pub kind: DiscreteOpKind,
+    pub term_op: TermOp,
     pub discretization: Discretization,
     pub scheme: Scheme,
     pub field: FieldRef,
@@ -78,6 +79,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
     DiscreteOp {
         target: target.clone(),
         kind,
+        term_op: term.op,
         discretization: term.discretization,
         scheme: schemes.scheme_for(term),
         field: term.field.clone(),

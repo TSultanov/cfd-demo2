@@ -15,6 +15,7 @@ pub mod linear_system;
 pub mod model_kernels;
 pub mod model_lowerer;
 pub mod ports;
+pub mod resource_registry;
 pub mod scalar_cg;
 pub mod state;
 pub mod time_integration;

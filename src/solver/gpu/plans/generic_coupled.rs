@@ -14,6 +14,7 @@ use crate::solver::gpu::lowering::models::generic_coupled::{
     GenericCoupledProgramResources,
 };
 use crate::solver::gpu::lowering::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{ProgramOpRegistry, ProgramResources};
@@ -83,19 +84,14 @@ impl GenericCoupledPlanResources {
 
         let bg_mesh = {
             let bgl = pipeline_assembly.get_bind_group_layout(0);
+            let registry = ResourceRegistry::new().with_mesh(&runtime.common.mesh);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "GenericCoupled: mesh bind group",
                 &bgl,
                 assembly_bindings,
                 0,
-                |name| {
-                    runtime
-                        .common
-                        .mesh
-                        .buffer_for_binding_name(name)
-                        .map(|buf| wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()))
-                },
+                |name| registry.resolve(name),
             )?
         };
 
@@ -119,21 +115,14 @@ impl GenericCoupledPlanResources {
         {
             let bg_mesh_flux = {
                 let bgl = pipeline_flux.get_bind_group_layout(0);
+                let registry = ResourceRegistry::new().with_mesh(&runtime.common.mesh);
                 wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     "GenericCoupled: flux mesh bind group",
                     &bgl,
                     flux.bindings,
                     0,
-                    |name| {
-                        runtime
-                            .common
-                            .mesh
-                            .buffer_for_binding_name(name)
-                            .map(|buf| {
-                                wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding())
-                            })
-                    },
+                    |name| registry.resolve(name),
                 )?
             };
 
@@ -141,25 +130,17 @@ impl GenericCoupledPlanResources {
                 let bgl = pipeline_flux.get_bind_group_layout(1);
                 let mut out = Vec::new();
                 for i in 0..3 {
+                    let registry = ResourceRegistry::new()
+                        .with_unified_fields(&fields)
+                        .at_ping_pong_phase(i)
+                        .with_constants_buffer(runtime.constants.buffer());
                     out.push(wgsl_reflect::create_bind_group_from_bindings(
                         device,
                         &format!("GenericCoupled flux fields bind group {i}"),
                         &bgl,
                         flux.bindings,
                         1,
-                        |name| {
-                            if let Some(buf) = fields.buffer_for_binding(name, i) {
-                                return Some(wgpu::BindingResource::Buffer(
-                                    buf.as_entire_buffer_binding(),
-                                ));
-                            }
-                            if name == "constants" {
-                                return Some(wgpu::BindingResource::Buffer(
-                                    runtime.constants.buffer().as_entire_buffer_binding(),
-                                ));
-                            }
-                            None
-                        },
+                        |name| registry.resolve(name),
                     )?);
                 }
                 out
@@ -188,21 +169,14 @@ impl GenericCoupledPlanResources {
             // Group 0: mesh
             let bg_mesh_kt = {
                 let bgl = pipeline_flux_kt.get_bind_group_layout(0);
+                let registry = ResourceRegistry::new().with_mesh(&runtime.common.mesh);
                 wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     "GenericCoupled: KT mesh bind group",
                     &bgl,
                     flux_kt.bindings,
                     0,
-                    |name| {
-                        runtime
-                            .common
-                            .mesh
-                            .buffer_for_binding_name(name)
-                            .map(|buf| {
-                                wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding())
-                            })
-                    },
+                    |name| registry.resolve(name),
                 )?
             };
 
@@ -211,32 +185,17 @@ impl GenericCoupledPlanResources {
                 let bgl = pipeline_kt_gradients.get_bind_group_layout(1);
                 let mut out = Vec::new();
                 for i in 0..3 {
+                    let registry = ResourceRegistry::new()
+                        .with_unified_fields(&fields)
+                        .at_ping_pong_phase(i)
+                        .with_constants_buffer(runtime.constants.buffer());
                     out.push(wgsl_reflect::create_bind_group_from_bindings(
                         device,
                         &format!("GenericCoupled KT fields bind group {i}"),
                         &bgl,
                         kt_gradients.bindings,
                         1,
-                        |name| {
-                            if let Some(buf) = fields.buffer_for_binding(name, i) {
-                                return Some(wgpu::BindingResource::Buffer(
-                                    buf.as_entire_buffer_binding(),
-                                ));
-                            }
-                            if name == "low_mach" {
-                                if let Some(buf) = fields.low_mach_params_buffer() {
-                                    return Some(wgpu::BindingResource::Buffer(
-                                        buf.as_entire_buffer_binding(),
-                                    ));
-                                }
-                            }
-                            if name == "constants" {
-                                return Some(wgpu::BindingResource::Buffer(
-                                    runtime.constants.buffer().as_entire_buffer_binding(),
-                                ));
-                            }
-                            None
-                        },
+                        |name| registry.resolve(name),
                     )?);
                 }
                 out
@@ -252,27 +211,17 @@ impl GenericCoupledPlanResources {
             let bgl = pipeline_assembly.get_bind_group_layout(1);
             let mut out = Vec::new();
             for i in 0..3 {
+                let registry = ResourceRegistry::new()
+                    .with_unified_fields(&fields)
+                    .at_ping_pong_phase(i)
+                    .with_constants_buffer(runtime.constants.buffer());
                 out.push(wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("GenericCoupled assembly fields bind group {i}"),
                     &bgl,
                     assembly_bindings,
                     1,
-                    |name| {
-                        // First check unified fields, then fall back to runtime constants
-                        if let Some(buf) = fields.buffer_for_binding(name, i) {
-                            return Some(wgpu::BindingResource::Buffer(
-                                buf.as_entire_buffer_binding(),
-                            ));
-                        }
-                        // Handle constants from runtime (which is updated during time stepping)
-                        if name == "constants" {
-                            return Some(wgpu::BindingResource::Buffer(
-                                runtime.constants.buffer().as_entire_buffer_binding(),
-                            ));
-                        }
-                        None
-                    },
+                    |name| registry.resolve(name),
                 )?);
             }
             out
@@ -294,32 +243,25 @@ impl GenericCoupledPlanResources {
 
         let bg_solver = {
             let bgl = pipeline_assembly.get_bind_group_layout(2);
+            let registry = ResourceRegistry::new()
+                .with_buffer(
+                    "matrix_values",
+                    runtime
+                        .linear_port_space
+                        .buffer(runtime.linear_ports.values),
+                )
+                .with_buffer(
+                    "rhs",
+                    runtime.linear_port_space.buffer(runtime.linear_ports.rhs),
+                )
+                .with_buffer("scalar_row_offsets", &b_scalar_row_offsets);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "GenericCoupled assembly solver bind group",
                 &bgl,
                 assembly_bindings,
                 2,
-                |name| match name {
-                    "matrix_values" => Some(wgpu::BindingResource::Buffer(
-                        runtime
-                            .linear_port_space
-                            .buffer(runtime.linear_ports.values)
-                            .as_entire_buffer_binding(),
-                    )),
-                    "rhs" => Some(wgpu::BindingResource::Buffer(
-                        runtime
-                            .linear_port_space
-                            .buffer(runtime.linear_ports.rhs)
-                            .as_entire_buffer_binding(),
-                    )),
-                    // The assembly kernel uses mesh-level scalar CSR row offsets to derive neighbor structure.
-                    // This is the cell-level connectivity pattern (before DOF expansion).
-                    "scalar_row_offsets" => Some(wgpu::BindingResource::Buffer(
-                        b_scalar_row_offsets.as_entire_buffer_binding(),
-                    )),
-                    _ => None,
-                },
+                |name| registry.resolve(name),
             )?
         };
 
@@ -344,21 +286,16 @@ impl GenericCoupledPlanResources {
         {
             Some({
                 let bgl = pipeline_flux_kt.get_bind_group_layout(2);
+                let registry = ResourceRegistry::new()
+                    .with_buffer("bc_kind", &b_bc_kind)
+                    .with_buffer("bc_value", &b_bc_value);
                 wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     "GenericCoupled: KT BC bind group",
                     &bgl,
                     flux_kt.bindings,
                     2,
-                    |name| match name {
-                        "bc_kind" => Some(wgpu::BindingResource::Buffer(
-                            b_bc_kind.as_entire_buffer_binding(),
-                        )),
-                        "bc_value" => Some(wgpu::BindingResource::Buffer(
-                            b_bc_value.as_entire_buffer_binding(),
-                        )),
-                        _ => None,
-                    },
+                    |name| registry.resolve(name),
                 )?
             })
         } else {
@@ -367,21 +304,16 @@ impl GenericCoupledPlanResources {
 
         let bg_bc = {
             let bgl = pipeline_assembly.get_bind_group_layout(3);
+            let registry = ResourceRegistry::new()
+                .with_buffer("bc_kind", &b_bc_kind)
+                .with_buffer("bc_value", &b_bc_value);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "GenericCoupled BC bind group",
                 &bgl,
                 assembly_bindings,
                 3,
-                |name| match name {
-                    "bc_kind" => Some(wgpu::BindingResource::Buffer(
-                        b_bc_kind.as_entire_buffer_binding(),
-                    )),
-                    "bc_value" => Some(wgpu::BindingResource::Buffer(
-                        b_bc_value.as_entire_buffer_binding(),
-                    )),
-                    _ => None,
-                },
+                |name| registry.resolve(name),
             )?
         };
 
@@ -389,27 +321,17 @@ impl GenericCoupledPlanResources {
             let bgl = pipeline_update.get_bind_group_layout(0);
             let mut out = Vec::new();
             for i in 0..3 {
+                let registry = ResourceRegistry::new()
+                    .with_unified_fields(&fields)
+                    .at_ping_pong_phase(i)
+                    .with_constants_buffer(runtime.constants.buffer());
                 out.push(wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("GenericCoupled update state bind group {i}"),
                     &bgl,
                     update_bindings,
                     0,
-                    |name| {
-                        // First check unified fields, then fall back to runtime constants
-                        if let Some(buf) = fields.buffer_for_binding(name, i) {
-                            return Some(wgpu::BindingResource::Buffer(
-                                buf.as_entire_buffer_binding(),
-                            ));
-                        }
-                        // Handle constants from runtime
-                        if name == "constants" {
-                            return Some(wgpu::BindingResource::Buffer(
-                                runtime.constants.buffer().as_entire_buffer_binding(),
-                            ));
-                        }
-                        None
-                    },
+                    |name| registry.resolve(name),
                 )?);
             }
             out
@@ -417,21 +339,17 @@ impl GenericCoupledPlanResources {
 
         let bg_update_solution = {
             let bgl = pipeline_update.get_bind_group_layout(1);
+            let registry = ResourceRegistry::new().with_buffer(
+                "x",
+                runtime.linear_port_space.buffer(runtime.linear_ports.x),
+            );
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "GenericCoupled update solution bind group",
                 &bgl,
                 update_bindings,
                 1,
-                |name| match name {
-                    "x" => Some(wgpu::BindingResource::Buffer(
-                        runtime
-                            .linear_port_space
-                            .buffer(runtime.linear_ports.x)
-                            .as_entire_buffer_binding(),
-                    )),
-                    _ => None,
-                },
+                |name| registry.resolve(name),
             )?
         };
 

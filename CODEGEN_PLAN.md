@@ -29,14 +29,15 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 
 ### 1) Bindings (metadata-driven bind groups)
 - Expand the uniform `ResourceRegistry` (now exists) to cover all binding roles used by kernels (mesh buffers, ping-pong state, gradients, fluxes, BC tables, solver workspaces, uniforms).
-- Build bind groups exclusively from generated binding metadata + `ResourceRegistry` (no per-kernel bind-group wiring).
+- Build bind groups exclusively from generated binding metadata + `ResourceRegistry` (no per-kernel bind-group wiring); `GeneratedKernelsModule` is the reference implementation.
 - Continue migrating existing partial helpers (`BindGroupBuilder`, `UnifiedFieldResources::buffer_for_binding`, ad-hoc closures) behind this uniform registry.
 
 ### 2) Kernel Modules (single generated-kernel module)
-- Merge per-family kernel modules (`src/solver/gpu/modules/model_kernels.rs`, `src/solver/gpu/modules/generic_coupled_kernels.rs`) into one module that:
+- Finish migrating all solver families to a single generated-kernel module (`src/solver/gpu/modules/generated_kernels.rs`) that:
   - iterates `recipe.kernels`
   - builds pipelines via `(model_id, KernelId)`
   - builds bind groups via binding metadata + `ResourceRegistry`
+- Remaining: retire `src/solver/gpu/modules/model_kernels.rs` and delete any remaining kernel-id→bind/pipeline match arms.
 - Done when: adding a kernel does not require editing host-side module code or adding new `match` arms.
 
 ### 3) Plan Resources (single universal runtime resource graph)

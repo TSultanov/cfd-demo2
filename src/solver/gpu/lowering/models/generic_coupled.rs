@@ -1,8 +1,6 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
-use crate::solver::gpu::modules::generic_coupled_kernels::{
-    GenericCoupledBindGroups, GenericCoupledKernelsModule, GenericCoupledPipeline,
-};
+use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::graph::{
     ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
 };
@@ -22,16 +20,16 @@ use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
-use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
+use crate::solver::model::{KernelId, ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
 
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
     fields: UnifiedFieldResources,
-    kernels: GenericCoupledKernelsModule,
-    assembly_graph: ModuleGraph<GenericCoupledKernelsModule>,
-    apply_graph: ModuleGraph<GenericCoupledKernelsModule>,
-    update_graph: ModuleGraph<GenericCoupledKernelsModule>,
+    kernels: GeneratedKernelsModule,
+    assembly_graph: ModuleGraph<GeneratedKernelsModule>,
+    apply_graph: ModuleGraph<GeneratedKernelsModule>,
+    update_graph: ModuleGraph<GeneratedKernelsModule>,
     outer_iters: usize,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
@@ -63,7 +61,7 @@ impl GenericCoupledProgramResources {
     pub(crate) fn new(
         runtime: GpuCsrRuntime,
         fields: UnifiedFieldResources,
-        kernels: GenericCoupledKernelsModule,
+        kernels: GeneratedKernelsModule,
         model: &ModelSpec,
         recipe: &SolverRecipe,
         b_scalar_row_offsets: wgpu::Buffer,
@@ -988,21 +986,21 @@ pub(crate) fn linear_debug_provider(
 }
 
 /// Fallback when recipe doesn't define assembly phase
-fn build_assembly_graph_fallback() -> ModuleGraph<GenericCoupledKernelsModule> {
+fn build_assembly_graph_fallback() -> ModuleGraph<GeneratedKernelsModule> {
     ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
         label: "generic_coupled:assembly",
-        pipeline: GenericCoupledPipeline::Assembly,
-        bind: GenericCoupledBindGroups::Assembly,
+        pipeline: KernelId::GENERIC_COUPLED_ASSEMBLY,
+        bind: KernelId::GENERIC_COUPLED_ASSEMBLY,
         dispatch: DispatchKind::Cells,
     })])
 }
 
 /// Fallback when recipe doesn't define update phase
-fn build_update_graph_fallback() -> ModuleGraph<GenericCoupledKernelsModule> {
+fn build_update_graph_fallback() -> ModuleGraph<GeneratedKernelsModule> {
     ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
         label: "generic_coupled:update",
-        pipeline: GenericCoupledPipeline::Update,
-        bind: GenericCoupledBindGroups::Update,
+        pipeline: KernelId::GENERIC_COUPLED_UPDATE,
+        bind: KernelId::GENERIC_COUPLED_UPDATE,
         dispatch: DispatchKind::Cells,
     })])
 }

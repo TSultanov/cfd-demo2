@@ -1,6 +1,7 @@
 use crate::solver::gpu::init::mesh::MeshResources;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 
+#[derive(Clone)]
 pub struct ResourceRegistry<'a> {
     mesh: Option<&'a MeshResources>,
     unified_fields: Option<&'a UnifiedFieldResources>,
@@ -99,4 +100,3 @@ impl<'a> Default for ResourceRegistry<'a> {
         Self::new()
     }
 }
-

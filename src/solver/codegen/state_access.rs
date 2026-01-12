@@ -31,6 +31,13 @@ pub fn state_vec2_expr(layout: &StateLayout, buffer: &str, idx: &str, field: &st
     format!("vec2<f32>({}, {})", x_expr, y_expr)
 }
 
+pub fn state_vec3_expr(layout: &StateLayout, buffer: &str, idx: &str, field: &str) -> String {
+    let x_expr = state_component_expr(layout, buffer, idx, field, 0);
+    let y_expr = state_component_expr(layout, buffer, idx, field, 1);
+    let z_expr = state_component_expr(layout, buffer, idx, field, 2);
+    format!("vec3<f32>({}, {}, {})", x_expr, y_expr, z_expr)
+}
+
 pub fn state_component(
     layout: &StateLayout,
     buffer: &str,
@@ -60,6 +67,13 @@ pub fn state_vec2(layout: &StateLayout, buffer: &str, idx: &str, field: &str) ->
     let x_expr = state_component(layout, buffer, idx, field, 0);
     let y_expr = state_component(layout, buffer, idx, field, 1);
     Expr::call_named("vec2<f32>", vec![x_expr, y_expr])
+}
+
+pub fn state_vec3(layout: &StateLayout, buffer: &str, idx: &str, field: &str) -> Expr {
+    let x_expr = state_component(layout, buffer, idx, field, 0);
+    let y_expr = state_component(layout, buffer, idx, field, 1);
+    let z_expr = state_component(layout, buffer, idx, field, 2);
+    Expr::call_named("vec3<f32>", vec![x_expr, y_expr, z_expr])
 }
 
 pub fn state_component_typed(
@@ -98,6 +112,23 @@ pub fn state_vec2_typed(layout: &StateLayout, buffer: &str, idx: &str, field: &s
     TypedExpr::new(
         Expr::call_named("vec2<f32>", vec![x_expr, y_expr]),
         DslType::vec2_f32(),
+        state_field.unit(),
+    )
+}
+
+pub fn state_vec3_typed(layout: &StateLayout, buffer: &str, idx: &str, field: &str) -> TypedExpr {
+    let state_field = layout.field(field).unwrap_or_else(|| {
+        panic!("missing field '{}' in state layout", field);
+    });
+    if state_field.kind() != FieldKind::Vector3 {
+        panic!("field '{}' is not vec3", field);
+    }
+    let x_expr = state_component(layout, buffer, idx, field, 0);
+    let y_expr = state_component(layout, buffer, idx, field, 1);
+    let z_expr = state_component(layout, buffer, idx, field, 2);
+    TypedExpr::new(
+        Expr::call_named("vec3<f32>", vec![x_expr, y_expr, z_expr]),
+        DslType::vec3_f32(),
         state_field.unit(),
     )
 }

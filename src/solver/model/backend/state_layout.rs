@@ -32,6 +32,7 @@ impl StateField {
         match self.kind {
             FieldKind::Scalar => 1,
             FieldKind::Vector2 => 2,
+            FieldKind::Vector3 => 3,
         }
     }
 }

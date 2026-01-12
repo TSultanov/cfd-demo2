@@ -7,6 +7,7 @@ use crate::solver::units::{si, UnitDim};
 pub enum FieldKind {
     Scalar,
     Vector2,
+    Vector3,
 }
 
 impl FieldKind {
@@ -14,6 +15,7 @@ impl FieldKind {
         match self {
             FieldKind::Scalar => "scalar",
             FieldKind::Vector2 => "vector2",
+            FieldKind::Vector3 => "vector3",
         }
     }
 
@@ -21,6 +23,7 @@ impl FieldKind {
         match self {
             FieldKind::Scalar => 1,
             FieldKind::Vector2 => 2,
+            FieldKind::Vector3 => 3,
         }
     }
 }
@@ -477,12 +480,20 @@ pub fn vol_vector(name: &'static str, unit: UnitDim) -> FieldRef {
     FieldRef::new(name, FieldKind::Vector2, unit)
 }
 
+pub fn vol_vector3(name: &'static str, unit: UnitDim) -> FieldRef {
+    FieldRef::new(name, FieldKind::Vector3, unit)
+}
+
 pub fn surface_scalar(name: &'static str, unit: UnitDim) -> FluxRef {
     FluxRef::new(name, FieldKind::Scalar, unit)
 }
 
 pub fn surface_vector(name: &'static str, unit: UnitDim) -> FluxRef {
     FluxRef::new(name, FieldKind::Vector2, unit)
+}
+
+pub fn surface_vector3(name: &'static str, unit: UnitDim) -> FluxRef {
+    FluxRef::new(name, FieldKind::Vector3, unit)
 }
 
 pub mod fvm {
@@ -697,6 +708,7 @@ mod tests {
     fn termop_and_discretization_strings_are_stable() {
         assert_eq!(FieldKind::Scalar.as_str(), "scalar");
         assert_eq!(FieldKind::Vector2.as_str(), "vector2");
+        assert_eq!(FieldKind::Vector3.as_str(), "vector3");
         assert_eq!(TermOp::Ddt.as_str(), "ddt");
         assert_eq!(TermOp::Div.as_str(), "div");
         assert_eq!(TermOp::DivFlux.as_str(), "divFlux");

@@ -44,6 +44,24 @@ impl FluxLayout {
                     });
                     offset += 1;
                 }
+                FieldKind::Vector3 => {
+                    // 3D ordering: x, y, z.
+                    components.push(FluxComponent {
+                        name: format!("{}_x", field.name()),
+                        offset,
+                    });
+                    offset += 1;
+                    components.push(FluxComponent {
+                        name: format!("{}_y", field.name()),
+                        offset,
+                    });
+                    offset += 1;
+                    components.push(FluxComponent {
+                        name: format!("{}_z", field.name()),
+                        offset,
+                    });
+                    offset += 1;
+                }
             }
         }
 
@@ -73,6 +91,15 @@ impl FluxLayout {
                 let suffix = match component {
                     0 => "x",
                     1 => "y",
+                    _ => return None,
+                };
+                self.offset_for(&format!("{}_{}", field.name(), suffix))
+            }
+            FieldKind::Vector3 => {
+                let suffix = match component {
+                    0 => "x",
+                    1 => "y",
+                    2 => "z",
                     _ => return None,
                 };
                 self.offset_for(&format!("{}_{}", field.name(), suffix))

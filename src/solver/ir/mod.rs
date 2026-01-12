@@ -12,7 +12,8 @@ pub(crate) use crate::solver::model::backend::{
 
 #[allow(unused_imports)]
 pub(crate) use crate::solver::model::backend::ast::{
-    surface_scalar, vol_scalar, vol_vector, CodegenError, UnitValidationError,
+    surface_scalar, surface_vector3, vol_scalar, vol_vector, vol_vector3, CodegenError,
+    UnitValidationError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,6 +75,24 @@ impl FluxLayout {
                     });
                     offset += 1;
                 }
+                FieldKind::Vector3 => {
+                    // 3D ordering: x, y, z.
+                    components.push(FluxComponent {
+                        name: format!("{}_x", field.name()),
+                        offset,
+                    });
+                    offset += 1;
+                    components.push(FluxComponent {
+                        name: format!("{}_y", field.name()),
+                        offset,
+                    });
+                    offset += 1;
+                    components.push(FluxComponent {
+                        name: format!("{}_z", field.name()),
+                        offset,
+                    });
+                    offset += 1;
+                }
             }
         }
 
@@ -103,6 +122,15 @@ impl FluxLayout {
                 let suffix = match component {
                     0 => "x",
                     1 => "y",
+                    _ => return None,
+                };
+                self.offset_for(&format!("{}_{}", field.name(), suffix))
+            }
+            FieldKind::Vector3 => {
+                let suffix = match component {
+                    0 => "x",
+                    1 => "y",
+                    2 => "z",
                     _ => return None,
                 };
                 self.offset_for(&format!("{}_{}", field.name(), suffix))

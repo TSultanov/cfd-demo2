@@ -350,7 +350,7 @@ fn analyze_kernel_requirements(
     // - require a Laplacian term on the pressure equation targeting p
     let mut candidates: Vec<PressureCoupling> = Vec::new();
     for eq in equations {
-        if eq.target().kind() != FieldKind::Vector2 {
+        if !matches!(eq.target().kind(), FieldKind::Vector2 | FieldKind::Vector3) {
             continue;
         }
 

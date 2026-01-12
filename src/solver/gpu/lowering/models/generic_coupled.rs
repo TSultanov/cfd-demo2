@@ -715,7 +715,13 @@ fn build_update_graph_fallback() -> ModuleGraph<GenericCoupledKernelsModule> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::{incompressible_momentum_generic_model, SchurBlockLayout};
+    use crate::solver::model::{
+        incompressible_momentum_generic_model, BoundarySpec, ModelGpuSpec, ModelLinearSolverSpec,
+        ModelPreconditionerSpec, SchurBlockLayout,
+    };
+    use crate::solver::model::{eos, primitives};
+    use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
+    use crate::solver::units::si;
 
     #[test]
     fn schur_rejects_invalid_layout_indices() {
@@ -731,5 +737,42 @@ mod tests {
 
         let err = validate_schur_model(&model).unwrap_err();
         assert!(err.contains("equation targets"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn schur_accepts_vector3_velocity_layout() {
+        let u = vol_vector3("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+
+        let mut system = EquationSystem::new();
+        system.add_equation(fvm::ddt(u).eqn(u));
+        system.add_equation(fvm::ddt(p).eqn(p));
+
+        let layout = crate::solver::model::backend::StateLayout::new(vec![u, p]);
+        assert_eq!(layout.stride(), 4);
+        assert_eq!(system.unknowns_per_cell(), 4);
+
+        let model = crate::solver::model::ModelSpec {
+            id: "schur_vector3_test",
+            method: crate::solver::model::method::MethodSpec::GenericCoupled,
+            eos: eos::EosSpec::Constant,
+            system,
+            state_layout: layout,
+            boundaries: BoundarySpec::default(),
+
+            linear_solver: Some(ModelLinearSolverSpec {
+                preconditioner: ModelPreconditionerSpec::Schur {
+                    omega: 1.0,
+                    layout: SchurBlockLayout::from_u_p(&[0, 1, 2], 3)
+                        .expect("layout build failed"),
+                },
+            }),
+            flux_module: None,
+            primitives: primitives::PrimitiveDerivations::default(),
+            gpu: ModelGpuSpec::default(),
+        }
+        .with_derived_gpu();
+
+        validate_schur_model(&model).expect("Vector3 velocity Schur layout should validate");
     }
 }

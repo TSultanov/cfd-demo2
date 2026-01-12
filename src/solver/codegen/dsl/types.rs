@@ -45,6 +45,10 @@ impl DslType {
         Self::new(ScalarType::F32, Shape::Vec(2))
     }
 
+    pub const fn vec3_f32() -> Self {
+        Self::new(ScalarType::F32, Shape::Vec(3))
+    }
+
     pub const fn mat_f32(rows: u8, cols: u8) -> Self {
         Self::new(ScalarType::F32, Shape::Mat { rows, cols })
     }

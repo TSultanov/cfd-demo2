@@ -1,26 +1,26 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
-use crate::solver::gpu::modules::model_kernels::ModelKernelsModule;
+use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::unified_graph::{
     build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe};
 
 pub struct CompressibleGraphs {
-    explicit_module_graph: ModuleGraph<ModelKernelsModule>,
-    explicit_module_graph_first_order: ModuleGraph<ModelKernelsModule>,
-    implicit_grad_assembly_module_graph: ModuleGraph<ModelKernelsModule>,
-    implicit_assembly_module_graph_first_order: ModuleGraph<ModelKernelsModule>,
-    implicit_apply_module_graph: ModuleGraph<ModelKernelsModule>,
-    primitive_update_module_graph: ModuleGraph<ModelKernelsModule>,
+    explicit_module_graph: ModuleGraph<GeneratedKernelsModule>,
+    explicit_module_graph_first_order: ModuleGraph<GeneratedKernelsModule>,
+    implicit_grad_assembly_module_graph: ModuleGraph<GeneratedKernelsModule>,
+    implicit_assembly_module_graph_first_order: ModuleGraph<GeneratedKernelsModule>,
+    implicit_apply_module_graph: ModuleGraph<GeneratedKernelsModule>,
+    primitive_update_module_graph: ModuleGraph<GeneratedKernelsModule>,
 }
 
 impl CompressibleGraphs {
     /// Create graphs from a SolverRecipe, requiring the necessary phases to be present.
     pub fn from_recipe(
         recipe: &SolverRecipe,
-        kernels: &ModelKernelsModule,
+        kernels: &GeneratedKernelsModule,
     ) -> Result<Self, String> {
         // Explicit path: gradients (optional) -> flux -> explicit update -> primitive recovery
         let explicit_graph = build_optional_graph_for_phases(
@@ -99,7 +99,7 @@ impl CompressibleGraphs {
     pub fn run_explicit(
         &self,
         context: &GpuContext,
-        kernels: &ModelKernelsModule,
+        kernels: &GeneratedKernelsModule,
         dims: RuntimeDims,
         mode: GraphExecMode,
         needs_gradients: bool,
@@ -115,7 +115,7 @@ impl CompressibleGraphs {
     pub fn run_implicit_grad_assembly(
         &self,
         context: &GpuContext,
-        kernels: &ModelKernelsModule,
+        kernels: &GeneratedKernelsModule,
         dims: RuntimeDims,
         mode: GraphExecMode,
         needs_gradients: bool,
@@ -131,7 +131,7 @@ impl CompressibleGraphs {
     pub fn run_implicit_apply(
         &self,
         context: &GpuContext,
-        kernels: &ModelKernelsModule,
+        kernels: &GeneratedKernelsModule,
         dims: RuntimeDims,
         mode: GraphExecMode,
     ) -> (f64, Option<GraphDetail>) {
@@ -147,7 +147,7 @@ impl CompressibleGraphs {
     pub fn run_primitive_update(
         &self,
         context: &GpuContext,
-        kernels: &ModelKernelsModule,
+        kernels: &GeneratedKernelsModule,
         dims: RuntimeDims,
         mode: GraphExecMode,
     ) -> (f64, Option<GraphDetail>) {

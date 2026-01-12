@@ -7,7 +7,8 @@ use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 
 use crate::solver::gpu::explicit_implicit::fgmres::{CompressibleLinearSolver, LinearTopology};
 use crate::solver::gpu::explicit_implicit::graphs::CompressibleGraphs;
-use crate::solver::gpu::modules::model_kernels::{ModelKernelsInit, ModelKernelsModule};
+use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
@@ -132,7 +133,7 @@ pub(crate) struct ExplicitImplicitPlanResources {
     pub system_ports: LinearSystemPorts,
     pub scalar_row_offsets_port: Port<BufU32>,
     pub port_space: PortSpace,
-    pub kernels: ModelKernelsModule,
+    pub kernels: GeneratedKernelsModule,
     pub(crate) b_bc_kind: wgpu::Buffer,
     pub(crate) b_bc_value: wgpu::Buffer,
     pub linear_solver: CompressibleLinearSolver,
@@ -288,15 +289,35 @@ impl ExplicitImplicitPlanResources {
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
-        let kernels = ModelKernelsModule::new_from_recipe(
+        let registry = ResourceRegistry::new()
+            .with_mesh(&common.mesh)
+            .with_unified_fields(&fields_res)
+            .with_buffer("bc_kind", &b_bc_kind)
+            .with_buffer("bc_value", &b_bc_value)
+            .with_buffer(
+                "matrix_values",
+                lowered.ports.buffer(lowered.system_ports.values),
+            )
+            .with_buffer("rhs", lowered.ports.buffer(lowered.system_ports.rhs))
+            .with_buffer("x", lowered.ports.buffer(lowered.system_ports.x))
+            .with_buffer(
+                "scalar_row_offsets",
+                lowered.ports.buffer(lowered.scalar_row_offsets_port),
+            )
+            .with_buffer(
+                "row_offsets",
+                lowered.ports.buffer(lowered.scalar_row_offsets_port),
+            )
+            .with_buffer("col_indices", lowered.ports.buffer(lowered.system_ports.col_indices))
+            .with_buffer("y", lowered.ports.buffer(lowered.system_ports.rhs));
+
+        let kernels = GeneratedKernelsModule::new_from_recipe(
             &common.context.device,
-            &common.mesh,
             model.id,
             &recipe,
-            &fields_res,
+            &registry,
             fields_res.step_handle(),
-            ModelKernelsInit { coupled: None },
-        );
+        )?;
 
         let port_space = lowered.ports;
 

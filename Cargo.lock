@@ -767,6 +767,8 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "bytemuck",
+ "cfd2_codegen",
+ "cfd2_ir",
  "criterion",
  "eframe",
  "egui",
@@ -785,6 +787,17 @@ dependencies = [
  "wgsl_bindgen",
  "wide 0.8.3",
 ]
+
+[[package]]
+name = "cfd2_codegen"
+version = "0.1.0"
+dependencies = [
+ "cfd2_ir",
+]
+
+[[package]]
+name = "cfd2_ir"
+version = "0.1.0"
 
 [[package]]
 name = "cfg-if"

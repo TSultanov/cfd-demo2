@@ -459,12 +459,12 @@ fn main_body(layout: &StateLayout) -> Block {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::test_fixtures::compressible_model;
+    use crate::solver::ir::test_fixtures::compressible_state_layout_and_system;
 
     #[test]
     fn compressible_gradients_codegen_emits_grad_buffers() {
-        let model = compressible_model();
-        let wgsl = generate_kt_gradients_wgsl(&model.state_layout);
+        let (layout, _system) = compressible_state_layout_and_system();
+        let wgsl = generate_kt_gradients_wgsl(&layout);
         assert!(wgsl.contains("grad_rho"));
         assert!(wgsl.contains("grad_rho_u_x"));
         assert!(wgsl.contains("grad_rho_u_y"));

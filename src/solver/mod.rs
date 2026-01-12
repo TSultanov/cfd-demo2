@@ -1,5 +1,5 @@
 pub mod backend;
-mod codegen;
+pub use cfd2_codegen::solver::codegen;
 pub mod compiler;
 pub mod gpu;
 pub(crate) mod ir;

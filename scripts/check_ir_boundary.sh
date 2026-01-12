@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 
-CODEGEN_DIR="$ROOT_DIR/src/solver/codegen"
+CODEGEN_DIR="$ROOT_DIR/crates/cfd2_codegen/src/solver/codegen"
 
 if [ ! -d "$CODEGEN_DIR" ]; then
   echo "ERROR: missing codegen dir: $CODEGEN_DIR" >&2

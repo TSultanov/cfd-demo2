@@ -154,174 +154,7 @@ mod solver {
         pub use kernel::{KernelKind, KernelPlan};
     }
     pub mod codegen {
-        pub mod dsl {
-            pub mod enums {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/enums.rs"
-                ));
-            }
-            pub mod expr {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/expr.rs"
-                ));
-            }
-            pub mod matrix {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/matrix.rs"
-                ));
-            }
-            pub mod types {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/types.rs"
-                ));
-            }
-            pub mod tensor {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/tensor.rs"
-                ));
-            }
-            pub mod units {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/dsl/units.rs"
-                ));
-            }
-
-            #[allow(unused_imports)]
-            pub use enums::{EnumExpr, WgslEnum};
-            #[allow(unused_imports)]
-            pub use expr::{DslError, TypedExpr};
-            #[allow(unused_imports)]
-            pub use matrix::{
-                BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix,
-                CsrPattern,
-            };
-            #[allow(unused_imports)]
-            pub use tensor::{
-                AxisCons, AxisXY, Cons, MatExpr, NamedMatExpr, NamedVecExpr, VecExpr, XY,
-            };
-            pub use types::{DslType, ScalarType, Shape};
-            pub use units::UnitDim;
-        }
-        pub mod coupled_assembly {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/coupled_assembly.rs"
-            ));
-        }
-        pub mod incompressible_fields {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/incompressible_fields.rs"
-            ));
-        }
-        pub mod generic_coupled_kernels {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/generic_coupled_kernels.rs"
-            ));
-        }
-        pub mod coeff_expr {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/coeff_expr.rs"
-            ));
-        }
-        pub mod flux_rhie_chow {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/flux_rhie_chow.rs"
-            ));
-        }
-        pub mod kt_gradients {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/kt_gradients.rs"
-            ));
-        }
-        pub mod flux_kt {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/flux_kt.rs"
-            ));
-        }
-        pub mod prepare_coupled {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/prepare_coupled.rs"
-            ));
-        }
-        pub mod pressure_assembly {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/pressure_assembly.rs"
-            ));
-        }
-        pub mod reconstruction {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/reconstruction.rs"
-            ));
-        }
-        pub mod update_fields_from_coupled {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/update_fields_from_coupled.rs"
-            ));
-        }
-        pub mod ir {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/ir.rs"
-            ));
-        }
-        pub mod unified_assembly {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/unified_assembly.rs"
-            ));
-        }
-        pub mod plan {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/plan.rs"
-            ));
-        }
-        pub mod primitive_expr {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/primitive_expr.rs"
-            ));
-        }
-        pub mod state_access {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/state_access.rs"
-            ));
-        }
-        pub mod wgsl {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/wgsl.rs"
-            ));
-        }
-        pub mod wgsl_ast {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/wgsl_ast.rs"
-            ));
-        }
-        pub mod wgsl_dsl {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/wgsl_dsl.rs"
-            ));
-        }
+        pub use cfd2_codegen::solver::codegen::*;
     }
 
     pub mod compiler {
@@ -347,7 +180,15 @@ fn main() {
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
-    for entry in glob("src/solver/codegen/**/*.rs").expect("Failed to read codegen glob") {
+    for entry in glob("crates/cfd2_codegen/src/solver/codegen/**/*.rs")
+        .expect("Failed to read codegen glob")
+    {
+        match entry {
+            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
+            Err(e) => println!("cargo:warning=Glob error: {:?}", e),
+        }
+    }
+    for entry in glob("crates/cfd2_ir/src/solver/**/*.rs").expect("Failed to read ir glob") {
         match entry {
             Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
@@ -430,6 +271,8 @@ fn main() {
 
 fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     let codegen_dir = PathBuf::from(manifest_dir)
+        .join("crates")
+        .join("cfd2_codegen")
         .join("src")
         .join("solver")
         .join("codegen");

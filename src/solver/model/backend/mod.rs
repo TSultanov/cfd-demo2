@@ -1,12 +1,18 @@
-pub mod ast;
-pub mod scheme;
-pub mod scheme_expansion;
-pub mod state_layout;
+pub use cfd2_ir::solver::model::backend::*;
 
-pub use ast::{
-    fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef, FluxRef,
-    Term, TermOp,
-};
-pub use scheme::{SchemeRegistry, TermKey};
-pub use scheme_expansion::{expand_schemes, SchemeExpansion};
-pub use state_layout::{StateField, StateLayout};
+pub mod ast {
+    pub use cfd2_ir::solver::model::backend::ast::*;
+}
+
+pub mod scheme {
+    pub use cfd2_ir::solver::model::backend::scheme::*;
+}
+
+pub mod scheme_expansion {
+    pub use cfd2_ir::solver::model::backend::scheme_expansion::*;
+}
+
+pub mod state_layout {
+    pub use cfd2_ir::solver::model::backend::state_layout::*;
+}
+

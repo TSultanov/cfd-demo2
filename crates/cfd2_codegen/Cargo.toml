@@ -1,0 +1,8 @@
+[package]
+name = "cfd2_codegen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cfd2_ir = { path = "../cfd2_ir" }
+

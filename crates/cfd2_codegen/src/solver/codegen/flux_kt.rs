@@ -1362,19 +1362,15 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, eos: &EosSpec) -> B
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::test_fixtures::compressible_model;
     use crate::solver::ir::FluxLayout;
+    use crate::solver::ir::{test_fixtures::compressible_state_layout_and_system, EosSpec};
 
     #[test]
     fn compressible_flux_kt_codegen_emits_state_arrays() {
-        let model = compressible_model();
-        let flux_layout = FluxLayout::from_system(&model.system);
-        let eos = model
-            .eos
-            .ideal_gas_gamma()
-            .map(|gamma| crate::solver::ir::EosSpec::IdealGas { gamma })
-            .unwrap_or(crate::solver::ir::EosSpec::Constant);
-        let wgsl = generate_flux_kt_wgsl(&model.state_layout, &flux_layout, &eos);
+        let (layout, system) = compressible_state_layout_and_system();
+        let flux_layout = FluxLayout::from_system(&system);
+        let eos = EosSpec::IdealGas { gamma: 1.4 };
+        let wgsl = generate_flux_kt_wgsl(&layout, &flux_layout, &eos);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("face_owner"));
         assert!(wgsl.contains("fluxes"));

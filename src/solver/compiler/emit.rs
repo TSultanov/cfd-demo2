@@ -8,13 +8,12 @@ use crate::solver::codegen::generic_coupled_kernels::{
 };
 use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
 use crate::solver::codegen::ir::{lower_system, DiscreteSystem};
-use crate::solver::codegen::method_ei;
 use crate::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl;
 use crate::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl;
 use crate::solver::codegen::unified_assembly;
 use crate::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl;
 use crate::solver::codegen::wgsl::generate_wgsl;
-use crate::solver::ir::{expand_schemes, SchemeRegistry};
+use crate::solver::ir::{expand_schemes, EosSpec as IrEosSpec, FluxLayout, SchemeRegistry};
 use crate::solver::model::incompressible_momentum_model;
 use crate::solver::model::{KernelKind, ModelSpec};
 use crate::solver::scheme::Scheme;
@@ -70,16 +69,9 @@ fn kernel_output_name(model: &ModelSpec, kind: KernelKind) -> String {
         KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
         KernelKind::SystemMain => "system_main.wgsl".to_string(),
 
-        KernelKind::ConservativeGradients => "ei_gradients.wgsl".to_string(),
-        KernelKind::ConservativeFluxKt => "ei_flux_kt.wgsl".to_string(),
-        KernelKind::ConservativeExplicitUpdate => "ei_explicit_update.wgsl".to_string(),
-        KernelKind::ConservativeAssembly => "ei_assembly.wgsl".to_string(),
-        KernelKind::ConservativeApply => "ei_apply.wgsl".to_string(),
-        KernelKind::ConservativeUpdate => "ei_update.wgsl".to_string(),
-
         // Transitional KT flux module bridge.
-        KernelKind::KtGradients => "ei_gradients.wgsl".to_string(),
-        KernelKind::FluxKt => "ei_flux_kt.wgsl".to_string(),
+        KernelKind::KtGradients => "kt_gradients.wgsl".to_string(),
+        KernelKind::FluxKt => "flux_kt.wgsl".to_string(),
 
         KernelKind::GenericCoupledAssembly => {
             format!("generic_coupled_assembly_{}.wgsl", model.id)
@@ -119,15 +111,18 @@ fn generate_kernel_wgsl(
         }
         KernelKind::SystemMain => generate_wgsl(&discrete),
 
-        KernelKind::ConservativeGradients => method_ei::generate_ei_gradients_wgsl(model),
-        KernelKind::ConservativeFluxKt => method_ei::generate_ei_flux_kt_wgsl(model),
-        KernelKind::ConservativeExplicitUpdate => method_ei::generate_ei_explicit_update_wgsl(model),
-        KernelKind::ConservativeAssembly => method_ei::generate_ei_assembly_wgsl(model),
-        KernelKind::ConservativeApply => method_ei::generate_ei_apply_wgsl(model),
-        KernelKind::ConservativeUpdate => method_ei::generate_ei_update_wgsl(model),
-
-        KernelKind::KtGradients => method_ei::generate_ei_gradients_wgsl(model),
-        KernelKind::FluxKt => method_ei::generate_ei_flux_kt_wgsl(model),
+        KernelKind::KtGradients => {
+            crate::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(&model.state_layout)
+        }
+        KernelKind::FluxKt => {
+            let flux_layout = FluxLayout::from_system(&model.system);
+            let eos = ir_eos_from_model(model.eos);
+            crate::solver::codegen::flux_kt::generate_flux_kt_wgsl(
+                &model.state_layout,
+                &flux_layout,
+                &eos,
+            )
+        }
 
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = expand_schemes(&model.system, schemes)
@@ -154,6 +149,13 @@ fn generate_kernel_wgsl(
     };
 
     Ok(wgsl)
+}
+
+fn ir_eos_from_model(eos: crate::solver::model::EosSpec) -> IrEosSpec {
+    match eos {
+        crate::solver::model::EosSpec::IdealGas { gamma } => IrEosSpec::IdealGas { gamma },
+        crate::solver::model::EosSpec::Constant => IrEosSpec::Constant,
+    }
 }
 
 pub fn emit_model_kernel_wgsl(

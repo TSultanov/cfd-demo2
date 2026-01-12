@@ -3,10 +3,6 @@ pub enum MethodSpec {
     /// Pressure-coupled incompressible momentum + pressure method.
     CoupledIncompressible,
 
-    /// Legacy compressible explicit/implicit family (EI kernels), selected without
-    /// EI-specific branches in the solver.
-    ConservativeCompressible { outer_iters: usize },
-
     /// Generic coupled scalar/vector method (unified assembly/apply/update path).
     GenericCoupled,
 

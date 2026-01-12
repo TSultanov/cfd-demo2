@@ -7,14 +7,6 @@ pub enum KernelKind {
     FluxRhieChow,
     SystemMain,
 
-    // Legacy compressible kernels (EI family) with model-agnostic naming.
-    ConservativeGradients,
-    ConservativeFluxKt,
-    ConservativeExplicitUpdate,
-    ConservativeAssembly,
-    ConservativeApply,
-    ConservativeUpdate,
-
     // Transitional: KT flux module bridge for the generic-coupled pipeline.
     //
     // These are currently backed by the legacy EI shader generators and bindings,
@@ -44,21 +36,10 @@ impl KernelId {
 
     pub const SYSTEM_MAIN: KernelId = KernelId("system_main");
 
-    // Transitional stable ids for legacy EI kernels.
-    //
-    // We intentionally keep the underlying string ids aligned with the existing generated
-    // shader registry entries ("ei_*") while removing EI naming from selection logic.
-    pub const CONSERVATIVE_GRADIENTS: KernelId = KernelId("ei_gradients");
-    pub const CONSERVATIVE_FLUX_KT: KernelId = KernelId("ei_flux_kt");
-    pub const CONSERVATIVE_EXPLICIT_UPDATE: KernelId = KernelId("ei_explicit_update");
-    pub const CONSERVATIVE_ASSEMBLY: KernelId = KernelId("ei_assembly");
-    pub const CONSERVATIVE_APPLY: KernelId = KernelId("ei_apply");
-    pub const CONSERVATIVE_UPDATE: KernelId = KernelId("ei_update");
-
     // Transitional stable ids for KT flux module + primitive recovery.
     //
     // These allow routing compressible models through the generic-coupled pipeline
-    // without selecting any `ei_*` kernel ids directly.
+    // without selecting any legacy EI kernel ids.
     pub const KT_GRADIENTS: KernelId = KernelId("kt_gradients");
     pub const FLUX_KT: KernelId = KernelId("flux_kt");
 
@@ -159,13 +140,6 @@ impl From<KernelKind> for KernelId {
             KernelKind::FluxRhieChow => KernelId::FLUX_RHIE_CHOW,
             KernelKind::SystemMain => KernelId::SYSTEM_MAIN,
 
-            KernelKind::ConservativeGradients => KernelId::CONSERVATIVE_GRADIENTS,
-            KernelKind::ConservativeFluxKt => KernelId::CONSERVATIVE_FLUX_KT,
-            KernelKind::ConservativeExplicitUpdate => KernelId::CONSERVATIVE_EXPLICIT_UPDATE,
-            KernelKind::ConservativeAssembly => KernelId::CONSERVATIVE_ASSEMBLY,
-            KernelKind::ConservativeApply => KernelId::CONSERVATIVE_APPLY,
-            KernelKind::ConservativeUpdate => KernelId::CONSERVATIVE_UPDATE,
-
             KernelKind::KtGradients => KernelId::KT_GRADIENTS,
             KernelKind::FluxKt => KernelId::FLUX_KT,
 
@@ -235,14 +209,6 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
             KernelKind::PressureAssembly,
             KernelKind::UpdateFieldsFromCoupled,
         ]),
-        MethodSpec::ConservativeCompressible { .. } => KernelPlan::new(vec![
-            KernelKind::ConservativeGradients,
-            KernelKind::ConservativeFluxKt,
-            KernelKind::ConservativeExplicitUpdate,
-            KernelKind::ConservativeAssembly,
-            KernelKind::ConservativeApply,
-            KernelKind::ConservativeUpdate,
-        ]),
         MethodSpec::GenericCoupled => {
             let mut kernels = Vec::new();
             // Optional flux module stage.
@@ -306,14 +272,6 @@ pub fn derive_kernel_ids_for_model(model: &crate::solver::model::ModelSpec) -> V
             KernelId::COUPLED_ASSEMBLY,
             KernelId::PRESSURE_ASSEMBLY,
             KernelId::UPDATE_FIELDS_FROM_COUPLED,
-        ],
-        MethodSpec::ConservativeCompressible { .. } => vec![
-            KernelId::CONSERVATIVE_GRADIENTS,
-            KernelId::CONSERVATIVE_FLUX_KT,
-            KernelId::CONSERVATIVE_EXPLICIT_UPDATE,
-            KernelId::CONSERVATIVE_ASSEMBLY,
-            KernelId::CONSERVATIVE_APPLY,
-            KernelId::CONSERVATIVE_UPDATE,
         ],
         MethodSpec::GenericCoupled => {
             let mut ids = Vec::new();

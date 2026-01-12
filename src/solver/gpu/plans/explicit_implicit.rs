@@ -295,13 +295,7 @@ impl ExplicitImplicitPlanResources {
             &recipe,
             &fields_res,
             fields_res.step_handle(),
-            ModelKernelsInit::linear_system_with_bc(
-                &lowered.ports,
-                lowered.system_ports,
-                lowered.scalar_row_offsets_port,
-                &b_bc_kind,
-                &b_bc_value,
-            ),
+            ModelKernelsInit { coupled: None },
         );
 
         let port_space = lowered.ports;

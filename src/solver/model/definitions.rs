@@ -40,8 +40,6 @@ impl ModelSpec {
     }
 
     pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
-        use crate::solver::model::method::MethodSpec;
-
         let has_kt_flux = matches!(
             self.flux_module,
             Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
@@ -83,12 +81,9 @@ impl ModelSpec {
         };
 
         // Low-Mach parameters are currently required by the KT flux kernel bridge.
-        let requires_low_mach_params = has_kt_flux
-            || matches!(self.method, MethodSpec::ConservativeCompressible { .. });
+        let requires_low_mach_params = has_kt_flux;
 
-        let gradient_storage = if has_kt_flux
-            || matches!(self.method, MethodSpec::ConservativeCompressible { .. })
-        {
+        let gradient_storage = if has_kt_flux {
             // Legacy EI kernels expect per-component gradient buffers (e.g. grad_rho_u_x).
             GradientStorage::PerFieldComponents
         } else if has(KernelKind::GenericCoupledAssembly) {
@@ -97,9 +92,7 @@ impl ModelSpec {
             GradientStorage::PerFieldName
         };
 
-        let required_gradient_fields = if has_kt_flux
-            || matches!(self.method, MethodSpec::ConservativeCompressible { .. })
-        {
+        let required_gradient_fields = if has_kt_flux {
             vec![
                 "rho".to_string(),
                 "rho_u_x".to_string(),
@@ -626,12 +619,17 @@ mod tests {
     }
 
     #[test]
-    fn compressible_model_defines_conservative_equations() {
+    fn compressible_model_routes_through_generic_coupled_pipeline() {
         let model = compressible_model();
         assert_eq!(model.system.equations().len(), 3);
         assert_eq!(model.system.equations()[1].terms().len(), 2);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
-        assert!(model.kernel_plan().contains(KernelKind::ConservativeAssembly));
+
+        // Compressible uses the generic-coupled pipeline with a KT flux module stage.
+        assert!(model.kernel_plan().contains(KernelKind::KtGradients));
+        assert!(model.kernel_plan().contains(KernelKind::FluxKt));
+        assert!(model.kernel_plan().contains(KernelKind::GenericCoupledAssembly));
+        assert!(model.kernel_plan().contains(KernelKind::GenericCoupledUpdate));
     }
 
     #[test]

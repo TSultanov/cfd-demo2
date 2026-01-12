@@ -240,10 +240,6 @@ impl SolverRecipe {
         let mut kernels: Vec<KernelSpec> = Vec::new();
         for id in crate::solver::model::kernel::derive_kernel_ids_for_model(model) {
             let phase = match id {
-                KernelId::CONSERVATIVE_GRADIENTS => KernelPhase::Gradients,
-                KernelId::CONSERVATIVE_FLUX_KT => KernelPhase::FluxComputation,
-                KernelId::CONSERVATIVE_EXPLICIT_UPDATE => KernelPhase::ExplicitUpdate,
-
                 KernelId::KT_GRADIENTS => KernelPhase::Gradients,
                 KernelId::FLUX_KT => KernelPhase::FluxComputation,
 
@@ -251,10 +247,9 @@ impl SolverRecipe {
 
                 KernelId::COUPLED_ASSEMBLY
                 | KernelId::PRESSURE_ASSEMBLY
-                | KernelId::CONSERVATIVE_ASSEMBLY
                 | KernelId::GENERIC_COUPLED_ASSEMBLY => KernelPhase::Assembly,
 
-                KernelId::CONSERVATIVE_APPLY | KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
+                KernelId::GENERIC_COUPLED_APPLY => KernelPhase::Apply,
 
                 KernelId::UPDATE_FIELDS_FROM_COUPLED => KernelPhase::Update,
 
@@ -266,15 +261,12 @@ impl SolverRecipe {
 
                 KernelId::GENERIC_COUPLED_UPDATE => KernelPhase::Update,
 
-                KernelId::CONSERVATIVE_UPDATE => KernelPhase::PrimitiveRecovery,
-
-
                 // Preparation kernels (or legacy defaults)
                 _ => KernelPhase::Preparation,
             };
 
             let dispatch = match id {
-                KernelId::FLUX_RHIE_CHOW | KernelId::CONSERVATIVE_FLUX_KT | KernelId::FLUX_KT => {
+                KernelId::FLUX_RHIE_CHOW | KernelId::FLUX_KT => {
                     DispatchKind::Faces
                 }
                 _ => DispatchKind::Cells,
@@ -565,9 +557,6 @@ fn derive_stepping_mode(model: &ModelSpec) -> SteppingMode {
         MethodSpec::CoupledIncompressible => SteppingMode::Coupled {
             outer_correctors: 3,
         },
-        MethodSpec::ConservativeCompressible { outer_iters } => {
-            SteppingMode::Implicit { outer_iters }
-        }
         MethodSpec::GenericCoupled => SteppingMode::Coupled {
             outer_correctors: 1,
         },

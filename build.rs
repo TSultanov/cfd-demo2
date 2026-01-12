@@ -201,55 +201,12 @@ mod solver {
                 BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix,
                 CsrPattern,
             };
+            #[allow(unused_imports)]
             pub use tensor::{
                 AxisCons, AxisXY, Cons, MatExpr, NamedMatExpr, NamedVecExpr, VecExpr, XY,
             };
             pub use types::{DslType, ScalarType, Shape};
             pub use units::UnitDim;
-        }
-        pub mod method_ei {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/codegen/method_ei.rs"
-            ));
-        }
-        pub mod ei {
-            pub mod apply {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/ei/apply.rs"
-                ));
-            }
-            pub mod assembly {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/ei/assembly.rs"
-                ));
-            }
-            pub mod explicit_update {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/ei/explicit_update.rs"
-                ));
-            }
-            pub mod flux_kt {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/ei/flux_kt.rs"
-                ));
-            }
-            pub mod gradients {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/ei/gradients.rs"
-                ));
-            }
-            pub mod update {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/codegen/ei/update.rs"
-                ));
-            }
         }
         pub mod coupled_assembly {
             include!(concat!(
@@ -279,6 +236,18 @@ mod solver {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/solver/codegen/flux_rhie_chow.rs"
+            ));
+        }
+        pub mod kt_gradients {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/kt_gradients.rs"
+            ));
+        }
+        pub mod flux_kt {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/codegen/flux_kt.rs"
             ));
         }
         pub mod prepare_coupled {
@@ -367,6 +336,10 @@ mod solver {
 }
 
 fn main() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+
+    enforce_codegen_ir_boundary(&manifest_dir);
+
     println!("cargo:rerun-if-changed=src/solver/scheme.rs");
     for entry in glob("src/solver/model/**/*.rs").expect("Failed to read model glob") {
         match entry {
@@ -395,7 +368,6 @@ fn main() {
         .derive_serde(false)
         .output("src/solver/gpu/bindings.rs");
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     if let Err(err) = solver::compiler::emit_system_main_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
@@ -454,6 +426,68 @@ fn main() {
     }
 
     builder.build().unwrap().generate().unwrap();
+}
+
+fn enforce_codegen_ir_boundary(manifest_dir: &str) {
+    let codegen_dir = PathBuf::from(manifest_dir)
+        .join("src")
+        .join("solver")
+        .join("codegen");
+
+    let pattern = codegen_dir.join("**/*.rs").to_string_lossy().to_string();
+    let mut violations = Vec::new();
+
+    // Make it difficult to accidentally punch through the IR boundary via path imports.
+    //
+    // If codegen needs additional inputs, expand `crate::solver::ir` (the facade) or move
+    // model-dependent orchestration into `solver::compiler`.
+    let needles = [
+        "crate::solver::model",
+        "crate::solver::{model",
+        "crate::solver::{ model",
+        "super::model",
+        "super::{model",
+        "super::{ model",
+        // Catch `use crate::solver as s; use s::model;` and similar aliasing.
+        "::model::",
+        "::model;",
+        "::model,",
+        "::model}",
+        "::model)",
+        "::model as",
+    ];
+
+    for entry in glob(&pattern).expect("Failed to read codegen glob") {
+        let Ok(path) = entry else {
+            continue;
+        };
+        let Ok(src) = fs::read_to_string(&path) else {
+            continue;
+        };
+
+        for (idx, line) in src.lines().enumerate() {
+            if needles.iter().any(|needle| line.contains(needle)) {
+                let rel = path.strip_prefix(manifest_dir).unwrap_or(&path);
+                violations.push(format!(
+                    "{}:{}: {}",
+                    rel.display(),
+                    idx + 1,
+                    line.trim_end()
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        let mut msg = String::new();
+        msg.push_str("IR boundary violation: codegen must not reference model types.\n");
+        msg.push_str("Use crate::solver::ir::{...} or move orchestration to solver::compiler.\n\n");
+        for v in violations {
+            msg.push_str(&v);
+            msg.push('\n');
+        }
+        panic!("{msg}");
+    }
 }
 
 fn generate_generic_coupled_registry(manifest_dir: &str) {
@@ -607,13 +641,9 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             gen_dir.join("update_fields_from_coupled.wgsl"),
         ),
 
-        // Legacy EI family (still used as a transitional backend).
-        ("ei_apply", gen_dir.join("ei_apply.wgsl")),
-        ("ei_assembly", gen_dir.join("ei_assembly.wgsl")),
-        ("ei_explicit_update", gen_dir.join("ei_explicit_update.wgsl")),
-        ("ei_flux_kt", gen_dir.join("ei_flux_kt.wgsl")),
-        ("ei_gradients", gen_dir.join("ei_gradients.wgsl")),
-        ("ei_update", gen_dir.join("ei_update.wgsl")),
+        // Transitional KT flux module kernels.
+        ("kt_gradients", gen_dir.join("kt_gradients.wgsl")),
+        ("flux_kt", gen_dir.join("flux_kt.wgsl")),
     ];
 
     let mut code = String::new();
@@ -668,26 +698,9 @@ fn generate_kernel_registry_map() {
             "generic_coupled_apply",
         ),
 
-        // Transitional conservative (EI) kernels.
-        (
-            "ConservativeGradients",
-            "ei_gradients",
-            "ei_gradients",
-        ),
-        ("ConservativeFluxKt", "ei_flux_kt", "ei_flux_kt"),
-        (
-            "ConservativeExplicitUpdate",
-            "ei_explicit_update",
-            "ei_explicit_update",
-        ),
-        ("ConservativeAssembly", "ei_assembly", "ei_assembly"),
-        ("ConservativeApply", "ei_apply", "ei_apply"),
-        ("ConservativeUpdate", "ei_update", "ei_update"),
-
-        // KT flux module bridge for generic-coupled models.
-        // These map to the existing generated shader modules while using non-ei stable ids.
-        ("KtGradients", "ei_gradients", "kt_gradients"),
-        ("FluxKt", "ei_flux_kt", "flux_kt"),
+        // KT flux module kernels for generic-coupled models.
+        ("KtGradients", "kt_gradients", "kt_gradients"),
+        ("FluxKt", "flux_kt", "flux_kt"),
     ];
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)

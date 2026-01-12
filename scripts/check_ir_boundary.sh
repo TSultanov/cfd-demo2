@@ -12,10 +12,9 @@ if [ ! -d "$CODEGEN_DIR" ]; then
   exit 1
 fi
 
-# Enforced invariants for the incremental IR boundary step:
+# Enforced invariants:
 # - codegen may depend on the IR facade (`crate::solver::ir::*`)
-# - (most) codegen must not depend on `crate::solver::model::*`
-#   (legacy EI emission is temporarily exempt)
+# - codegen must not depend on `crate::solver::model::*` (KT migration completed)
 # - codegen must not reach into `crate::solver::model::backend::*` directly
 
 if grep -R --line-number --fixed-string "crate::solver::model::backend" "$CODEGEN_DIR" --include='*.rs' >/dev/null; then
@@ -28,20 +27,16 @@ fi
 
 echo "✓ IR boundary check passed (no model backend imports in codegen)"
 
-# Stronger guard: forbid `crate::solver::model::*` in codegen outside the temporary EI bridge.
+# Stronger guard: forbid model references in codegen entirely.
 #
-# This is intentionally coarse-grained (a simple grep) to avoid pulling in tooling.
-MODEL_IMPORTS=$(grep -R --line-number --fixed-string "crate::solver::model::" "$CODEGEN_DIR" --include='*.rs' || true)
-if [ -n "$MODEL_IMPORTS" ]; then
-  # Allowlist the transitional files that still depend on model data.
-  FILTERED=$(echo "$MODEL_IMPORTS" | grep -v "/codegen/ei/" | grep -v "/codegen/method_ei.rs" || true)
-  if [ -n "$FILTERED" ]; then
-    echo "ERROR: IR boundary violation: codegen imports model types outside the EI bridge." >&2
-    echo "Move model-dependent orchestration out of codegen, or plumb data via solver::ir." >&2
-    echo "" >&2
-    echo "$FILTERED" >&2
-    exit 1
-  fi
+# NOTE: This is intentionally coarse-grained (a simple grep) to keep it portable.
+MODEL_REFS=$(grep -R --line-number -E "(crate::solver::model\b|crate::solver::\{[[:space:]]*model\b|super::model\b|super::\{[[:space:]]*model\b|::model(::|[[:space:]]*(as|[;},)])))" "$CODEGEN_DIR" --include='*.rs' || true)
+if [ -n "$MODEL_REFS" ]; then
+  echo "ERROR: IR boundary violation: codegen references model types." >&2
+  echo "Use the IR facade (crate::solver::ir::{...}) or move orchestration to compiler." >&2
+  echo "" >&2
+  echo "$MODEL_REFS" >&2
+  exit 1
 fi
 
-echo "✓ IR boundary check passed (no model imports outside EI bridge)"
+echo "✓ IR boundary check passed (no model references in codegen)"

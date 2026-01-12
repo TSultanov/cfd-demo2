@@ -16,53 +16,51 @@
 // - b_u is the momentum source term
 
 use crate::solver::gpu::modules::graph::{ComputeSpec, DispatchKind, ModuleGraph, ModuleNode};
-use crate::solver::gpu::modules::model_kernels::{
-    KernelBindGroups, KernelPipeline, ModelKernelsModule,
-};
+use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
 use crate::solver::model::KernelId;
 
 impl GpuSolver {
-    pub(crate) fn build_coupled_init_prepare_graph() -> ModuleGraph<ModelKernelsModule> {
+    pub(crate) fn build_coupled_init_prepare_graph() -> ModuleGraph<GeneratedKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:init_prepare",
-            pipeline: KernelPipeline::Kernel(KernelId::PREPARE_COUPLED),
-            bind: KernelBindGroups::MeshFieldsSolver,
+            pipeline: KernelId::PREPARE_COUPLED,
+            bind: KernelId::PREPARE_COUPLED,
             dispatch: DispatchKind::Cells,
         })])
     }
 
-    pub(crate) fn build_coupled_prepare_assembly_graph() -> ModuleGraph<ModelKernelsModule> {
+    pub(crate) fn build_coupled_prepare_assembly_graph() -> ModuleGraph<GeneratedKernelsModule> {
         ModuleGraph::new(vec![
             ModuleNode::Compute(ComputeSpec {
                 label: "coupled:prepare",
-                pipeline: KernelPipeline::Kernel(KernelId::PREPARE_COUPLED),
-                bind: KernelBindGroups::MeshFieldsSolver,
+                pipeline: KernelId::PREPARE_COUPLED,
+                bind: KernelId::PREPARE_COUPLED,
                 dispatch: DispatchKind::Cells,
             }),
             ModuleNode::Compute(ComputeSpec {
                 label: "coupled:assembly_merged",
-                pipeline: KernelPipeline::Kernel(KernelId::COUPLED_ASSEMBLY),
-                bind: KernelBindGroups::MeshFieldsSolver,
+                pipeline: KernelId::COUPLED_ASSEMBLY,
+                bind: KernelId::COUPLED_ASSEMBLY,
                 dispatch: DispatchKind::Cells,
             }),
         ])
     }
 
-    pub(crate) fn build_coupled_assembly_graph() -> ModuleGraph<ModelKernelsModule> {
+    pub(crate) fn build_coupled_assembly_graph() -> ModuleGraph<GeneratedKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:assembly_merged",
-            pipeline: KernelPipeline::Kernel(KernelId::COUPLED_ASSEMBLY),
-            bind: KernelBindGroups::MeshFieldsSolver,
+            pipeline: KernelId::COUPLED_ASSEMBLY,
+            bind: KernelId::COUPLED_ASSEMBLY,
             dispatch: DispatchKind::Cells,
         })])
     }
 
-    pub(crate) fn build_coupled_update_graph() -> ModuleGraph<ModelKernelsModule> {
+    pub(crate) fn build_coupled_update_graph() -> ModuleGraph<GeneratedKernelsModule> {
         ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
             label: "coupled:update_fields_max_diff",
-            pipeline: KernelPipeline::Kernel(KernelId::UPDATE_FIELDS_FROM_COUPLED),
-            bind: KernelBindGroups::UpdateFieldsSolution,
+            pipeline: KernelId::UPDATE_FIELDS_FROM_COUPLED,
+            bind: KernelId::UPDATE_FIELDS_FROM_COUPLED,
             dispatch: DispatchKind::Cells,
         })])
     }

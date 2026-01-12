@@ -37,7 +37,8 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
   - iterates `recipe.kernels`
   - builds pipelines via `(model_id, KernelId)`
   - builds bind groups via binding metadata + `ResourceRegistry`
-- Remaining: retire `src/solver/gpu/modules/model_kernels.rs` and delete any remaining kernel-id→bind/pipeline match arms.
+- Progress: generic-coupled and coupled paths now use `GeneratedKernelsModule` (no per-kernel host bind-group wiring).
+- Remaining: retire `src/solver/gpu/modules/model_kernels.rs` and migrate explicit/implicit (`src/solver/gpu/plans/explicit_implicit.rs`) to the same module.
 - Done when: adding a kernel does not require editing host-side module code or adding new `match` arms.
 
 ### 3) Plan Resources (single universal runtime resource graph)

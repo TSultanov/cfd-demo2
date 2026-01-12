@@ -6,7 +6,8 @@ use crate::solver::mesh::Mesh;
 use std::sync::Mutex;
 
 use crate::solver::gpu::coupled_backend::linear_solver::IncompressibleLinearSolver;
-use crate::solver::gpu::modules::model_kernels::{ModelKernelsInit, ModelKernelsModule};
+use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::recipe::SolverRecipe;
@@ -77,15 +78,46 @@ impl GpuSolver {
             initial_constants,
         );
 
-        let kernels = ModelKernelsModule::new_from_recipe(
+        let coupled = &linear_res.coupled_resources;
+        let registry = ResourceRegistry::new()
+            .with_mesh(&common.mesh)
+            .with_unified_fields(&fields_res)
+            .with_buffer(
+                "matrix_values",
+                coupled
+                    .linear_port_space
+                    .buffer(coupled.linear_ports.values),
+            )
+            .with_buffer(
+                "rhs",
+                coupled.linear_port_space.buffer(coupled.linear_ports.rhs),
+            )
+            .with_buffer(
+                "x",
+                coupled.linear_port_space.buffer(coupled.linear_ports.x),
+            )
+            .with_buffer("grad_u", &coupled.b_grad_u)
+            .with_buffer("grad_v", &coupled.b_grad_v)
+            .with_buffer(
+                "scalar_matrix_values",
+                linear_res.port_space.buffer(linear_res.ports.values),
+            )
+            .with_buffer(
+                "scalar_row_offsets",
+                linear_res.port_space.buffer(linear_res.ports.row_offsets),
+            )
+            .with_buffer("diag_u_inv", &coupled.b_diag_u)
+            .with_buffer("diag_v_inv", &coupled.b_diag_v)
+            .with_buffer("diag_p_inv", &coupled.b_diag_p)
+            .with_buffer("max_diff_result", &coupled.b_max_diff_result);
+
+        let kernels = GeneratedKernelsModule::new_from_recipe(
             &common.context.device,
-            &common.mesh,
             model.id,
             &recipe,
-            &fields_res,
+            &registry,
             fields_res.step_handle(),
-            ModelKernelsInit::coupled(&linear_res.coupled_resources),
-        );
+        )?;
 
         let solver = Self {
             common,

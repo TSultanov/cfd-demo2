@@ -2,7 +2,7 @@ use super::async_buffer::AsyncScalarReader;
 use super::coupled_backend::linear_solver::IncompressibleLinearSolver;
 use super::modules::graph::ModuleGraph;
 use super::modules::linear_system::LinearSystemPorts;
-use super::modules::model_kernels::ModelKernelsModule;
+use super::modules::generated_kernels::GeneratedKernelsModule;
 use super::modules::ports::PortSpace;
 use super::modules::time_integration::TimeIntegrationModule;
 use super::modules::unified_field_resources::UnifiedFieldResources;
@@ -169,7 +169,7 @@ pub(crate) struct GpuSolver {
     pub num_nonzeros: u32,
 
     // Incompressible/coupled physics compute module (pipelines + bind groups)
-    pub kernels: ModelKernelsModule,
+    pub kernels: GeneratedKernelsModule,
 
     pub num_cells: u32,
     pub num_faces: u32,
@@ -201,10 +201,10 @@ pub(crate) struct GpuSolver {
     pub should_stop: bool,
 
     // Prebuilt compute graphs for coupled solver dispatch (module-based).
-    pub coupled_init_prepare_graph: ModuleGraph<ModelKernelsModule>,
-    pub coupled_prepare_assembly_graph: ModuleGraph<ModelKernelsModule>,
-    pub coupled_assembly_graph: ModuleGraph<ModelKernelsModule>,
-    pub coupled_update_graph: ModuleGraph<ModelKernelsModule>,
+    pub coupled_init_prepare_graph: ModuleGraph<GeneratedKernelsModule>,
+    pub coupled_prepare_assembly_graph: ModuleGraph<GeneratedKernelsModule>,
+    pub coupled_assembly_graph: ModuleGraph<GeneratedKernelsModule>,
+    pub coupled_update_graph: ModuleGraph<GeneratedKernelsModule>,
 
     pub linear_ports: crate::solver::gpu::modules::linear_system::LinearSystemPorts,
     pub linear_port_space: crate::solver::gpu::modules::ports::PortSpace,

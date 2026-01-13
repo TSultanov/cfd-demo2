@@ -47,9 +47,9 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 ### 2) Codegen (remove model-specific generators; IR-driven kernels)
 - Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
-- Eliminate remaining build-time kernel-specific glue by making kernel emission fully data-driven:
-  - Model/recipe emits a list of kernel artifacts to generate (kernel id + generator kind + parameters + output name).
-  - `build.rs` iterates those artifacts without `match KernelKind` and without naming/parameter knowledge.
+- Reduce build-time kernel-specific glue:
+  - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.
+  - Next: replace remaining transitional “system_main from representative model” hack with a truly model-independent shared module (or emit it as part of the recipe).
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing

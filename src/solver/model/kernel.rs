@@ -554,6 +554,172 @@ fn derive_rhie_chow_fields(
     Ok(())
 }
 
+fn required_codegen_field<'a>(map: &'a KernelCodegenFieldMap, key: &str) -> &'a str {
+    map.get(key)
+        .map(|s| s.as_str())
+        .unwrap_or_else(|| panic!("missing required derived kernel codegen field '{key}'"))
+}
+
+pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
+    match kind {
+        KernelKind::PrepareCoupled => "prepare_coupled.wgsl".to_string(),
+        KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl".to_string(),
+        KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
+        KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl".to_string(),
+        KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
+        KernelKind::SystemMain => "system_main.wgsl".to_string(),
+
+        // Transitional KT flux module bridge.
+        KernelKind::KtGradients => "kt_gradients.wgsl".to_string(),
+        KernelKind::FluxKt => "flux_kt.wgsl".to_string(),
+
+        KernelKind::GenericCoupledAssembly => format!("generic_coupled_assembly_{model_id}.wgsl"),
+        KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
+        KernelKind::GenericCoupledUpdate => format!("generic_coupled_update_{model_id}.wgsl"),
+    }
+}
+
+pub fn generate_kernel_wgsl_for_model(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+    kind: KernelKind,
+) -> Result<String, String> {
+    use cfd2_codegen::solver::codegen::{lower_system, DiscreteSystem};
+
+    let discrete: DiscreteSystem = lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
+
+    let wgsl = match kind {
+        KernelKind::PrepareCoupled => {
+            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
+            cfd2_codegen::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl(
+                &discrete,
+                &model.state_layout,
+                required_codegen_field(&fields, "momentum"),
+                required_codegen_field(&fields, "pressure"),
+                required_codegen_field(&fields, "d_p"),
+                required_codegen_field(&fields, "grad_p"),
+            )
+        }
+        KernelKind::CoupledAssembly => {
+            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
+            cfd2_codegen::solver::codegen::coupled_assembly::generate_coupled_assembly_wgsl(
+                &discrete,
+                &model.state_layout,
+                required_codegen_field(&fields, "momentum"),
+                required_codegen_field(&fields, "pressure"),
+                required_codegen_field(&fields, "d_p"),
+            )
+        }
+        KernelKind::PressureAssembly => {
+            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
+            cfd2_codegen::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl(
+                &discrete,
+                &model.state_layout,
+                required_codegen_field(&fields, "pressure"),
+                required_codegen_field(&fields, "d_p"),
+                required_codegen_field(&fields, "grad_p"),
+            )
+        }
+        KernelKind::UpdateFieldsFromCoupled => {
+            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
+            cfd2_codegen::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl(
+                &model.state_layout,
+                required_codegen_field(&fields, "momentum"),
+                required_codegen_field(&fields, "pressure"),
+            )
+        }
+        KernelKind::FluxRhieChow => {
+            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
+            cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
+                &discrete,
+                &model.state_layout,
+                required_codegen_field(&fields, "momentum"),
+                required_codegen_field(&fields, "pressure"),
+                required_codegen_field(&fields, "d_p"),
+                required_codegen_field(&fields, "grad_p"),
+            )
+        }
+        KernelKind::SystemMain => cfd2_codegen::solver::codegen::generate_wgsl(&discrete),
+
+        KernelKind::KtGradients => {
+            cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(
+                &model.state_layout,
+            )
+        }
+        KernelKind::FluxKt => {
+            let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+            let eos = ir_eos_from_model(model.eos);
+            cfd2_codegen::solver::codegen::flux_kt::generate_flux_kt_wgsl(
+                &model.state_layout,
+                &flux_layout,
+                &eos,
+            )
+        }
+
+        KernelKind::GenericCoupledAssembly => {
+            let needs_gradients = crate::solver::ir::expand_schemes(&model.system, schemes)
+                .map(|e| e.needs_gradients())
+                .unwrap_or(false);
+            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+            cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+                &discrete,
+                &model.state_layout,
+                flux_stride,
+                needs_gradients,
+            )
+        }
+        KernelKind::GenericCoupledApply => {
+            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
+        }
+        KernelKind::GenericCoupledUpdate => {
+            let prims = model
+                .primitives
+                .ordered()
+                .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
+            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
+                &discrete,
+                &model.state_layout,
+                &prims,
+            )
+        }
+    };
+
+    Ok(wgsl)
+}
+
+pub fn emit_model_kernels_wgsl(
+    base_dir: impl AsRef<std::path::Path>,
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let mut outputs = Vec::new();
+    let plan = model.kernel_plan();
+    for kind in plan.kernels() {
+        outputs.push(emit_model_kernel_wgsl(&base_dir, model, schemes, *kind)?);
+    }
+    Ok(outputs)
+}
+
+pub fn emit_model_kernel_wgsl(
+    base_dir: impl AsRef<std::path::Path>,
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+    kind: KernelKind,
+) -> std::io::Result<std::path::PathBuf> {
+    let base_dir = base_dir.as_ref();
+    let filename = kernel_output_name(model.id, kind);
+    let wgsl = generate_kernel_wgsl_for_model(model, schemes, kind)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+    cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, &wgsl)
+}
+
+fn ir_eos_from_model(eos: crate::solver::model::EosSpec) -> crate::solver::ir::EosSpec {
+    match eos {
+        crate::solver::model::EosSpec::IdealGas { gamma } => crate::solver::ir::EosSpec::IdealGas { gamma },
+        crate::solver::model::EosSpec::Constant => crate::solver::ir::EosSpec::Constant,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PressureCoupling {
     momentum: crate::solver::model::backend::FieldRef,

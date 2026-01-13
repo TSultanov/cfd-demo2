@@ -194,13 +194,19 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    // Emit a single "system_main.wgsl" for shared helpers (transitional).
-    // Prefer keeping this independent of any one model long-term.
+    // Transitional: generate shared "system_main.wgsl" from a representative model.
     let system_main_model = solver::model::incompressible_momentum_model();
-    emit_system_main_wgsl(&manifest_dir, &system_main_model, &schemes);
+    solver::model::kernel::emit_model_kernel_wgsl(
+        &manifest_dir,
+        &system_main_model,
+        &schemes,
+        solver::model::KernelKind::SystemMain,
+    )
+    .unwrap_or_else(|err| panic!("codegen failed (system_main): {err}"));
 
     for model in solver::model::all_models() {
-        emit_model_kernels_wgsl(&manifest_dir, &model, &schemes);
+        solver::model::kernel::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
+            .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
     }
 
     generate_wgsl_binding_meta(&manifest_dir);
@@ -846,201 +852,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     write_if_changed(&out_path, &code);
 }
 
-fn emit_system_main_wgsl(
-    manifest_dir: &str,
-    model: &solver::model::ModelSpec,
-    schemes: &solver::ir::SchemeRegistry,
-) {
-    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
-        .unwrap_or_else(|err| panic!("codegen failed (system_main): {err}"));
-    let wgsl = cfd2_codegen::solver::codegen::generate_wgsl(&discrete);
-    codegen_compiler::write_generated_wgsl(manifest_dir, "system_main.wgsl", &wgsl)
-        .unwrap_or_else(|err| panic!("failed to write system_main.wgsl: {err}"));
-}
-
-fn emit_model_kernels_wgsl(
-    manifest_dir: &str,
-    model: &solver::model::ModelSpec,
-    schemes: &solver::ir::SchemeRegistry,
-) {
-    let plan = model.kernel_plan();
-    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
-        .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
-
-    for kind in plan.kernels() {
-        // `system_main.wgsl` is emitted once above.
-        if matches!(kind, solver::model::KernelKind::SystemMain) {
-            continue;
-        }
-
-        let filename = kernel_output_name(model, *kind);
-        let wgsl = generate_kernel_wgsl_for_model(model, &discrete, schemes, *kind);
-        codegen_compiler::write_generated_wgsl(manifest_dir, filename, &wgsl).unwrap_or_else(
-            |err| panic!("failed to write generated WGSL for model '{}': {err}", model.id),
-        );
-    }
-}
-
-fn kernel_output_name(model: &solver::model::ModelSpec, kind: solver::model::KernelKind) -> String {
-    match kind {
-        solver::model::KernelKind::PrepareCoupled => "prepare_coupled.wgsl".to_string(),
-        solver::model::KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl".to_string(),
-        solver::model::KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
-        solver::model::KernelKind::UpdateFieldsFromCoupled => {
-            "update_fields_from_coupled.wgsl".to_string()
-        }
-        solver::model::KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
-        solver::model::KernelKind::SystemMain => "system_main.wgsl".to_string(),
-
-        // Transitional KT flux module bridge.
-        solver::model::KernelKind::KtGradients => "kt_gradients.wgsl".to_string(),
-        solver::model::KernelKind::FluxKt => "flux_kt.wgsl".to_string(),
-
-        solver::model::KernelKind::GenericCoupledAssembly => {
-            format!("generic_coupled_assembly_{}.wgsl", model.id)
-        }
-        solver::model::KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
-        solver::model::KernelKind::GenericCoupledUpdate => {
-            format!("generic_coupled_update_{}.wgsl", model.id)
-        }
-    }
-}
-
-fn generate_kernel_wgsl_for_model(
-    model: &solver::model::ModelSpec,
-    discrete: &cfd2_codegen::solver::codegen::DiscreteSystem,
-    schemes: &solver::ir::SchemeRegistry,
-    kind: solver::model::KernelKind,
-) -> String {
-    match kind {
-        solver::model::KernelKind::PrepareCoupled => {
-            let fields =
-                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
-                    .unwrap_or_else(|e| {
-                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
-                    });
-            cfd2_codegen::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl(
-                discrete,
-                &model.state_layout,
-                required_field(&fields, "momentum"),
-                required_field(&fields, "pressure"),
-                required_field(&fields, "d_p"),
-                required_field(&fields, "grad_p"),
-            )
-        }
-        solver::model::KernelKind::CoupledAssembly => {
-            let fields =
-                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
-                    .unwrap_or_else(|e| {
-                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
-                    });
-            cfd2_codegen::solver::codegen::coupled_assembly::generate_coupled_assembly_wgsl(
-                discrete,
-                &model.state_layout,
-                required_field(&fields, "momentum"),
-                required_field(&fields, "pressure"),
-                required_field(&fields, "d_p"),
-            )
-        }
-        solver::model::KernelKind::PressureAssembly => {
-            let fields =
-                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
-                    .unwrap_or_else(|e| {
-                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
-                    });
-            cfd2_codegen::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl(
-                discrete,
-                &model.state_layout,
-                required_field(&fields, "pressure"),
-                required_field(&fields, "d_p"),
-                required_field(&fields, "grad_p"),
-            )
-        }
-        solver::model::KernelKind::UpdateFieldsFromCoupled => {
-            let fields =
-                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
-                    .unwrap_or_else(|e| {
-                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
-                    });
-            cfd2_codegen::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl(
-                &model.state_layout,
-                required_field(&fields, "momentum"),
-                required_field(&fields, "pressure"),
-            )
-        }
-        solver::model::KernelKind::FluxRhieChow => {
-            let fields =
-                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
-                    .unwrap_or_else(|e| {
-                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
-                    });
-            cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
-                discrete,
-                &model.state_layout,
-                required_field(&fields, "momentum"),
-                required_field(&fields, "pressure"),
-                required_field(&fields, "d_p"),
-                required_field(&fields, "grad_p"),
-            )
-        }
-        solver::model::KernelKind::SystemMain => cfd2_codegen::solver::codegen::generate_wgsl(discrete),
-
-        solver::model::KernelKind::KtGradients => {
-            cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(&model.state_layout)
-        }
-        solver::model::KernelKind::FluxKt => {
-            let flux_layout = solver::ir::FluxLayout::from_system(&model.system);
-            let eos = ir_eos_from_model(model.eos);
-            cfd2_codegen::solver::codegen::flux_kt::generate_flux_kt_wgsl(
-                &model.state_layout,
-                &flux_layout,
-                &eos,
-            )
-        }
-
-        solver::model::KernelKind::GenericCoupledAssembly => {
-            let needs_gradients = solver::ir::expand_schemes(&model.system, schemes)
-                .map(|e| e.needs_gradients())
-                .unwrap_or(false);
-            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
-            cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
-                discrete,
-                &model.state_layout,
-                flux_stride,
-                needs_gradients,
-            )
-        }
-        solver::model::KernelKind::GenericCoupledApply => {
-            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
-        }
-        solver::model::KernelKind::GenericCoupledUpdate => {
-            let prims = model.primitives.ordered().unwrap_or_else(|e| {
-                panic!("primitive recovery ordering failed for model '{}': {e}", model.id)
-            });
-            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
-                discrete,
-                &model.state_layout,
-                &prims,
-            )
-        }
-    }
-}
-
-fn required_field<'a>(
-    map: &'a solver::model::kernel::KernelCodegenFieldMap,
-    key: &str,
-) -> &'a str {
-    map.get(key)
-        .map(|s| s.as_str())
-        .unwrap_or_else(|| panic!("missing required derived kernel field '{key}'"))
-}
-
-fn ir_eos_from_model(eos: solver::model::EosSpec) -> solver::ir::EosSpec {
-    match eos {
-        solver::model::EosSpec::IdealGas { gamma } => solver::ir::EosSpec::IdealGas { gamma },
-        solver::model::EosSpec::Constant => solver::ir::EosSpec::Constant,
-    }
-}
 
 fn sanitize_rust_ident(raw: &str) -> String {
     let mut out = String::new();

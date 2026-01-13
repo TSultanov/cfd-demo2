@@ -125,47 +125,7 @@ async fn lower_parts_for_model(
     // Otherwise, select the runtime backend based on the derived recipe structure.
     match recipe.stepping {
         crate::solver::gpu::recipe::SteppingMode::Coupled { .. } => {
-            if model.method != crate::solver::model::MethodSpec::CoupledIncompressible {
-                let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
-                    mesh,
-                    model.clone(),
-                    recipe.clone(),
-                    device,
-                    queue,
-                )
-                .await?;
-
-                let mut ops = ProgramOpRegistry::new();
-                models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
-
-                let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-                resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
-                    built.backend,
-                ));
-
-                return Ok(LoweredProgramParts {
-                    model: built.model,
-                    context: built.context,
-                    profiling_stats: built.profiling_stats,
-                    resources,
-                    spec: ModelGpuProgramSpecParts {
-                        ops,
-                        num_cells: models::universal::spec_num_cells,
-                        time: models::universal::spec_time,
-                        dt: models::universal::spec_dt,
-                        state_buffer: models::universal::spec_state_buffer,
-                        write_state_bytes: models::universal::spec_write_state_bytes,
-                        initialize_history: None,
-                        params: HashMap::new(),
-                        set_param_fallback: Some(models::universal::set_param_fallback),
-                        step_stats: Some(models::universal::step_stats),
-                        step_with_stats: None,
-                        linear_debug: Some(models::universal::linear_debug_provider),
-                    },
-                });
-            }
-
-            let solver = crate::solver::gpu::structs::GpuSolver::new(
+            let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
                 mesh,
                 model.clone(),
                 recipe.clone(),
@@ -174,24 +134,18 @@ async fn lower_parts_for_model(
             )
             .await?;
 
-            let context = crate::solver::gpu::context::GpuContext {
-                device: solver.common.context.device.clone(),
-                queue: solver.common.context.queue.clone(),
-            };
-            let profiling_stats = std::sync::Arc::clone(&solver.common.profiling_stats);
-
-            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::universal::UniversalProgramResources::new_coupled(
-                solver,
-            ));
-
             let mut ops = ProgramOpRegistry::new();
             models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
+            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
+            resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
+                built.backend,
+            ));
+
             Ok(LoweredProgramParts {
-                model: model.clone(),
-                context,
-                profiling_stats,
+                model: built.model,
+                context: built.context,
+                profiling_stats: built.profiling_stats,
                 resources,
                 spec: ModelGpuProgramSpecParts {
                     ops,
@@ -200,7 +154,7 @@ async fn lower_parts_for_model(
                     dt: models::universal::spec_dt,
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
-                    initialize_history: Some(models::universal::init_history),
+                    initialize_history: None,
                     params: HashMap::new(),
                     set_param_fallback: Some(models::universal::set_param_fallback),
                     step_stats: Some(models::universal::step_stats),

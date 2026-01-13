@@ -76,14 +76,6 @@ fn test_reproduce_divergence() {
     for step in 0..max_steps {
         solver.step();
 
-        if solver.incompressible_should_stop() {
-            if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
-                panic!("Solver stopped due to degenerate solution!");
-            }
-            println!("Solver stopped early (steady state).");
-            break;
-        }
-
         {
             // Check for divergence
             let (outer_iters, outer_res_u, outer_res_p) =

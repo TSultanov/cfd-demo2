@@ -231,11 +231,9 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
 
     match model.method {
         MethodSpec::CoupledIncompressible => KernelPlan::new(vec![
-            KernelKind::PrepareCoupled,
             KernelKind::FluxRhieChow,
-            KernelKind::CoupledAssembly,
-            KernelKind::PressureAssembly,
-            KernelKind::UpdateFieldsFromCoupled,
+            KernelKind::GenericCoupledAssembly,
+            KernelKind::GenericCoupledUpdate,
         ]),
         MethodSpec::GenericCoupled => {
             let mut kernels = Vec::new();
@@ -305,27 +303,17 @@ pub fn derive_kernel_specs_for_model(
 
             Ok(vec![
                 ModelKernelSpec {
-                    id: KernelId::PREPARE_COUPLED,
-                    phase: KernelPhaseId::Preparation,
-                    dispatch: DispatchKindId::Cells,
-                },
-                ModelKernelSpec {
                     id: KernelId::FLUX_RHIE_CHOW,
                     phase: KernelPhaseId::FluxComputation,
                     dispatch: DispatchKindId::Faces,
                 },
                 ModelKernelSpec {
-                    id: KernelId::COUPLED_ASSEMBLY,
+                    id: KernelId::GENERIC_COUPLED_ASSEMBLY,
                     phase: KernelPhaseId::Assembly,
                     dispatch: DispatchKindId::Cells,
                 },
                 ModelKernelSpec {
-                    id: KernelId::PRESSURE_ASSEMBLY,
-                    phase: KernelPhaseId::Assembly,
-                    dispatch: DispatchKindId::Cells,
-                },
-                ModelKernelSpec {
-                    id: KernelId::UPDATE_FIELDS_FROM_COUPLED,
+                    id: KernelId::GENERIC_COUPLED_UPDATE,
                     phase: KernelPhaseId::Update,
                     dispatch: DispatchKindId::Cells,
                 },

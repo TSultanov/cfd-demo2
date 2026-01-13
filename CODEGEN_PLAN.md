@@ -41,27 +41,25 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Converged duplicated WGSL AST sources (single canonical implementation in codegen).
 - Explicit stepping uses the same generic-coupled backend resources (no separate explicit/implicit plan/resources path).
 - Documented CSR binding/shape contract (`src/solver/gpu/CSR_CONTRACT.md`) and clarified scalar-vs-DOF naming in mesh resources.
+- Retired the legacy coupled backend resources (`GpuSolver`); coupled stepping runs on the same universal `GenericCoupledProgramResources` path.
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
-### 1) Plan Resources (single universal runtime resource graph)
-- Retire the remaining coupled-backend-specific plan/resources (`GpuSolver`) so coupled stepping is also expressed via the universal program resources + recipe-driven ops/graphs.
-
-### 2) Codegen (remove model-specific generators; IR-driven kernels)
+### 1) Codegen (remove model-specific generators; IR-driven kernels)
 - Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
 - Reduce build-time kernel-specific glue:
   - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.
 
-### 3) Retire `PlanParam` as global plumbing
+### 2) Retire `PlanParam` as global plumbing
 - Replace `PlanParam`-based “global knobs” with typed, module-owned uniforms/config deltas routed through the recipe.
 - Done when: new configuration does not add `PlanParam` enum cases.
 
-### 4) Handwritten WGSL (treat infrastructure the same way)
+### 3) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
 - Done when: runtime consumes only registry-provided WGSL (no ad-hoc `include_str!` modules).
 
-### 5) Contract Tests
+### 4) Contract Tests
 - Add regression tests that fail if:
   - `kernel_registry` has special-case lookup paths
   - lowering selects a backend by “family”
@@ -69,9 +67,8 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
   - `build.rs` contains per-model hardcoding or kernel-kind-specific codegen glue
 
 ## Recommended Sequence (high leverage)
-1) Converge plan resources into one universal runtime graph/resources layer.
-2) Retire model-specific codegen bridges and handwritten physics kernels; keep solver infrastructure next.
-3) Retire `PlanParam` and add contract tests to lock in invariants.
+1) Retire model-specific codegen bridges and handwritten physics kernels; keep solver infrastructure next.
+2) Retire `PlanParam` and add contract tests to lock in invariants.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

@@ -64,14 +64,6 @@ fn test_gpu_profile() {
             solver.step();
             let duration = start_step.elapsed();
 
-            if solver.incompressible_should_stop() {
-                if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
-                    panic!("Solver stopped due to degenerate solution!");
-                }
-                println!("Solver stopped early (steady state).");
-                break;
-            }
-
             if step % 10 == 0 {
                 println!("Step {}: {:?}", step, duration);
             }

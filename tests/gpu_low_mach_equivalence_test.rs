@@ -316,7 +316,6 @@ fn low_mach_equivalence_vortex_street() {
     let smooth_iters = env_usize("CFD2_LOW_MACH_SMOOTH_ITERS", 40);
     let base_pressure = env_f64("CFD2_LOW_MACH_BASE_P", 25.0);
     let perturb_amp = env_f64("CFD2_LOW_MACH_PERTURB", 5e-3);
-    let incomp_iters = env_usize("CFD2_LOW_MACH_INCOMP_ITERS", 20);
     let comp_iters = env_usize("CFD2_LOW_MACH_COMP_ITERS", 40);
     let probe_stride = env_usize("CFD2_LOW_MACH_PROBE_STRIDE", 10);
     let progress = env_bool("CFD2_LOW_MACH_PROGRESS", true);
@@ -350,9 +349,6 @@ fn low_mach_equivalence_vortex_street() {
     incomp.set_advection_scheme(Scheme::QUICK);
     incomp.set_inlet_velocity(u_in);
     incomp.set_ramp_time(0.1);
-    incomp
-        .set_incompressible_outer_correctors(incomp_iters as u32)
-        .expect("set outer correctors");
     let mut u_seed = vec![(0.0f64, 0.0f64); mesh.num_cells()];
     let length = 3.0;
     for i in 0..mesh.num_cells() {

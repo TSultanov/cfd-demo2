@@ -792,9 +792,6 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     incomp.set_alpha_p(0.3);
     incomp.set_inlet_velocity(u_in);
     incomp.set_ramp_time(0.2);
-    incomp
-        .set_incompressible_outer_correctors(2)
-        .expect("outer correctors");
     incomp.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     incomp.set_p(&vec![0.0; mesh.num_cells()]);
     incomp.initialize_history();

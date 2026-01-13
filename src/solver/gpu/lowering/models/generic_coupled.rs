@@ -198,9 +198,13 @@ fn validate_schur_model(
         return Err("model does not request Schur preconditioning".into());
     };
 
-    if model.method != crate::solver::model::method::MethodSpec::GenericCoupled {
+    if !matches!(
+        model.method,
+        crate::solver::model::method::MethodSpec::GenericCoupled
+            | crate::solver::model::method::MethodSpec::CoupledIncompressible
+    ) {
         return Err(
-            "Schur preconditioner is only wired for the GenericCoupled pipeline".to_string(),
+            "Schur preconditioner is only wired for the GenericCoupled pipelines".to_string(),
         );
     }
     layout.validate(model.system.unknowns_per_cell())?;

@@ -80,7 +80,7 @@ impl ModelSpec {
                     GradientStorage::PackedState
                 }
                 crate::solver::model::method::MethodSpec::CoupledIncompressible => {
-                    GradientStorage::PerFieldName
+                    GradientStorage::PackedState
                 }
             }
         };
@@ -395,15 +395,35 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_component,
     ]);
 
+    let u0 = layout
+        .component_offset("U", 0)
+        .ok_or_else(|| "incompressible_momentum_model missing U[0] in state layout".to_string())
+        .expect("state layout validation failed");
+    let u1 = layout
+        .component_offset("U", 1)
+        .ok_or_else(|| "incompressible_momentum_model missing U[1] in state layout".to_string())
+        .expect("state layout validation failed");
+    let p = layout
+        .offset_for("p")
+        .ok_or_else(|| "incompressible_momentum_model missing p in state layout".to_string())
+        .expect("state layout validation failed");
+
     ModelSpec {
         id: "incompressible_momentum",
-        method: crate::solver::model::method::MethodSpec::CoupledIncompressible,
+        method: crate::solver::model::method::MethodSpec::GenericCoupled,
         eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries: BoundarySpec::default(),
 
-        linear_solver: None,
+        // The generic coupled path needs a saddle-point-capable preconditioner.
+        linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
+            preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
+                omega: 1.0,
+                layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[u0, u1], p)
+                    .expect("invalid SchurBlockLayout"),
+            },
+        }),
         flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow {
             alpha_u: None,
         }),
@@ -413,42 +433,9 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     .with_derived_gpu()
 }
 
-/// Transitional: incompressible model routed through the generic coupled pipeline.
-///
-/// This keeps the same state layout (including auxiliary fields like `d_p`, `grad_p`) so
-/// existing flux kernels (e.g. Rhie–Chow) remain usable while generic assembly/solve is
-/// brought up.
 pub fn incompressible_momentum_generic_model() -> ModelSpec {
     let mut model = incompressible_momentum_model();
     model.id = "incompressible_momentum_generic";
-    model.method = crate::solver::model::method::MethodSpec::GenericCoupled;
-
-    let u0 = model
-        .state_layout
-        .component_offset("U", 0)
-        .ok_or_else(|| "incompressible_momentum_generic_model missing U[0] in state layout".to_string())
-        .expect("state layout validation failed");
-    let u1 = model
-        .state_layout
-        .component_offset("U", 1)
-        .ok_or_else(|| "incompressible_momentum_generic_model missing U[1] in state layout".to_string())
-        .expect("state layout validation failed");
-    let p = model
-        .state_layout
-        .offset_for("p")
-        .ok_or_else(|| "incompressible_momentum_generic_model missing p in state layout".to_string())
-        .expect("state layout validation failed");
-
-    // The generic coupled path needs a saddle-point-capable preconditioner.
-    // Keep the legacy incompressible model on the specialized coupled solver
-    // until this preconditioner is stable.
-    model.linear_solver = Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
-        preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
-            omega: 1.0,
-            layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[u0, u1], p)
-                .expect("invalid SchurBlockLayout"),
-        },
-    });
 
     model.with_derived_gpu()
 }
@@ -631,7 +618,11 @@ mod tests {
         assert_eq!(model.state_layout.offset_for("p"), Some(2));
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
-        assert!(model.kernel_plan().contains(KernelKind::CoupledAssembly));
+        assert!(model.kernel_plan().contains(KernelKind::FluxRhieChow));
+        assert!(model
+            .kernel_plan()
+            .contains(KernelKind::GenericCoupledAssembly));
+        assert!(model.kernel_plan().contains(KernelKind::GenericCoupledUpdate));
     }
 
     #[test]

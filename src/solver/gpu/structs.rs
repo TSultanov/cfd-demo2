@@ -1,16 +1,4 @@
-use super::async_buffer::AsyncScalarReader;
-use super::coupled_backend::linear_solver::IncompressibleLinearSolver;
-use super::modules::graph::ModuleGraph;
-use super::modules::linear_system::LinearSystemPorts;
-use super::modules::generated_kernels::GeneratedKernelsModule;
-use super::modules::ports::PortSpace;
-use super::modules::time_integration::TimeIntegrationModule;
-use super::modules::unified_field_resources::UnifiedFieldResources;
-use super::runtime_common::GpuRuntimeCommon;
-use crate::solver::model::ModelSpec;
 use bytemuck::{Pod, Zeroable};
-use std::cell::RefCell;
-use std::sync::Mutex;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct LinearSolverStats {
@@ -46,63 +34,6 @@ impl Default for GpuLowMachParams {
             _pad0: 0.0,
         }
     }
-}
-
-pub struct CoupledSolverResources {
-    pub num_unknowns: u32,
-    pub b_r: wgpu::Buffer,
-    pub b_r0: wgpu::Buffer,
-    pub b_p_solver: wgpu::Buffer,
-    pub b_v: wgpu::Buffer,
-    pub b_s: wgpu::Buffer,
-    pub b_t: wgpu::Buffer,
-    pub b_scalars: wgpu::Buffer,
-    pub b_staging_scalar: wgpu::Buffer,
-    pub num_nonzeros: u32,
-
-    pub linear_ports: LinearSystemPorts,
-    pub linear_port_space: PortSpace,
-
-    // Preconditioner buffers
-    pub b_diag_inv: wgpu::Buffer, // 3x3 block inverse for block-Jacobi preconditioner
-    pub b_diag_u: wgpu::Buffer,   // Diagonal inverse for U (FGMRES-Schur)
-    pub b_diag_v: wgpu::Buffer,   // Diagonal inverse for V (FGMRES-Schur)
-    pub b_diag_p: wgpu::Buffer,   // Diagonal inverse for P (FGMRES-Schur)
-    pub b_p_hat: wgpu::Buffer,    // M^{-1} * p
-    pub b_s_hat: wgpu::Buffer,    // M^{-1} * s
-    pub b_precond_rhs: wgpu::Buffer, // Schur RHS per DOF
-    pub b_precond_params: wgpu::Buffer,
-
-    // Gradient buffers for higher order schemes
-    pub b_grad_u: wgpu::Buffer,
-    pub b_grad_v: wgpu::Buffer,
-
-    // Convergence check buffers (GPU max-diff)
-    pub b_max_diff_result: wgpu::Buffer, // Final max-diff result (2 floats: max_u, max_p)
-    pub num_max_diff_groups: u32,        // Number of workgroups for max-diff reduction
-
-    pub bg_solver: wgpu::BindGroup,
-    pub bg_linear_matrix: wgpu::BindGroup,
-    pub bg_linear_state: wgpu::BindGroup,
-    pub bg_linear_state_ro: wgpu::BindGroup,
-    pub bg_dot_p_v: wgpu::BindGroup,
-    pub bg_dot_r_r: wgpu::BindGroup,
-    pub bg_coupled_solution: wgpu::BindGroup,
-    pub bg_scalars: wgpu::BindGroup,
-    pub bg_dot_params: wgpu::BindGroup,
-    pub bg_precond: wgpu::BindGroup, // Preconditioner bind group
-
-    pub bgl_coupled_solver: wgpu::BindGroupLayout,
-    pub bgl_coupled_solution: wgpu::BindGroupLayout,
-    pub bgl_precond: wgpu::BindGroupLayout, // Preconditioner bind group layout
-
-    // Preconditioner pipelines
-    pub pipeline_build_schur_rhs: wgpu::ComputePipeline,
-    pub pipeline_finalize_precond: wgpu::ComputePipeline,
-    pub pipeline_spmv_phat_v: wgpu::ComputePipeline,
-    pub pipeline_spmv_shat_t: wgpu::ComputePipeline,
-    /// Async scalar reader for non-blocking convergence checks
-    pub async_scalar_reader: RefCell<AsyncScalarReader>,
 }
 
 #[repr(C)]
@@ -151,86 +82,4 @@ pub struct SolverParams {
     pub n: u32,
     pub num_groups: u32,
     pub padding: [u32; 2],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct PreconditionerParams {
-    pub n: u32,
-    pub num_cells: u32,
-    pub omega: f32,
-    pub unknowns_per_cell: u32,
-    pub u0: u32,
-    pub u1: u32,
-    pub p: u32,
-    pub _pad0: u32,
-}
-
-impl Default for PreconditionerParams {
-    fn default() -> Self {
-        Self {
-            n: 0,
-            num_cells: 0,
-            omega: 1.0,
-            unknowns_per_cell: 3,
-            u0: 0,
-            u1: 1,
-            p: 2,
-            _pad0: 0,
-        }
-    }
-}
-
-pub(crate) struct GpuSolver {
-    pub common: GpuRuntimeCommon,
-    pub model: ModelSpec,
-
-    pub fields: UnifiedFieldResources,
-
-    pub num_nonzeros: u32,
-
-    // Incompressible/coupled physics compute module (pipelines + bind groups)
-    pub kernels: GeneratedKernelsModule,
-
-    pub num_cells: u32,
-    pub num_faces: u32,
-
-    pub preconditioner: PreconditionerType,
-    pub scheme_needs_gradients: bool,
-
-    // Solver Stats
-    pub stats_ux: Mutex<LinearSolverStats>,
-    pub stats_uy: Mutex<LinearSolverStats>,
-    pub stats_p: Mutex<LinearSolverStats>,
-    pub outer_residual_u: Mutex<f32>,
-    pub outer_residual_p: Mutex<f32>,
-    pub outer_iterations: Mutex<u32>,
-
-    pub linear_solver: IncompressibleLinearSolver,
-
-    pub n_outer_correctors: u32,
-
-    pub coupled_resources: Option<CoupledSolverResources>,
-    pub coupled_should_clear_max_diff: bool,
-    pub coupled_last_linear_stats: LinearSolverStats,
-
-    // Evolution check
-    pub variance_history: Vec<(f64, f64)>,
-    pub degenerate_count: u32,
-    pub prev_u_cpu: Vec<f32>,
-    pub steady_state_count: u32,
-    pub should_stop: bool,
-
-    // Prebuilt compute graphs for coupled solver dispatch (module-based).
-    pub coupled_init_prepare_graph: ModuleGraph<GeneratedKernelsModule>,
-    pub coupled_prepare_assembly_graph: ModuleGraph<GeneratedKernelsModule>,
-    pub coupled_assembly_graph: ModuleGraph<GeneratedKernelsModule>,
-    pub coupled_update_graph: ModuleGraph<GeneratedKernelsModule>,
-
-    pub linear_ports: crate::solver::gpu::modules::linear_system::LinearSystemPorts,
-    pub linear_port_space: crate::solver::gpu::modules::ports::PortSpace,
-
-    pub scalar_cg: crate::solver::gpu::modules::scalar_cg::ScalarCgModule,
-
-    pub time_integration: TimeIntegrationModule,
 }

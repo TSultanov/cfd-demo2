@@ -1,4 +1,4 @@
-use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::models::generic_coupled as generic_coupled_model;
 use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
@@ -7,28 +7,11 @@ use crate::solver::gpu::plans::plan_instance::{
 };
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
-use crate::solver::gpu::structs::{GpuSolver, LinearSolverStats};
+use crate::solver::gpu::structs::LinearSolverStats;
 
 // --- Single universal program resource ---
 
 pub(in crate::solver::gpu::lowering) struct UniversalProgramResources {
-    backend: UniversalBackend,
-}
-
-enum UniversalBackend {
-    GenericCoupled(GenericCoupledBackend),
-    Coupled(CoupledBackend),
-}
-
-struct CoupledBackend {
-    plan: GpuSolver,
-    coupled_outer_iter: usize,
-    coupled_continue: bool,
-    coupled_prev_residual_u: f64,
-    coupled_prev_residual_p: f64,
-}
-
-struct GenericCoupledBackend {
     plan: GenericCoupledProgramResources,
 }
 
@@ -36,52 +19,25 @@ impl UniversalProgramResources {
     pub(in crate::solver::gpu::lowering) fn new_generic_coupled(
         plan: GenericCoupledProgramResources,
     ) -> Self {
-        Self {
-            backend: UniversalBackend::GenericCoupled(GenericCoupledBackend { plan }),
-        }
-    }
-
-    pub(in crate::solver::gpu::lowering) fn new_coupled(plan: GpuSolver) -> Self {
-        Self {
-            backend: UniversalBackend::Coupled(CoupledBackend {
-                plan,
-                coupled_outer_iter: 0,
-                coupled_continue: true,
-                coupled_prev_residual_u: f64::MAX,
-                coupled_prev_residual_p: f64::MAX,
-            }),
-        }
+        Self { plan }
     }
 
     pub(in crate::solver::gpu::lowering) fn generic_coupled(
         &self,
     ) -> Option<&GenericCoupledProgramResources> {
-        match &self.backend {
-            UniversalBackend::GenericCoupled(b) => Some(&b.plan),
-            _ => None,
-        }
+        Some(&self.plan)
     }
 
     pub(in crate::solver::gpu::lowering) fn generic_coupled_mut(
         &mut self,
     ) -> Option<&mut GenericCoupledProgramResources> {
-        match &mut self.backend {
-            UniversalBackend::GenericCoupled(b) => Some(&mut b.plan),
-            _ => None,
-        }
+        Some(&mut self.plan)
     }
 }
 
 impl PlanLinearSystemDebug for UniversalProgramResources {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        match &self.backend {
-            UniversalBackend::GenericCoupled(b) => {
-                PlanLinearSystemDebug::set_linear_system(&b.plan, matrix_values, rhs)
-            }
-            UniversalBackend::Coupled(b) => {
-                PlanLinearSystemDebug::set_linear_system(&b.plan, matrix_values, rhs)
-            }
-        }
+        PlanLinearSystemDebug::set_linear_system(&self.plan, matrix_values, rhs)
     }
 
     fn solve_linear_system_with_size(
@@ -90,23 +46,11 @@ impl PlanLinearSystemDebug for UniversalProgramResources {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        match &mut self.backend {
-            UniversalBackend::GenericCoupled(b) => {
-                PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
-            }
-            UniversalBackend::Coupled(b) => {
-                PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
-            }
-        }
+        PlanLinearSystemDebug::solve_linear_system_with_size(&mut self.plan, n, max_iters, tol)
     }
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-        match &self.backend {
-            UniversalBackend::GenericCoupled(b) => {
-                PlanLinearSystemDebug::get_linear_solution(&b.plan)
-            }
-            UniversalBackend::Coupled(b) => PlanLinearSystemDebug::get_linear_solution(&b.plan),
-        }
+        PlanLinearSystemDebug::get_linear_solution(&self.plan)
     }
 }
 
@@ -122,34 +66,6 @@ fn wrap_mut(plan: &mut GpuProgramPlan) -> &mut UniversalProgramResources {
     plan.resources
         .get_mut::<UniversalProgramResources>()
         .expect("missing UniversalProgramResources")
-}
-
-fn coupled(plan: &GpuProgramPlan) -> Option<&GpuSolver> {
-    match &wrap(plan).backend {
-        UniversalBackend::Coupled(b) => Some(&b.plan),
-        UniversalBackend::GenericCoupled(_) => None,
-    }
-}
-
-fn coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GpuSolver> {
-    match &mut wrap_mut(plan).backend {
-        UniversalBackend::Coupled(b) => Some(&mut b.plan),
-        UniversalBackend::GenericCoupled(_) => None,
-    }
-}
-
-fn coupled_backend(plan: &GpuProgramPlan) -> Option<&CoupledBackend> {
-    match &wrap(plan).backend {
-        UniversalBackend::Coupled(b) => Some(b),
-        UniversalBackend::GenericCoupled(_) => None,
-    }
-}
-
-fn coupled_backend_mut(plan: &mut GpuProgramPlan) -> Option<&mut CoupledBackend> {
-    match &mut wrap_mut(plan).backend {
-        UniversalBackend::Coupled(b) => Some(b),
-        UniversalBackend::GenericCoupled(_) => None,
-    }
 }
 
 fn generic_coupled(plan: &GpuProgramPlan) -> Option<&GenericCoupledProgramResources> {
@@ -196,18 +112,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
             ..Default::default()
         },
         SteppingMode::Coupled { .. } => {
-            fn coupled_graph_assembly_select_run(
-                plan: &GpuProgramPlan,
-                context: &crate::solver::gpu::context::GpuContext,
-                mode: GraphExecMode,
-            ) -> (f64, Option<GraphDetail>) {
-                if coupled_needs_prepare(plan) {
-                    coupled_graph_prepare_assembly_run(plan, context, mode)
-                } else {
-                    coupled_graph_assembly_run(plan, context, mode)
-                }
-            }
-
             UnifiedOpRegistryConfig {
                 // These map onto the unified coupled program.
                 prepare: Some(host_coupled_begin_step),
@@ -222,8 +126,8 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
                 coupled_should_continue: Some(coupled_should_continue),
                 coupled_max_iters: Some(coupled_max_iters),
 
-                assembly_graph: Some(coupled_graph_assembly_select_run),
-                update_graph: Some(coupled_graph_update_run),
+                assembly_graph: Some(generic_coupled_model::assembly_graph_run),
+                update_graph: Some(generic_coupled_model::update_graph_run),
                 ..Default::default()
             }
         }
@@ -237,71 +141,33 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
 // --- Universal program spec callbacks ---
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::spec_num_cells(plan);
-    }
-    if let Some(solver) = coupled(plan) {
-        return solver.num_cells;
-    }
-    panic!("missing solver resources (num_cells)");
+    generic_coupled_model::spec_num_cells(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::spec_time(plan);
-    }
-    if let Some(solver) = coupled(plan) {
-        return solver.time_integration.time as f32;
-    }
-    panic!("missing solver resources (time)");
+    generic_coupled_model::spec_time(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::spec_dt(plan);
-    }
-    if let Some(solver) = coupled(plan) {
-        return solver.time_integration.dt;
-    }
-    panic!("missing solver resources (dt)");
+    generic_coupled_model::spec_dt(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::spec_state_buffer(plan);
-    }
-    if let Some(solver) = coupled(plan) {
-        return solver.fields.state.state();
-    }
-    panic!("missing solver resources (state_buffer)");
+    generic_coupled_model::spec_state_buffer(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     plan: &GpuProgramPlan,
     bytes: &[u8],
 ) -> Result<(), String> {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::spec_write_state_bytes(plan, bytes);
-    }
-    if let Some(solver) = coupled(plan) {
-        solver.fields.state.write_all(&plan.context.queue, bytes);
-        return Ok(());
-    }
-    Err("missing solver resources (write_state_bytes)".into())
+    generic_coupled_model::spec_write_state_bytes(plan, bytes)
 }
 
-pub(in crate::solver::gpu::lowering) fn init_history(plan: &GpuProgramPlan) {
-    if let Some(solver) = coupled(plan) {
-        solver.initialize_history();
-        return;
-    }
+pub(in crate::solver::gpu::lowering) fn init_history(_plan: &GpuProgramPlan) {
     // Generic-coupled time integration seeds history via `TimeIntegrationModule::set_dt`.
 }
 
-pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
-    if coupled(plan).is_some() {
-        return step_stats_coupled(plan);
-    }
+pub(in crate::solver::gpu::lowering) fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {
     PlanStepStats::default()
 }
 
@@ -310,13 +176,7 @@ pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     param: PlanParam,
     value: PlanParamValue,
 ) -> Result<(), String> {
-    if generic_coupled_mut(plan).is_some() {
-        return set_param_fallback_generic_coupled(plan, param, value);
-    }
-    if coupled_mut(plan).is_some() {
-        return set_param_fallback_coupled(plan, param, value);
-    }
-    Err("missing solver resources (set_param_fallback)".into())
+    set_param_fallback_generic_coupled(plan, param, value)
 }
 
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
@@ -404,415 +264,55 @@ fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
 
 // --- Coupled handlers ---
 
-fn has_coupled_resources(plan: &GpuProgramPlan) -> bool {
-    if generic_coupled(plan).is_some() {
-        return true;
-    }
-    coupled(plan)
-        .expect("missing universal coupled backend")
-        .coupled_resources
-        .is_some()
-}
-
-fn coupled_runtime(plan: &GpuProgramPlan) -> crate::solver::gpu::modules::graph::RuntimeDims {
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    crate::solver::gpu::modules::graph::RuntimeDims {
-        num_cells: solver.num_cells,
-        num_faces: solver.num_faces,
-    }
+fn has_coupled_resources(_plan: &GpuProgramPlan) -> bool {
+    // Coupled stepping is implemented on top of the generic coupled backend.
+    true
 }
 
 fn coupled_graph_init_prepare_run(
-    plan: &GpuProgramPlan,
-    context: &crate::solver::gpu::context::GpuContext,
-    mode: GraphExecMode,
+    _plan: &GpuProgramPlan,
+    _context: &crate::solver::gpu::context::GpuContext,
+    _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return (0.0, None);
-    }
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    run_module_graph(
-        &solver.coupled_init_prepare_graph,
-        context,
-        &solver.kernels,
-        coupled_runtime(plan),
-        mode,
-    )
-}
-
-fn coupled_graph_prepare_assembly_run(
-    plan: &GpuProgramPlan,
-    context: &crate::solver::gpu::context::GpuContext,
-    mode: GraphExecMode,
-) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::assembly_graph_run(plan, context, mode);
-    }
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    run_module_graph(
-        &solver.coupled_prepare_assembly_graph,
-        context,
-        &solver.kernels,
-        coupled_runtime(plan),
-        mode,
-    )
-}
-
-fn coupled_graph_assembly_run(
-    plan: &GpuProgramPlan,
-    context: &crate::solver::gpu::context::GpuContext,
-    mode: GraphExecMode,
-) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::assembly_graph_run(plan, context, mode);
-    }
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    run_module_graph(
-        &solver.coupled_assembly_graph,
-        context,
-        &solver.kernels,
-        coupled_runtime(plan),
-        mode,
-    )
-}
-
-fn coupled_graph_update_run(
-    plan: &GpuProgramPlan,
-    context: &crate::solver::gpu::context::GpuContext,
-    mode: GraphExecMode,
-) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::update_graph_run(plan, context, mode);
-    }
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    run_module_graph(
-        &solver.coupled_update_graph,
-        context,
-        &solver.kernels,
-        coupled_runtime(plan),
-        mode,
-    )
-}
-
-fn coupled_needs_prepare(plan: &GpuProgramPlan) -> bool {
-    if generic_coupled(plan).is_some() {
-        return false;
-    }
-    let wrap = coupled_backend(plan).expect("missing universal coupled backend");
-    wrap.coupled_outer_iter > 0
-        || coupled(plan)
-            .expect("missing universal coupled backend")
-            .scheme_needs_gradients
+    // No dedicated init_prepare stage for the generic coupled backend.
+    (0.0, None)
 }
 
 fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
-    if generic_coupled(plan).is_some() {
-        return 1;
-    }
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    (solver.n_outer_correctors.max(10)) as usize
+    // Outer corrector loops are not modeled generically yet.
+    //
+    // The coupled program uses a fixed single corrector so it remains PDE-agnostic.
+    let _ = plan;
+    1
 }
 
 fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
-    if generic_coupled(plan).is_some() {
-        return true;
-    }
-    coupled_backend(plan)
-        .expect("missing universal coupled backend")
-        .coupled_continue
+    let _ = plan;
+    true
 }
 
 fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        generic_coupled_model::host_prepare_step(plan);
-        return;
-    }
-    let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
-    let solver = &mut wrap.plan;
-
-    // Mirror legacy behavior: no-op if resources were not initialized.
-    if solver.coupled_resources.is_none() {
-        wrap.coupled_continue = false;
-        return;
-    }
-
-    wrap.coupled_outer_iter = 0;
-    wrap.coupled_continue = !solver.should_stop;
-    wrap.coupled_prev_residual_u = f64::MAX;
-    wrap.coupled_prev_residual_p = f64::MAX;
-
-    // Reset async reader to clear old values.
-    if let Some(res) = solver.coupled_resources.as_ref() {
-        res.async_scalar_reader.borrow_mut().reset();
-    }
-
-    // Ping-pong rotation (shared with kernels via PingPongState handle).
-    solver.fields.state.advance();
-    solver
-        .time_integration
-        .prepare_step(&mut solver.fields.constants, &solver.common.context.queue);
-
-    // Initialize fluxes and d_p (and gradients) expects `component = 0`.
-    {
-        let values = solver.fields.constants.values_mut();
-        values.component = 0;
-    }
-    solver.fields.constants.write(&solver.common.context.queue);
+    generic_coupled_model::host_prepare_step(plan);
 }
 
 fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
-    let iter = wrap.coupled_outer_iter;
-    let solver = &mut wrap.plan;
-    if iter > 0 {
-        {
-            let values = solver.fields.constants.values_mut();
-            values.component = 0;
-        }
-        solver.fields.constants.write(&solver.common.context.queue);
-    }
+    let _ = plan;
 }
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        generic_coupled_model::host_solve_linear_system(plan);
-        return;
-    }
-    let solver = coupled_mut(plan).expect("missing universal coupled backend");
-    let stats = solver.solve_coupled_system();
-    solver.coupled_last_linear_stats = stats;
-    *solver.stats_p.lock().unwrap() = stats;
-    if stats.residual.is_nan() {
-        panic!("Coupled Linear Solver Diverged: NaN detected in linear residual");
-    }
+    generic_coupled_model::host_solve_linear_system(plan);
 }
 
 fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
-    let iter = wrap.coupled_outer_iter;
-    let solver = &mut wrap.plan;
-    if iter == 0 {
-        return;
-    }
-    let Some(res) = solver.coupled_resources.as_ref() else {
-        return;
-    };
-    solver
-        .common
-        .context
-        .queue
-        .write_buffer(&res.b_max_diff_result, 0, &[0u8; 8]);
+    let _ = plan;
 }
 
 fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    let wrap = coupled_backend_mut(plan).expect("missing universal coupled backend");
-    let solver = &mut wrap.plan;
-    let iter = wrap.coupled_outer_iter;
-
-    if iter == 0 {
-        *solver.outer_residual_u.lock().unwrap() = f32::MAX;
-        *solver.outer_residual_p.lock().unwrap() = f32::MAX;
-        *solver.outer_iterations.lock().unwrap() = 1;
-        wrap.coupled_outer_iter = 1;
-        return;
-    }
-
-    let Some(res) = solver.coupled_resources.as_ref() else {
-        wrap.coupled_continue = false;
-        return;
-    };
-
-    // Start async read for CURRENT iteration, then poll for completion of previous reads.
-    {
-        let mut reader = res.async_scalar_reader.borrow_mut();
-        reader.start_read(
-            &solver.common.context.device,
-            &solver.common.context.queue,
-            &res.b_max_diff_result,
-            0,
-        );
-        reader.poll();
-
-        if let Some(results) = reader.get_last_value_vec(2) {
-            let max_diff_u = results[0] as f64;
-            let max_diff_p = results[1] as f64;
-
-            if max_diff_u.is_nan() || max_diff_p.is_nan() {
-                panic!(
-                    "Coupled Solver Diverged: NaN detected in outer residuals (U: {}, P: {})",
-                    max_diff_u, max_diff_p
-                );
-            }
-
-            *solver.outer_residual_u.lock().unwrap() = max_diff_u as f32;
-            *solver.outer_residual_p.lock().unwrap() = max_diff_p as f32;
-            *solver.outer_iterations.lock().unwrap() = (iter + 1) as u32;
-
-            let convergence_tol_u = 1e-5;
-            let convergence_tol_p = 1e-4;
-            if max_diff_u < convergence_tol_u && max_diff_p < convergence_tol_p {
-                wrap.coupled_continue = false;
-            }
-
-            // Stagnation check (mirror legacy thresholds).
-            let stagnation_factor = 1e-2;
-            let rel_u = if wrap.coupled_prev_residual_u.is_finite()
-                && wrap.coupled_prev_residual_u.abs() > 1e-14
-            {
-                ((max_diff_u - wrap.coupled_prev_residual_u) / wrap.coupled_prev_residual_u).abs()
-            } else {
-                f64::INFINITY
-            };
-            let rel_p = if wrap.coupled_prev_residual_p.is_finite()
-                && wrap.coupled_prev_residual_p.abs() > 1e-14
-            {
-                ((max_diff_p - wrap.coupled_prev_residual_p) / wrap.coupled_prev_residual_p).abs()
-            } else {
-                f64::INFINITY
-            };
-
-            if rel_u < stagnation_factor && rel_p < stagnation_factor && iter > 2 {
-                wrap.coupled_continue = false;
-            }
-
-            wrap.coupled_prev_residual_u = max_diff_u;
-            wrap.coupled_prev_residual_p = max_diff_p;
-        }
-    }
-
-    wrap.coupled_outer_iter += 1;
+    let _ = plan;
 }
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        generic_coupled_model::host_finalize_step(plan);
-        return;
-    }
-    let solver = coupled_mut(plan).expect("missing universal coupled backend");
-    if solver.coupled_resources.is_none() {
-        return;
-    }
-
-    solver
-        .time_integration
-        .finalize_step(&mut solver.fields.constants, &solver.common.context.queue);
-
-    solver.check_evolution();
-
-    let _ = solver
-        .common
-        .context
-        .device
-        .poll(wgpu::PollType::wait_indefinitely());
-}
-
-fn step_stats_coupled(plan: &GpuProgramPlan) -> PlanStepStats {
-    if generic_coupled(plan).is_some() {
-        return PlanStepStats::default();
-    }
-    let solver = coupled(plan).expect("missing universal coupled backend");
-    PlanStepStats {
-        should_stop: Some(solver.should_stop),
-        degenerate_count: Some(solver.degenerate_count),
-        outer_iterations: Some(*solver.outer_iterations.lock().unwrap()),
-        outer_residual_u: Some(*solver.outer_residual_u.lock().unwrap()),
-        outer_residual_p: Some(*solver.outer_residual_p.lock().unwrap()),
-        linear_stats: Some((
-            *solver.stats_ux.lock().unwrap(),
-            *solver.stats_uy.lock().unwrap(),
-            *solver.stats_p.lock().unwrap(),
-        )),
-    }
-}
-
-fn set_param_fallback_coupled(
-    plan: &mut GpuProgramPlan,
-    param: PlanParam,
-    value: PlanParamValue,
-) -> Result<(), String> {
-    let model_owns_preconditioner = plan
-        .model
-        .linear_solver
-        .map(|spec| {
-            matches!(
-                spec.preconditioner,
-                crate::solver::model::ModelPreconditionerSpec::Schur { .. }
-            )
-        })
-        .unwrap_or(false);
-
-    let solver = coupled_mut(plan).expect("missing universal coupled backend");
-    match (param, value) {
-        (PlanParam::Dt, PlanParamValue::F32(dt)) => {
-            solver.time_integration.set_dt(
-                dt,
-                &mut solver.fields.constants,
-                &solver.common.context.queue,
-            );
-            Ok(())
-        }
-        (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
-            solver.set_scheme(scheme.gpu_id());
-            Ok(())
-        }
-        (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
-            solver.set_time_scheme(scheme as u32);
-            Ok(())
-        }
-        (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
-            if model_owns_preconditioner {
-                return Err("preconditioner is model-owned for this model".to_string());
-            }
-            solver.set_precond_type(preconditioner);
-            Ok(())
-        }
-        (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
-            solver.set_viscosity(mu);
-            Ok(())
-        }
-        (PlanParam::Density, PlanParamValue::F32(rho)) => {
-            solver.set_density(rho);
-            Ok(())
-        }
-        (PlanParam::AlphaU, PlanParamValue::F32(alpha)) => {
-            solver.set_alpha_u(alpha);
-            Ok(())
-        }
-        (PlanParam::AlphaP, PlanParamValue::F32(alpha)) => {
-            solver.set_alpha_p(alpha);
-            Ok(())
-        }
-        (PlanParam::InletVelocity, PlanParamValue::F32(velocity)) => {
-            solver.set_inlet_velocity(velocity);
-            Ok(())
-        }
-        (PlanParam::RampTime, PlanParamValue::F32(time)) => {
-            solver.set_ramp_time(time);
-            Ok(())
-        }
-        (PlanParam::IncompressibleOuterCorrectors, PlanParamValue::U32(iters)) => {
-            solver.n_outer_correctors = iters.max(1);
-            Ok(())
-        }
-        (PlanParam::IncompressibleShouldStop, PlanParamValue::Bool(value)) => {
-            solver.should_stop = value;
-            Ok(())
-        }
-        (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
-            solver.enable_detailed_profiling(enable);
-            Ok(())
-        }
-        _ => Err("parameter is not supported by this plan".into()),
-    }
+    generic_coupled_model::host_finalize_step(plan);
 }
 
 fn set_param_fallback_generic_coupled(

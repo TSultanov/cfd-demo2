@@ -92,14 +92,6 @@ fn test_gpu_transfer_profile() {
             solver.step();
             let step_duration = step_start.elapsed();
 
-            if solver.incompressible_should_stop() {
-                if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
-                    panic!("Solver stopped due to degenerate solution!");
-                }
-                println!("Solver stopped early (steady state).");
-                break;
-            }
-
             step_times.push(step_duration);
             println!("Step {} completed in {:?}", step + 1, step_duration);
         }

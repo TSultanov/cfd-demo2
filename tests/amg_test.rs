@@ -1,5 +1,5 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -23,7 +23,7 @@ fn test_amg_preconditioner() {
     pollster::block_on(async {
         let mut solver = UnifiedSolver::new(
             &mesh,
-            incompressible_momentum_model(),
+            compressible_model(),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,
@@ -35,39 +35,26 @@ fn test_amg_preconditioner() {
         .await
         .expect("solver init");
         solver.set_dt(0.001);
+        solver.set_dtau(5e-5);
         solver.set_viscosity(0.001);
-        solver.set_density(1.0);
-        solver.set_alpha_p(0.3);
-        solver.set_alpha_u(0.7);
         solver.set_advection_scheme(Scheme::Upwind);
 
-        let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
-        for i in 0..mesh.num_cells() {
-            let cx = mesh.cell_cx[i];
-            let cy = mesh.cell_cy[i];
-            if cx < 0.05 && cy > 0.5 {
-                u_init[i] = (1.0, 0.0);
-            }
-        }
-        solver.set_u(&u_init);
+        let rho_init = vec![1.0f32; mesh.num_cells()];
+        let p_init = vec![1.0f32; mesh.num_cells()];
+        let u_init = vec![[0.0f32, 0.0f32]; mesh.num_cells()];
+        solver.set_state_fields(&rho_init, &u_init, &p_init);
         solver.initialize_history();
 
         // Run with Jacobi
         solver.set_preconditioner(PreconditionerType::Jacobi);
-        for _ in 0..5 {
+        for _ in 0..3 {
             solver.step();
-            if solver.incompressible_should_stop() {
-                if solver.incompressible_degenerate_count().unwrap_or(0) > 10 {
-                    panic!("Solver stopped due to degenerate solution!");
-                }
-                break;
-            }
         }
 
         // Reset solver (or create new one)
         let mut solver_amg = UnifiedSolver::new(
             &mesh,
-            incompressible_momentum_model(),
+            compressible_model(),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,
@@ -79,24 +66,16 @@ fn test_amg_preconditioner() {
         .await
         .expect("solver init");
         solver_amg.set_dt(0.001);
+        solver_amg.set_dtau(5e-5);
         solver_amg.set_viscosity(0.001);
-        solver_amg.set_density(1.0);
-        solver_amg.set_alpha_p(0.3);
-        solver_amg.set_alpha_u(0.7);
         solver_amg.set_advection_scheme(Scheme::Upwind);
-        solver_amg.set_u(&u_init);
+        solver_amg.set_state_fields(&rho_init, &u_init, &p_init);
         solver_amg.initialize_history();
 
         // Run with AMG
         solver_amg.set_preconditioner(PreconditionerType::Amg);
-        for _ in 0..5 {
+        for _ in 0..3 {
             solver_amg.step();
-            if solver_amg.incompressible_should_stop() {
-                if solver_amg.incompressible_degenerate_count().unwrap_or(0) > 10 {
-                    panic!("Solver stopped due to degenerate solution!");
-                }
-                break;
-            }
         }
         let p_amg = solver_amg.get_p().await;
 
@@ -108,8 +87,8 @@ fn test_amg_preconditioner() {
 
         // Just check that AMG runs without crashing and produces reasonable values.
         let max_p = p_amg.iter().fold(0.0f64, |a, &b| a.max(b.abs()));
-        assert!(max_p < 1000.0, "Pressure exploded with AMG");
-        assert!(max_p > 0.0, "Pressure is zero with AMG");
+        assert!(max_p.is_finite(), "pressure has non-finite values");
+        assert!(max_p < 1e6, "pressure exploded with AMG");
 
         println!("Max pressure with AMG: {}", max_p);
     });

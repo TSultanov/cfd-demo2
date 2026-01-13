@@ -18,13 +18,18 @@ fn test_gpu_divergence_channel_obstacle() {
         obstacle_center: Point2::new(1.0, 0.5),
         obstacle_radius: 0.2,
     };
-    let min_cell_size = 0.025;
     let max_cell_size = 0.025;
 
     println!("Generating mesh...");
     let mut mesh = generate_cut_cell_mesh(&geo, 0.05, 0.05, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
     println!("Mesh generated: {} cells", mesh.num_cells());
+    let min_cell_size = mesh
+        .cell_vol
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min)
+        .sqrt();
 
     // Initialize Solver
     let timestep = 0.01;
@@ -47,8 +52,14 @@ fn test_gpu_divergence_channel_obstacle() {
     ))
     .expect("solver init");
     gpu_solver.set_dt(timestep as f32);
+    gpu_solver.set_dtau(0.0);
     gpu_solver.set_viscosity(viscosity as f32);
     gpu_solver.set_density(density as f32);
+    gpu_solver.set_alpha_u(0.7);
+    gpu_solver.set_alpha_p(0.3);
+    gpu_solver.set_inlet_velocity(1.0);
+    gpu_solver.set_ramp_time(0.1);
+    gpu_solver.set_outer_iters(2);
 
     // Initial Conditions
     let mut u_init = Vec::new();

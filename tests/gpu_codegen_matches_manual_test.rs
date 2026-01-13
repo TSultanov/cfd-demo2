@@ -38,7 +38,14 @@ fn run_solver(mesh: &Mesh, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
     solver.set_inlet_velocity(1.0);
     solver.set_ramp_time(0.001);
 
-    let u_init = vec![(0.0, 0.0); mesh.num_cells()];
+    // Seed a non-trivial flow so this stays a codegen/dispatch smoke test even when
+    // inlet boundary forcing is expressed via model-defined BCs (not global params).
+    let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
+    for i in 0..mesh.num_cells() {
+        if mesh.cell_cx[i] < 0.25 {
+            u_init[i] = (1.0, 0.0);
+        }
+    }
     solver.set_u(&u_init);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();

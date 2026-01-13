@@ -1,9 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KernelKind {
-    PrepareCoupled,
-    CoupledAssembly,
-    PressureAssembly,
-    UpdateFieldsFromCoupled,
     FluxRhieChow,
 
     // Transitional: KT flux module bridge for the generic-coupled pipeline.
@@ -27,10 +23,6 @@ pub enum KernelKind {
 pub struct KernelId(pub &'static str);
 
 impl KernelId {
-    pub const PREPARE_COUPLED: KernelId = KernelId("prepare_coupled");
-    pub const COUPLED_ASSEMBLY: KernelId = KernelId("coupled_assembly");
-    pub const PRESSURE_ASSEMBLY: KernelId = KernelId("pressure_assembly");
-    pub const UPDATE_FIELDS_FROM_COUPLED: KernelId = KernelId("update_fields_from_coupled");
     pub const FLUX_RHIE_CHOW: KernelId = KernelId("flux_rhie_chow");
 
     // Transitional stable ids for KT flux module + primitive recovery.
@@ -133,10 +125,6 @@ impl KernelId {
 impl From<KernelKind> for KernelId {
     fn from(kind: KernelKind) -> Self {
         match kind {
-            KernelKind::PrepareCoupled => KernelId::PREPARE_COUPLED,
-            KernelKind::CoupledAssembly => KernelId::COUPLED_ASSEMBLY,
-            KernelKind::PressureAssembly => KernelId::PRESSURE_ASSEMBLY,
-            KernelKind::UpdateFieldsFromCoupled => KernelId::UPDATE_FIELDS_FROM_COUPLED,
             KernelKind::FluxRhieChow => KernelId::FLUX_RHIE_CHOW,
 
             KernelKind::KtGradients => KernelId::KT_GRADIENTS,
@@ -432,11 +420,7 @@ pub fn derive_kernel_codegen_fields_for_model(
 ) -> Result<KernelCodegenFieldMap, String> {
     let mut out = KernelCodegenFieldMap::new();
     match kind {
-        KernelKind::PrepareCoupled
-        | KernelKind::CoupledAssembly
-        | KernelKind::PressureAssembly
-        | KernelKind::UpdateFieldsFromCoupled
-        | KernelKind::FluxRhieChow => {
+        KernelKind::FluxRhieChow => {
             derive_rhie_chow_fields(model, &mut out)?;
         }
         KernelKind::KtGradients
@@ -545,10 +529,6 @@ fn required_codegen_field<'a>(map: &'a KernelCodegenFieldMap, key: &str) -> &'a 
 
 pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
     match kind {
-        KernelKind::PrepareCoupled => "prepare_coupled.wgsl".to_string(),
-        KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl".to_string(),
-        KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
-        KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl".to_string(),
         KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
 
         // Transitional KT flux module bridge.
@@ -571,45 +551,6 @@ pub fn generate_kernel_wgsl_for_model(
     let discrete: DiscreteSystem = lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
 
     let wgsl = match kind {
-        KernelKind::PrepareCoupled => {
-            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
-            cfd2_codegen::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl(
-                &discrete,
-                &model.state_layout,
-                required_codegen_field(&fields, "momentum"),
-                required_codegen_field(&fields, "pressure"),
-                required_codegen_field(&fields, "d_p"),
-                required_codegen_field(&fields, "grad_p"),
-            )
-        }
-        KernelKind::CoupledAssembly => {
-            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
-            cfd2_codegen::solver::codegen::coupled_assembly::generate_coupled_assembly_wgsl(
-                &discrete,
-                &model.state_layout,
-                required_codegen_field(&fields, "momentum"),
-                required_codegen_field(&fields, "pressure"),
-                required_codegen_field(&fields, "d_p"),
-            )
-        }
-        KernelKind::PressureAssembly => {
-            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
-            cfd2_codegen::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl(
-                &discrete,
-                &model.state_layout,
-                required_codegen_field(&fields, "pressure"),
-                required_codegen_field(&fields, "d_p"),
-                required_codegen_field(&fields, "grad_p"),
-            )
-        }
-        KernelKind::UpdateFieldsFromCoupled => {
-            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
-            cfd2_codegen::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl(
-                &model.state_layout,
-                required_codegen_field(&fields, "momentum"),
-                required_codegen_field(&fields, "pressure"),
-            )
-        }
         KernelKind::FluxRhieChow => {
             let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
             cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
@@ -772,11 +713,9 @@ fn analyze_kernel_requirements(
 fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
     if req.pressure_coupling.is_some() {
         return KernelPlan::new(vec![
-            KernelKind::PrepareCoupled,
             KernelKind::FluxRhieChow,
-            KernelKind::CoupledAssembly,
-            KernelKind::PressureAssembly,
-            KernelKind::UpdateFieldsFromCoupled,
+            KernelKind::GenericCoupledAssembly,
+            KernelKind::GenericCoupledUpdate,
         ]);
     }
 
@@ -790,11 +729,9 @@ fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
 fn synthesize_kernel_ids(req: &KernelRequirements) -> Vec<KernelId> {
     if req.pressure_coupling.is_some() {
         return vec![
-            KernelId::PREPARE_COUPLED,
             KernelId::FLUX_RHIE_CHOW,
-            KernelId::COUPLED_ASSEMBLY,
-            KernelId::PRESSURE_ASSEMBLY,
-            KernelId::UPDATE_FIELDS_FROM_COUPLED,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+            KernelId::GENERIC_COUPLED_UPDATE,
         ];
     }
 

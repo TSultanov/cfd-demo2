@@ -46,7 +46,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
 ### 1) Codegen (remove model-specific generators; IR-driven kernels)
-- Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
+- Retired coupled-backend-only kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`); remaining: retire `flux_rhie_chow` and drive flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
 - Reduce build-time kernel-specific glue:
   - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.

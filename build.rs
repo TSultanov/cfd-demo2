@@ -297,20 +297,11 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             "schur_precond_generic",
             shader_dir.join("schur_precond_generic.wgsl"),
         ),
-        (
-            "coupled_assembly_merged",
-            gen_dir.join("coupled_assembly_merged.wgsl"),
-        ),
+        // Legacy coupled-incompressible kernels have been retired; only the flux module remains.
         ("flux_rhie_chow", gen_dir.join("flux_rhie_chow.wgsl")),
         (
             "generic_coupled_apply",
             gen_dir.join("generic_coupled_apply.wgsl"),
-        ),
-        ("prepare_coupled", gen_dir.join("prepare_coupled.wgsl")),
-        ("pressure_assembly", gen_dir.join("pressure_assembly.wgsl")),
-        (
-            "update_fields_from_coupled",
-            gen_dir.join("update_fields_from_coupled.wgsl"),
         ),
 
         // Transitional KT flux module kernels.
@@ -406,19 +397,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
 
     // (KernelKind variant, generated module name, stable KernelId string)
     let entries: &[(&str, &str, &str)] = &[
-        ("PrepareCoupled", "prepare_coupled", "prepare_coupled"),
-        // Note: kernel kind is `CoupledAssembly`, but current shader module is `coupled_assembly_merged`.
-        (
-            "CoupledAssembly",
-            "coupled_assembly_merged",
-            "coupled_assembly",
-        ),
-        ("PressureAssembly", "pressure_assembly", "pressure_assembly"),
-        (
-            "UpdateFieldsFromCoupled",
-            "update_fields_from_coupled",
-            "update_fields_from_coupled",
-        ),
         ("FluxRhieChow", "flux_rhie_chow", "flux_rhie_chow"),
         (
             "GenericCoupledApply",

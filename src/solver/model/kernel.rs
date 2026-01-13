@@ -553,9 +553,11 @@ pub fn generate_kernel_wgsl_for_model(
     let wgsl = match kind {
         KernelKind::FluxRhieChow => {
             let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
+            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
             cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
                 &discrete,
                 &model.state_layout,
+                flux_stride,
                 required_codegen_field(&fields, "momentum"),
                 required_codegen_field(&fields, "pressure"),
                 required_codegen_field(&fields, "d_p"),

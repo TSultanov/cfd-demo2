@@ -131,15 +131,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let p_grad_f = (p_neigh - p_own) / dist;
         let rc_term = d_p_face * area * (grad_p_n - p_grad_f);
         let u_n = dot(u_face, normal_vec);
-        fluxes[idx] = rho_face * (u_n * area + rc_term);
+        let phi = rho_face * (u_n * area + rc_term);
+        fluxes[idx * 3u + 0u] = phi;
+        fluxes[idx * 3u + 1u] = phi;
+        fluxes[idx * 3u + 2u] = phi;
     } else {
         if (boundary_type == 1u) {
             let ramp = smoothstep(0.0, constants.ramp_time, constants.time);
             let u_bc: vec2<f32> = vec2<f32>(constants.inlet_velocity * ramp, 0.0);
-            fluxes[idx] = rho_face * dot(u_bc, normal_vec) * area;
+            let phi = rho_face * dot(u_bc, normal_vec) * area;
+            fluxes[idx * 3u + 0u] = phi;
+            fluxes[idx * 3u + 1u] = phi;
+            fluxes[idx * 3u + 2u] = phi;
         } else {
             if (boundary_type == 3u) {
-                fluxes[idx] = 0.0;
+                fluxes[idx * 3u + 0u] = 0.0;
+                fluxes[idx * 3u + 1u] = 0.0;
+                fluxes[idx * 3u + 2u] = 0.0;
             } else {
                 if (boundary_type == 2u) {
                     let u_n = dot(u_face, normal_vec);
@@ -149,9 +157,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         rc_term = 0.0;
                     }
                     let raw_flux = rho_face * (u_n * area + rc_term);
-                    fluxes[idx] = max(0.0, raw_flux);
+                    let phi = max(0.0, raw_flux);
+                    fluxes[idx * 3u + 0u] = phi;
+                    fluxes[idx * 3u + 1u] = phi;
+                    fluxes[idx * 3u + 2u] = phi;
                 } else {
-                    fluxes[idx] = 0.0;
+                    fluxes[idx * 3u + 0u] = 0.0;
+                    fluxes[idx * 3u + 1u] = 0.0;
+                    fluxes[idx * 3u + 2u] = 0.0;
                 }
             }
         }

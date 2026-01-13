@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: b71ee25e7a8a1a57a3e997fb9a1b1669e40ded9208dce3f04755b83cb9d1854d
+// SourceHash: 4d0fa948ec36d5290909c4a2cde72e021e522d2eb1b4cc23e73faf6ebf88acb6
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -5982,40 +5982,53 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e201 = u_face;
         let _e202 = normal_vec;
         let u_n = dot(_e201, _e202);
-        let _e206 = rho_face;
-        fluxes[idx] = (_e206 * ((u_n * area) + rc_term_1));
+        let _e204 = rho_face;
+        let phi = (_e204 * ((u_n * area) + rc_term_1));
+        fluxes[((idx * 3u) + 0u)] = phi;
+        fluxes[((idx * 3u) + 1u)] = phi;
+        fluxes[((idx * 3u) + 2u)] = phi;
         return;
     } else {
         if (boundary_type == 1u) {
-            let _e214 = constants.ramp_time;
-            let _e217 = constants.time;
-            let ramp = smoothstep(0f, _e214, _e217);
-            let _e222 = constants.inlet_velocity;
-            let u_bc = vec2<f32>((_e222 * ramp), 0f);
-            let _e228 = rho_face;
-            let _e229 = normal_vec;
-            fluxes[idx] = ((_e228 * dot(u_bc, _e229)) * area);
+            let _e230 = constants.ramp_time;
+            let _e233 = constants.time;
+            let ramp = smoothstep(0f, _e230, _e233);
+            let _e238 = constants.inlet_velocity;
+            let u_bc = vec2<f32>((_e238 * ramp), 0f);
+            let _e242 = rho_face;
+            let _e243 = normal_vec;
+            let phi_1 = ((_e242 * dot(u_bc, _e243)) * area);
+            fluxes[((idx * 3u) + 0u)] = phi_1;
+            fluxes[((idx * 3u) + 1u)] = phi_1;
+            fluxes[((idx * 3u) + 2u)] = phi_1;
             return;
         } else {
             if (boundary_type == 3u) {
-                fluxes[idx] = 0f;
+                fluxes[((idx * 3u) + 0u)] = 0f;
+                fluxes[((idx * 3u) + 1u)] = 0f;
+                fluxes[((idx * 3u) + 2u)] = 0f;
                 return;
             } else {
                 if (boundary_type == 2u) {
-                    let _e240 = u_face;
-                    let _e241 = normal_vec;
-                    let u_n_1 = dot(_e240, _e241);
+                    let _e290 = u_face;
+                    let _e291 = normal_vec;
+                    let u_n_1 = dot(_e290, _e291);
                     let dist_face = distance(c_owner_vec, face_center_vec);
                     if (dist_face > 0.000001f) {
                         rc_term = 0f;
                     }
-                    let _e248 = rho_face;
-                    let _e250 = rc_term;
-                    let raw_flux = (_e248 * ((u_n_1 * area) + _e250));
-                    fluxes[idx] = max(0f, raw_flux);
+                    let _e298 = rho_face;
+                    let _e300 = rc_term;
+                    let raw_flux = (_e298 * ((u_n_1 * area) + _e300));
+                    let phi_2 = max(0f, raw_flux);
+                    fluxes[((idx * 3u) + 0u)] = phi_2;
+                    fluxes[((idx * 3u) + 1u)] = phi_2;
+                    fluxes[((idx * 3u) + 2u)] = phi_2;
                     return;
                 } else {
-                    fluxes[idx] = 0f;
+                    fluxes[((idx * 3u) + 0u)] = 0f;
+                    fluxes[((idx * 3u) + 1u)] = 0f;
+                    fluxes[((idx * 3u) + 2u)] = 0f;
                     return;
                 }
             }
@@ -9498,186 +9511,186 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
-            let _e575 = fluxes[face_idx];
-            phi_0_ = _e575;
+            let _e579 = fluxes[((face_idx * 3u) + 0u)];
+            phi_0_ = _e579;
             if (owner != idx) {
-                let _e578 = phi_0_;
-                let _e581 = phi_0_;
-                phi_0_ = (_e581 - (_e578 * 2f));
-            }
-            let _e583 = is_boundary;
-            if !(_e583) {
+                let _e582 = phi_0_;
                 let _e585 = phi_0_;
-                let _e588 = diag_0_;
-                diag_0_ = (_e588 + max(_e585, 0f));
-                let _e597 = phi_0_;
-                let _e600 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e600 + min(_e597, 0f));
-                let _e602 = phi_0_;
-                let _e609 = state[((idx * 8u) + 0u)];
-                let _e610 = other_idx;
-                let _e617 = state[((_e610 * 8u) + 0u)];
-                let _e618 = phi_0_;
-                let _e622 = other_idx;
-                let _e629 = state[((_e622 * 8u) + 0u)];
-                let _e637 = other_center.x;
-                let _e639 = other_center.y;
-                let _e650 = state[((idx * 8u) + 0u)];
-                let _e663 = phi_0_;
-                let _e669 = other_idx;
-                let _e676 = state[((_e669 * 8u) + 0u)];
-                let _e685 = state[((idx * 8u) + 0u)];
-                let _e696 = other_center.x;
-                let _e698 = other_center.y;
-                let _e711 = state[((idx * 8u) + 0u)];
-                let _e714 = other_idx;
-                let _e721 = state[((_e714 * 8u) + 0u)];
-                let _e729 = other_center.x;
-                let _e731 = other_center.y;
-                let _e741 = phi_0_;
-                let _e753 = state[((idx * 8u) + 0u)];
-                let _e754 = other_idx;
-                let _e761 = state[((_e754 * 8u) + 0u)];
-                let _e762 = phi_0_;
-                let _e768 = rhs_0_;
-                rhs_0_ = (_e768 - (_e602 * (select(select(select(_e609, _e617, (_e618 < 0f)), select((_e629 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e637, _e639)))), (_e650 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e663 > 0f)), false), select((((_e676 * 0.625f) + (_e685 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e696, _e698))) * 0.125f)), (((_e711 * 0.625f) + (_e721 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e729, _e731) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e741 > 0f)), false) - select(_e753, _e761, (_e762 < 0f)))));
+                phi_0_ = (_e585 - (_e582 * 2f));
+            }
+            let _e587 = is_boundary;
+            if !(_e587) {
+                let _e589 = phi_0_;
+                let _e592 = diag_0_;
+                diag_0_ = (_e592 + max(_e589, 0f));
+                let _e601 = phi_0_;
+                let _e604 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e604 + min(_e601, 0f));
+                let _e606 = phi_0_;
+                let _e613 = state[((idx * 8u) + 0u)];
+                let _e614 = other_idx;
+                let _e621 = state[((_e614 * 8u) + 0u)];
+                let _e622 = phi_0_;
+                let _e626 = other_idx;
+                let _e633 = state[((_e626 * 8u) + 0u)];
+                let _e641 = other_center.x;
+                let _e643 = other_center.y;
+                let _e654 = state[((idx * 8u) + 0u)];
+                let _e667 = phi_0_;
+                let _e673 = other_idx;
+                let _e680 = state[((_e673 * 8u) + 0u)];
+                let _e689 = state[((idx * 8u) + 0u)];
+                let _e700 = other_center.x;
+                let _e702 = other_center.y;
+                let _e715 = state[((idx * 8u) + 0u)];
+                let _e718 = other_idx;
+                let _e725 = state[((_e718 * 8u) + 0u)];
+                let _e733 = other_center.x;
+                let _e735 = other_center.y;
+                let _e745 = phi_0_;
+                let _e757 = state[((idx * 8u) + 0u)];
+                let _e758 = other_idx;
+                let _e765 = state[((_e758 * 8u) + 0u)];
+                let _e766 = phi_0_;
+                let _e772 = rhs_0_;
+                rhs_0_ = (_e772 - (_e606 * (select(select(select(_e613, _e621, (_e622 < 0f)), select((_e633 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e641, _e643)))), (_e654 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e667 > 0f)), false), select((((_e680 * 0.625f) + (_e689 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e700, _e702))) * 0.125f)), (((_e715 * 0.625f) + (_e725 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e733, _e735) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e745 > 0f)), false) - select(_e757, _e765, (_e766 < 0f)))));
             } else {
-                let _e776 = bc_kind[((boundary_type * 3u) + 0u)];
-                if (_e776 == 1u) {
-                    let _e779 = phi_0_;
-                    let _e782 = diag_0_;
-                    diag_0_ = (_e782 + max(_e779, 0f));
-                    let _e784 = phi_0_;
-                    let _e793 = bc_value[((boundary_type * 3u) + 0u)];
-                    let _e795 = rhs_0_;
-                    rhs_0_ = (_e795 - (min(_e784, 0f) * _e793));
+                let _e780 = bc_kind[((boundary_type * 3u) + 0u)];
+                if (_e780 == 1u) {
+                    let _e783 = phi_0_;
+                    let _e786 = diag_0_;
+                    diag_0_ = (_e786 + max(_e783, 0f));
+                    let _e788 = phi_0_;
+                    let _e797 = bc_value[((boundary_type * 3u) + 0u)];
+                    let _e799 = rhs_0_;
+                    rhs_0_ = (_e799 - (min(_e788, 0f) * _e797));
                 } else {
-                    let _e797 = phi_0_;
-                    let _e798 = diag_0_;
-                    diag_0_ = (_e798 + _e797);
+                    let _e801 = phi_0_;
+                    let _e802 = diag_0_;
+                    diag_0_ = (_e802 + _e801);
                 }
             }
-            let _e802 = fluxes[face_idx];
-            phi_1_ = _e802;
+            let _e810 = fluxes[((face_idx * 3u) + 1u)];
+            phi_1_ = _e810;
             if (owner != idx) {
-                let _e805 = phi_1_;
-                let _e808 = phi_1_;
-                phi_1_ = (_e808 - (_e805 * 2f));
+                let _e813 = phi_1_;
+                let _e816 = phi_1_;
+                phi_1_ = (_e816 - (_e813 * 2f));
             }
-            let _e810 = is_boundary;
-            if !(_e810) {
-                let _e812 = phi_1_;
-                let _e815 = diag_1_;
-                diag_1_ = (_e815 + max(_e812, 0f));
-                let _e824 = phi_1_;
-                let _e827 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e827 + min(_e824, 0f));
-                let _e829 = phi_1_;
-                let _e836 = state[((idx * 8u) + 1u)];
-                let _e837 = other_idx;
-                let _e844 = state[((_e837 * 8u) + 1u)];
-                let _e845 = phi_1_;
-                let _e849 = other_idx;
-                let _e856 = state[((_e849 * 8u) + 1u)];
-                let _e864 = other_center.x;
-                let _e866 = other_center.y;
-                let _e877 = state[((idx * 8u) + 1u)];
-                let _e890 = phi_1_;
-                let _e896 = other_idx;
-                let _e903 = state[((_e896 * 8u) + 1u)];
-                let _e912 = state[((idx * 8u) + 1u)];
-                let _e923 = other_center.x;
-                let _e925 = other_center.y;
-                let _e938 = state[((idx * 8u) + 1u)];
-                let _e941 = other_idx;
-                let _e948 = state[((_e941 * 8u) + 1u)];
-                let _e956 = other_center.x;
-                let _e958 = other_center.y;
-                let _e968 = phi_1_;
-                let _e980 = state[((idx * 8u) + 1u)];
-                let _e981 = other_idx;
-                let _e988 = state[((_e981 * 8u) + 1u)];
-                let _e989 = phi_1_;
-                let _e995 = rhs_1_;
-                rhs_1_ = (_e995 - (_e829 * (select(select(select(_e836, _e844, (_e845 < 0f)), select((_e856 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e864, _e866)))), (_e877 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e890 > 0f)), false), select((((_e903 * 0.625f) + (_e912 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e923, _e925))) * 0.125f)), (((_e938 * 0.625f) + (_e948 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e956, _e958) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e968 > 0f)), false) - select(_e980, _e988, (_e989 < 0f)))));
+            let _e818 = is_boundary;
+            if !(_e818) {
+                let _e820 = phi_1_;
+                let _e823 = diag_1_;
+                diag_1_ = (_e823 + max(_e820, 0f));
+                let _e832 = phi_1_;
+                let _e835 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e835 + min(_e832, 0f));
+                let _e837 = phi_1_;
+                let _e844 = state[((idx * 8u) + 1u)];
+                let _e845 = other_idx;
+                let _e852 = state[((_e845 * 8u) + 1u)];
+                let _e853 = phi_1_;
+                let _e857 = other_idx;
+                let _e864 = state[((_e857 * 8u) + 1u)];
+                let _e872 = other_center.x;
+                let _e874 = other_center.y;
+                let _e885 = state[((idx * 8u) + 1u)];
+                let _e898 = phi_1_;
+                let _e904 = other_idx;
+                let _e911 = state[((_e904 * 8u) + 1u)];
+                let _e920 = state[((idx * 8u) + 1u)];
+                let _e931 = other_center.x;
+                let _e933 = other_center.y;
+                let _e946 = state[((idx * 8u) + 1u)];
+                let _e949 = other_idx;
+                let _e956 = state[((_e949 * 8u) + 1u)];
+                let _e964 = other_center.x;
+                let _e966 = other_center.y;
+                let _e976 = phi_1_;
+                let _e988 = state[((idx * 8u) + 1u)];
+                let _e989 = other_idx;
+                let _e996 = state[((_e989 * 8u) + 1u)];
+                let _e997 = phi_1_;
+                let _e1003 = rhs_1_;
+                rhs_1_ = (_e1003 - (_e837 * (select(select(select(_e844, _e852, (_e853 < 0f)), select((_e864 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e872, _e874)))), (_e885 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e898 > 0f)), false), select((((_e911 * 0.625f) + (_e920 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e931, _e933))) * 0.125f)), (((_e946 * 0.625f) + (_e956 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e964, _e966) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e976 > 0f)), false) - select(_e988, _e996, (_e997 < 0f)))));
             } else {
-                let _e1003 = bc_kind[((boundary_type * 3u) + 1u)];
-                if (_e1003 == 1u) {
-                    let _e1006 = phi_1_;
-                    let _e1009 = diag_1_;
-                    diag_1_ = (_e1009 + max(_e1006, 0f));
-                    let _e1011 = phi_1_;
-                    let _e1020 = bc_value[((boundary_type * 3u) + 1u)];
-                    let _e1022 = rhs_1_;
-                    rhs_1_ = (_e1022 - (min(_e1011, 0f) * _e1020));
+                let _e1011 = bc_kind[((boundary_type * 3u) + 1u)];
+                if (_e1011 == 1u) {
+                    let _e1014 = phi_1_;
+                    let _e1017 = diag_1_;
+                    diag_1_ = (_e1017 + max(_e1014, 0f));
+                    let _e1019 = phi_1_;
+                    let _e1028 = bc_value[((boundary_type * 3u) + 1u)];
+                    let _e1030 = rhs_1_;
+                    rhs_1_ = (_e1030 - (min(_e1019, 0f) * _e1028));
                 } else {
-                    let _e1024 = phi_1_;
-                    let _e1025 = diag_1_;
-                    diag_1_ = (_e1025 + _e1024);
+                    let _e1032 = phi_1_;
+                    let _e1033 = diag_1_;
+                    diag_1_ = (_e1033 + _e1032);
                 }
             }
-            let _e1030 = normal.x;
-            let _e1038 = state[((idx * 8u) + 2u)];
-            let _e1039 = other_idx;
-            let _e1046 = state[((_e1039 * 8u) + 2u)];
-            let _e1049 = rhs_0_;
-            rhs_0_ = (_e1049 + (((0.5f * area) * _e1030) * (_e1038 + _e1046)));
-            let _e1054 = normal.y;
-            let _e1062 = state[((idx * 8u) + 2u)];
-            let _e1063 = other_idx;
-            let _e1070 = state[((_e1063 * 8u) + 2u)];
-            let _e1073 = rhs_1_;
-            rhs_1_ = (_e1073 + (((0.5f * area) * _e1054) * (_e1062 + _e1070)));
-            let _e1077 = constants.density;
-            let _e1084 = state[((idx * 8u) + 3u)];
-            let _e1087 = dist;
-            let diff_coeff_p = (((_e1077 * _e1084) * area) / _e1087);
-            let _e1089 = is_boundary;
-            if !(_e1089) {
-                let _e1092 = diag_2_;
-                diag_2_ = (_e1092 + diff_coeff_p);
-                let _e1101 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
-                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e1101 - diff_coeff_p);
+            let _e1038 = normal.x;
+            let _e1046 = state[((idx * 8u) + 2u)];
+            let _e1047 = other_idx;
+            let _e1054 = state[((_e1047 * 8u) + 2u)];
+            let _e1057 = rhs_0_;
+            rhs_0_ = (_e1057 + (((0.5f * area) * _e1038) * (_e1046 + _e1054)));
+            let _e1062 = normal.y;
+            let _e1070 = state[((idx * 8u) + 2u)];
+            let _e1071 = other_idx;
+            let _e1078 = state[((_e1071 * 8u) + 2u)];
+            let _e1081 = rhs_1_;
+            rhs_1_ = (_e1081 + (((0.5f * area) * _e1062) * (_e1070 + _e1078)));
+            let _e1085 = constants.density;
+            let _e1092 = state[((idx * 8u) + 3u)];
+            let _e1095 = dist;
+            let diff_coeff_p = (((_e1085 * _e1092) * area) / _e1095);
+            let _e1097 = is_boundary;
+            if !(_e1097) {
+                let _e1100 = diag_2_;
+                diag_2_ = (_e1100 + diff_coeff_p);
+                let _e1109 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
+                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e1109 - diff_coeff_p);
             } else {
-                let _e1109 = bc_kind[((boundary_type * 3u) + 2u)];
-                if (_e1109 == 1u) {
-                    let _e1112 = diag_2_;
-                    diag_2_ = (_e1112 + diff_coeff_p);
-                    let _e1121 = bc_value[((boundary_type * 3u) + 2u)];
-                    let _e1123 = rhs_2_;
-                    rhs_2_ = (_e1123 + (diff_coeff_p * _e1121));
+                let _e1117 = bc_kind[((boundary_type * 3u) + 2u)];
+                if (_e1117 == 1u) {
+                    let _e1120 = diag_2_;
+                    diag_2_ = (_e1120 + diff_coeff_p);
+                    let _e1129 = bc_value[((boundary_type * 3u) + 2u)];
+                    let _e1131 = rhs_2_;
+                    rhs_2_ = (_e1131 + (diff_coeff_p * _e1129));
                 } else {
-                    let _e1131 = bc_kind[((boundary_type * 3u) + 2u)];
-                    if (_e1131 == 2u) {
-                        let _e1136 = constants.density;
-                        let _e1143 = state[((idx * 8u) + 3u)];
-                        let _e1152 = bc_value[((boundary_type * 3u) + 2u)];
-                        let _e1155 = rhs_2_;
-                        rhs_2_ = (_e1155 + -((((_e1136 * _e1143) * area) * _e1152)));
+                    let _e1139 = bc_kind[((boundary_type * 3u) + 2u)];
+                    if (_e1139 == 2u) {
+                        let _e1144 = constants.density;
+                        let _e1151 = state[((idx * 8u) + 3u)];
+                        let _e1160 = bc_value[((boundary_type * 3u) + 2u)];
+                        let _e1163 = rhs_2_;
+                        rhs_2_ = (_e1163 + -((((_e1144 * _e1151) * area) * _e1160)));
                     }
                 }
             }
         }
         continuing {
-            let _e1158 = k;
-            k = (_e1158 + 1u);
+            let _e1166 = k;
+            k = (_e1166 + 1u);
         }
     }
-    let _e1167 = diag_0_;
-    let _e1168 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1168 + _e1167);
-    let _e1176 = rhs_0_;
-    rhs[((idx * 3u) + 0u)] = _e1176;
-    let _e1184 = diag_1_;
-    let _e1185 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1185 + _e1184);
-    let _e1193 = rhs_1_;
-    rhs[((idx * 3u) + 1u)] = _e1193;
-    let _e1201 = diag_2_;
-    let _e1202 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1202 + _e1201);
-    let _e1210 = rhs_2_;
-    rhs[((idx * 3u) + 2u)] = _e1210;
+    let _e1175 = diag_0_;
+    let _e1176 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
+    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1176 + _e1175);
+    let _e1184 = rhs_0_;
+    rhs[((idx * 3u) + 0u)] = _e1184;
+    let _e1192 = diag_1_;
+    let _e1193 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
+    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1193 + _e1192);
+    let _e1201 = rhs_1_;
+    rhs[((idx * 3u) + 1u)] = _e1201;
+    let _e1209 = diag_2_;
+    let _e1210 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
+    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1210 + _e1209);
+    let _e1218 = rhs_2_;
+    rhs[((idx * 3u) + 2u)] = _e1218;
     return;
 }
 "#;
@@ -10453,186 +10466,186 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
-            let _e575 = fluxes[face_idx];
-            phi_0_ = _e575;
+            let _e579 = fluxes[((face_idx * 3u) + 0u)];
+            phi_0_ = _e579;
             if (owner != idx) {
-                let _e578 = phi_0_;
-                let _e581 = phi_0_;
-                phi_0_ = (_e581 - (_e578 * 2f));
-            }
-            let _e583 = is_boundary;
-            if !(_e583) {
+                let _e582 = phi_0_;
                 let _e585 = phi_0_;
-                let _e588 = diag_0_;
-                diag_0_ = (_e588 + max(_e585, 0f));
-                let _e597 = phi_0_;
-                let _e600 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e600 + min(_e597, 0f));
-                let _e602 = phi_0_;
-                let _e609 = state[((idx * 8u) + 0u)];
-                let _e610 = other_idx;
-                let _e617 = state[((_e610 * 8u) + 0u)];
-                let _e618 = phi_0_;
-                let _e622 = other_idx;
-                let _e629 = state[((_e622 * 8u) + 0u)];
-                let _e637 = other_center.x;
-                let _e639 = other_center.y;
-                let _e650 = state[((idx * 8u) + 0u)];
-                let _e663 = phi_0_;
-                let _e669 = other_idx;
-                let _e676 = state[((_e669 * 8u) + 0u)];
-                let _e685 = state[((idx * 8u) + 0u)];
-                let _e696 = other_center.x;
-                let _e698 = other_center.y;
-                let _e711 = state[((idx * 8u) + 0u)];
-                let _e714 = other_idx;
-                let _e721 = state[((_e714 * 8u) + 0u)];
-                let _e729 = other_center.x;
-                let _e731 = other_center.y;
-                let _e741 = phi_0_;
-                let _e753 = state[((idx * 8u) + 0u)];
-                let _e754 = other_idx;
-                let _e761 = state[((_e754 * 8u) + 0u)];
-                let _e762 = phi_0_;
-                let _e768 = rhs_0_;
-                rhs_0_ = (_e768 - (_e602 * (select(select(select(_e609, _e617, (_e618 < 0f)), select((_e629 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e637, _e639)))), (_e650 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e663 > 0f)), false), select((((_e676 * 0.625f) + (_e685 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e696, _e698))) * 0.125f)), (((_e711 * 0.625f) + (_e721 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e729, _e731) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e741 > 0f)), false) - select(_e753, _e761, (_e762 < 0f)))));
+                phi_0_ = (_e585 - (_e582 * 2f));
+            }
+            let _e587 = is_boundary;
+            if !(_e587) {
+                let _e589 = phi_0_;
+                let _e592 = diag_0_;
+                diag_0_ = (_e592 + max(_e589, 0f));
+                let _e601 = phi_0_;
+                let _e604 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e604 + min(_e601, 0f));
+                let _e606 = phi_0_;
+                let _e613 = state[((idx * 8u) + 0u)];
+                let _e614 = other_idx;
+                let _e621 = state[((_e614 * 8u) + 0u)];
+                let _e622 = phi_0_;
+                let _e626 = other_idx;
+                let _e633 = state[((_e626 * 8u) + 0u)];
+                let _e641 = other_center.x;
+                let _e643 = other_center.y;
+                let _e654 = state[((idx * 8u) + 0u)];
+                let _e667 = phi_0_;
+                let _e673 = other_idx;
+                let _e680 = state[((_e673 * 8u) + 0u)];
+                let _e689 = state[((idx * 8u) + 0u)];
+                let _e700 = other_center.x;
+                let _e702 = other_center.y;
+                let _e715 = state[((idx * 8u) + 0u)];
+                let _e718 = other_idx;
+                let _e725 = state[((_e718 * 8u) + 0u)];
+                let _e733 = other_center.x;
+                let _e735 = other_center.y;
+                let _e745 = phi_0_;
+                let _e757 = state[((idx * 8u) + 0u)];
+                let _e758 = other_idx;
+                let _e765 = state[((_e758 * 8u) + 0u)];
+                let _e766 = phi_0_;
+                let _e772 = rhs_0_;
+                rhs_0_ = (_e772 - (_e606 * (select(select(select(_e613, _e621, (_e622 < 0f)), select((_e633 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e641, _e643)))), (_e654 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e667 > 0f)), false), select((((_e680 * 0.625f) + (_e689 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e700, _e702))) * 0.125f)), (((_e715 * 0.625f) + (_e725 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e733, _e735) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e745 > 0f)), false) - select(_e757, _e765, (_e766 < 0f)))));
             } else {
-                let _e776 = bc_kind[((boundary_type * 3u) + 0u)];
-                if (_e776 == 1u) {
-                    let _e779 = phi_0_;
-                    let _e782 = diag_0_;
-                    diag_0_ = (_e782 + max(_e779, 0f));
-                    let _e784 = phi_0_;
-                    let _e793 = bc_value[((boundary_type * 3u) + 0u)];
-                    let _e795 = rhs_0_;
-                    rhs_0_ = (_e795 - (min(_e784, 0f) * _e793));
+                let _e780 = bc_kind[((boundary_type * 3u) + 0u)];
+                if (_e780 == 1u) {
+                    let _e783 = phi_0_;
+                    let _e786 = diag_0_;
+                    diag_0_ = (_e786 + max(_e783, 0f));
+                    let _e788 = phi_0_;
+                    let _e797 = bc_value[((boundary_type * 3u) + 0u)];
+                    let _e799 = rhs_0_;
+                    rhs_0_ = (_e799 - (min(_e788, 0f) * _e797));
                 } else {
-                    let _e797 = phi_0_;
-                    let _e798 = diag_0_;
-                    diag_0_ = (_e798 + _e797);
+                    let _e801 = phi_0_;
+                    let _e802 = diag_0_;
+                    diag_0_ = (_e802 + _e801);
                 }
             }
-            let _e802 = fluxes[face_idx];
-            phi_1_ = _e802;
+            let _e810 = fluxes[((face_idx * 3u) + 1u)];
+            phi_1_ = _e810;
             if (owner != idx) {
-                let _e805 = phi_1_;
-                let _e808 = phi_1_;
-                phi_1_ = (_e808 - (_e805 * 2f));
+                let _e813 = phi_1_;
+                let _e816 = phi_1_;
+                phi_1_ = (_e816 - (_e813 * 2f));
             }
-            let _e810 = is_boundary;
-            if !(_e810) {
-                let _e812 = phi_1_;
-                let _e815 = diag_1_;
-                diag_1_ = (_e815 + max(_e812, 0f));
-                let _e824 = phi_1_;
-                let _e827 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e827 + min(_e824, 0f));
-                let _e829 = phi_1_;
-                let _e836 = state[((idx * 8u) + 1u)];
-                let _e837 = other_idx;
-                let _e844 = state[((_e837 * 8u) + 1u)];
-                let _e845 = phi_1_;
-                let _e849 = other_idx;
-                let _e856 = state[((_e849 * 8u) + 1u)];
-                let _e864 = other_center.x;
-                let _e866 = other_center.y;
-                let _e877 = state[((idx * 8u) + 1u)];
-                let _e890 = phi_1_;
-                let _e896 = other_idx;
-                let _e903 = state[((_e896 * 8u) + 1u)];
-                let _e912 = state[((idx * 8u) + 1u)];
-                let _e923 = other_center.x;
-                let _e925 = other_center.y;
-                let _e938 = state[((idx * 8u) + 1u)];
-                let _e941 = other_idx;
-                let _e948 = state[((_e941 * 8u) + 1u)];
-                let _e956 = other_center.x;
-                let _e958 = other_center.y;
-                let _e968 = phi_1_;
-                let _e980 = state[((idx * 8u) + 1u)];
-                let _e981 = other_idx;
-                let _e988 = state[((_e981 * 8u) + 1u)];
-                let _e989 = phi_1_;
-                let _e995 = rhs_1_;
-                rhs_1_ = (_e995 - (_e829 * (select(select(select(_e836, _e844, (_e845 < 0f)), select((_e856 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e864, _e866)))), (_e877 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e890 > 0f)), false), select((((_e903 * 0.625f) + (_e912 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e923, _e925))) * 0.125f)), (((_e938 * 0.625f) + (_e948 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e956, _e958) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e968 > 0f)), false) - select(_e980, _e988, (_e989 < 0f)))));
+            let _e818 = is_boundary;
+            if !(_e818) {
+                let _e820 = phi_1_;
+                let _e823 = diag_1_;
+                diag_1_ = (_e823 + max(_e820, 0f));
+                let _e832 = phi_1_;
+                let _e835 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e835 + min(_e832, 0f));
+                let _e837 = phi_1_;
+                let _e844 = state[((idx * 8u) + 1u)];
+                let _e845 = other_idx;
+                let _e852 = state[((_e845 * 8u) + 1u)];
+                let _e853 = phi_1_;
+                let _e857 = other_idx;
+                let _e864 = state[((_e857 * 8u) + 1u)];
+                let _e872 = other_center.x;
+                let _e874 = other_center.y;
+                let _e885 = state[((idx * 8u) + 1u)];
+                let _e898 = phi_1_;
+                let _e904 = other_idx;
+                let _e911 = state[((_e904 * 8u) + 1u)];
+                let _e920 = state[((idx * 8u) + 1u)];
+                let _e931 = other_center.x;
+                let _e933 = other_center.y;
+                let _e946 = state[((idx * 8u) + 1u)];
+                let _e949 = other_idx;
+                let _e956 = state[((_e949 * 8u) + 1u)];
+                let _e964 = other_center.x;
+                let _e966 = other_center.y;
+                let _e976 = phi_1_;
+                let _e988 = state[((idx * 8u) + 1u)];
+                let _e989 = other_idx;
+                let _e996 = state[((_e989 * 8u) + 1u)];
+                let _e997 = phi_1_;
+                let _e1003 = rhs_1_;
+                rhs_1_ = (_e1003 - (_e837 * (select(select(select(_e844, _e852, (_e853 < 0f)), select((_e864 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e872, _e874)))), (_e885 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e898 > 0f)), false), select((((_e911 * 0.625f) + (_e920 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e931, _e933))) * 0.125f)), (((_e946 * 0.625f) + (_e956 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e964, _e966) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e976 > 0f)), false) - select(_e988, _e996, (_e997 < 0f)))));
             } else {
-                let _e1003 = bc_kind[((boundary_type * 3u) + 1u)];
-                if (_e1003 == 1u) {
-                    let _e1006 = phi_1_;
-                    let _e1009 = diag_1_;
-                    diag_1_ = (_e1009 + max(_e1006, 0f));
-                    let _e1011 = phi_1_;
-                    let _e1020 = bc_value[((boundary_type * 3u) + 1u)];
-                    let _e1022 = rhs_1_;
-                    rhs_1_ = (_e1022 - (min(_e1011, 0f) * _e1020));
+                let _e1011 = bc_kind[((boundary_type * 3u) + 1u)];
+                if (_e1011 == 1u) {
+                    let _e1014 = phi_1_;
+                    let _e1017 = diag_1_;
+                    diag_1_ = (_e1017 + max(_e1014, 0f));
+                    let _e1019 = phi_1_;
+                    let _e1028 = bc_value[((boundary_type * 3u) + 1u)];
+                    let _e1030 = rhs_1_;
+                    rhs_1_ = (_e1030 - (min(_e1019, 0f) * _e1028));
                 } else {
-                    let _e1024 = phi_1_;
-                    let _e1025 = diag_1_;
-                    diag_1_ = (_e1025 + _e1024);
+                    let _e1032 = phi_1_;
+                    let _e1033 = diag_1_;
+                    diag_1_ = (_e1033 + _e1032);
                 }
             }
-            let _e1030 = normal.x;
-            let _e1038 = state[((idx * 8u) + 2u)];
-            let _e1039 = other_idx;
-            let _e1046 = state[((_e1039 * 8u) + 2u)];
-            let _e1049 = rhs_0_;
-            rhs_0_ = (_e1049 + (((0.5f * area) * _e1030) * (_e1038 + _e1046)));
-            let _e1054 = normal.y;
-            let _e1062 = state[((idx * 8u) + 2u)];
-            let _e1063 = other_idx;
-            let _e1070 = state[((_e1063 * 8u) + 2u)];
-            let _e1073 = rhs_1_;
-            rhs_1_ = (_e1073 + (((0.5f * area) * _e1054) * (_e1062 + _e1070)));
-            let _e1077 = constants.density;
-            let _e1084 = state[((idx * 8u) + 3u)];
-            let _e1087 = dist;
-            let diff_coeff_p = (((_e1077 * _e1084) * area) / _e1087);
-            let _e1089 = is_boundary;
-            if !(_e1089) {
-                let _e1092 = diag_2_;
-                diag_2_ = (_e1092 + diff_coeff_p);
-                let _e1101 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
-                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e1101 - diff_coeff_p);
+            let _e1038 = normal.x;
+            let _e1046 = state[((idx * 8u) + 2u)];
+            let _e1047 = other_idx;
+            let _e1054 = state[((_e1047 * 8u) + 2u)];
+            let _e1057 = rhs_0_;
+            rhs_0_ = (_e1057 + (((0.5f * area) * _e1038) * (_e1046 + _e1054)));
+            let _e1062 = normal.y;
+            let _e1070 = state[((idx * 8u) + 2u)];
+            let _e1071 = other_idx;
+            let _e1078 = state[((_e1071 * 8u) + 2u)];
+            let _e1081 = rhs_1_;
+            rhs_1_ = (_e1081 + (((0.5f * area) * _e1062) * (_e1070 + _e1078)));
+            let _e1085 = constants.density;
+            let _e1092 = state[((idx * 8u) + 3u)];
+            let _e1095 = dist;
+            let diff_coeff_p = (((_e1085 * _e1092) * area) / _e1095);
+            let _e1097 = is_boundary;
+            if !(_e1097) {
+                let _e1100 = diag_2_;
+                diag_2_ = (_e1100 + diff_coeff_p);
+                let _e1109 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
+                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e1109 - diff_coeff_p);
             } else {
-                let _e1109 = bc_kind[((boundary_type * 3u) + 2u)];
-                if (_e1109 == 1u) {
-                    let _e1112 = diag_2_;
-                    diag_2_ = (_e1112 + diff_coeff_p);
-                    let _e1121 = bc_value[((boundary_type * 3u) + 2u)];
-                    let _e1123 = rhs_2_;
-                    rhs_2_ = (_e1123 + (diff_coeff_p * _e1121));
+                let _e1117 = bc_kind[((boundary_type * 3u) + 2u)];
+                if (_e1117 == 1u) {
+                    let _e1120 = diag_2_;
+                    diag_2_ = (_e1120 + diff_coeff_p);
+                    let _e1129 = bc_value[((boundary_type * 3u) + 2u)];
+                    let _e1131 = rhs_2_;
+                    rhs_2_ = (_e1131 + (diff_coeff_p * _e1129));
                 } else {
-                    let _e1131 = bc_kind[((boundary_type * 3u) + 2u)];
-                    if (_e1131 == 2u) {
-                        let _e1136 = constants.density;
-                        let _e1143 = state[((idx * 8u) + 3u)];
-                        let _e1152 = bc_value[((boundary_type * 3u) + 2u)];
-                        let _e1155 = rhs_2_;
-                        rhs_2_ = (_e1155 + -((((_e1136 * _e1143) * area) * _e1152)));
+                    let _e1139 = bc_kind[((boundary_type * 3u) + 2u)];
+                    if (_e1139 == 2u) {
+                        let _e1144 = constants.density;
+                        let _e1151 = state[((idx * 8u) + 3u)];
+                        let _e1160 = bc_value[((boundary_type * 3u) + 2u)];
+                        let _e1163 = rhs_2_;
+                        rhs_2_ = (_e1163 + -((((_e1144 * _e1151) * area) * _e1160)));
                     }
                 }
             }
         }
         continuing {
-            let _e1158 = k;
-            k = (_e1158 + 1u);
+            let _e1166 = k;
+            k = (_e1166 + 1u);
         }
     }
-    let _e1167 = diag_0_;
-    let _e1168 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1168 + _e1167);
-    let _e1176 = rhs_0_;
-    rhs[((idx * 3u) + 0u)] = _e1176;
-    let _e1184 = diag_1_;
-    let _e1185 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1185 + _e1184);
-    let _e1193 = rhs_1_;
-    rhs[((idx * 3u) + 1u)] = _e1193;
-    let _e1201 = diag_2_;
-    let _e1202 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1202 + _e1201);
-    let _e1210 = rhs_2_;
-    rhs[((idx * 3u) + 2u)] = _e1210;
+    let _e1175 = diag_0_;
+    let _e1176 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
+    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1176 + _e1175);
+    let _e1184 = rhs_0_;
+    rhs[((idx * 3u) + 0u)] = _e1184;
+    let _e1192 = diag_1_;
+    let _e1193 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
+    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1193 + _e1192);
+    let _e1201 = rhs_1_;
+    rhs[((idx * 3u) + 1u)] = _e1201;
+    let _e1209 = diag_2_;
+    let _e1210 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
+    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1210 + _e1209);
+    let _e1218 = rhs_2_;
+    rhs[((idx * 3u) + 2u)] = _e1218;
     return;
 }
 "#;

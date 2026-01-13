@@ -51,8 +51,13 @@ impl ModelSpec {
         //   unknown component.
         let flux = match &self.flux_module {
             Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. }) => {
-                // Rhie–Chow computes a single scalar face flux (phi).
-                Some(FluxSpec { stride: 1 })
+                // Flux modules write into a packed per-unknown-component face flux table.
+                //
+                // Even if the method computes a single scalar face flux (phi), it is replicated
+                // into all coupled unknown-component slots so assembly can remain layout-driven.
+                Some(FluxSpec {
+                    stride: self.system.unknowns_per_cell(),
+                })
             }
             Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
                 // Conservative KT fluxes are stored per-unknown component.
@@ -61,8 +66,11 @@ impl ModelSpec {
                 })
             }
             Some(crate::solver::model::flux_module::FluxModuleSpec::Convective { .. }) => {
-                // Generic convective flux uses a scalar face flux.
-                Some(FluxSpec { stride: 1 })
+                // Generic convective flux uses a scalar face flux, replicated across the packed
+                // per-unknown-component slots.
+                Some(FluxSpec {
+                    stride: self.system.unknowns_per_cell(),
+                })
             }
             None => None,
         };

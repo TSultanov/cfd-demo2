@@ -683,7 +683,11 @@ mod tests {
         .expect("should create recipe");
 
         assert!(recipe.flux.is_some(), "generic incompressible should allocate flux buffer");
-        assert_eq!(recipe.flux.unwrap().stride, 1);
+        assert_eq!(
+            recipe.flux.unwrap().stride,
+            model.system.unknowns_per_cell(),
+            "flux stride should match packed coupled unknown layout"
+        );
         assert!(recipe
             .kernels
             .iter()

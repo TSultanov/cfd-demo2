@@ -216,7 +216,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_0: f32 = fluxes[face_idx];
+        var phi_0: f32 = fluxes[face_idx * 3u + 0u];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
@@ -232,7 +232,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 diag_0 += phi_0;
             }
         }
-        var phi_1: f32 = fluxes[face_idx];
+        var phi_1: f32 = fluxes[face_idx * 3u + 1u];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }

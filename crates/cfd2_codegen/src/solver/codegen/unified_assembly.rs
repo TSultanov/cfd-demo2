@@ -752,8 +752,8 @@ fn main_assembly_fn(
                 // Indexing is `fluxes[face * flux_stride + u_idx]`, where `u_idx` is the packed
                 // unknown component index in the coupled system.
                 //
-                // Note: legacy models may still populate fluxes via method-specific kernels,
-                // but the codegen remains agnostic.
+                // Flux population is handled by an optional flux module kernel; assembly only
+                // assumes the packed `(face_idx, u_idx)` layout.
                 let flux_stride = flux_stride;
 
                 // `DivFlux` terms represent conservative flux divergence:
@@ -764,16 +764,12 @@ fn main_assembly_fn(
                     for component in 0..equation.target.kind().component_count() as u32 {
                         let u_idx = base_offset + component;
                         let flux_var = format!("phi_{u_idx}");
-                        let flux_val_expr = if flux_stride == 1 {
-                            dsl::array_access("fluxes", Expr::ident("face_idx"))
-                        } else {
-                            dsl::array_access_linear(
-                                "fluxes",
-                                Expr::ident("face_idx"),
-                                flux_stride,
-                                u_idx,
-                            )
-                        };
+                        let flux_val_expr = dsl::array_access_linear(
+                            "fluxes",
+                            Expr::ident("face_idx"),
+                            flux_stride,
+                            u_idx,
+                        );
 
                         body.push(dsl::var_typed_expr(
                             &flux_var,
@@ -802,16 +798,12 @@ fn main_assembly_fn(
                         let field_name = equation.target.name();
 
                         let flux_var = format!("phi_{u_idx}");
-                        let flux_val_expr = if flux_stride == 1 {
-                            dsl::array_access("fluxes", Expr::ident("face_idx"))
-                        } else {
-                            dsl::array_access_linear(
-                                "fluxes",
-                                Expr::ident("face_idx"),
-                                flux_stride,
-                                u_idx,
-                            )
-                        };
+                        let flux_val_expr = dsl::array_access_linear(
+                            "fluxes",
+                            Expr::ident("face_idx"),
+                            flux_stride,
+                            u_idx,
+                        );
                         body.push(dsl::var_typed_expr(
                             &flux_var,
                             Type::F32,

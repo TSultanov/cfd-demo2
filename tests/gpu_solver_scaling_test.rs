@@ -1,4 +1,5 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
+use cfd2::solver::gpu::csr::build_block_csr;
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -104,22 +105,47 @@ fn diag_indices(row_offsets: &[u32], col_indices: &[u32]) -> Vec<usize> {
 fn solve_identity_system(solver: &mut UnifiedSolver, mesh: &Mesh) {
     let (row_offsets, col_indices) = build_csr(mesh);
     let diag = diag_indices(&row_offsets, &col_indices);
-    let mut matrix = vec![0.0_f32; col_indices.len()];
-    for &idx in &diag {
-        matrix[idx] = 1.0;
+
+    let coupled_unknowns = solver.coupled_unknowns().expect("coupled unknowns");
+    let unknowns_per_cell = coupled_unknowns / mesh.num_cells() as u32;
+    assert!(unknowns_per_cell > 0);
+
+    let (block_row_offsets, _block_col_indices) =
+        build_block_csr(&row_offsets, &col_indices, unknowns_per_cell);
+    let num_nonzeros = *block_row_offsets
+        .last()
+        .expect("block_row_offsets must be non-empty") as usize;
+    let mut matrix = vec![0.0_f32; num_nonzeros];
+    let block_size = unknowns_per_cell as usize;
+
+    for row in 0..mesh.num_cells() as usize {
+        let row_start = row_offsets[row] as usize;
+        let diag_pos_in_row = diag[row]
+            .checked_sub(row_start)
+            .expect("diag indices should be within row slice");
+        for block_row in 0..block_size {
+            let dof_row = row * block_size + block_row;
+            let dof_start = block_row_offsets[dof_row] as usize;
+            let diag_entry = dof_start + diag_pos_in_row * block_size + block_row;
+            matrix[diag_entry] = 1.0;
+        }
     }
+
     let rhs: Vec<f32> = mesh
         .cell_cx
         .iter()
         .zip(mesh.cell_cy.iter())
-        .map(|(&x, &y)| 1.0 + 0.5 * x as f32 + 0.25 * y as f32)
+        .flat_map(|(&x, &y)| {
+            let base = 1.0 + 0.5 * x as f32 + 0.25 * y as f32;
+            (0..unknowns_per_cell).map(move |k| base + 0.1 * k as f32)
+        })
         .collect();
 
     solver
         .set_linear_system(&matrix, &rhs)
         .expect("set linear system");
     let stats = solver
-        .solve_linear_system_with_size(mesh.num_cells() as u32, 200, 1e-6)
+        .solve_linear_system_with_size(coupled_unknowns, 200, 1e-6)
         .expect("cg solve");
     assert!(
         stats.converged,

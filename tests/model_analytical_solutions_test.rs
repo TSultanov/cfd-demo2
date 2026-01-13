@@ -1,6 +1,6 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
-use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::model::generic_diffusion_demo_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::units::{si, UnitDim};
@@ -266,7 +266,7 @@ fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         mesh,
-        incompressible_momentum_model(),
+        generic_diffusion_demo_model(),
         config,
         None,
         None,

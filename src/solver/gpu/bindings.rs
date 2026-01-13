@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: ff3327058434072a84ecb13844f40e15c3b393a04020d3b525ab86c1ea487d02
+// SourceHash: 5cbb4a8f5598a46ec3309e0b32850cffad4ecb01e895ec9b0ad63a66d58430c0
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -11162,15 +11162,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[((idx * 7u) + 2u)] = _e45;
     let _e58 = x[((idx * 4u) + 3u)];
     state[((idx * 7u) + 3u)] = _e58;
-    let _e71 = state[((idx * 7u) + 3u)];
-    let _e78 = state[((idx * 7u) + 1u)];
-    let _e85 = state[((idx * 7u) + 1u)];
-    let _e93 = state[((idx * 7u) + 2u)];
-    let _e100 = state[((idx * 7u) + 2u)];
-    let _e111 = state[((idx * 7u) + 0u)];
-    state[((idx * 7u) + 4u)] = (0.39999998f * (_e71 - ((0.5f * ((_e78 * _e85) + (_e93 * _e100))) / _e111)));
-    let _e128 = state[((idx * 7u) + 0u)];
-    state[((idx * 7u) + 0u)] = _e128;
+    let _e71 = state[((idx * 7u) + 0u)];
+    state[((idx * 7u) + 0u)] = _e71;
+    let _e84 = state[((idx * 7u) + 3u)];
+    let _e91 = state[((idx * 7u) + 1u)];
+    let _e98 = state[((idx * 7u) + 1u)];
+    let _e106 = state[((idx * 7u) + 2u)];
+    let _e113 = state[((idx * 7u) + 2u)];
+    let _e124 = state[((idx * 7u) + 0u)];
+    state[((idx * 7u) + 4u)] = (0.39999998f * (_e84 - ((0.5f * ((_e91 * _e98) + (_e106 * _e113))) / _e124)));
     let _e141 = state[((idx * 7u) + 1u)];
     let _e148 = state[((idx * 7u) + 0u)];
     state[((idx * 7u) + 5u)] = (_e141 / _e148);

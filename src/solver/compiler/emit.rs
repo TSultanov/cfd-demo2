@@ -138,12 +138,10 @@ fn generate_kernel_wgsl(
         }
         KernelKind::GenericCoupledApply => generate_generic_coupled_apply_wgsl(),
         KernelKind::GenericCoupledUpdate => {
-            let mut prims: Vec<(String, crate::solver::shared::PrimitiveExpr)> = model
+            let prims = model
                 .primitives
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            prims.sort_by(|a, b| a.0.cmp(&b.0));
+                .ordered()
+                .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
             generate_generic_coupled_update_wgsl(&discrete, &model.state_layout, &prims)
         }
     };

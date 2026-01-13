@@ -43,7 +43,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 ### 2) Codegen (remove model-specific generators; IR-driven kernels)
 - Retire field-name-specific bridges (e.g. `CodegenIncompressibleMomentumFields`) and kernel generators that assume fixed layouts; drive assembly/update kernels from IR + layout only.
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
-- Add derived-primitive dependency validation/toposort (or explicitly forbid derived→derived at validation time).
+- Progress: derived primitive recovery is dependency-ordered (toposort) so derived→derived references are well-defined.
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing

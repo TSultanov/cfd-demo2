@@ -10,6 +10,7 @@ use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch}
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::solve_fgmres;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
+use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase,
@@ -27,6 +28,7 @@ use bytemuck::bytes_of;
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
     fields: UnifiedFieldResources,
+    time_integration: TimeIntegrationModule,
     kernels: GeneratedKernelsModule,
     assembly_graph: ModuleGraph<GeneratedKernelsModule>,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -146,6 +148,7 @@ impl GenericCoupledProgramResources {
         Ok(Self {
             runtime,
             fields,
+            time_integration: TimeIntegrationModule::new(),
             kernels,
             assembly_graph,
             apply_graph,
@@ -604,11 +607,11 @@ pub(crate) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
 }
 
 pub(crate) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    res(plan).runtime.time_integration.time as f32
+    res(plan).time_integration.time as f32
 }
 
 pub(crate) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    res(plan).runtime.time_integration.dt
+    res(plan).time_integration.dt
 }
 
 pub(crate) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
@@ -641,15 +644,15 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     });
     encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
     queue.submit(Some(encoder.finish()));
-    r.runtime.advance_time();
+    r.time_integration
+        .prepare_step(&mut r.fields.constants, &queue);
 }
 
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
-    r.runtime
-        .time_integration
-        .finalize_step(&mut r.runtime.constants, &queue);
+    r.time_integration
+        .finalize_step(&mut r.fields.constants, &queue);
 }
 
 pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
@@ -787,7 +790,9 @@ pub(crate) fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Resu
     let PlanParamValue::F32(dt) = value else {
         return Err("invalid value type".into());
     };
-    res_mut(plan).runtime.set_dt(dt);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    r.time_integration.set_dt(dt, &mut r.fields.constants, &queue);
     Ok(())
 }
 
@@ -795,12 +800,13 @@ pub(crate) fn param_dtau(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Re
     let PlanParamValue::F32(dtau) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.dtau = dtau;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -811,7 +817,13 @@ pub(crate) fn param_advection_scheme(
     let PlanParamValue::Scheme(scheme) = value else {
         return Err("invalid value type".into());
     };
-    res_mut(plan).runtime.set_scheme(scheme.gpu_id());
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.scheme = scheme.gpu_id();
+    }
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -822,7 +834,13 @@ pub(crate) fn param_time_scheme(
     let PlanParamValue::TimeScheme(scheme) = value else {
         return Err("invalid value type".into());
     };
-    res_mut(plan).runtime.set_time_scheme(scheme as u32);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.time_scheme = scheme as u32;
+    }
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -833,12 +851,13 @@ pub(crate) fn param_viscosity(
     let PlanParamValue::F32(mu) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.viscosity = mu;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -846,12 +865,13 @@ pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
     let PlanParamValue::F32(rho) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.density = rho;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -859,12 +879,13 @@ pub(crate) fn param_alpha_u(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
     let PlanParamValue::F32(alpha) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.alpha_u = alpha;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -872,12 +893,13 @@ pub(crate) fn param_alpha_p(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
     let PlanParamValue::F32(alpha) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.alpha_p = alpha;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -888,12 +910,13 @@ pub(crate) fn param_inlet_velocity(
     let PlanParamValue::F32(velocity) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.inlet_velocity = velocity;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 
@@ -904,12 +927,13 @@ pub(crate) fn param_ramp_time(
     let PlanParamValue::F32(time) = value else {
         return Err("invalid value type".into());
     };
+    let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
-        let values = r.runtime.constants.values_mut();
+        let values = r.fields.constants.values_mut();
         values.ramp_time = time;
     }
-    r.runtime.update_constants();
+    r.fields.constants.write(&queue);
     Ok(())
 }
 

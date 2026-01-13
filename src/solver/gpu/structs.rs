@@ -124,6 +124,27 @@ pub struct GpuConstants {
     pub ramp_time: f32,
 }
 
+impl Default for GpuConstants {
+    fn default() -> Self {
+        Self {
+            dt: 0.0001,
+            dt_old: 0.0001,
+            dtau: 0.0,
+            time: 0.0,
+            viscosity: 0.01,
+            density: 1.0,
+            component: 0,
+            alpha_p: 1.0,
+            scheme: 0,
+            alpha_u: 0.7,
+            stride_x: 65535 * 64,
+            time_scheme: 0,
+            inlet_velocity: 1.0,
+            ramp_time: 0.1,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct SolverParams {

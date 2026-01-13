@@ -1,19 +1,16 @@
 use crate::solver::gpu::init::linear_solver;
 use crate::solver::gpu::csr::build_block_csr;
-use crate::solver::gpu::modules::constants::ConstantsModule;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
-use crate::solver::gpu::structs::{GpuConstants, LinearSolverStats};
+use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::mesh::Mesh;
 
 pub(crate) struct GpuScalarRuntime {
     pub common: GpuRuntimeCommon,
     pub num_nonzeros: u32,
-
-    pub constants: ConstantsModule,
 
     pub linear_ports: LinearSystemPorts,
     pub linear_port_space: PortSpace,
@@ -36,14 +33,10 @@ pub(crate) struct GpuCsrRuntime {
     pub num_dofs: u32,
     pub num_nonzeros: u32,
 
-    pub constants: ConstantsModule,
-
     pub linear_ports: LinearSystemPorts,
     pub linear_port_space: PortSpace,
 
     pub scalar_cg: ScalarCgModule,
-
-    pub time_integration: TimeIntegrationModule,
 }
 
 impl GpuCsrRuntime {
@@ -70,53 +63,15 @@ impl GpuCsrRuntime {
             &col_indices,
         );
 
-        let constants = ConstantsModule::new(
-            &common.context.device,
-            default_constants(),
-            "CSR Runtime Constants Buffer",
-        );
-
         Self {
             common,
             unknowns_per_cell,
             num_dofs,
             num_nonzeros: cg.num_nonzeros,
-            constants,
             linear_ports: cg.ports,
             linear_port_space: cg.port_space,
             scalar_cg: cg.scalar_cg,
-            time_integration: TimeIntegrationModule::new(),
         }
-    }
-
-    pub fn update_constants(&self) {
-        self.constants.write(&self.common.context.queue);
-    }
-
-    pub fn set_dt(&mut self, dt: f32) {
-        self.time_integration
-            .set_dt(dt, &mut self.constants, &self.common.context.queue);
-    }
-
-    pub fn set_scheme(&mut self, scheme: u32) {
-        {
-            let values = self.constants.values_mut();
-            values.scheme = scheme;
-        }
-        self.update_constants();
-    }
-
-    pub fn set_time_scheme(&mut self, scheme: u32) {
-        {
-            let values = self.constants.values_mut();
-            values.time_scheme = scheme;
-        }
-        self.update_constants();
-    }
-
-    pub fn advance_time(&mut self) {
-        self.time_integration
-            .prepare_step(&mut self.constants, &self.common.context.queue);
     }
 
     pub fn solve_linear_system_cg(&self, max_iters: u32, tol: f32) -> LinearSolverStats {
@@ -168,51 +123,14 @@ impl GpuScalarRuntime {
             &common.mesh.col_indices,
         );
 
-        let constants = ConstantsModule::new(
-            &common.context.device,
-            default_constants(),
-            "Scalar Runtime Constants Buffer",
-        );
-
         Self {
             common,
             num_nonzeros: cg.num_nonzeros,
-            constants,
             linear_ports: cg.ports,
             linear_port_space: cg.port_space,
             scalar_cg: cg.scalar_cg,
             time_integration: TimeIntegrationModule::new(),
         }
-    }
-
-    pub fn update_constants(&self) {
-        self.constants.write(&self.common.context.queue);
-    }
-
-    pub fn set_dt(&mut self, dt: f32) {
-        self.time_integration
-            .set_dt(dt, &mut self.constants, &self.common.context.queue);
-    }
-
-    pub fn set_scheme(&mut self, scheme: u32) {
-        {
-            let values = self.constants.values_mut();
-            values.scheme = scheme;
-        }
-        self.update_constants();
-    }
-
-    pub fn set_time_scheme(&mut self, scheme: u32) {
-        {
-            let values = self.constants.values_mut();
-            values.time_scheme = scheme;
-        }
-        self.update_constants();
-    }
-
-    pub fn advance_time(&mut self) {
-        self.time_integration
-            .prepare_step(&mut self.constants, &self.common.context.queue);
     }
 
     pub fn solve_linear_system_cg_with_size(
@@ -277,24 +195,5 @@ impl GpuScalarRuntime {
         self.common
             .read_buffer(buffer, size, "Scalar Runtime Staging Buffer (cached)")
             .await
-    }
-}
-
-fn default_constants() -> GpuConstants {
-    GpuConstants {
-        dt: 0.0001,
-        dt_old: 0.0001,
-        dtau: 0.0,
-        time: 0.0,
-        viscosity: 0.01,
-        density: 1.0,
-        component: 0,
-        alpha_p: 1.0,
-        scheme: 0,
-        alpha_u: 0.7,
-        stride_x: 65535 * 64,
-        time_scheme: 0,
-        inlet_velocity: 1.0,
-        ramp_time: 0.1,
     }
 }

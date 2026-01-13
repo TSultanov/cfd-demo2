@@ -10,6 +10,7 @@ use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime::GpuCsrRuntime;
+use crate::solver::gpu::structs::GpuConstants;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 
@@ -29,23 +30,20 @@ pub(crate) async fn build_generic_coupled_backend(
 ) -> Result<GenericCoupledBuilt, String> {
     let unknowns_per_cell = model.system.unknowns_per_cell();
     let runtime = GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue).await;
-    runtime.update_constants();
 
     let device = &runtime.common.context.device;
 
     let stride = model.state_layout.stride();
     let num_cells = runtime.common.num_cells;
 
-    // Create unified field resources from recipe
-    // Clone the initial constants from runtime
-    let initial_constants = *runtime.constants.values();
+    // Create unified field resources from recipe.
     let fields = UnifiedFieldResources::from_recipe(
         device,
         &recipe,
         num_cells,
         runtime.common.num_faces,
         stride,
-        initial_constants,
+        GpuConstants::default(),
     );
 
     // Create buffer for scalar row offsets (mesh-level CSR structure)
@@ -81,7 +79,6 @@ pub(crate) async fn build_generic_coupled_backend(
     let registry = ResourceRegistry::new()
         .with_mesh(&runtime.common.mesh)
         .with_unified_fields(&fields)
-        .with_constants_buffer(runtime.constants.buffer())
         .with_buffer(
             "matrix_values",
             runtime.linear_port_space.buffer(runtime.linear_ports.values),

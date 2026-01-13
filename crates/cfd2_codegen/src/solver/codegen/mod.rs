@@ -1,5 +1,4 @@
 pub mod coeff_expr;
-pub mod coupled_incompressible_fields;
 pub mod coupled_assembly;
 pub mod dsl;
 pub mod flux_kt;

@@ -7,13 +7,15 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
-use super::coupled_incompressible_fields::{derive_coupled_incompressible_fields, CoupledIncompressibleFields};
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::ir::StateLayout;
 
 pub fn generate_pressure_assembly_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
+    pressure_field: &str,
+    d_p_field: &str,
+    grad_p_field: &str,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -21,10 +23,13 @@ pub fn generate_pressure_assembly_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
-    let fields = derive_coupled_incompressible_fields(system, layout)
-        .unwrap_or_else(|e| panic!("pressure_assembly: {e}"));
-    let plan = pressure_plan(system, fields.p.as_str());
-    module.push(Item::Function(main_fn(layout, &plan, &fields)));
+    let plan = pressure_plan(system, pressure_field);
+    module.push(Item::Function(main_fn(
+        layout,
+        &plan,
+        d_p_field,
+        grad_p_field,
+    )));
     module.to_wgsl()
 }
 
@@ -198,7 +203,8 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
 fn main_fn(
     layout: &StateLayout,
     plan: &PressurePlan,
-    fields: &CoupledIncompressibleFields,
+    d_p_field: &str,
+    grad_p_field: &str,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -210,7 +216,7 @@ fn main_fn(
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(layout, plan, fields),
+        main_body(layout, plan, d_p_field, grad_p_field),
     )
 }
 
@@ -252,7 +258,8 @@ fn pressure_plan(system: &DiscreteSystem, pressure_field: &str) -> PressurePlan 
 fn main_body(
     layout: &StateLayout,
     plan: &PressurePlan,
-    fields: &CoupledIncompressibleFields,
+    d_p_field: &str,
+    grad_p_field: &str,
 ) -> Block {
     let mut stmts = Vec::new();
 
@@ -293,8 +300,6 @@ fn main_body(
     ));
     stmts.push(dsl::var_typed_expr("rhs_val", Type::F32, Some(0.0.into())));
 
-    let d_p_field = fields.d_p.as_str();
-    let grad_p_field = fields.grad_p.as_str();
     let d_p_idx_expr = state_scalar(layout, "state", "idx", d_p_field);
     let grad_p_idx_expr = state_vec2(layout, "state", "idx", grad_p_field);
     let pressure_coeff_face_expr = coeff_face_expr(
@@ -692,7 +697,7 @@ mod tests {
         ]);
 
         let discrete = lower_system(&system, &registry).unwrap();
-        let wgsl = generate_pressure_assembly_wgsl(&discrete, &layout);
+        let wgsl = generate_pressure_assembly_wgsl(&discrete, &layout, "p", "d_p", "grad_p");
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("matrix_values"));
         assert!(wgsl.contains("rhs"));

@@ -16,6 +16,7 @@ use crate::solver::ir::{expand_schemes, EosSpec as IrEosSpec, FluxLayout, Scheme
 use crate::solver::model::incompressible_momentum_model;
 use crate::solver::model::{KernelKind, ModelSpec};
 use crate::solver::scheme::Scheme;
+use crate::solver::units::si;
 
 pub fn write_wgsl_file(
     system: &DiscreteSystem,
@@ -89,19 +90,54 @@ fn generate_kernel_wgsl(
 
     let wgsl = match kind {
         KernelKind::PrepareCoupled => {
-            generate_prepare_coupled_wgsl(&discrete, &model.state_layout)
+            let fields = derive_coupled_incompressible_field_names(model, &discrete)?;
+            generate_prepare_coupled_wgsl(
+                &discrete,
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+                &fields.d_p,
+                &fields.grad_p,
+            )
         }
         KernelKind::CoupledAssembly => {
-            generate_coupled_assembly_wgsl(&discrete, &model.state_layout)
+            let fields = derive_coupled_incompressible_field_names(model, &discrete)?;
+            generate_coupled_assembly_wgsl(
+                &discrete,
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+                &fields.d_p,
+            )
         }
         KernelKind::PressureAssembly => {
-            generate_pressure_assembly_wgsl(&discrete, &model.state_layout)
+            let fields = derive_coupled_incompressible_field_names(model, &discrete)?;
+            generate_pressure_assembly_wgsl(
+                &discrete,
+                &model.state_layout,
+                &fields.pressure,
+                &fields.d_p,
+                &fields.grad_p,
+            )
         }
         KernelKind::UpdateFieldsFromCoupled => {
-            generate_update_fields_from_coupled_wgsl(&discrete, &model.state_layout)
+            let fields = derive_coupled_incompressible_field_names(model, &discrete)?;
+            generate_update_fields_from_coupled_wgsl(
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+            )
         }
         KernelKind::FluxRhieChow => {
-            generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout)
+            let fields = derive_coupled_incompressible_field_names(model, &discrete)?;
+            generate_flux_rhie_chow_wgsl(
+                &discrete,
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+                &fields.d_p,
+                &fields.grad_p,
+            )
         }
         KernelKind::SystemMain => generate_wgsl(&discrete),
 
@@ -141,6 +177,145 @@ fn generate_kernel_wgsl(
     };
 
     Ok(wgsl)
+}
+
+#[derive(Debug, Clone)]
+struct CoupledIncompressibleFieldNames {
+    momentum: String,
+    pressure: String,
+    d_p: String,
+    grad_p: String,
+}
+
+fn derive_coupled_incompressible_field_names(
+    model: &ModelSpec,
+    system: &DiscreteSystem,
+) -> Result<CoupledIncompressibleFieldNames, String> {
+    let mut momentum_targets = Vec::new();
+    for equation in &system.equations {
+        if equation.target.kind() == crate::solver::ir::FieldKind::Vector2
+            || equation.target.kind() == crate::solver::ir::FieldKind::Vector3
+        {
+            momentum_targets.push(equation.target);
+        }
+    }
+
+    let momentum = match momentum_targets.as_slice() {
+        [only] => only.name().to_string(),
+        [] => return Err("missing momentum equation (no vector equation targets)".to_string()),
+        many => {
+            let velocity: Vec<_> = many
+                .iter()
+                .copied()
+                .filter(|f| f.unit() == si::VELOCITY)
+                .collect();
+            match velocity.as_slice() {
+                [only] => only.name().to_string(),
+                _ => {
+                    return Err(format!(
+                        "ambiguous momentum equation target: [{}]",
+                        many.iter()
+                            .map(|f| f.name())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+        }
+    };
+
+    let mut pressure_targets = Vec::new();
+    for equation in &system.equations {
+        if equation.target.kind() == crate::solver::ir::FieldKind::Scalar
+            && equation.target.unit() == si::PRESSURE
+        {
+            pressure_targets.push(equation.target);
+        }
+    }
+
+    let pressure = if pressure_targets.len() == 1 {
+        pressure_targets[0].name().to_string()
+    } else {
+        let momentum_equation = system
+            .equations
+            .iter()
+            .find(|eq| eq.target.name() == momentum)
+            .ok_or_else(|| format!("missing momentum equation for '{momentum}'"))?;
+
+        let mut gradient_fields = Vec::new();
+        for op in &momentum_equation.ops {
+            if op.kind != crate::solver::codegen::DiscreteOpKind::Gradient {
+                continue;
+            }
+            if op.field.kind() != crate::solver::ir::FieldKind::Scalar {
+                continue;
+            }
+            gradient_fields.push(op.field);
+        }
+
+        let gradient_pressure: Vec<_> = gradient_fields
+            .iter()
+            .copied()
+            .filter(|f| f.unit() == si::PRESSURE)
+            .collect();
+        match gradient_pressure.as_slice() {
+            [only] => only.name().to_string(),
+            _ => {
+                return Err("missing/ambiguous pressure field for coupled-incompressible kernels".to_string());
+            }
+        }
+    };
+
+    let d_p = derive_unique_layout_field_by_unit(
+        &model.state_layout,
+        si::D_P,
+        "d_p",
+        Some(&format!("d_{pressure}")),
+    )?;
+    let grad_p = derive_unique_layout_field_by_unit(
+        &model.state_layout,
+        si::PRESSURE_GRADIENT,
+        "grad_p",
+        Some(&format!("grad_{pressure}")),
+    )?;
+
+    Ok(CoupledIncompressibleFieldNames {
+        momentum,
+        pressure,
+        d_p,
+        grad_p,
+    })
+}
+
+fn derive_unique_layout_field_by_unit(
+    layout: &crate::solver::ir::StateLayout,
+    unit: crate::solver::units::UnitDim,
+    label: &str,
+    preferred_name: Option<&str>,
+) -> Result<String, String> {
+    if let Some(name) = preferred_name {
+        if let Some(field) = layout.field(name) {
+            if field.unit() == unit {
+                return Ok(name.to_string());
+            }
+        }
+    }
+
+    let candidates: Vec<_> = layout
+        .fields()
+        .iter()
+        .filter(|f| f.unit() == unit)
+        .map(|f| f.name().to_string())
+        .collect();
+
+    match candidates.as_slice() {
+        [] => Err(format!("missing required '{label}' state field (unit={unit})")),
+        [only] => Ok(only.clone()),
+        many => Err(format!(
+            "ambiguous '{label}' state field for coupled-incompressible kernels: [{}]",
+            many.join(", ")
+        )),
+    }
 }
 
 fn ir_eos_from_model(eos: crate::solver::model::EosSpec) -> IrEosSpec {

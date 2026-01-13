@@ -8,13 +8,16 @@ use super::wgsl_ast::{
     StructField, Type,
 };
 use super::wgsl_dsl as dsl;
-use super::coupled_incompressible_fields::{derive_coupled_incompressible_fields, CoupledIncompressibleFields};
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::ir::StateLayout;
 
 pub fn generate_flux_rhie_chow_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
+    momentum_field: &str,
+    pressure_field: &str,
+    d_p_field: &str,
+    grad_p_field: &str,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -22,10 +25,15 @@ pub fn generate_flux_rhie_chow_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
-    let fields = derive_coupled_incompressible_fields(system, layout)
-        .unwrap_or_else(|e| panic!("flux_rhie_chow: {e}"));
-    let plan = momentum_plan(system, fields.u.as_str(), fields.p.as_str());
-    module.push(Item::Function(main_fn(layout, &plan, &fields)));
+    let plan = momentum_plan(system, momentum_field, pressure_field);
+    module.push(Item::Function(main_fn(
+        layout,
+        &plan,
+        momentum_field,
+        pressure_field,
+        d_p_field,
+        grad_p_field,
+    )));
     module.to_wgsl()
 }
 
@@ -184,7 +192,10 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
 fn main_fn(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CoupledIncompressibleFields,
+    momentum_field: &str,
+    pressure_field: &str,
+    d_p_field: &str,
+    grad_p_field: &str,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -196,14 +207,24 @@ fn main_fn(
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(layout, plan, fields),
+        main_body(
+            layout,
+            plan,
+            momentum_field,
+            pressure_field,
+            d_p_field,
+            grad_p_field,
+        ),
     )
 }
 
 fn main_body(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CoupledIncompressibleFields,
+    momentum_field: &str,
+    pressure_field: &str,
+    d_p_field: &str,
+    grad_p_field: &str,
 ) -> Block {
     let mut stmts = Vec::new();
 
@@ -281,10 +302,8 @@ fn main_body(
         None,
     ));
 
-    let u_field = fields.u.as_str();
-    let p_field = fields.p.as_str();
-    let d_p_field = fields.d_p.as_str();
-    let grad_p_field = fields.grad_p.as_str();
+    let u_field = momentum_field;
+    let p_field = pressure_field;
     let u_owner_expr = state_vec2(layout, "state", "owner", u_field);
     let dp_owner_expr = state_scalar(layout, "state", "owner", d_p_field);
     let grad_p_owner_expr = state_vec2(layout, "state", "owner", grad_p_field);
@@ -543,7 +562,8 @@ mod tests {
             vol_vector("grad_p", si::PRESSURE_GRADIENT),
         ]);
         let discrete = lower_system(&system, &schemes).unwrap();
-        let wgsl = generate_flux_rhie_chow_wgsl(&discrete, &layout);
+        let wgsl =
+            generate_flux_rhie_chow_wgsl(&discrete, &layout, "U", "p", "d_p", "grad_p");
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("face_owner"));
         assert!(wgsl.contains("smoothstep"));

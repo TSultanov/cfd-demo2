@@ -44,7 +44,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
 - Progress: derived primitive recovery is dependency-ordered (toposort) so derived→derived references are well-defined.
-- Done: coupled-incompressible kernels derive required state field names from `DiscreteSystem + StateLayout` (no hardcoded `U/p/d_p/grad_p` bridge).
+- Done: removed `CodegenIncompressibleMomentumFields`; field-name inference for coupled-incompressible kernels lives in model/build-time emit (not in `crates/cfd2_codegen`, which remains PDE-agnostic).
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing

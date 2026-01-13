@@ -10,7 +10,6 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
-use super::coupled_incompressible_fields::{derive_coupled_incompressible_fields, CoupledIncompressibleFields};
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::ir::StateLayout;
 use crate::solver::scheme::Scheme;
@@ -18,6 +17,9 @@ use crate::solver::scheme::Scheme;
 pub fn generate_coupled_assembly_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
+    momentum_field: &str,
+    pressure_field: &str,
+    d_p_field: &str,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -26,19 +28,23 @@ pub fn generate_coupled_assembly_wgsl(
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
     module.extend(generate_wgsl_library_items(system));
-    let fields = derive_coupled_incompressible_fields(system, layout)
-        .unwrap_or_else(|e| panic!("coupled_assembly: {e}"));
     let plan = {
-        let plan = momentum_plan(system, fields.u.as_str(), fields.p.as_str());
+        let plan = momentum_plan(system, momentum_field, pressure_field);
         if plan.pressure_diffusion.is_none() {
             panic!(
                 "missing pressure diffusion term for field '{}'",
-                fields.p
+                pressure_field
             );
         }
         plan
     };
-    module.push(Item::Function(main_fn(layout, &plan, &fields)));
+    module.push(Item::Function(main_fn(
+        layout,
+        &plan,
+        momentum_field,
+        pressure_field,
+        d_p_field,
+    )));
     module.to_wgsl()
 }
 
@@ -275,14 +281,16 @@ fn safe_inverse_fn() -> Function {
 fn main_fn(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CoupledIncompressibleFields,
+    momentum_field: &str,
+    pressure_field: &str,
+    d_p_field: &str,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
         Type::vec3_u32(),
         vec![Attribute::Builtin("global_invocation_id".to_string())],
     )];
-    let body = main_body(layout, plan, fields);
+    let body = main_body(layout, plan, momentum_field, pressure_field, d_p_field);
     Function::new(
         "main",
         params,
@@ -295,18 +303,19 @@ fn main_fn(
 fn main_body(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CoupledIncompressibleFields,
+    momentum_field: &str,
+    pressure_field: &str,
+    d_p_field: &str,
 ) -> Block {
     let mut stmts = Vec::new();
-    let u_field = fields.u.as_str();
-    let d_p_field = fields.d_p.as_str();
+    let u_field = momentum_field;
     let u_components = layout
         .field(u_field)
         .unwrap_or_else(|| panic!("missing state field '{u_field}'"))
         .component_count() as usize;
     let p_components = layout
-        .field(fields.p.as_str())
-        .unwrap_or_else(|| panic!("missing state field '{}'", fields.p))
+        .field(pressure_field)
+        .unwrap_or_else(|| panic!("missing state field '{pressure_field}'"))
         .component_count() as usize;
     if u_components != 2 {
         panic!(
@@ -1114,7 +1123,7 @@ mod tests {
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry).unwrap();
         let layout = default_layout();
-        let wgsl = generate_coupled_assembly_wgsl(&discrete, &layout);
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &layout, "U", "p", "d_p");
 
         assert!(wgsl.contains("codegen_conv_coeff"));
         assert!(wgsl.contains("codegen_diff_coeff"));
@@ -1145,7 +1154,7 @@ mod tests {
         );
 
         let discrete = lower_system(&system, &registry).unwrap();
-        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout());
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), "U", "p", "d_p");
 
         assert!(wgsl.contains("scheme_id: u32 = 2u"));
     }
@@ -1166,8 +1175,7 @@ mod tests {
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry).unwrap();
-        let fields = default_fields();
-        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), &fields);
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), "U", "p", "d_p");
 
         assert!(wgsl.contains("let diff_coeff = 0.0"));
     }
@@ -1191,8 +1199,7 @@ mod tests {
 
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry).unwrap();
-        let fields = default_fields();
-        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), &fields);
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), "U", "p", "d_p");
 
         assert!(wgsl.contains("let rho = constants.density"));
         assert!(wgsl.contains("codegen_diff_coeff(constants.viscosity, area, dist)"));

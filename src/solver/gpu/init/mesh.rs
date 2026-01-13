@@ -16,8 +16,8 @@ pub struct MeshResources {
     pub b_diagonal_indices: wgpu::Buffer,
     pub b_scalar_row_offsets: wgpu::Buffer,
     pub b_scalar_col_indices: wgpu::Buffer,
-    pub row_offsets: Vec<u32>,
-    pub col_indices: Vec<u32>,
+    pub scalar_row_offsets: Vec<u32>,
+    pub scalar_col_indices: Vec<u32>,
 }
 
 impl MeshResources {
@@ -46,8 +46,8 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
     let num_cells = mesh.cell_cx.len() as u32;
 
     // --- CSR Matrix Structure ---
-    let mut row_offsets = vec![0u32; num_cells as usize + 1];
-    let mut col_indices = Vec::new();
+    let mut scalar_row_offsets = vec![0u32; num_cells as usize + 1];
+    let mut scalar_col_indices = Vec::new();
 
     let mut adj = vec![Vec::new(); num_cells as usize];
     for (i, &owner) in mesh.face_owner.iter().enumerate() {
@@ -65,23 +65,23 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
 
     let mut current_offset = 0;
     for (i, list) in adj.iter().enumerate() {
-        row_offsets[i] = current_offset;
+        scalar_row_offsets[i] = current_offset;
         for &neighbor in list {
-            col_indices.push(neighbor as u32);
+            scalar_col_indices.push(neighbor as u32);
         }
         current_offset += list.len() as u32;
     }
-    row_offsets[num_cells as usize] = current_offset;
+    scalar_row_offsets[num_cells as usize] = current_offset;
 
     let b_scalar_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Mesh scalar_row_offsets"),
-        contents: bytemuck::cast_slice(&row_offsets),
+        contents: bytemuck::cast_slice(&scalar_row_offsets),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
     let b_scalar_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Mesh scalar_col_indices"),
-        contents: bytemuck::cast_slice(&col_indices),
+        contents: bytemuck::cast_slice(&scalar_col_indices),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
@@ -212,9 +212,9 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
             if target_col == u32::MAX {
                 cell_face_matrix_indices.push(u32::MAX);
             } else {
-                let row_start = row_offsets[i as usize] as usize;
-                let row_end = row_offsets[i as usize + 1] as usize;
-                let cols = &col_indices[row_start..row_end];
+                let row_start = scalar_row_offsets[i as usize] as usize;
+                let row_end = scalar_row_offsets[i as usize + 1] as usize;
+                let cols = &scalar_col_indices[row_start..row_end];
 
                 if let Ok(idx) = cols.binary_search(&target_col) {
                     cell_face_matrix_indices.push((row_start + idx) as u32);
@@ -233,9 +233,9 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
 
     let mut diagonal_indices = Vec::with_capacity(num_cells as usize);
     for i in 0..num_cells {
-        let row_start = row_offsets[i as usize] as usize;
-        let row_end = row_offsets[i as usize + 1] as usize;
-        let cols = &col_indices[row_start..row_end];
+        let row_start = scalar_row_offsets[i as usize] as usize;
+        let row_end = scalar_row_offsets[i as usize + 1] as usize;
+        let cols = &scalar_col_indices[row_start..row_end];
 
         if let Ok(idx) = cols.binary_search(&i) {
             diagonal_indices.push((row_start + idx) as u32);
@@ -265,7 +265,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         b_diagonal_indices,
         b_scalar_row_offsets,
         b_scalar_col_indices,
-        row_offsets,
-        col_indices,
+        scalar_row_offsets,
+        scalar_col_indices,
     }
 }

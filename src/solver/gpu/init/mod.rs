@@ -63,8 +63,8 @@ impl GpuSolver {
         let linear_res = linear_solver::init_linear_solver(
             &common.context.device,
             num_cells,
-            &common.mesh.row_offsets,
-            &common.mesh.col_indices,
+            &common.mesh.scalar_row_offsets,
+            &common.mesh.scalar_col_indices,
             unknowns_per_cell,
         );
 

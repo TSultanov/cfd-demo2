@@ -288,7 +288,7 @@ fn build_generic_schur(
     let device = &runtime.common.context.device;
     let num_cells = runtime.common.num_cells;
     let num_dofs = runtime.num_dofs;
-    let scalar_nnz = runtime.common.mesh.col_indices.len() as u64;
+    let scalar_nnz = runtime.common.mesh.scalar_col_indices.len() as u64;
 
     let u_len = layout.u_len;
     let mut u0123 = [0u32; 4];

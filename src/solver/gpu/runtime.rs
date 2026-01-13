@@ -54,7 +54,7 @@ impl GpuCsrRuntime {
             .expect("num_dofs overflow");
 
         let (row_offsets, col_indices) =
-            build_block_csr(&common.mesh.row_offsets, &common.mesh.col_indices, unknowns_per_cell);
+            build_block_csr(&common.mesh.scalar_row_offsets, &common.mesh.scalar_col_indices, unknowns_per_cell);
 
         let cg = linear_solver::init_scalar_cg(
             &common.context.device,
@@ -119,8 +119,8 @@ impl GpuScalarRuntime {
         let cg = linear_solver::init_scalar_cg(
             &common.context.device,
             common.num_cells,
-            &common.mesh.row_offsets,
-            &common.mesh.col_indices,
+            &common.mesh.scalar_row_offsets,
+            &common.mesh.scalar_col_indices,
         );
 
         Self {

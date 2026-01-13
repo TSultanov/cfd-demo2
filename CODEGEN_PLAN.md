@@ -40,11 +40,12 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Removed transitional `system_main.wgsl` artifact/hack (no “representative model” generation).
 - Converged duplicated WGSL AST sources (single canonical implementation in codegen).
 - Explicit stepping uses the same generic-coupled backend resources (no separate explicit/implicit plan/resources path).
+- Documented CSR binding/shape contract (`src/solver/gpu/CSR_CONTRACT.md`) and clarified scalar-vs-DOF naming in mesh resources.
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
 ### 1) Plan Resources (single universal runtime resource graph)
-- Document the canonical linear-system representation(s) (DOF/system CSR vs scalar CSR used for mesh adjacency), and make all kernel bindings reflect that choice consistently.
+- Retire the remaining coupled-backend-specific plan/resources (`GpuSolver`) so coupled stepping is also expressed via the universal program resources + recipe-driven ops/graphs.
 
 ### 2) Codegen (remove model-specific generators; IR-driven kernels)
 - Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).

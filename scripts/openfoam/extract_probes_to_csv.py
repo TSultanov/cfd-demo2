@@ -75,6 +75,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Extract last-time OpenFOAM probes output into CSV.")
     ap.add_argument("--case", type=Path, required=True, help="OpenFOAM case directory")
     ap.add_argument(
+        "--probes-name",
+        type=str,
+        default="probes",
+        help="Name of the probes functionObject (controls postProcessing/<name>/...)",
+    )
+    ap.add_argument(
         "--mode",
         choices=("incompressible_channel", "compressible_acoustic"),
         required=True,
@@ -83,7 +89,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True, help="Output CSV file path")
     args = ap.parse_args()
 
-    probes_dir = args.case / "postProcessing" / "probes" / "0"
+    probes_dir = args.case / "postProcessing" / args.probes_name / "0"
     u_file = probes_dir / "U"
     p_file = probes_dir / "p"
     t_file = probes_dir / "T"
@@ -117,7 +123,7 @@ def main() -> int:
             rows = []
             for loc, u, p in zip(locs, u_vecs, p_vals):
                 rows.append((loc.x, loc.y, u[0], u[1], p))
-            rows.sort(key=lambda r: r[1])
+            rows.sort(key=lambda r: (r[1], r[0]))
             w.writerows(rows)
         else:
             t_t, t_vals = parse_scalar_row(last_data_line(t_file), n)
@@ -125,7 +131,7 @@ def main() -> int:
             rows = []
             for loc, u, p, T in zip(locs, u_vecs, p_vals, t_vals):
                 rows.append((loc.x, loc.y, p, u[0], u[1], T))
-            rows.sort(key=lambda r: r[0])
+            rows.sort(key=lambda r: (r[0], r[1]))
             w.writerows(rows)
 
     return 0
@@ -136,4 +142,3 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except BrokenPipeError:
         sys.exit(1)
-

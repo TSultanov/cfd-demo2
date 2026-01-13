@@ -46,9 +46,7 @@ fn gpu_generic_incompressible_schur_smoke() {
     solver.set_inlet_velocity(0.0);
     solver.set_alpha_u(0.7);
     solver.set_alpha_p(0.3);
-    solver
-        .set_incompressible_outer_correctors(1)
-        .expect("set outer correctors");
+    solver.set_outer_iters(1);
 
     let u0 = vec![(0.0f64, 0.0f64); mesh.num_cells()];
     let p0 = vec![0.0f64; mesh.num_cells()];

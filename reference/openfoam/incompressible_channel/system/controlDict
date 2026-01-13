@@ -42,4 +42,8 @@ functions
     {
         #include "probes.cfg"
     }
+    probesAll
+    {
+        #include "probes_all.cfg"
+    }
 }

@@ -49,9 +49,7 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     solver.set_ramp_time(0.0);
     solver.set_alpha_u(0.7);
     solver.set_alpha_p(0.3);
-    solver
-        .set_incompressible_outer_correctors(6)
-        .expect("set outer correctors");
+    solver.set_outer_iters(6);
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
@@ -62,6 +60,7 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     }
 
     let u = pollster::block_on(solver.get_u());
+    let p = pollster::block_on(solver.get_p());
 
     // Sample at x = 0.4875 (cell center i=19 for Nx=40).
     let i_sample = 19usize;
@@ -117,12 +116,57 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
 
     // The code and OpenFOAM use different linear solver stacks and discretization details.
     // These tolerances are intended to catch gross regressions while allowing some drift.
-    assert!(
-        u_x_err < 0.25,
-        "u_x profile mismatch vs OpenFOAM: rel_l2={u_x_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}])"
+
+    // Full-field comparison (all cell centers).
+    let table = common::load_csv(&common::data_path("incompressible_channel_full_field.csv"));
+    let x_idx = common::column_idx(&table.header, "x");
+    let y_idx = common::column_idx(&table.header, "y");
+    let ux_idx = common::column_idx(&table.header, "u_x");
+    let uy_idx = common::column_idx(&table.header, "u_y");
+    let p_idx = common::column_idx(&table.header, "p");
+
+    assert_eq!(
+        table.rows.len(),
+        mesh.num_cells(),
+        "reference rows must equal num_cells for full-field comparison"
     );
+
+    let mut ref_rows: Vec<(f64, f64, f64, f64, f64)> = table
+        .rows
+        .iter()
+        .map(|r| (r[x_idx], r[y_idx], r[ux_idx], r[uy_idx], r[p_idx]))
+        .collect();
+    ref_rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().then(a.0.partial_cmp(&b.0).unwrap()));
+
+    let mut sol_rows: Vec<(f64, f64, f64, f64, f64)> = (0..mesh.num_cells())
+        .map(|i| (mesh.cell_cx[i], mesh.cell_cy[i], u[i].0, u[i].1, p[i]))
+        .collect();
+    sol_rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().then(a.0.partial_cmp(&b.0).unwrap()));
+
+    for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
+        let (sx, sy, _, _, _) = *sol;
+        let (rx, ry, _, _, _) = *rf;
+        assert!((sx - rx).abs() < 1e-12, "x mismatch at sorted row {i}: solver={sx} ref={rx}");
+        assert!((sy - ry).abs() < 1e-12, "y mismatch at sorted row {i}: solver={sy} ref={ry}");
+    }
+
+    let u_x_sol: Vec<f64> = sol_rows.iter().map(|r| r.2).collect();
+    let u_y_sol: Vec<f64> = sol_rows.iter().map(|r| r.3).collect();
+    let p_sol: Vec<f64> = sol_rows.iter().map(|r| r.4).collect();
+    let u_x_ref: Vec<f64> = ref_rows.iter().map(|r| r.2).collect();
+    let u_y_ref: Vec<f64> = ref_rows.iter().map(|r| r.3).collect();
+    let p_ref: Vec<f64> = ref_rows.iter().map(|r| r.4).collect();
+
+    let u_x_err_full = common::rel_l2(&u_x_sol, &u_x_ref, 1e-12);
+    let u_y_err_full = common::rel_l2(&u_y_sol, &u_y_ref, 1e-12);
+    let p_err_full = common::rel_l2(&p_sol, &p_ref, 1e-12);
+
     assert!(
-        u_y_err < 5.0,
-        "u_y noise mismatch vs OpenFOAM: rel_l2={u_y_err:.3}"
+        u_x_err < 0.25
+            && u_y_err < 5.0
+            && u_x_err_full < 0.35
+            && u_y_err_full < 10.0
+            && p_err_full < 0.35,
+        "mismatch vs OpenFOAM: centerline rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}]); full rel_l2(u_x)={u_x_err_full:.3} rel_l2(u_y)={u_y_err_full:.3} rel_l2(p)={p_err_full:.3}"
     );
 }

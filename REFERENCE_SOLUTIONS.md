@@ -10,7 +10,9 @@ The OpenFOAM case templates live in:
 The committed reference datasets live in:
 
 - `tests/openfoam_reference/data/incompressible_channel_centerline.csv`
+- `tests/openfoam_reference/data/incompressible_channel_full_field.csv`
 - `tests/openfoam_reference/data/compressible_acoustic_centerline.csv`
+- `tests/openfoam_reference/data/compressible_acoustic_full_field.csv`
 
 ## Regenerating reference data
 
@@ -36,6 +38,7 @@ This will run each case in `target/openfoam_reference_runs/` and overwrite the C
   - Convergence: `system/fvSolution` uses `SIMPLE.residualControl` with `p` and `U` at `1e-12`.
 - Sampling:
   - 20 probes placed at structured cell centers along `x=0.4875`, spanning `y=0.005..0.195`.
+  - Full-field: 800 probes placed at all structured cell centers (`40x20`), written via a second `probesAll` function object.
 
 ### Compressible acoustic box (`rhoCentralFoam`)
 
@@ -53,4 +56,4 @@ This will run each case in `target/openfoam_reference_runs/` and overwrite the C
   - Kurganov (central-upwind) flux scheme (`system/fvSchemes`) to match the style of flux used by `cfd2`'s compressible solver.
 - Sampling:
   - 200 probes placed at structured cell centers along the midline (`y=0.025`).
-
+  - Full-field: identical to the midline for `Ny=1`, written via a second `probesAll` function object.

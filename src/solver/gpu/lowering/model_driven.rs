@@ -126,24 +126,28 @@ async fn lower_parts_for_model(
     match recipe.stepping {
         crate::solver::gpu::recipe::SteppingMode::Coupled { .. } => {
             if model.method != crate::solver::model::MethodSpec::CoupledIncompressible {
-                let parts =
-                    crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
-                        mesh,
-                        model.clone(),
-                        recipe.clone(),
-                        device,
-                        queue,
-                    )
-                    .await?;
+                let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
+                    mesh,
+                    model.clone(),
+                    recipe.clone(),
+                    device,
+                    queue,
+                )
+                .await?;
 
                 let mut ops = ProgramOpRegistry::new();
                 models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
+                let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
+                resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
+                    built.backend,
+                ));
+
                 return Ok(LoweredProgramParts {
-                    model: parts.model,
-                    context: parts.context,
-                    profiling_stats: parts.profiling_stats,
-                    resources: parts.resources,
+                    model: built.model,
+                    context: built.context,
+                    profiling_stats: built.profiling_stats,
+                    resources,
                     spec: ModelGpuProgramSpecParts {
                         ops,
                         num_cells: models::universal::spec_num_cells,
@@ -206,7 +210,7 @@ async fn lower_parts_for_model(
             })
         }
         crate::solver::gpu::recipe::SteppingMode::Implicit { .. } => {
-            let parts = crate::solver::gpu::plans::generic_coupled::GenericCoupledPlanResources::new(
+            let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
                 mesh,
                 model.clone(),
                 recipe.clone(),
@@ -218,11 +222,16 @@ async fn lower_parts_for_model(
             let mut ops = ProgramOpRegistry::new();
             models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
+            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
+            resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
+                built.backend,
+            ));
+
             Ok(LoweredProgramParts {
-                model: parts.model,
-                context: parts.context,
-                profiling_stats: parts.profiling_stats,
-                resources: parts.resources,
+                model: built.model,
+                context: built.context,
+                profiling_stats: built.profiling_stats,
+                resources,
                 spec: ModelGpuProgramSpecParts {
                     ops,
                     num_cells: models::universal::spec_num_cells,

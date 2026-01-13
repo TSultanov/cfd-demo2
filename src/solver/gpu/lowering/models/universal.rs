@@ -18,6 +18,7 @@ pub(in crate::solver::gpu::lowering) struct UniversalProgramResources {
 
 enum UniversalBackend {
     ExplicitImplicit(ExplicitImplicitBackend),
+    GenericCoupled(GenericCoupledBackend),
     Coupled(CoupledBackend),
 }
 
@@ -35,6 +36,10 @@ struct CoupledBackend {
     coupled_prev_residual_p: f64,
 }
 
+struct GenericCoupledBackend {
+    plan: GenericCoupledProgramResources,
+}
+
 impl UniversalProgramResources {
     pub(in crate::solver::gpu::lowering) fn new_explicit_implicit(
         plan: ExplicitImplicitPlanResources,
@@ -45,6 +50,14 @@ impl UniversalProgramResources {
                 implicit_outer_idx: 0,
                 implicit_stats: Vec::new(),
             }),
+        }
+    }
+
+    pub(in crate::solver::gpu::lowering) fn new_generic_coupled(
+        plan: GenericCoupledProgramResources,
+    ) -> Self {
+        Self {
+            backend: UniversalBackend::GenericCoupled(GenericCoupledBackend { plan }),
         }
     }
 
@@ -59,12 +72,33 @@ impl UniversalProgramResources {
             }),
         }
     }
+
+    pub(in crate::solver::gpu::lowering) fn generic_coupled(
+        &self,
+    ) -> Option<&GenericCoupledProgramResources> {
+        match &self.backend {
+            UniversalBackend::GenericCoupled(b) => Some(&b.plan),
+            _ => None,
+        }
+    }
+
+    pub(in crate::solver::gpu::lowering) fn generic_coupled_mut(
+        &mut self,
+    ) -> Option<&mut GenericCoupledProgramResources> {
+        match &mut self.backend {
+            UniversalBackend::GenericCoupled(b) => Some(&mut b.plan),
+            _ => None,
+        }
+    }
 }
 
 impl PlanLinearSystemDebug for UniversalProgramResources {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         match &self.backend {
             UniversalBackend::ExplicitImplicit(b) => {
+                PlanLinearSystemDebug::set_linear_system(&b.plan, matrix_values, rhs)
+            }
+            UniversalBackend::GenericCoupled(b) => {
                 PlanLinearSystemDebug::set_linear_system(&b.plan, matrix_values, rhs)
             }
             UniversalBackend::Coupled(b) => {
@@ -83,6 +117,9 @@ impl PlanLinearSystemDebug for UniversalProgramResources {
             UniversalBackend::ExplicitImplicit(b) => {
                 PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
             }
+            UniversalBackend::GenericCoupled(b) => {
+                PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
+            }
             UniversalBackend::Coupled(b) => {
                 PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
             }
@@ -92,6 +129,9 @@ impl PlanLinearSystemDebug for UniversalProgramResources {
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
         match &self.backend {
             UniversalBackend::ExplicitImplicit(b) => {
+                PlanLinearSystemDebug::get_linear_solution(&b.plan)
+            }
+            UniversalBackend::GenericCoupled(b) => {
                 PlanLinearSystemDebug::get_linear_solution(&b.plan)
             }
             UniversalBackend::Coupled(b) => PlanLinearSystemDebug::get_linear_solution(&b.plan),
@@ -116,6 +156,7 @@ fn wrap_mut(plan: &mut GpuProgramPlan) -> &mut UniversalProgramResources {
 fn explicit_implicit(plan: &GpuProgramPlan) -> Option<&ExplicitImplicitPlanResources> {
     match &wrap(plan).backend {
         UniversalBackend::ExplicitImplicit(b) => Some(&b.plan),
+        UniversalBackend::GenericCoupled(_) => None,
         UniversalBackend::Coupled(_) => None,
     }
 }
@@ -123,6 +164,7 @@ fn explicit_implicit(plan: &GpuProgramPlan) -> Option<&ExplicitImplicitPlanResou
 fn explicit_implicit_mut(plan: &mut GpuProgramPlan) -> Option<&mut ExplicitImplicitPlanResources> {
     match &mut wrap_mut(plan).backend {
         UniversalBackend::ExplicitImplicit(b) => Some(&mut b.plan),
+        UniversalBackend::GenericCoupled(_) => None,
         UniversalBackend::Coupled(_) => None,
     }
 }
@@ -132,6 +174,7 @@ fn explicit_implicit_backend_mut(
 ) -> Option<&mut ExplicitImplicitBackend> {
     match &mut wrap_mut(plan).backend {
         UniversalBackend::ExplicitImplicit(b) => Some(b),
+        UniversalBackend::GenericCoupled(_) => None,
         UniversalBackend::Coupled(_) => None,
     }
 }
@@ -140,6 +183,7 @@ fn coupled(plan: &GpuProgramPlan) -> Option<&GpuSolver> {
     match &wrap(plan).backend {
         UniversalBackend::Coupled(b) => Some(&b.plan),
         UniversalBackend::ExplicitImplicit(_) => None,
+        UniversalBackend::GenericCoupled(_) => None,
     }
 }
 
@@ -147,6 +191,7 @@ fn coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GpuSolver> {
     match &mut wrap_mut(plan).backend {
         UniversalBackend::Coupled(b) => Some(&mut b.plan),
         UniversalBackend::ExplicitImplicit(_) => None,
+        UniversalBackend::GenericCoupled(_) => None,
     }
 }
 
@@ -154,6 +199,7 @@ fn coupled_backend(plan: &GpuProgramPlan) -> Option<&CoupledBackend> {
     match &wrap(plan).backend {
         UniversalBackend::Coupled(b) => Some(b),
         UniversalBackend::ExplicitImplicit(_) => None,
+        UniversalBackend::GenericCoupled(_) => None,
     }
 }
 
@@ -161,15 +207,16 @@ fn coupled_backend_mut(plan: &mut GpuProgramPlan) -> Option<&mut CoupledBackend>
     match &mut wrap_mut(plan).backend {
         UniversalBackend::Coupled(b) => Some(b),
         UniversalBackend::ExplicitImplicit(_) => None,
+        UniversalBackend::GenericCoupled(_) => None,
     }
 }
 
 fn generic_coupled(plan: &GpuProgramPlan) -> Option<&GenericCoupledProgramResources> {
-    plan.resources.get::<GenericCoupledProgramResources>()
+    wrap(plan).generic_coupled()
 }
 
 fn generic_coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GenericCoupledProgramResources> {
-    plan.resources.get_mut::<GenericCoupledProgramResources>()
+    wrap_mut(plan).generic_coupled_mut()
 }
 
 // --- Universal op registration ---
@@ -366,10 +413,6 @@ pub(in crate::solver::gpu::lowering) fn step_with_stats(
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     plan: &mut GpuProgramPlan,
 ) -> Option<&mut dyn PlanLinearSystemDebug> {
-    if plan.resources.has::<GenericCoupledProgramResources>() {
-        let gc = plan.resources.get_mut::<GenericCoupledProgramResources>()?;
-        return Some(gc as &mut dyn PlanLinearSystemDebug);
-    }
     let u = plan.resources.get_mut::<UniversalProgramResources>()?;
     Some(u as &mut dyn PlanLinearSystemDebug)
 }

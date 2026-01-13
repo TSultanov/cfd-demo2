@@ -42,7 +42,8 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Done when: adding a kernel does not require editing host-side module code or adding new `match` arms.
 
 ### 3) Plan Resources (single universal runtime resource graph)
-- Converge `ExplicitImplicitPlanResources` and `GenericCoupledPlanResources` into one universal plan/resources layer (recipe-driven graphs + shared resource registry).
+- Progress: generic-coupled now lives inside `UniversalProgramResources` (no separate `ProgramResources` entry and no dedicated `LoweredProgramParts` builder for it).
+- Remaining: converge `ExplicitImplicitPlanResources` and the generic-coupled runtime into a shared plan/resources layer (recipe-driven graphs + shared resource registry), removing duplicated init plumbing (`GpuCsrRuntime` vs `CompressibleLowered` paths).
 - Done when: new solver modes do not introduce new plan/resource structs or wiring paths.
 
 ### 4) Codegen (remove model-specific generators; IR-driven kernels)

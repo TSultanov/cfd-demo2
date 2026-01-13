@@ -14,6 +14,7 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase,
 };
+use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
@@ -559,14 +560,16 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
 
 fn res(plan: &GpuProgramPlan) -> &GenericCoupledProgramResources {
     plan.resources
-        .get::<GenericCoupledProgramResources>()
-        .expect("missing GenericCoupledProgramResources")
+        .get::<UniversalProgramResources>()
+        .and_then(|u| u.generic_coupled())
+        .expect("missing GenericCoupledProgramResources backend")
 }
 
 fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
     plan.resources
-        .get_mut::<GenericCoupledProgramResources>()
-        .expect("missing GenericCoupledProgramResources")
+        .get_mut::<UniversalProgramResources>()
+        .and_then(|u| u.generic_coupled_mut())
+        .expect("missing GenericCoupledProgramResources backend")
 }
 
 /// Register ops using the unified registry builder.

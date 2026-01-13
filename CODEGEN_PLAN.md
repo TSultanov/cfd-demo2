@@ -32,6 +32,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Generic-coupled integrated as a backend variant inside `UniversalProgramResources` (no separate plan selection path).
 - Kernel constants/time integration are owned by the recipe-level `UnifiedFieldResources` (no per-backend constants buffer).
 - `build.rs` discovers models via `definitions.rs` (adding a model does not require editing `build.rs`).
+- Handwritten infrastructure kernels can be routed through the same kernel registry + binding-metadata path (e.g. `generic_coupled_schur_setup`).
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 

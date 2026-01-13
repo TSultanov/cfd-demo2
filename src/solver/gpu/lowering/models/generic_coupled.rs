@@ -360,7 +360,7 @@ fn build_generic_schur(
         &b_diag_p,
         &b_p_matrix_values,
         &b_setup_params,
-    );
+    )?;
 
     let system = LinearSystemView {
         ports: runtime.linear_ports,

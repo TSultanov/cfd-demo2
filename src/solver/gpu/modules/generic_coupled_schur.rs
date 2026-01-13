@@ -1,8 +1,10 @@
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::wgsl_reflect;
+use crate::solver::model::KernelId;
 const WORKGROUP_SIZE: u32 = 64;
-const SCHUR_SETUP_WGSL: &str = include_str!("../shaders/generic_coupled_schur_setup.wgsl");
 
 use crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams;
 
@@ -60,101 +62,12 @@ impl GenericCoupledSchurPreconditioner {
     }
 
     pub fn build_setup_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Generic Coupled Schur Setup"),
-            source: wgpu::ShaderSource::Wgsl(SCHUR_SETUP_WGSL.into()),
-        });
-
-        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Generic Coupled Schur Setup BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Generic Coupled Schur Setup Layout"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
-        });
-
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Generic Coupled Schur Setup"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("build_diag_and_pressure"),
-            compilation_options: Default::default(),
-            cache: None,
-        })
+        let src = kernel_registry::kernel_source_by_id(
+            "",
+            KernelId::GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE,
+        )
+        .expect("generic_coupled_schur_setup shader missing from kernel registry");
+        (src.create_pipeline)(device)
     }
 
     pub fn build_setup_bind_group(
@@ -167,42 +80,34 @@ impl GenericCoupledSchurPreconditioner {
         diag_p_inv: &wgpu::Buffer,
         p_matrix_values: &wgpu::Buffer,
         setup_params: &wgpu::Buffer,
-    ) -> wgpu::BindGroup {
+    ) -> Result<wgpu::BindGroup, String> {
+        let src = kernel_registry::kernel_source_by_id(
+            "",
+            KernelId::GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE,
+        )?;
         let bgl = pipeline.get_bind_group_layout(0);
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Generic Coupled Schur Setup BG"),
-            layout: &bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: scalar_row_offsets.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: diagonal_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: matrix_values.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: diag_u_inv.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: diag_p_inv.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: p_matrix_values.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: setup_params.as_entire_binding(),
-                },
-            ],
-        })
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Generic Coupled Schur Setup BG",
+            &bgl,
+            src.bindings,
+            0,
+            |name| {
+                let buf = match name {
+                    "scalar_row_offsets" => scalar_row_offsets,
+                    "diagonal_indices" => diagonal_indices,
+                    "matrix_values" => matrix_values,
+                    "diag_u_inv" => diag_u_inv,
+                    "diag_p_inv" => diag_p_inv,
+                    "p_matrix_values" => p_matrix_values,
+                    "params" => setup_params,
+                    _ => return None,
+                };
+                Some(wgpu::BindingResource::Buffer(
+                    buf.as_entire_buffer_binding(),
+                ))
+            },
+        )
     }
 
     pub fn set_pressure_kind(&mut self, kind: CoupledPressureSolveKind) {

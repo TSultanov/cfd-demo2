@@ -324,6 +324,10 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
         ("linear_solver", shader_dir.join("linear_solver.wgsl")),
         ("preconditioner", shader_dir.join("preconditioner.wgsl")),
         ("scalars", shader_dir.join("scalars.wgsl")),
+        (
+            "generic_coupled_schur_setup",
+            shader_dir.join("generic_coupled_schur_setup.wgsl"),
+        ),
         ("schur_precond", shader_dir.join("schur_precond.wgsl")),
         (
             "schur_precond_generic",
@@ -636,6 +640,13 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "create_correct_velocity_pipeline_embed_source",
         ),
 
+        // Generic-coupled Schur setup (extract diagonal/pressure blocks).
+        (
+            "generic_coupled_schur_setup/build_diag_and_pressure",
+            "generic_coupled_schur_setup",
+            "create_build_diag_and_pressure_pipeline_embed_source",
+        ),
+
         // Coupled-solver preconditioner
         (
             "preconditioner/build_schur_rhs",
@@ -885,6 +896,15 @@ fn parse_wgsl_bindings(shader: &str) -> Vec<(u32, u32, String)> {
             let binding = parse_attr_u32(line, "@binding(");
             if let (Some(group), Some(binding)) = (group, binding) {
                 pending = Some((group, binding));
+
+                // Handle inline declarations like:
+                // `@group(0) @binding(0) var<storage, read> foo: array<u32>;`
+                if let Some(var_idx) = line.find("var") {
+                    if let Some(name) = parse_var_name(line[var_idx..].trim_start()) {
+                        out.push((group, binding, name));
+                    }
+                    pending = None;
+                }
             }
             continue;
         }

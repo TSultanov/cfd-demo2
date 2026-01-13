@@ -8,14 +8,13 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
-use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
+use super::coupled_incompressible_fields::{derive_coupled_incompressible_fields, CoupledIncompressibleFields};
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::ir::StateLayout;
 
 pub fn generate_prepare_coupled_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
-    fields: &CodegenIncompressibleMomentumFields,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -23,8 +22,10 @@ pub fn generate_prepare_coupled_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
-    let plan = momentum_plan(system, fields.u.name(), fields.p.name());
-    module.push(Item::Function(main_fn(layout, &plan, fields)));
+    let fields = derive_coupled_incompressible_fields(system, layout)
+        .unwrap_or_else(|e| panic!("prepare_coupled: {e}"));
+    let plan = momentum_plan(system, fields.u.as_str(), fields.p.as_str());
+    module.push(Item::Function(main_fn(layout, &plan, &fields)));
     module.to_wgsl()
 }
 
@@ -249,7 +250,7 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
 fn main_fn(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CodegenIncompressibleMomentumFields,
+    fields: &CoupledIncompressibleFields,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -268,13 +269,13 @@ fn main_fn(
 fn main_body(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CodegenIncompressibleMomentumFields,
+    fields: &CoupledIncompressibleFields,
 ) -> Block {
     let mut stmts = Vec::new();
-    let u_field = fields.u.name();
-    let p_field = fields.p.name();
-    let d_p_field = fields.d_p.name();
-    let grad_p_field = fields.grad_p.name();
+    let u_field = fields.u.as_str();
+    let p_field = fields.p.as_str();
+    let d_p_field = fields.d_p.as_str();
+    let grad_p_field = fields.grad_p.as_str();
     let u_old_expr = state_vec2(layout, "state_old", "idx", u_field);
     let u_idx_expr = state_vec2(layout, "state", "idx", u_field);
     let p_idx_expr = state_scalar(layout, "state", "idx", p_field);
@@ -1040,8 +1041,7 @@ mod tests {
             vol_vector("grad_p", si::PRESSURE_GRADIENT),
         ]);
         let discrete = lower_system(&system, &schemes).unwrap();
-        let fields = CodegenIncompressibleMomentumFields::new();
-        let wgsl = generate_prepare_coupled_wgsl(&discrete, &layout, &fields);
+        let wgsl = generate_prepare_coupled_wgsl(&discrete, &layout);
         assert!(wgsl.contains("state: array<f32>"));
         assert!(wgsl.contains("grad_u"));
         assert!(wgsl.contains("grad_v"));

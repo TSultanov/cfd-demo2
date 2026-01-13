@@ -41,9 +41,10 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Decide and document the canonical linear-system representation for generic-coupled (block-on-scalar-CSR vs DOF-level CSR), and make kernel bindings reflect that choice.
 
 ### 2) Codegen (remove model-specific generators; IR-driven kernels)
-- Retire field-name-specific bridges (e.g. `CodegenIncompressibleMomentumFields`) and kernel generators that assume fixed layouts; drive assembly/update kernels from IR + layout only.
+- Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
 - Progress: derived primitive recovery is dependency-ordered (toposort) so derived→derived references are well-defined.
+- Done: coupled-incompressible kernels derive required state field names from `DiscreteSystem + StateLayout` (no hardcoded `U/p/d_p/grad_p` bridge).
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing

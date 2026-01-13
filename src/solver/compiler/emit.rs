@@ -6,7 +6,6 @@ use crate::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl;
 use crate::solver::codegen::generic_coupled_kernels::{
     generate_generic_coupled_apply_wgsl, generate_generic_coupled_update_wgsl,
 };
-use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
 use crate::solver::codegen::ir::{lower_system, DiscreteSystem};
 use crate::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl;
 use crate::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl;
@@ -90,24 +89,19 @@ fn generate_kernel_wgsl(
 
     let wgsl = match kind {
         KernelKind::PrepareCoupled => {
-            let fields = CodegenIncompressibleMomentumFields::new();
-            generate_prepare_coupled_wgsl(&discrete, &model.state_layout, &fields)
+            generate_prepare_coupled_wgsl(&discrete, &model.state_layout)
         }
         KernelKind::CoupledAssembly => {
-            let fields = CodegenIncompressibleMomentumFields::new();
-            generate_coupled_assembly_wgsl(&discrete, &model.state_layout, &fields)
+            generate_coupled_assembly_wgsl(&discrete, &model.state_layout)
         }
         KernelKind::PressureAssembly => {
-            let fields = CodegenIncompressibleMomentumFields::new();
-            generate_pressure_assembly_wgsl(&discrete, &model.state_layout, &fields)
+            generate_pressure_assembly_wgsl(&discrete, &model.state_layout)
         }
         KernelKind::UpdateFieldsFromCoupled => {
-            let fields = CodegenIncompressibleMomentumFields::new();
-            generate_update_fields_from_coupled_wgsl(&model.state_layout, &fields)
+            generate_update_fields_from_coupled_wgsl(&discrete, &model.state_layout)
         }
         KernelKind::FluxRhieChow => {
-            let fields = CodegenIncompressibleMomentumFields::new();
-            generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout, &fields)
+            generate_flux_rhie_chow_wgsl(&discrete, &model.state_layout)
         }
         KernelKind::SystemMain => generate_wgsl(&discrete),
 

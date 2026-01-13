@@ -10,7 +10,7 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
-use crate::solver::codegen::incompressible_fields::CodegenIncompressibleMomentumFields;
+use super::coupled_incompressible_fields::{derive_coupled_incompressible_fields, CoupledIncompressibleFields};
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::ir::StateLayout;
 use crate::solver::scheme::Scheme;
@@ -18,7 +18,6 @@ use crate::solver::scheme::Scheme;
 pub fn generate_coupled_assembly_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
-    fields: &CodegenIncompressibleMomentumFields,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -27,17 +26,19 @@ pub fn generate_coupled_assembly_wgsl(
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
     module.extend(generate_wgsl_library_items(system));
+    let fields = derive_coupled_incompressible_fields(system, layout)
+        .unwrap_or_else(|e| panic!("coupled_assembly: {e}"));
     let plan = {
-        let plan = momentum_plan(system, fields.u.name(), fields.p.name());
+        let plan = momentum_plan(system, fields.u.as_str(), fields.p.as_str());
         if plan.pressure_diffusion.is_none() {
             panic!(
                 "missing pressure diffusion term for field '{}'",
-                fields.p.name()
+                fields.p
             );
         }
         plan
     };
-    module.push(Item::Function(main_fn(layout, &plan, fields)));
+    module.push(Item::Function(main_fn(layout, &plan, &fields)));
     module.to_wgsl()
 }
 
@@ -274,7 +275,7 @@ fn safe_inverse_fn() -> Function {
 fn main_fn(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CodegenIncompressibleMomentumFields,
+    fields: &CoupledIncompressibleFields,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -294,13 +295,19 @@ fn main_fn(
 fn main_body(
     layout: &StateLayout,
     plan: &MomentumPlan,
-    fields: &CodegenIncompressibleMomentumFields,
+    fields: &CoupledIncompressibleFields,
 ) -> Block {
     let mut stmts = Vec::new();
-    let u_field = fields.u.name();
-    let d_p_field = fields.d_p.name();
-    let u_components = fields.u.kind().component_count();
-    let p_components = fields.p.kind().component_count();
+    let u_field = fields.u.as_str();
+    let d_p_field = fields.d_p.as_str();
+    let u_components = layout
+        .field(u_field)
+        .unwrap_or_else(|| panic!("missing state field '{u_field}'"))
+        .component_count() as usize;
+    let p_components = layout
+        .field(fields.p.as_str())
+        .unwrap_or_else(|| panic!("missing state field '{}'", fields.p))
+        .component_count() as usize;
     if u_components != 2 {
         panic!(
             "expected vector2 velocity field, got {} components",
@@ -1087,10 +1094,6 @@ mod tests {
         ])
     }
 
-    fn default_fields() -> CodegenIncompressibleMomentumFields {
-        CodegenIncompressibleMomentumFields::new()
-    }
-
     #[test]
     fn generate_coupled_assembly_wgsl_includes_codegen_helpers() {
         let u = vol_vector("U", si::VELOCITY);
@@ -1111,8 +1114,7 @@ mod tests {
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &registry).unwrap();
         let layout = default_layout();
-        let fields = default_fields();
-        let wgsl = generate_coupled_assembly_wgsl(&discrete, &layout, &fields);
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &layout);
 
         assert!(wgsl.contains("codegen_conv_coeff"));
         assert!(wgsl.contains("codegen_diff_coeff"));
@@ -1143,8 +1145,7 @@ mod tests {
         );
 
         let discrete = lower_system(&system, &registry).unwrap();
-        let fields = default_fields();
-        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout(), &fields);
+        let wgsl = generate_coupled_assembly_wgsl(&discrete, &default_layout());
 
         assert!(wgsl.contains("scheme_id: u32 = 2u"));
     }

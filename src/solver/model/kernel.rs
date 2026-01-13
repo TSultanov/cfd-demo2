@@ -418,6 +418,129 @@ pub fn derive_kernel_specs_for_model(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoupledIncompressibleKernelFields {
+    pub momentum: String,
+    pub pressure: String,
+    pub d_p: String,
+    pub grad_p: String,
+}
+
+pub fn derive_coupled_incompressible_kernel_fields(
+    model: &crate::solver::model::ModelSpec,
+) -> Result<CoupledIncompressibleKernelFields, String> {
+    use crate::solver::model::backend::{FieldKind, TermOp};
+
+    let req = analyze_kernel_requirements(&model.system);
+    let coupling = req
+        .pressure_coupling
+        .ok_or_else(|| "model does not contain a unique momentum-pressure coupling".to_string())?;
+
+    if coupling.momentum.kind() != FieldKind::Vector2 {
+        return Err(format!(
+            "legacy coupled-incompressible kernels require Vector2 momentum, got {} for '{}'",
+            coupling.momentum.kind().as_str(),
+            coupling.momentum.name()
+        ));
+    }
+
+    let pressure_eq = model
+        .system
+        .equations()
+        .iter()
+        .find(|eq| *eq.target() == coupling.pressure)
+        .ok_or_else(|| {
+            format!(
+                "missing pressure equation for inferred pressure field '{}'",
+                coupling.pressure.name()
+            )
+        })?;
+
+    let pressure_laplacian = pressure_eq
+        .terms()
+        .iter()
+        .find(|t| t.op == TermOp::Laplacian)
+        .ok_or_else(|| {
+            format!(
+                "pressure equation for '{}' must include a laplacian term",
+                coupling.pressure.name()
+            )
+        })?;
+
+    let mut coeff_fields = Vec::new();
+    if let Some(coeff) = &pressure_laplacian.coeff {
+        collect_coefficient_fields(coeff, &mut coeff_fields);
+    } else {
+        return Err(format!(
+            "pressure laplacian coefficient for '{}' is missing",
+            coupling.pressure.name()
+        ));
+    }
+
+    // Rhie–Chow expects a per-cell scalar coefficient field `d_p` in state.
+    //
+    // We derive it structurally from the pressure Laplacian coefficient by selecting
+    // the unique coefficient field that lives in the state layout (named coefficients
+    // like `rho` are provided via uniforms and won't appear in the layout).
+    let layout_coeff_fields: Vec<_> = coeff_fields
+        .into_iter()
+        .filter(|f| model.state_layout.field(f.name()).is_some())
+        .collect();
+    let d_p = match layout_coeff_fields.as_slice() {
+        [only] => only.name().to_string(),
+        [] => {
+            return Err(format!(
+                "pressure laplacian coefficient for '{}' does not reference any state-layout scalar fields",
+                coupling.pressure.name()
+            ));
+        }
+        many => {
+            return Err(format!(
+                "pressure laplacian coefficient for '{}' references multiple state-layout fields; cannot derive unique d_p: [{}]",
+                coupling.pressure.name(),
+                many.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    };
+
+    let grad_p = format!("grad_{}", coupling.pressure.name());
+    if model.state_layout.field(&grad_p).is_none() {
+        return Err(format!(
+            "state layout missing required pressure-gradient field '{}' (expected by Rhie–Chow)",
+            grad_p
+        ));
+    }
+
+    if model.state_layout.field(&d_p).is_none() {
+        return Err(format!(
+            "state layout missing required pressure coefficient field '{}' (from pressure laplacian)",
+            d_p
+        ));
+    }
+
+    Ok(CoupledIncompressibleKernelFields {
+        momentum: coupling.momentum.name().to_string(),
+        pressure: coupling.pressure.name().to_string(),
+        d_p,
+        grad_p,
+    })
+}
+
+fn collect_coefficient_fields(
+    coeff: &crate::solver::model::backend::Coefficient,
+    out: &mut Vec<crate::solver::model::backend::FieldRef>,
+) {
+    use crate::solver::model::backend::Coefficient;
+    match coeff {
+        Coefficient::Constant { .. } => {}
+        Coefficient::Field(field) => out.push(*field),
+        Coefficient::Product(lhs, rhs) => {
+            collect_coefficient_fields(lhs, out);
+            collect_coefficient_fields(rhs, out);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PressureCoupling {
     momentum: crate::solver::model::backend::FieldRef,

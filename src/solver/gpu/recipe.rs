@@ -691,7 +691,7 @@ mod tests {
         assert!(recipe
             .kernels
             .iter()
-            .any(|k| k.id == KernelId::FLUX_RHIE_CHOW));
+            .any(|k| k.id == KernelId::FLUX_MODULE));
         assert!(recipe
             .kernels
             .iter()

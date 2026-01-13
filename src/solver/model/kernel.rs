@@ -1,14 +1,15 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KernelKind {
-    FluxRhieChow,
+    /// Flux-module gradients stage (optional).
+    ///
+    /// Some flux modules (e.g. KT) require precomputed gradients of the coupled unknowns.
+    FluxModuleGradients,
 
-    // Transitional: KT flux module bridge for the generic-coupled pipeline.
-    //
-    // These are currently backed by the legacy EI shader generators and bindings,
-    // but are selected by model structure (FluxModuleSpec + PrimitiveDerivations)
-    // rather than by the EI method family.
-    KtGradients,
-    FluxKt,
+    /// Flux computation stage (optional).
+    ///
+    /// This is a model-selected numerical module (KT, Rhie–Chow, etc.) and is emitted
+    /// as a per-model kernel in the registry keyed by `(model_id, KernelId)`.
+    FluxModule,
 
     GenericCoupledAssembly,
     GenericCoupledApply,
@@ -23,14 +24,8 @@ pub enum KernelKind {
 pub struct KernelId(pub &'static str);
 
 impl KernelId {
-    pub const FLUX_RHIE_CHOW: KernelId = KernelId("flux_rhie_chow");
-
-    // Transitional stable ids for KT flux module + primitive recovery.
-    //
-    // These allow routing compressible models through the generic-coupled pipeline
-    // without selecting any legacy EI kernel ids.
-    pub const KT_GRADIENTS: KernelId = KernelId("kt_gradients");
-    pub const FLUX_KT: KernelId = KernelId("flux_kt");
+    pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
+    pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
@@ -125,10 +120,8 @@ impl KernelId {
 impl From<KernelKind> for KernelId {
     fn from(kind: KernelKind) -> Self {
         match kind {
-            KernelKind::FluxRhieChow => KernelId::FLUX_RHIE_CHOW,
-
-            KernelKind::KtGradients => KernelId::KT_GRADIENTS,
-            KernelKind::FluxKt => KernelId::FLUX_KT,
+            KernelKind::FluxModuleGradients => KernelId::FLUX_MODULE_GRADIENTS,
+            KernelKind::FluxModule => KernelId::FLUX_MODULE,
 
             KernelKind::GenericCoupledAssembly => KernelId::GENERIC_COUPLED_ASSEMBLY,
             KernelKind::GenericCoupledApply => KernelId::GENERIC_COUPLED_APPLY,
@@ -219,7 +212,7 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
 
     match model.method {
         MethodSpec::CoupledIncompressible => KernelPlan::new(vec![
-            KernelKind::FluxRhieChow,
+            KernelKind::FluxModule,
             KernelKind::GenericCoupledAssembly,
             KernelKind::GenericCoupledUpdate,
         ]),
@@ -227,21 +220,13 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
             let mut kernels = Vec::new();
             // Optional flux module stage.
             //
-            // Transitional bridge: reuse the existing Rhie–Chow kernel when requested by the
-            // model. This should eventually come from module-driven recipe emission.
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
-            ) {
-                kernels.push(KernelKind::FluxRhieChow);
-            }
-
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
-            ) {
-                kernels.push(KernelKind::KtGradients);
-                kernels.push(KernelKind::FluxKt);
+            // Emit a generic flux-module stage, plus an optional gradients stage for modules
+            // that require it (e.g. KT).
+            if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })) {
+                kernels.push(KernelKind::FluxModuleGradients);
+                kernels.push(KernelKind::FluxModule);
+            } else if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })) {
+                kernels.push(KernelKind::FluxModule);
             }
 
             kernels.push(KernelKind::GenericCoupledAssembly);
@@ -253,19 +238,11 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
             // Keep kernel ordering stable; phases are assigned by the recipe.
             let mut kernels = Vec::new();
 
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
-            ) {
-                kernels.push(KernelKind::FluxRhieChow);
-            }
-
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
-            ) {
-                kernels.push(KernelKind::KtGradients);
-                kernels.push(KernelKind::FluxKt);
+            if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })) {
+                kernels.push(KernelKind::FluxModuleGradients);
+                kernels.push(KernelKind::FluxModule);
+            } else if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })) {
+                kernels.push(KernelKind::FluxModule);
             }
 
             kernels.push(KernelKind::GenericCoupledAssembly);
@@ -291,7 +268,7 @@ pub fn derive_kernel_specs_for_model(
 
             Ok(vec![
                 ModelKernelSpec {
-                    id: KernelId::FLUX_RHIE_CHOW,
+                    id: KernelId::FLUX_MODULE,
                     phase: KernelPhaseId::FluxComputation,
                     dispatch: DispatchKindId::Faces,
                 },
@@ -313,19 +290,19 @@ pub fn derive_kernel_specs_for_model(
             match &model.flux_module {
                 Some(FluxModuleSpec::RhieChow { .. }) => {
                     kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_RHIE_CHOW,
+                        id: KernelId::FLUX_MODULE,
                         phase: KernelPhaseId::FluxComputation,
                         dispatch: DispatchKindId::Faces,
                     });
                 }
                 Some(FluxModuleSpec::KurganovTadmor { .. }) => {
                     kernels.push(ModelKernelSpec {
-                        id: KernelId::KT_GRADIENTS,
+                        id: KernelId::FLUX_MODULE_GRADIENTS,
                         phase: KernelPhaseId::Gradients,
                         dispatch: DispatchKindId::Cells,
                     });
                     kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_KT,
+                        id: KernelId::FLUX_MODULE,
                         phase: KernelPhaseId::FluxComputation,
                         dispatch: DispatchKindId::Faces,
                     });
@@ -352,19 +329,19 @@ pub fn derive_kernel_specs_for_model(
             match &model.flux_module {
                 Some(FluxModuleSpec::RhieChow { .. }) => {
                     kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_RHIE_CHOW,
+                        id: KernelId::FLUX_MODULE,
                         phase: KernelPhaseId::FluxComputation,
                         dispatch: DispatchKindId::Faces,
                     });
                 }
                 Some(FluxModuleSpec::KurganovTadmor { .. }) => {
                     kernels.push(ModelKernelSpec {
-                        id: KernelId::KT_GRADIENTS,
+                        id: KernelId::FLUX_MODULE_GRADIENTS,
                         phase: KernelPhaseId::Gradients,
                         dispatch: DispatchKindId::Cells,
                     });
                     kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_KT,
+                        id: KernelId::FLUX_MODULE,
                         phase: KernelPhaseId::FluxComputation,
                         dispatch: DispatchKindId::Faces,
                     });
@@ -420,11 +397,15 @@ pub fn derive_kernel_codegen_fields_for_model(
 ) -> Result<KernelCodegenFieldMap, String> {
     let mut out = KernelCodegenFieldMap::new();
     match kind {
-        KernelKind::FluxRhieChow => {
-            derive_rhie_chow_fields(model, &mut out)?;
+        KernelKind::FluxModule => {
+            if matches!(
+                model.flux_module,
+                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
+            ) {
+                derive_rhie_chow_fields(model, &mut out)?;
+            }
         }
-        KernelKind::KtGradients
-        | KernelKind::FluxKt
+        KernelKind::FluxModuleGradients
         | KernelKind::GenericCoupledAssembly
         | KernelKind::GenericCoupledApply
         | KernelKind::GenericCoupledUpdate => {}
@@ -529,11 +510,8 @@ fn required_codegen_field<'a>(map: &'a KernelCodegenFieldMap, key: &str) -> &'a 
 
 pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
     match kind {
-        KernelKind::FluxRhieChow => format!("flux_rhie_chow_{model_id}.wgsl"),
-
-        // Transitional KT flux module bridge.
-        KernelKind::KtGradients => format!("kt_gradients_{model_id}.wgsl"),
-        KernelKind::FluxKt => format!("flux_kt_{model_id}.wgsl"),
+        KernelKind::FluxModuleGradients => format!("flux_module_gradients_{model_id}.wgsl"),
+        KernelKind::FluxModule => format!("flux_module_{model_id}.wgsl"),
 
         KernelKind::GenericCoupledAssembly => format!("generic_coupled_assembly_{model_id}.wgsl"),
         KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
@@ -551,34 +529,43 @@ pub fn generate_kernel_wgsl_for_model(
     let discrete: DiscreteSystem = lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
 
     let wgsl = match kind {
-        KernelKind::FluxRhieChow => {
-            let fields = derive_kernel_codegen_fields_for_model(model, kind)?;
-            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
-            cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
-                &discrete,
-                &model.state_layout,
-                flux_stride,
-                required_codegen_field(&fields, "momentum"),
-                required_codegen_field(&fields, "pressure"),
-                required_codegen_field(&fields, "d_p"),
-                required_codegen_field(&fields, "grad_p"),
-            )
-        }
-
-        KernelKind::KtGradients => {
-            cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(
-                &model.state_layout,
-            )
-        }
-        KernelKind::FluxKt => {
-            let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-            let eos = ir_eos_from_model(model.eos);
-            cfd2_codegen::solver::codegen::flux_kt::generate_flux_kt_wgsl(
-                &model.state_layout,
-                &flux_layout,
-                &eos,
-            )
-        }
+        KernelKind::FluxModuleGradients => match &model.flux_module {
+            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
+                cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(
+                    &model.state_layout,
+                )
+            }
+            _ => {
+                return Err("FluxModuleGradients requested but model has no gradients-based flux module".to_string());
+            }
+        },
+        KernelKind::FluxModule => match &model.flux_module {
+            Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. }) => {
+                let fields = derive_kernel_codegen_fields_for_model(model, KernelKind::FluxModule)?;
+                let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+                cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
+                    &discrete,
+                    &model.state_layout,
+                    flux_stride,
+                    required_codegen_field(&fields, "momentum"),
+                    required_codegen_field(&fields, "pressure"),
+                    required_codegen_field(&fields, "d_p"),
+                    required_codegen_field(&fields, "grad_p"),
+                )
+            }
+            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
+                let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+                let eos = ir_eos_from_model(model.eos);
+                cfd2_codegen::solver::codegen::flux_kt::generate_flux_kt_wgsl(
+                    &model.state_layout,
+                    &flux_layout,
+                    &eos,
+                )
+            }
+            Some(crate::solver::model::flux_module::FluxModuleSpec::Convective { .. }) | None => {
+                return Err("FluxModule requested but model has no flux module requiring a kernel".to_string());
+            }
+        },
 
         KernelKind::GenericCoupledAssembly => {
             let needs_gradients = crate::solver::ir::expand_schemes(&model.system, schemes)
@@ -715,7 +702,7 @@ fn analyze_kernel_requirements(
 fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
     if req.pressure_coupling.is_some() {
         return KernelPlan::new(vec![
-            KernelKind::FluxRhieChow,
+            KernelKind::FluxModule,
             KernelKind::GenericCoupledAssembly,
             KernelKind::GenericCoupledUpdate,
         ]);
@@ -731,7 +718,7 @@ fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
 fn synthesize_kernel_ids(req: &KernelRequirements) -> Vec<KernelId> {
     if req.pressure_coupling.is_some() {
         return vec![
-            KernelId::FLUX_RHIE_CHOW,
+            KernelId::FLUX_MODULE,
             KernelId::GENERIC_COUPLED_ASSEMBLY,
             KernelId::GENERIC_COUPLED_UPDATE,
         ];

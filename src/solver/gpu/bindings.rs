@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 95b6202cac7b1cd91911d69ca3bc07a543e99be4e9ba584f978ffd75585e34c6
+// SourceHash: b86c362818161d906b7b19ec4451938d1596c39dd0d3267d82ab4b885e896a08
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12,9 +12,10 @@ pub enum ShaderEntry {
     BlockPrecond,
     DotProduct,
     DotProductPair,
-    GeneratedFluxKtCompressible,
-    GeneratedFluxRhieChowIncompressibleMomentum,
-    GeneratedFluxRhieChowIncompressibleMomentumGeneric,
+    GeneratedFluxModuleCompressible,
+    GeneratedFluxModuleGradientsCompressible,
+    GeneratedFluxModuleIncompressibleMomentum,
+    GeneratedFluxModuleIncompressibleMomentumGeneric,
     GeneratedGenericCoupledApply,
     GeneratedGenericCoupledAssemblyCompressible,
     GeneratedGenericCoupledAssemblyGenericDiffusionDemo,
@@ -26,7 +27,6 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann,
     GeneratedGenericCoupledUpdateIncompressibleMomentum,
     GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric,
-    GeneratedKtGradientsCompressible,
     GenericCoupledSchurSetup,
     GmresCgs,
     GmresLogic,
@@ -39,10 +39,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedFluxKtCompressible => generated :: flux_kt_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxRhieChowIncompressibleMomentum => generated :: flux_rhie_chow_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxRhieChowIncompressibleMomentumGeneric => generated :: flux_rhie_chow_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedKtGradientsCompressible => generated :: kt_gradients_compressible :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Preconditioner => preconditioner :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumGeneric => generated :: flux_module_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Preconditioner => preconditioner :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxKtCompressible => { generated :: flux_kt_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxRhieChowIncompressibleMomentum => { generated :: flux_rhie_chow_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxRhieChowIncompressibleMomentumGeneric => { generated :: flux_rhie_chow_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedKtGradientsCompressible => { generated :: kt_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Preconditioner => { preconditioner :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumGeneric => { generated :: flux_module_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Preconditioner => { preconditioner :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -108,258 +108,400 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(dot_product_pair::SolverParams, n) == 0);
         assert!(std::mem::size_of::<dot_product_pair::SolverParams>() == 4);
     };
-    const GENERATED_FLUX_KT_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Vector2, x) == 0);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Vector2, y) == 4);
-        assert!(std::mem::size_of::<generated::flux_kt_compressible::Vector2>() == 8);
+    const GENERATED_FLUX_MODULE_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Vector2, x) == 0);
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Vector2, y) == 4);
+        assert!(std::mem::size_of::<generated::flux_module_compressible::Vector2>() == 8);
     };
-    const GENERATED_FLUX_KT_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, dt) == 0);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, dt_old) == 4);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, dtau) == 8);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, time) == 12);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, viscosity) == 16);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, density) == 20);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, component) == 24);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, alpha_p) == 28);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, scheme) == 32);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, alpha_u) == 36);
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, stride_x) == 40);
+    const GENERATED_FLUX_MODULE_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, dt) == 0);
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, dt_old) == 4);
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, dtau) == 8);
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, time) == 12);
         assert!(
-            std::mem::offset_of!(generated::flux_kt_compressible::Constants, time_scheme) == 44
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, viscosity) == 16
         );
         assert!(
-            std::mem::offset_of!(generated::flux_kt_compressible::Constants, inlet_velocity) == 48
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, density) == 20
         );
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::Constants, ramp_time) == 52);
-        assert!(std::mem::size_of::<generated::flux_kt_compressible::Constants>() == 56);
-    };
-    const GENERATED_FLUX_KT_COMPRESSIBLE_LOW_MACH_PARAMS_ASSERTS: () = {
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::LowMachParams, model) == 0);
         assert!(
-            std::mem::offset_of!(generated::flux_kt_compressible::LowMachParams, theta_floor) == 4
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, component) == 24
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, alpha_p) == 28
+        );
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, scheme) == 32);
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, alpha_u) == 36
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, stride_x) == 40
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, time_scheme) == 44
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_kt_compressible::LowMachParams,
+                generated::flux_module_compressible::Constants,
+                inlet_velocity
+            ) == 48
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, ramp_time) == 52
+        );
+        assert!(std::mem::size_of::<generated::flux_module_compressible::Constants>() == 56);
+    };
+    const GENERATED_FLUX_MODULE_COMPRESSIBLE_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::LowMachParams, model) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_compressible::LowMachParams,
+                theta_floor
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_compressible::LowMachParams,
                 pressure_coupling_alpha
             ) == 8
         );
-        assert!(std::mem::offset_of!(generated::flux_kt_compressible::LowMachParams, _pad0) == 12);
-        assert!(std::mem::size_of::<generated::flux_kt_compressible::LowMachParams>() == 16);
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::LowMachParams, _pad0) == 12
+        );
+        assert!(std::mem::size_of::<generated::flux_module_compressible::LowMachParams>() == 16);
     };
-    const GENERATED_FLUX_RHIE_CHOW_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
+    const GENERATED_FLUX_MODULE_GRADIENTS_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
         assert!(
-            std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Vector2,
-                x
-            ) == 0
+            std::mem::offset_of!(generated::flux_module_gradients_compressible::Vector2, x) == 0
         );
         assert!(
-            std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Vector2,
-                y
-            ) == 4
+            std::mem::offset_of!(generated::flux_module_gradients_compressible::Vector2, y) == 4
         );
-        assert!(
-            std::mem::size_of::<generated::flux_rhie_chow_incompressible_momentum::Vector2>() == 8
-        );
+        assert!(std::mem::size_of::<generated::flux_module_gradients_compressible::Vector2>() == 8);
     };
-    const GENERATED_FLUX_RHIE_CHOW_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
+    const GENERATED_FLUX_MODULE_GRADIENTS_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
         assert!(
-            std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
-                dt
-            ) == 0
+            std::mem::offset_of!(generated::flux_module_gradients_compressible::Constants, dt) == 0
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 dt_old
             ) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 dtau
             ) == 8
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 time
             ) == 12
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 viscosity
             ) == 16
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 density
             ) == 20
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 component
             ) == 24
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 alpha_p
             ) == 28
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 scheme
             ) == 32
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 alpha_u
             ) == 36
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 stride_x
             ) == 40
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 time_scheme
             ) == 44
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 inlet_velocity
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum::Constants,
+                generated::flux_module_gradients_compressible::Constants,
                 ramp_time
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::flux_rhie_chow_incompressible_momentum::Constants>()
-                == 56
+            std::mem::size_of::<generated::flux_module_gradients_compressible::Constants>() == 56
         );
     };
-    const GENERATED_FLUX_RHIE_CHOW_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
+    const GENERATED_FLUX_MODULE_GRADIENTS_COMPRESSIBLE_LOW_MACH_PARAMS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Vector2,
-                x
+                generated::flux_module_gradients_compressible::LowMachParams,
+                model
             ) == 0
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Vector2,
-                y
+                generated::flux_module_gradients_compressible::LowMachParams,
+                theta_floor
             ) == 4
         );
         assert!(
-            std::mem::size_of::<generated::flux_rhie_chow_incompressible_momentum_generic::Vector2>(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_compressible::LowMachParams,
+                pressure_coupling_alpha
             ) == 8
         );
-    };
-    const GENERATED_FLUX_RHIE_CHOW_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_gradients_compressible::LowMachParams,
+                _pad0
+            ) == 12
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_gradients_compressible::LowMachParams>()
+                == 16
+        );
+    };
+    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(generated::flux_module_incompressible_momentum::Vector2, x) == 0
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_incompressible_momentum::Vector2, y) == 4
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum::Vector2>() == 8
+        );
+    };
+    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
                 dt
             ) == 0
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 dt_old
             ) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 dtau
             ) == 8
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 time
             ) == 12
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 viscosity
             ) == 16
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 density
             ) == 20
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 component
             ) == 24
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 alpha_p
             ) == 28
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 scheme
             ) == 32
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 alpha_u
             ) == 36
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 stride_x
             ) == 40
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 time_scheme
             ) == 44
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 inlet_velocity
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
-                generated::flux_rhie_chow_incompressible_momentum_generic::Constants,
+                generated::flux_module_incompressible_momentum::Constants,
                 ramp_time
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::flux_rhie_chow_incompressible_momentum_generic::Constants>(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum::Constants>() == 56
+        );
+    };
+    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Vector2,
+                x
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Vector2,
+                y
+            ) == 4
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Vector2>()
+                == 8
+        );
+    };
+    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                inlet_velocity
+            ) == 48
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                ramp_time
+            ) == 52
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Constants>(
             ) == 56
         );
     };
@@ -1353,73 +1495,6 @@ pub mod layout_asserts {
             >() == 56
         );
     };
-    const GENERATED_KT_GRADIENTS_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
-        assert!(std::mem::offset_of!(generated::kt_gradients_compressible::Vector2, x) == 0);
-        assert!(std::mem::offset_of!(generated::kt_gradients_compressible::Vector2, y) == 4);
-        assert!(std::mem::size_of::<generated::kt_gradients_compressible::Vector2>() == 8);
-    };
-    const GENERATED_KT_GRADIENTS_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
-        assert!(std::mem::offset_of!(generated::kt_gradients_compressible::Constants, dt) == 0);
-        assert!(std::mem::offset_of!(generated::kt_gradients_compressible::Constants, dt_old) == 4);
-        assert!(std::mem::offset_of!(generated::kt_gradients_compressible::Constants, dtau) == 8);
-        assert!(std::mem::offset_of!(generated::kt_gradients_compressible::Constants, time) == 12);
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, viscosity) == 16
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, density) == 20
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, component) == 24
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, alpha_p) == 28
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, scheme) == 32
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, alpha_u) == 36
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, stride_x) == 40
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, time_scheme)
-                == 44
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::kt_gradients_compressible::Constants,
-                inlet_velocity
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::Constants, ramp_time) == 52
-        );
-        assert!(std::mem::size_of::<generated::kt_gradients_compressible::Constants>() == 56);
-    };
-    const GENERATED_KT_GRADIENTS_COMPRESSIBLE_LOW_MACH_PARAMS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::LowMachParams, model) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::kt_gradients_compressible::LowMachParams,
-                theta_floor
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::kt_gradients_compressible::LowMachParams,
-                pressure_coupling_alpha
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(generated::kt_gradients_compressible::LowMachParams, _pad0) == 12
-        );
-        assert!(std::mem::size_of::<generated::kt_gradients_compressible::LowMachParams>() == 16);
-    };
     const GENERIC_COUPLED_SCHUR_SETUP_SETUP_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, dispatch_x) == 0);
         assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, num_cells) == 4);
@@ -2245,26 +2320,29 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for dot_product::SolverParams {}
     unsafe impl bytemuck::Zeroable for dot_product_pair::SolverParams {}
     unsafe impl bytemuck::Pod for dot_product_pair::SolverParams {}
-    unsafe impl bytemuck::Zeroable for generated::flux_kt_compressible::Vector2 {}
-    unsafe impl bytemuck::Pod for generated::flux_kt_compressible::Vector2 {}
-    unsafe impl bytemuck::Zeroable for generated::flux_kt_compressible::Constants {}
-    unsafe impl bytemuck::Pod for generated::flux_kt_compressible::Constants {}
-    unsafe impl bytemuck::Zeroable for generated::flux_kt_compressible::LowMachParams {}
-    unsafe impl bytemuck::Pod for generated::flux_kt_compressible::LowMachParams {}
-    unsafe impl bytemuck::Zeroable for generated::flux_rhie_chow_incompressible_momentum::Vector2 {}
-    unsafe impl bytemuck::Pod for generated::flux_rhie_chow_incompressible_momentum::Vector2 {}
-    unsafe impl bytemuck::Zeroable for generated::flux_rhie_chow_incompressible_momentum::Constants {}
-    unsafe impl bytemuck::Pod for generated::flux_rhie_chow_incompressible_momentum::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::flux_module_compressible::Vector2 {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::Constants {}
+    unsafe impl bytemuck::Pod for generated::flux_module_compressible::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::flux_module_compressible::LowMachParams {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_gradients_compressible::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::flux_module_gradients_compressible::Vector2 {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_gradients_compressible::Constants {}
+    unsafe impl bytemuck::Pod for generated::flux_module_gradients_compressible::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_gradients_compressible::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::flux_module_gradients_compressible::LowMachParams {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum::Vector2 {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum::Constants {}
+    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum_generic::Vector2 {}
+    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_generic::Vector2 {}
     unsafe impl bytemuck::Zeroable
-        for generated::flux_rhie_chow_incompressible_momentum_generic::Vector2
+        for generated::flux_module_incompressible_momentum_generic::Constants
     {
     }
-    unsafe impl bytemuck::Pod for generated::flux_rhie_chow_incompressible_momentum_generic::Vector2 {}
-    unsafe impl bytemuck::Zeroable
-        for generated::flux_rhie_chow_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod for generated::flux_rhie_chow_incompressible_momentum_generic::Constants {}
+    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_generic::Constants {}
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_assembly_compressible::Vector2 {}
     unsafe impl bytemuck::Pod for generated::generic_coupled_assembly_compressible::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_assembly_compressible::Constants {}
@@ -2355,12 +2433,6 @@ pub mod bytemuck_impls {
         for generated::generic_coupled_update_incompressible_momentum_generic::Constants
     {
     }
-    unsafe impl bytemuck::Zeroable for generated::kt_gradients_compressible::Vector2 {}
-    unsafe impl bytemuck::Pod for generated::kt_gradients_compressible::Vector2 {}
-    unsafe impl bytemuck::Zeroable for generated::kt_gradients_compressible::Constants {}
-    unsafe impl bytemuck::Pod for generated::kt_gradients_compressible::Constants {}
-    unsafe impl bytemuck::Zeroable for generated::kt_gradients_compressible::LowMachParams {}
-    unsafe impl bytemuck::Pod for generated::kt_gradients_compressible::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generic_coupled_schur_setup::SetupParams {}
     unsafe impl bytemuck::Pod for generic_coupled_schur_setup::SetupParams {}
     unsafe impl bytemuck::Zeroable for gmres_cgs::Params {}
@@ -4336,7 +4408,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
 }
 pub mod generated {
     use super::{_root, _root::*};
-    pub mod flux_kt_compressible {
+    pub mod flux_module_compressible {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
@@ -4572,7 +4644,7 @@ pub mod generated {
         impl WgpuBindGroup0 {
             pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
                 wgpu::BindGroupLayoutDescriptor {
-                    label: Some("GeneratedFluxKtCompressible::BindGroup0::LayoutDescriptor"),
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup0::LayoutDescriptor"),
                     entries: &[
                         #[doc = " @binding(0): \"face_owner\""]
                         wgpu::BindGroupLayoutEntry {
@@ -4715,7 +4787,7 @@ pub mod generated {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxKtCompressible::BindGroup0"),
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup0"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -4826,7 +4898,7 @@ pub mod generated {
         impl WgpuBindGroup1 {
             pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
                 wgpu::BindGroupLayoutDescriptor {
-                    label: Some("GeneratedFluxKtCompressible::BindGroup1::LayoutDescriptor"),
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup1::LayoutDescriptor"),
                     entries: &[
                         #[doc = " @binding(0): \"state\""]
                         wgpu::BindGroupLayoutEntry {
@@ -4880,7 +4952,7 @@ pub mod generated {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
                                 min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                                    _root::generated::flux_kt_compressible::Constants,
+                                    _root::generated::flux_module_compressible::Constants,
                                 >(
                                 )
                                     as _),
@@ -4950,7 +5022,7 @@ pub mod generated {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
                                 min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                                    _root::generated::flux_kt_compressible::LowMachParams,
+                                    _root::generated::flux_module_compressible::LowMachParams,
                                 >(
                                 )
                                     as _),
@@ -4966,7 +5038,7 @@ pub mod generated {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxKtCompressible::BindGroup1"),
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup1"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -5011,7 +5083,7 @@ pub mod generated {
         impl WgpuBindGroup2 {
             pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
                 wgpu::BindGroupLayoutDescriptor {
-                    label: Some("GeneratedFluxKtCompressible::BindGroup2::LayoutDescriptor"),
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup2::LayoutDescriptor"),
                     entries: &[
                         #[doc = " @binding(0): \"bc_kind\""]
                         wgpu::BindGroupLayoutEntry {
@@ -5044,7 +5116,7 @@ pub mod generated {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxKtCompressible::BindGroup2"),
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup2"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -5084,7 +5156,7 @@ pub mod generated {
         }
         pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedFluxKtCompressible::PipelineLayout"),
+                label: Some("GeneratedFluxModuleCompressible::PipelineLayout"),
                 bind_group_layouts: &[
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
@@ -5096,7 +5168,7 @@ pub mod generated {
         pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("flux_kt_compressible.wgsl"),
+                label: Some("flux_module_compressible.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -5539,7 +5611,762 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod flux_rhie_chow_incompressible_momentum {
+    pub mod flux_module_gradients_compressible {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub inlet_velocity: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub ramp_time: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                inlet_velocity: f32,
+                ramp_time: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    inlet_velocity,
+                    ramp_time,
+                }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
+                    pressure_coupling_alpha,
+                    _pad0,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
+            pub diagonal_indices: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
+            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    cell_face_matrix_indices: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
+                    },
+                    diagonal_indices: wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.cell_face_matrix_indices,
+                    self.diagonal_indices,
+                    self.face_boundary,
+                    self.face_centers,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some(
+                        "GeneratedFluxModuleGradientsCompressible::BindGroup0::LayoutDescriptor",
+                    ),
+                    entries: &[
+                        #[doc = " @binding(0): \"face_owner\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"face_neighbor\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(2): \"face_areas\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(3): \"face_normals\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(4): \"cell_centers\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"cell_vols\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(6): \"cell_face_offsets\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(7): \"cell_faces\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(8): \"cell_face_matrix_indices\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 8,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(9): \"diagonal_indices\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 9,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(12): \"face_boundary\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 12,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(13): \"face_centers\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 13,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleGradientsCompressible::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub grad_rho: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
+            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
+            pub grad_rho_e: wgpu::BufferBinding<'a>,
+            pub state_iter: wgpu::BufferBinding<'a>,
+            pub low_mach: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_rho: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
+            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
+            pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub low_mach: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    grad_rho: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
+                    },
+                    grad_rho_u_x: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
+                    },
+                    grad_rho_u_y: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
+                    },
+                    grad_rho_e: wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
+                    },
+                    state_iter: wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Buffer(params.state_iter),
+                    },
+                    low_mach: wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.fluxes,
+                    self.constants,
+                    self.grad_rho,
+                    self.grad_rho_u_x,
+                    self.grad_rho_u_y,
+                    self.grad_rho_e,
+                    self.state_iter,
+                    self.low_mach,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsCompressible::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_gradients_compressible :: Constants > () as _) , } , count : None , } , # [doc = " @binding(5): \"grad_rho\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"grad_rho_u_x\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"grad_rho_u_y\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(8): \"grad_rho_e\""] wgpu :: BindGroupLayoutEntry { binding : 8 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(9): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 9 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"low_mach\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_gradients_compressible :: LowMachParams > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleGradientsCompressible::BindGroup1"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 2],
+            ) -> [wgpu::BindGroupLayout; 2] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedFluxModuleGradientsCompressible::PipelineLayout"),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("flux_module_gradients_compressible.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    inlet_velocity: f32,
+    ramp_time: f32,
+}
+
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
+    pressure_coupling_alpha: f32,
+    _pad0_: f32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(0) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(0) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(0) @binding(8) 
+var<storage> cell_face_matrix_indices: array<u32>;
+@group(0) @binding(9) 
+var<storage> diagonal_indices: array<u32>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) 
+var<uniform> constants: Constants;
+@group(1) @binding(5) 
+var<storage, read_write> grad_rho: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> grad_rho_u_x: array<Vector2_>;
+@group(1) @binding(7) 
+var<storage, read_write> grad_rho_u_y: array<Vector2_>;
+@group(1) @binding(8) 
+var<storage, read_write> grad_rho_e: array<Vector2_>;
+@group(1) @binding(9) 
+var<storage> state_iter: array<f32>;
+@group(1) @binding(10) 
+var<uniform> low_mach: LowMachParams;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var grad_rho_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_rho_u_x_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_rho_u_y_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_rho_e_accum: vec2<f32> = vec2<f32>(0f, 0f);
+    var k: u32;
+    var normal: vec2<f32>;
+    var rho_r: f32;
+    var rho_u_r: vec2<f32>;
+    var rho_e_r: f32;
+    var other_idx: u32;
+    var rho_face: f32;
+    var rho_u_face: vec2<f32>;
+    var rho_e_face: f32;
+
+    let idx = global_id.x;
+    if (idx >= arrayLength((&cell_vols))) {
+        return;
+    }
+    let center = cell_centers[idx];
+    let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    let rho_l = state[((idx * 7u) + 0u)];
+    let _e34 = state[((idx * 7u) + 1u)];
+    let _e41 = state[((idx * 7u) + 2u)];
+    let rho_u_l = vec2<f32>(_e34, _e41);
+    let rho_e_l = state[((idx * 7u) + 3u)];
+    k = start;
+    loop {
+        let _e51 = k;
+        if (_e51 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e54 = k;
+            let face_idx = cell_faces[_e54];
+            let owner = face_owner[face_idx];
+            let neighbor = face_neighbor[face_idx];
+            let area = face_areas[face_idx];
+            let _e69 = face_normals[face_idx].x;
+            let _e73 = face_normals[face_idx].y;
+            normal = vec2<f32>(_e69, _e73);
+            if (owner != idx) {
+                let _e77 = normal;
+                normal = -(_e77);
+            }
+            rho_r = rho_l;
+            rho_u_r = rho_u_l;
+            rho_e_r = rho_e_l;
+            if (neighbor != -1i) {
+                other_idx = u32(neighbor);
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e87 = other_idx;
+                let rho_neigh = state[((_e87 * 7u) + 0u)];
+                let _e95 = other_idx;
+                let _e102 = state[((_e95 * 7u) + 1u)];
+                let _e103 = other_idx;
+                let _e110 = state[((_e103 * 7u) + 2u)];
+                let rho_u_neigh = vec2<f32>(_e102, _e110);
+                let _e112 = other_idx;
+                let rho_e_neigh = state[((_e112 * 7u) + 3u)];
+                rho_r = rho_neigh;
+                rho_u_r = rho_u_neigh;
+                rho_e_r = rho_e_neigh;
+            }
+            rho_face = rho_l;
+            rho_u_face = rho_u_l;
+            rho_e_face = rho_e_l;
+            if (neighbor != -1i) {
+                let _e125 = rho_r;
+                rho_face = ((rho_l + _e125) * 0.5f);
+                let _e129 = rho_u_r;
+                rho_u_face = ((rho_u_l + _e129) * 0.5f);
+                let _e133 = rho_e_r;
+                rho_e_face = ((rho_e_l + _e133) * 0.5f);
+            }
+            let _e138 = normal;
+            let _e139 = rho_face;
+            let _e142 = grad_rho_accum;
+            grad_rho_accum = (_e142 + ((_e138 * _e139) * area));
+            let _e145 = normal;
+            let _e147 = rho_u_face.x;
+            let _e150 = grad_rho_u_x_accum;
+            grad_rho_u_x_accum = (_e150 + ((_e145 * _e147) * area));
+            let _e153 = normal;
+            let _e155 = rho_u_face.y;
+            let _e158 = grad_rho_u_y_accum;
+            grad_rho_u_y_accum = (_e158 + ((_e153 * _e155) * area));
+            let _e161 = normal;
+            let _e162 = rho_e_face;
+            let _e165 = grad_rho_e_accum;
+            grad_rho_e_accum = (_e165 + ((_e161 * _e162) * area));
+        }
+        continuing {
+            let _e168 = k;
+            k = (_e168 + 1u);
+        }
+    }
+    let _e170 = grad_rho_accum;
+    grad_rho_accum = (_e170 / vec2(vol));
+    let _e173 = grad_rho_u_x_accum;
+    grad_rho_u_x_accum = (_e173 / vec2(vol));
+    let _e176 = grad_rho_u_y_accum;
+    grad_rho_u_y_accum = (_e176 / vec2(vol));
+    let _e179 = grad_rho_e_accum;
+    grad_rho_e_accum = (_e179 / vec2(vol));
+    let _e185 = grad_rho_accum.x;
+    let _e187 = grad_rho_accum.y;
+    grad_rho[idx] = Vector2_(_e185, _e187);
+    let _e192 = grad_rho_u_x_accum.x;
+    let _e194 = grad_rho_u_x_accum.y;
+    grad_rho_u_x[idx] = Vector2_(_e192, _e194);
+    let _e199 = grad_rho_u_y_accum.x;
+    let _e201 = grad_rho_u_y_accum.y;
+    grad_rho_u_y[idx] = Vector2_(_e199, _e201);
+    let _e206 = grad_rho_e_accum.x;
+    let _e208 = grad_rho_e_accum.y;
+    grad_rho_e[idx] = Vector2_(_e206, _e208);
+    return;
+}
+"#;
+    }
+    pub mod flux_module_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
@@ -5749,7 +6576,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
                 wgpu::BindGroupLayoutDescriptor {
                     label: Some(
-                        "GeneratedFluxRhieChowIncompressibleMomentum::BindGroup0::LayoutDescriptor",
+                        "GeneratedFluxModuleIncompressibleMomentum::BindGroup0::LayoutDescriptor",
                     ),
                     entries: &[
                         #[doc = " @binding(0): \"face_owner\""]
@@ -5893,7 +6720,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxRhieChowIncompressibleMomentum::BindGroup0"),
+                    label: Some("GeneratedFluxModuleIncompressibleMomentum::BindGroup0"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -5960,7 +6787,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup1(wgpu::BindGroup);
         impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxRhieChowIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_rhie_chow_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -5968,7 +6795,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxRhieChowIncompressibleMomentum::BindGroup1"),
+                    label: Some("GeneratedFluxModuleIncompressibleMomentum::BindGroup1"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -6006,7 +6833,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedFluxRhieChowIncompressibleMomentum::PipelineLayout"),
+                label: Some("GeneratedFluxModuleIncompressibleMomentum::PipelineLayout"),
                 bind_group_layouts: &[
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
@@ -6017,7 +6844,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("flux_rhie_chow_incompressible_momentum.wgsl"),
+                label: Some("flux_module_incompressible_momentum.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -6221,7 +7048,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod flux_rhie_chow_incompressible_momentum_generic {
+    pub mod flux_module_incompressible_momentum_generic {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
@@ -6428,7 +7255,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxRhieChowIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -6436,7 +7263,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxRhieChowIncompressibleMomentumGeneric::BindGroup0"),
+                    label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup0"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -6503,7 +7330,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup1(wgpu::BindGroup);
         impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxRhieChowIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_rhie_chow_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -6511,7 +7338,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let bind_group_layout = Self::get_bind_group_layout(device);
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxRhieChowIncompressibleMomentumGeneric::BindGroup1"),
+                    label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup1"),
                     layout: &bind_group_layout,
                     entries: &entries,
                 });
@@ -6549,7 +7376,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedFluxRhieChowIncompressibleMomentumGeneric::PipelineLayout"),
+                label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::PipelineLayout"),
                 bind_group_layouts: &[
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
@@ -6560,7 +7387,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("flux_rhie_chow_incompressible_momentum_generic.wgsl"),
+                label: Some("flux_module_incompressible_momentum_generic.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -12782,893 +13609,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[((idx * 8u) + 1u)] = _e32;
     let _e45 = x[((idx * 3u) + 2u)];
     state[((idx * 8u) + 2u)] = _e45;
-    return;
-}
-"#;
-    }
-    pub mod kt_gradients_compressible {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Vector2 {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub x: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub y: f32,
-        }
-        impl Vector2 {
-            pub const fn new(x: f32, y: f32) -> Self {
-                Self { x, y }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    inlet_velocity,
-                    ramp_time,
-                }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct LowMachParams {
-            #[doc = "offset: 0, size: 4, type: `u32`"]
-            pub model: u32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub theta_floor: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub pressure_coupling_alpha: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub _pad0: f32,
-        }
-        impl LowMachParams {
-            pub const fn new(
-                model: u32,
-                theta_floor: f32,
-                pressure_coupling_alpha: f32,
-                _pad0: f32,
-            ) -> Self {
-                Self {
-                    model,
-                    theta_floor,
-                    pressure_coupling_alpha,
-                    _pad0,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
-            pub diagonal_indices: wgpu::BufferBinding<'a>,
-            pub face_boundary: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
-            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
-            pub face_boundary: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    cell_face_matrix_indices: wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
-                    },
-                    diagonal_indices: wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
-                    },
-                    face_boundary: wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.cell_face_matrix_indices,
-                    self.diagonal_indices,
-                    self.face_boundary,
-                    self.face_centers,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-                wgpu::BindGroupLayoutDescriptor {
-                    label: Some("GeneratedKtGradientsCompressible::BindGroup0::LayoutDescriptor"),
-                    entries: &[
-                        #[doc = " @binding(0): \"face_owner\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(1): \"face_neighbor\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(2): \"face_areas\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(3): \"face_normals\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(4): \"cell_centers\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 4,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(5): \"cell_vols\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 5,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(6): \"cell_face_offsets\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 6,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(7): \"cell_faces\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 7,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(8): \"cell_face_matrix_indices\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 8,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(9): \"diagonal_indices\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 9,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(12): \"face_boundary\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 12,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(13): \"face_centers\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 13,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                };
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedKtGradientsCompressible::BindGroup0"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub state_old: wgpu::BufferBinding<'a>,
-            pub state_old_old: wgpu::BufferBinding<'a>,
-            pub fluxes: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-            pub grad_rho: wgpu::BufferBinding<'a>,
-            pub grad_rho_u_x: wgpu::BufferBinding<'a>,
-            pub grad_rho_u_y: wgpu::BufferBinding<'a>,
-            pub grad_rho_e: wgpu::BufferBinding<'a>,
-            pub state_iter: wgpu::BufferBinding<'a>,
-            pub low_mach: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub state_old: wgpu::BindGroupEntry<'a>,
-            pub state_old_old: wgpu::BindGroupEntry<'a>,
-            pub fluxes: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-            pub grad_rho: wgpu::BindGroupEntry<'a>,
-            pub grad_rho_u_x: wgpu::BindGroupEntry<'a>,
-            pub grad_rho_u_y: wgpu::BindGroupEntry<'a>,
-            pub grad_rho_e: wgpu::BindGroupEntry<'a>,
-            pub state_iter: wgpu::BindGroupEntry<'a>,
-            pub low_mach: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    state_old: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.state_old),
-                    },
-                    state_old_old: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
-                    },
-                    fluxes: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.fluxes),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                    grad_rho: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.grad_rho),
-                    },
-                    grad_rho_u_x: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_x),
-                    },
-                    grad_rho_u_y: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.grad_rho_u_y),
-                    },
-                    grad_rho_e: wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: wgpu::BindingResource::Buffer(params.grad_rho_e),
-                    },
-                    state_iter: wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::Buffer(params.state_iter),
-                    },
-                    low_mach: wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: wgpu::BindingResource::Buffer(params.low_mach),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 11] {
-                [
-                    self.state,
-                    self.state_old,
-                    self.state_old_old,
-                    self.fluxes,
-                    self.constants,
-                    self.grad_rho,
-                    self.grad_rho_u_x,
-                    self.grad_rho_u_y,
-                    self.grad_rho_e,
-                    self.state_iter,
-                    self.low_mach,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
-                wgpu::BindGroupLayoutDescriptor {
-                    label: Some("GeneratedKtGradientsCompressible::BindGroup1::LayoutDescriptor"),
-                    entries: &[
-                        #[doc = " @binding(0): \"state\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(1): \"state_old\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(2): \"state_old_old\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(3): \"fluxes\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(4): \"constants\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 4,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                                    _root::generated::kt_gradients_compressible::Constants,
-                                >(
-                                )
-                                    as _),
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(5): \"grad_rho\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 5,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(6): \"grad_rho_u_x\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 6,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(7): \"grad_rho_u_y\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 7,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(8): \"grad_rho_e\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 8,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(9): \"state_iter\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 9,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(10): \"low_mach\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 10,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                                    _root::generated::kt_gradients_compressible::LowMachParams,
-                                >(
-                                )
-                                    as _),
-                            },
-                            count: None,
-                        },
-                    ],
-                };
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedKtGradientsCompressible::BindGroup1"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 2],
-            ) -> [wgpu::BindGroupLayout; 2] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedKtGradientsCompressible::PipelineLayout"),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("kt_gradients_compressible.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
-}
-
-struct LowMachParams {
-    model: u32,
-    theta_floor: f32,
-    pressure_coupling_alpha: f32,
-    _pad0_: f32,
-}
-
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(8) 
-var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(9) 
-var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
-var<storage> face_boundary: array<u32>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(1) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
-var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
-var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
-var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(4) 
-var<uniform> constants: Constants;
-@group(1) @binding(5) 
-var<storage, read_write> grad_rho: array<Vector2_>;
-@group(1) @binding(6) 
-var<storage, read_write> grad_rho_u_x: array<Vector2_>;
-@group(1) @binding(7) 
-var<storage, read_write> grad_rho_u_y: array<Vector2_>;
-@group(1) @binding(8) 
-var<storage, read_write> grad_rho_e: array<Vector2_>;
-@group(1) @binding(9) 
-var<storage> state_iter: array<f32>;
-@group(1) @binding(10) 
-var<uniform> low_mach: LowMachParams;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var grad_rho_accum: vec2<f32> = vec2<f32>(0f, 0f);
-    var grad_rho_u_x_accum: vec2<f32> = vec2<f32>(0f, 0f);
-    var grad_rho_u_y_accum: vec2<f32> = vec2<f32>(0f, 0f);
-    var grad_rho_e_accum: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal: vec2<f32>;
-    var rho_r: f32;
-    var rho_u_r: vec2<f32>;
-    var rho_e_r: f32;
-    var other_idx: u32;
-    var rho_face: f32;
-    var rho_u_face: vec2<f32>;
-    var rho_e_face: f32;
-
-    let idx = global_id.x;
-    if (idx >= arrayLength((&cell_vols))) {
-        return;
-    }
-    let center = cell_centers[idx];
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[(idx + 1u)];
-    let rho_l = state[((idx * 7u) + 0u)];
-    let _e34 = state[((idx * 7u) + 1u)];
-    let _e41 = state[((idx * 7u) + 2u)];
-    let rho_u_l = vec2<f32>(_e34, _e41);
-    let rho_e_l = state[((idx * 7u) + 3u)];
-    k = start;
-    loop {
-        let _e51 = k;
-        if (_e51 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e54 = k;
-            let face_idx = cell_faces[_e54];
-            let owner = face_owner[face_idx];
-            let neighbor = face_neighbor[face_idx];
-            let area = face_areas[face_idx];
-            let _e69 = face_normals[face_idx].x;
-            let _e73 = face_normals[face_idx].y;
-            normal = vec2<f32>(_e69, _e73);
-            if (owner != idx) {
-                let _e77 = normal;
-                normal = -(_e77);
-            }
-            rho_r = rho_l;
-            rho_u_r = rho_u_l;
-            rho_e_r = rho_e_l;
-            if (neighbor != -1i) {
-                other_idx = u32(neighbor);
-                if (owner != idx) {
-                    other_idx = owner;
-                }
-                let _e87 = other_idx;
-                let rho_neigh = state[((_e87 * 7u) + 0u)];
-                let _e95 = other_idx;
-                let _e102 = state[((_e95 * 7u) + 1u)];
-                let _e103 = other_idx;
-                let _e110 = state[((_e103 * 7u) + 2u)];
-                let rho_u_neigh = vec2<f32>(_e102, _e110);
-                let _e112 = other_idx;
-                let rho_e_neigh = state[((_e112 * 7u) + 3u)];
-                rho_r = rho_neigh;
-                rho_u_r = rho_u_neigh;
-                rho_e_r = rho_e_neigh;
-            }
-            rho_face = rho_l;
-            rho_u_face = rho_u_l;
-            rho_e_face = rho_e_l;
-            if (neighbor != -1i) {
-                let _e125 = rho_r;
-                rho_face = ((rho_l + _e125) * 0.5f);
-                let _e129 = rho_u_r;
-                rho_u_face = ((rho_u_l + _e129) * 0.5f);
-                let _e133 = rho_e_r;
-                rho_e_face = ((rho_e_l + _e133) * 0.5f);
-            }
-            let _e138 = normal;
-            let _e139 = rho_face;
-            let _e142 = grad_rho_accum;
-            grad_rho_accum = (_e142 + ((_e138 * _e139) * area));
-            let _e145 = normal;
-            let _e147 = rho_u_face.x;
-            let _e150 = grad_rho_u_x_accum;
-            grad_rho_u_x_accum = (_e150 + ((_e145 * _e147) * area));
-            let _e153 = normal;
-            let _e155 = rho_u_face.y;
-            let _e158 = grad_rho_u_y_accum;
-            grad_rho_u_y_accum = (_e158 + ((_e153 * _e155) * area));
-            let _e161 = normal;
-            let _e162 = rho_e_face;
-            let _e165 = grad_rho_e_accum;
-            grad_rho_e_accum = (_e165 + ((_e161 * _e162) * area));
-        }
-        continuing {
-            let _e168 = k;
-            k = (_e168 + 1u);
-        }
-    }
-    let _e170 = grad_rho_accum;
-    grad_rho_accum = (_e170 / vec2(vol));
-    let _e173 = grad_rho_u_x_accum;
-    grad_rho_u_x_accum = (_e173 / vec2(vol));
-    let _e176 = grad_rho_u_y_accum;
-    grad_rho_u_y_accum = (_e176 / vec2(vol));
-    let _e179 = grad_rho_e_accum;
-    grad_rho_e_accum = (_e179 / vec2(vol));
-    let _e185 = grad_rho_accum.x;
-    let _e187 = grad_rho_accum.y;
-    grad_rho[idx] = Vector2_(_e185, _e187);
-    let _e192 = grad_rho_u_x_accum.x;
-    let _e194 = grad_rho_u_x_accum.y;
-    grad_rho_u_x[idx] = Vector2_(_e192, _e194);
-    let _e199 = grad_rho_u_y_accum.x;
-    let _e201 = grad_rho_u_y_accum.y;
-    grad_rho_u_y[idx] = Vector2_(_e199, _e201);
-    let _e206 = grad_rho_e_accum.x;
-    let _e208 = grad_rho_e_accum.y;
-    grad_rho_e[idx] = Vector2_(_e206, _e208);
     return;
 }
 "#;

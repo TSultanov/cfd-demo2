@@ -425,9 +425,8 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         out
     }
 
-    let flux_rhie_chow_models = discover_per_model_kernel(&gen_dir, "flux_rhie_chow");
-    let kt_gradients_models = discover_per_model_kernel(&gen_dir, "kt_gradients");
-    let flux_kt_models = discover_per_model_kernel(&gen_dir, "flux_kt");
+    let flux_module_models = discover_per_model_kernel(&gen_dir, "flux_module");
+    let flux_module_gradients_models = discover_per_model_kernel(&gen_dir, "flux_module_gradients");
 
     // (KernelKind variant, generated module name, stable KernelId string)
     let entries: &[(&str, &str, &str)] = &[
@@ -802,9 +801,9 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         code.push_str("        }\n");
     }
 
-    for (model_id, mod_id, bindings) in &flux_rhie_chow_models {
-        let module_name = format!("flux_rhie_chow_{mod_id}");
-        code.push_str(&format!("        (\"{model_id}\", \"flux_rhie_chow\") => {{\n"));
+    for (model_id, mod_id, bindings) in &flux_module_models {
+        let module_name = format!("flux_module_{mod_id}");
+        code.push_str(&format!("        (\"{model_id}\", \"flux_module\") => {{\n"));
         code.push_str("            use crate::solver::gpu::bindings::generated::");
         code.push_str(&format!("{module_name} as kernel;\n"));
         code.push_str("            Some((\n");
@@ -821,28 +820,11 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         code.push_str("        }\n");
     }
 
-    for (model_id, mod_id, bindings) in &kt_gradients_models {
-        let module_name = format!("kt_gradients_{mod_id}");
-        code.push_str(&format!("        (\"{model_id}\", \"kt_gradients\") => {{\n"));
-        code.push_str("            use crate::solver::gpu::bindings::generated::");
-        code.push_str(&format!("{module_name} as kernel;\n"));
-        code.push_str("            Some((\n");
-        code.push_str("                kernel::SHADER_STRING,\n");
-        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
-        code.push_str("                &[\n");
-        for (group, binding, name) in bindings {
-            code.push_str(&format!(
-                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
-            ));
-        }
-        code.push_str("                ],\n");
-        code.push_str("            ))\n");
-        code.push_str("        }\n");
-    }
-
-    for (model_id, mod_id, bindings) in &flux_kt_models {
-        let module_name = format!("flux_kt_{mod_id}");
-        code.push_str(&format!("        (\"{model_id}\", \"flux_kt\") => {{\n"));
+    for (model_id, mod_id, bindings) in &flux_module_gradients_models {
+        let module_name = format!("flux_module_gradients_{mod_id}");
+        code.push_str(&format!(
+            "        (\"{model_id}\", \"flux_module_gradients\") => {{\n"
+        ));
         code.push_str("            use crate::solver::gpu::bindings::generated::");
         code.push_str(&format!("{module_name} as kernel;\n"));
         code.push_str("            Some((\n");

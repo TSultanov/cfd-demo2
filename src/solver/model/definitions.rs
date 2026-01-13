@@ -626,7 +626,7 @@ mod tests {
         assert_eq!(model.state_layout.offset_for("p"), Some(2));
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
-        assert!(model.kernel_plan().contains(KernelKind::FluxRhieChow));
+        assert!(model.kernel_plan().contains(KernelKind::FluxModule));
         assert!(model
             .kernel_plan()
             .contains(KernelKind::GenericCoupledAssembly));
@@ -641,8 +641,8 @@ mod tests {
         assert_eq!(model.system.equations()[2].terms().len(), 2);
 
         // Compressible uses the generic-coupled pipeline with a KT flux module stage.
-        assert!(model.kernel_plan().contains(KernelKind::KtGradients));
-        assert!(model.kernel_plan().contains(KernelKind::FluxKt));
+        assert!(model.kernel_plan().contains(KernelKind::FluxModuleGradients));
+        assert!(model.kernel_plan().contains(KernelKind::FluxModule));
         assert!(model.kernel_plan().contains(KernelKind::GenericCoupledAssembly));
         assert!(model.kernel_plan().contains(KernelKind::GenericCoupledUpdate));
     }

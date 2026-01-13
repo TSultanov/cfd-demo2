@@ -198,11 +198,12 @@ pub(in crate::solver::gpu::lowering) fn set_named_param_fallback(
         "ramp_time" => PlanParam::RampTime,
         "low_mach.model" => PlanParam::LowMachModel,
         "low_mach.theta_floor" => PlanParam::LowMachThetaFloor,
+        "nonconverged_relax" => PlanParam::NonconvergedRelax,
         "outer_iters" => PlanParam::OuterIters,
         "detailed_profiling_enabled" => PlanParam::DetailedProfilingEnabled,
         _ => {
             return Err(format!(
-                "unknown named parameter '{name}'; supported: dt, dtau, advection_scheme, time_scheme, preconditioner, viscosity, density, alpha_u, alpha_p, inlet_velocity, ramp_time, low_mach.model, low_mach.theta_floor, outer_iters, detailed_profiling_enabled"
+                "unknown named parameter '{name}'; known: dt, dtau, advection_scheme, time_scheme, preconditioner, viscosity, density, alpha_u, alpha_p, inlet_velocity, ramp_time, low_mach.model, low_mach.theta_floor, nonconverged_relax, outer_iters, detailed_profiling_enabled"
             ));
         }
     };

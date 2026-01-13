@@ -107,22 +107,34 @@ impl GpuUnifiedSolver {
         self.plan.set_param(param, value)
     }
 
+    pub(crate) fn set_plan_named_param(
+        &mut self,
+        name: &str,
+        value: PlanParamValue,
+    ) -> Result<(), String> {
+        self.plan.set_named_param(name, value)
+    }
+
+    pub fn set_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {
+        self.plan.set_named_param(name, value)
+    }
+
     pub fn set_dt(&mut self, dt: f32) {
-        let _ = self.plan.set_param(PlanParam::Dt, PlanParamValue::F32(dt));
+        let _ = self.plan.set_named_param("dt", PlanParamValue::F32(dt));
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
         self.config.advection_scheme = scheme;
         let _ = self
             .plan
-            .set_param(PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme));
+            .set_named_param("advection_scheme", PlanParamValue::Scheme(scheme));
     }
 
     pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
         self.config.time_scheme = scheme;
         let _ = self
             .plan
-            .set_param(PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme));
+            .set_named_param("time_scheme", PlanParamValue::TimeScheme(scheme));
     }
 
     pub fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
@@ -130,10 +142,7 @@ impl GpuUnifiedSolver {
         // If the plan rejects this param, keep the config unchanged.
         if self
             .plan
-            .set_param(
-            PlanParam::Preconditioner,
-            PlanParamValue::Preconditioner(preconditioner),
-            )
+            .set_named_param("preconditioner", PlanParamValue::Preconditioner(preconditioner))
             .is_ok()
         {
             self.config.preconditioner = preconditioner;
@@ -153,10 +162,8 @@ impl GpuUnifiedSolver {
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {
-        self.plan.set_param(
-            PlanParam::DetailedProfilingEnabled,
-            PlanParamValue::Bool(enable),
-        )
+        self.plan
+            .set_named_param("detailed_profiling_enabled", PlanParamValue::Bool(enable))
     }
 
     pub fn start_profiling_session(&self) -> Result<(), String> {

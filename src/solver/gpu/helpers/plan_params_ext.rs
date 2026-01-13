@@ -1,4 +1,4 @@
-use crate::solver::gpu::plans::plan_instance::{PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::PlanParamValue;
 use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::enums::GpuLowMachPrecondModel;
 
@@ -20,52 +20,46 @@ pub trait SolverPlanParamsExt {
 
 impl SolverPlanParamsExt for GpuUnifiedSolver {
     fn set_dtau(&mut self, dtau: f32) {
-        let _ = self.set_plan_param(PlanParam::Dtau, PlanParamValue::F32(dtau));
+        let _ = self.set_plan_named_param("dtau", PlanParamValue::F32(dtau));
     }
 
     fn set_viscosity(&mut self, mu: f32) {
-        let _ = self.set_plan_param(PlanParam::Viscosity, PlanParamValue::F32(mu));
+        let _ = self.set_plan_named_param("viscosity", PlanParamValue::F32(mu));
     }
 
     fn set_density(&mut self, rho: f32) {
-        let _ = self.set_plan_param(PlanParam::Density, PlanParamValue::F32(rho));
+        let _ = self.set_plan_named_param("density", PlanParamValue::F32(rho));
     }
 
     fn set_alpha_u(&mut self, alpha_u: f32) {
-        let _ = self.set_plan_param(PlanParam::AlphaU, PlanParamValue::F32(alpha_u));
+        let _ = self.set_plan_named_param("alpha_u", PlanParamValue::F32(alpha_u));
     }
 
     fn set_alpha_p(&mut self, alpha_p: f32) {
-        let _ = self.set_plan_param(PlanParam::AlphaP, PlanParamValue::F32(alpha_p));
+        let _ = self.set_plan_named_param("alpha_p", PlanParamValue::F32(alpha_p));
     }
 
     fn set_inlet_velocity(&mut self, velocity: f32) {
-        let _ = self.set_plan_param(
-            PlanParam::InletVelocity,
-            PlanParamValue::F32(velocity),
-        );
+        let _ = self.set_plan_named_param("inlet_velocity", PlanParamValue::F32(velocity));
     }
 
     fn set_ramp_time(&mut self, time: f32) {
-        let _ = self.set_plan_param(PlanParam::RampTime, PlanParamValue::F32(time));
+        let _ = self.set_plan_named_param("ramp_time", PlanParamValue::F32(time));
     }
 
     fn set_outer_iters(&mut self, iters: usize) {
-        let _ = self.set_plan_param(PlanParam::OuterIters, PlanParamValue::Usize(iters));
+        let _ = self.set_plan_named_param("outer_iters", PlanParamValue::Usize(iters));
     }
 
     fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
-        self.set_plan_param(
-            PlanParam::LowMachModel,
-            PlanParamValue::LowMachModel(model),
-        )
+        self.set_plan_named_param("low_mach.model", PlanParamValue::LowMachModel(model))
     }
 
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
-        self.set_plan_param(PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta))
+        self.set_plan_named_param("low_mach.theta_floor", PlanParamValue::F32(theta))
     }
 
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
-        self.set_plan_param(PlanParam::NonconvergedRelax, PlanParamValue::F32(alpha))
+        self.set_plan_named_param("nonconverged_relax", PlanParamValue::F32(alpha))
     }
 }

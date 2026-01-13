@@ -1,4 +1,4 @@
-use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
+use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::plans::build_plan_instance;
 use crate::solver::gpu::plans::plan_instance::{
     PlanAction, PlanInitConfig, PlanParam, PlanParamValue, PlanStepStats,
@@ -150,21 +150,6 @@ impl GpuUnifiedSolver {
 
     pub fn initialize_history(&self) {
         self.plan.initialize_history();
-    }
-
-    pub fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
-        self.plan
-            .set_param(PlanParam::LowMachModel, PlanParamValue::LowMachModel(model))
-    }
-
-    pub fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
-        self.plan
-            .set_param(PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta))
-    }
-
-    pub fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
-        self.plan
-            .set_param(PlanParam::NonconvergedRelax, PlanParamValue::F32(alpha))
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {

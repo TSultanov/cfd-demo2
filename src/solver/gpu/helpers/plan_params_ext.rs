@@ -1,5 +1,6 @@
 use crate::solver::gpu::plans::plan_instance::{PlanParam, PlanParamValue};
 use crate::solver::gpu::GpuUnifiedSolver;
+use crate::solver::gpu::enums::GpuLowMachPrecondModel;
 
 pub trait SolverPlanParamsExt {
     fn set_dtau(&mut self, dtau: f32);
@@ -10,6 +11,11 @@ pub trait SolverPlanParamsExt {
     fn set_inlet_velocity(&mut self, velocity: f32);
     fn set_ramp_time(&mut self, time: f32);
     fn set_outer_iters(&mut self, iters: usize);
+
+    // Compressible/low-Mach helpers (model/method-specific; intentionally not inherent methods on the solver).
+    fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String>;
+    fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
+    fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
 }
 
 impl SolverPlanParamsExt for GpuUnifiedSolver {
@@ -47,5 +53,19 @@ impl SolverPlanParamsExt for GpuUnifiedSolver {
     fn set_outer_iters(&mut self, iters: usize) {
         let _ = self.set_plan_param(PlanParam::OuterIters, PlanParamValue::Usize(iters));
     }
-}
 
+    fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
+        self.set_plan_param(
+            PlanParam::LowMachModel,
+            PlanParamValue::LowMachModel(model),
+        )
+    }
+
+    fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
+        self.set_plan_param(PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta))
+    }
+
+    fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
+        self.set_plan_param(PlanParam::NonconvergedRelax, PlanParamValue::F32(alpha))
+    }
+}

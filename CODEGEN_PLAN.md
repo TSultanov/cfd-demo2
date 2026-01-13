@@ -48,6 +48,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Flux-module scheduling/lookup is unified behind stable `KernelId`s (`flux_module_gradients`, `flux_module`) rather than per-method kernel ids.
 - Retired handwritten flux WGSL generators (`flux_kt`, `flux_rhie_chow`) in favor of a PDE-agnostic IR-driven `flux_module` codegen path; flux math is declared in `src/solver/model/definitions.rs` and compiled generically.
 - Added initial contract tests to prevent regressions toward kernel-id/model-id special-casing (`tests/contract_codegen_invariants_test.rs`).
+- Moved low-Mach/preconditioning knobs off the core solver type and into helper traits (`src/solver/gpu/helpers/plan_params_ext.rs`) to keep `GpuUnifiedSolver` closer to model-agnostic.
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 

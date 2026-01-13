@@ -297,16 +297,10 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
             "schur_precond_generic",
             shader_dir.join("schur_precond_generic.wgsl"),
         ),
-        // Legacy coupled-incompressible kernels have been retired; only the flux module remains.
-        ("flux_rhie_chow", gen_dir.join("flux_rhie_chow.wgsl")),
         (
             "generic_coupled_apply",
             gen_dir.join("generic_coupled_apply.wgsl"),
         ),
-
-        // Transitional KT flux module kernels.
-        ("kt_gradients", gen_dir.join("kt_gradients.wgsl")),
-        ("flux_kt", gen_dir.join("flux_kt.wgsl")),
     ];
 
     let mut code = String::new();
@@ -395,18 +389,53 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     generic_coupled_models.sort_by(|a, b| a.0.cmp(&b.0));
     generic_coupled_models.dedup_by(|a, b| a.0 == b.0);
 
+    // Discover per-model flux-module kernels.
+    //
+    // Flux modules can depend on the model ordering/layout, so we treat them the same way as
+    // per-model generic-coupled kernels: lookup is keyed by (model_id, kernel_id).
+    fn discover_per_model_kernel(
+        gen_dir: &PathBuf,
+        prefix: &str,
+    ) -> Vec<(String, String, Vec<(u32, u32, String)>)> {
+        let pattern = gen_dir
+            .join(format!("{prefix}_*.wgsl"))
+            .to_string_lossy()
+            .to_string();
+        let mut out = Vec::new();
+        for entry in glob(&pattern).expect("Failed to read per-model kernel glob") {
+            let Ok(path) = entry else { continue };
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some(model_id) = stem.strip_prefix(&format!("{prefix}_")) else {
+                continue;
+            };
+            let src = fs::read_to_string(&path).unwrap_or_else(|err| {
+                panic!("failed to read generated WGSL '{}': {err}", path.display())
+            });
+            let bindings = parse_wgsl_bindings(&src);
+            out.push((
+                model_id.to_string(),
+                sanitize_rust_ident(model_id),
+                bindings,
+            ));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.dedup_by(|a, b| a.0 == b.0);
+        out
+    }
+
+    let flux_rhie_chow_models = discover_per_model_kernel(&gen_dir, "flux_rhie_chow");
+    let kt_gradients_models = discover_per_model_kernel(&gen_dir, "kt_gradients");
+    let flux_kt_models = discover_per_model_kernel(&gen_dir, "flux_kt");
+
     // (KernelKind variant, generated module name, stable KernelId string)
     let entries: &[(&str, &str, &str)] = &[
-        ("FluxRhieChow", "flux_rhie_chow", "flux_rhie_chow"),
         (
             "GenericCoupledApply",
             "generic_coupled_apply",
             "generic_coupled_apply",
         ),
-
-        // KT flux module kernels for generic-coupled models.
-        ("KtGradients", "kt_gradients", "kt_gradients"),
-        ("FluxKt", "flux_kt", "flux_kt"),
     ];
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)
@@ -764,6 +793,63 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
         code.push_str("                &[\n");
         for (group, binding, name) in update_bindings {
+            code.push_str(&format!(
+                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
+            ));
+        }
+        code.push_str("                ],\n");
+        code.push_str("            ))\n");
+        code.push_str("        }\n");
+    }
+
+    for (model_id, mod_id, bindings) in &flux_rhie_chow_models {
+        let module_name = format!("flux_rhie_chow_{mod_id}");
+        code.push_str(&format!("        (\"{model_id}\", \"flux_rhie_chow\") => {{\n"));
+        code.push_str("            use crate::solver::gpu::bindings::generated::");
+        code.push_str(&format!("{module_name} as kernel;\n"));
+        code.push_str("            Some((\n");
+        code.push_str("                kernel::SHADER_STRING,\n");
+        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
+        code.push_str("                &[\n");
+        for (group, binding, name) in bindings {
+            code.push_str(&format!(
+                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
+            ));
+        }
+        code.push_str("                ],\n");
+        code.push_str("            ))\n");
+        code.push_str("        }\n");
+    }
+
+    for (model_id, mod_id, bindings) in &kt_gradients_models {
+        let module_name = format!("kt_gradients_{mod_id}");
+        code.push_str(&format!("        (\"{model_id}\", \"kt_gradients\") => {{\n"));
+        code.push_str("            use crate::solver::gpu::bindings::generated::");
+        code.push_str(&format!("{module_name} as kernel;\n"));
+        code.push_str("            Some((\n");
+        code.push_str("                kernel::SHADER_STRING,\n");
+        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
+        code.push_str("                &[\n");
+        for (group, binding, name) in bindings {
+            code.push_str(&format!(
+                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
+            ));
+        }
+        code.push_str("                ],\n");
+        code.push_str("            ))\n");
+        code.push_str("        }\n");
+    }
+
+    for (model_id, mod_id, bindings) in &flux_kt_models {
+        let module_name = format!("flux_kt_{mod_id}");
+        code.push_str(&format!("        (\"{model_id}\", \"flux_kt\") => {{\n"));
+        code.push_str("            use crate::solver::gpu::bindings::generated::");
+        code.push_str(&format!("{module_name} as kernel;\n"));
+        code.push_str("            Some((\n");
+        code.push_str("                kernel::SHADER_STRING,\n");
+        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
+        code.push_str("                &[\n");
+        for (group, binding, name) in bindings {
             code.push_str(&format!(
                 "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
             ));

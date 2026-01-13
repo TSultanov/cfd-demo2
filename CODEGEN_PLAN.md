@@ -43,12 +43,12 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Documented CSR binding/shape contract (`src/solver/gpu/CSR_CONTRACT.md`) and clarified scalar-vs-DOF naming in mesh resources.
 - Retired the legacy coupled backend resources (`GpuSolver`); coupled stepping runs on the same universal `GenericCoupledProgramResources` path.
 - Stabilized the face-flux buffer contract: flux modules write a packed per-unknown-component face table (`flux_stride = system.unknowns_per_cell()`), and unified assembly indexes fluxes as `fluxes[face * flux_stride + u_idx]` (no scalar-stride special-casing).
+- Flux-module kernels are emitted per-model when they depend on `(ModelSpec.system, StateLayout, FluxLayout)` (no shared `flux_*.wgsl` artifacts across models).
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
 ### 1) Codegen (remove model-specific generators; IR-driven kernels)
 - Retired coupled-backend-only kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`); remaining: retire the handwritten/physics-specialized flux kernels (`flux_rhie_chow`, transitional `flux_kt`/`kt_gradients`) in favor of IR-driven flux modules derived from the system math + `FluxLayout` only.
-- Ensure flux module kernels are emitted per-model when they depend on `(ModelSpec.system, StateLayout, FluxLayout)` (avoid shared `flux_*.wgsl` artifacts that implicitly assume a single model ordering/layout).
 - Reduce build-time kernel-specific glue:
   - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.
 

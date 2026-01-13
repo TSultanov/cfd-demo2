@@ -529,11 +529,11 @@ fn required_codegen_field<'a>(map: &'a KernelCodegenFieldMap, key: &str) -> &'a 
 
 pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
     match kind {
-        KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
+        KernelKind::FluxRhieChow => format!("flux_rhie_chow_{model_id}.wgsl"),
 
         // Transitional KT flux module bridge.
-        KernelKind::KtGradients => "kt_gradients.wgsl".to_string(),
-        KernelKind::FluxKt => "flux_kt.wgsl".to_string(),
+        KernelKind::KtGradients => format!("kt_gradients_{model_id}.wgsl"),
+        KernelKind::FluxKt => format!("flux_kt_{model_id}.wgsl"),
 
         KernelKind::GenericCoupledAssembly => format!("generic_coupled_assembly_{model_id}.wgsl"),
         KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),

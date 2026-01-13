@@ -1,6 +1,6 @@
 pub mod backend;
 pub use cfd2_codegen::solver::codegen;
-pub mod compiler;
+pub use cfd2_codegen::compiler;
 pub mod gpu;
 pub(crate) mod ir;
 pub mod kernels;

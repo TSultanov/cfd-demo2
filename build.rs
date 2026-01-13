@@ -2,6 +2,7 @@ use glob::glob;
 use std::fs;
 use std::path::PathBuf;
 use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
+use cfd2_codegen::compiler as codegen_compiler;
 
 #[allow(dead_code)]
 mod solver {
@@ -154,19 +155,6 @@ mod solver {
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
     }
-    pub mod codegen {
-        pub use cfd2_codegen::solver::codegen::*;
-    }
-
-    pub mod compiler {
-        pub mod emit {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/compiler/emit.rs"
-            ));
-        }
-        pub use emit::*;
-    }
 }
 
 fn main() {
@@ -195,12 +183,6 @@ fn main() {
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
-    for entry in glob("src/solver/compiler/**/*.rs").expect("Failed to read compiler glob") {
-        match entry {
-            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
-            Err(e) => println!("cargo:warning=Glob error: {:?}", e),
-        }
-    }
     println!("cargo:rerun-if-changed=src/solver/gpu/shaders");
 
     let mut builder = WgslBindgenOptionBuilder::default();
@@ -210,15 +192,15 @@ fn main() {
         .derive_serde(false)
         .output("src/solver/gpu/bindings.rs");
 
-    if let Err(err) = solver::compiler::emit_system_main_wgsl(&manifest_dir) {
-        panic!("codegen failed: {}", err);
-    }
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
+
+    // Emit a single "system_main.wgsl" for shared helpers (transitional).
+    // Prefer keeping this independent of any one model long-term.
+    let system_main_model = solver::model::incompressible_momentum_model();
+    emit_system_main_wgsl(&manifest_dir, &system_main_model, &schemes);
+
     for model in solver::model::all_models() {
-        if let Err(err) = solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
-        {
-            panic!("codegen failed for model '{}': {}", model.id, err);
-        }
+        emit_model_kernels_wgsl(&manifest_dir, &model, &schemes);
     }
 
     generate_wgsl_binding_meta(&manifest_dir);
@@ -252,7 +234,7 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     // Make it difficult to accidentally punch through the IR boundary via path imports.
     //
     // If codegen needs additional inputs, expand `crate::solver::ir` (the facade) or move
-    // model-dependent orchestration into `solver::compiler`.
+    // model-dependent orchestration into build-time code (e.g. `build.rs`).
     let needles = [
         "crate::solver::model",
         "crate::solver::{model",
@@ -293,7 +275,7 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     if !violations.is_empty() {
         let mut msg = String::new();
         msg.push_str("IR boundary violation: codegen must not reference model types.\n");
-        msg.push_str("Use crate::solver::ir::{...} or move orchestration to solver::compiler.\n\n");
+        msg.push_str("Use crate::solver::ir::{...} or move orchestration to build-time code.\n\n");
         for v in violations {
             msg.push_str(&v);
             msg.push('\n');
@@ -306,7 +288,7 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("wgsl_binding_meta.rs");
 
-    let gen_dir = solver::compiler::generated_dir_for(manifest_dir);
+    let gen_dir = codegen_compiler::generated_dir_for(manifest_dir);
     let shader_dir = PathBuf::from(manifest_dir)
         .join("src")
         .join("solver")
@@ -395,7 +377,7 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     // - generic_coupled_update_<model_id>.wgsl
     //
     // We include them in the same registry mapping so runtime lookup goes through a single path.
-    let gen_dir = solver::compiler::generated_dir_for(manifest_dir);
+    let gen_dir = codegen_compiler::generated_dir_for(manifest_dir);
     let mut generic_coupled_models: Vec<(
         String,
         String,
@@ -862,6 +844,308 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     code.push_str("}\n");
 
     write_if_changed(&out_path, &code);
+}
+
+fn emit_system_main_wgsl(
+    manifest_dir: &str,
+    model: &solver::model::ModelSpec,
+    schemes: &solver::ir::SchemeRegistry,
+) {
+    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
+        .unwrap_or_else(|err| panic!("codegen failed (system_main): {err}"));
+    let wgsl = cfd2_codegen::solver::codegen::generate_wgsl(&discrete);
+    codegen_compiler::write_generated_wgsl(manifest_dir, "system_main.wgsl", &wgsl)
+        .unwrap_or_else(|err| panic!("failed to write system_main.wgsl: {err}"));
+}
+
+fn emit_model_kernels_wgsl(
+    manifest_dir: &str,
+    model: &solver::model::ModelSpec,
+    schemes: &solver::ir::SchemeRegistry,
+) {
+    let plan = model.kernel_plan();
+    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
+        .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
+
+    for kind in plan.kernels() {
+        // `system_main.wgsl` is emitted once above.
+        if matches!(kind, solver::model::KernelKind::SystemMain) {
+            continue;
+        }
+
+        let filename = kernel_output_name(model, *kind);
+        let wgsl = generate_kernel_wgsl_for_model(model, &discrete, schemes, *kind);
+        codegen_compiler::write_generated_wgsl(manifest_dir, filename, &wgsl).unwrap_or_else(
+            |err| panic!("failed to write generated WGSL for model '{}': {err}", model.id),
+        );
+    }
+}
+
+fn kernel_output_name(model: &solver::model::ModelSpec, kind: solver::model::KernelKind) -> String {
+    match kind {
+        solver::model::KernelKind::PrepareCoupled => "prepare_coupled.wgsl".to_string(),
+        solver::model::KernelKind::CoupledAssembly => "coupled_assembly_merged.wgsl".to_string(),
+        solver::model::KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
+        solver::model::KernelKind::UpdateFieldsFromCoupled => {
+            "update_fields_from_coupled.wgsl".to_string()
+        }
+        solver::model::KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
+        solver::model::KernelKind::SystemMain => "system_main.wgsl".to_string(),
+
+        // Transitional KT flux module bridge.
+        solver::model::KernelKind::KtGradients => "kt_gradients.wgsl".to_string(),
+        solver::model::KernelKind::FluxKt => "flux_kt.wgsl".to_string(),
+
+        solver::model::KernelKind::GenericCoupledAssembly => {
+            format!("generic_coupled_assembly_{}.wgsl", model.id)
+        }
+        solver::model::KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
+        solver::model::KernelKind::GenericCoupledUpdate => {
+            format!("generic_coupled_update_{}.wgsl", model.id)
+        }
+    }
+}
+
+fn generate_kernel_wgsl_for_model(
+    model: &solver::model::ModelSpec,
+    discrete: &cfd2_codegen::solver::codegen::DiscreteSystem,
+    schemes: &solver::ir::SchemeRegistry,
+    kind: solver::model::KernelKind,
+) -> String {
+    match kind {
+        solver::model::KernelKind::PrepareCoupled => {
+            let fields = derive_coupled_incompressible_field_names(model, discrete);
+            cfd2_codegen::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl(
+                discrete,
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+                &fields.d_p,
+                &fields.grad_p,
+            )
+        }
+        solver::model::KernelKind::CoupledAssembly => {
+            let fields = derive_coupled_incompressible_field_names(model, discrete);
+            cfd2_codegen::solver::codegen::coupled_assembly::generate_coupled_assembly_wgsl(
+                discrete,
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+                &fields.d_p,
+            )
+        }
+        solver::model::KernelKind::PressureAssembly => {
+            let fields = derive_coupled_incompressible_field_names(model, discrete);
+            cfd2_codegen::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl(
+                discrete,
+                &model.state_layout,
+                &fields.pressure,
+                &fields.d_p,
+                &fields.grad_p,
+            )
+        }
+        solver::model::KernelKind::UpdateFieldsFromCoupled => {
+            let fields = derive_coupled_incompressible_field_names(model, discrete);
+            cfd2_codegen::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl(
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+            )
+        }
+        solver::model::KernelKind::FluxRhieChow => {
+            let fields = derive_coupled_incompressible_field_names(model, discrete);
+            cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
+                discrete,
+                &model.state_layout,
+                &fields.momentum,
+                &fields.pressure,
+                &fields.d_p,
+                &fields.grad_p,
+            )
+        }
+        solver::model::KernelKind::SystemMain => cfd2_codegen::solver::codegen::generate_wgsl(discrete),
+
+        solver::model::KernelKind::KtGradients => {
+            cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(&model.state_layout)
+        }
+        solver::model::KernelKind::FluxKt => {
+            let flux_layout = solver::ir::FluxLayout::from_system(&model.system);
+            let eos = ir_eos_from_model(model.eos);
+            cfd2_codegen::solver::codegen::flux_kt::generate_flux_kt_wgsl(
+                &model.state_layout,
+                &flux_layout,
+                &eos,
+            )
+        }
+
+        solver::model::KernelKind::GenericCoupledAssembly => {
+            let needs_gradients = solver::ir::expand_schemes(&model.system, schemes)
+                .map(|e| e.needs_gradients())
+                .unwrap_or(false);
+            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+            cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+                discrete,
+                &model.state_layout,
+                flux_stride,
+                needs_gradients,
+            )
+        }
+        solver::model::KernelKind::GenericCoupledApply => {
+            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
+        }
+        solver::model::KernelKind::GenericCoupledUpdate => {
+            let prims = model.primitives.ordered().unwrap_or_else(|e| {
+                panic!("primitive recovery ordering failed for model '{}': {e}", model.id)
+            });
+            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
+                discrete,
+                &model.state_layout,
+                &prims,
+            )
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CoupledIncompressibleFieldNames {
+    momentum: String,
+    pressure: String,
+    d_p: String,
+    grad_p: String,
+}
+
+fn derive_coupled_incompressible_field_names(
+    model: &solver::model::ModelSpec,
+    system: &cfd2_codegen::solver::codegen::DiscreteSystem,
+) -> CoupledIncompressibleFieldNames {
+    use solver::units::si;
+
+    let mut momentum_targets = Vec::new();
+    for equation in &system.equations {
+        if equation.target.kind() == solver::ir::FieldKind::Vector2
+            || equation.target.kind() == solver::ir::FieldKind::Vector3
+        {
+            momentum_targets.push(equation.target);
+        }
+    }
+
+    let momentum = match momentum_targets.as_slice() {
+        [only] => only.name().to_string(),
+        [] => panic!("missing momentum equation (no vector equation targets)"),
+        many => {
+            let velocity: Vec<_> = many
+                .iter()
+                .copied()
+                .filter(|f| f.unit() == si::VELOCITY)
+                .collect();
+            match velocity.as_slice() {
+                [only] => only.name().to_string(),
+                _ => panic!(
+                    "ambiguous momentum equation target: [{}]",
+                    many.iter()
+                        .map(|f| f.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+        }
+    };
+
+    let mut pressure_targets = Vec::new();
+    for equation in &system.equations {
+        if equation.target.kind() == solver::ir::FieldKind::Scalar && equation.target.unit() == si::PRESSURE {
+            pressure_targets.push(equation.target);
+        }
+    }
+
+    let pressure = if pressure_targets.len() == 1 {
+        pressure_targets[0].name().to_string()
+    } else {
+        let momentum_equation = system
+            .equations
+            .iter()
+            .find(|eq| eq.target.name() == momentum)
+            .unwrap_or_else(|| panic!("missing momentum equation for '{momentum}'"));
+
+        let mut gradient_fields = Vec::new();
+        for op in &momentum_equation.ops {
+            if op.kind != cfd2_codegen::solver::codegen::DiscreteOpKind::Gradient {
+                continue;
+            }
+            if op.field.kind() != solver::ir::FieldKind::Scalar {
+                continue;
+            }
+            gradient_fields.push(op.field);
+        }
+
+        let gradient_pressure: Vec<_> = gradient_fields
+            .iter()
+            .copied()
+            .filter(|f| f.unit() == si::PRESSURE)
+            .collect();
+        match gradient_pressure.as_slice() {
+            [only] => only.name().to_string(),
+            _ => panic!("missing/ambiguous pressure field for coupled-incompressible kernels"),
+        }
+    };
+
+    let d_p = derive_unique_layout_field_by_unit(
+        &model.state_layout,
+        si::D_P,
+        "d_p",
+        Some(&format!("d_{pressure}")),
+    );
+    let grad_p = derive_unique_layout_field_by_unit(
+        &model.state_layout,
+        si::PRESSURE_GRADIENT,
+        "grad_p",
+        Some(&format!("grad_{pressure}")),
+    );
+
+    CoupledIncompressibleFieldNames {
+        momentum,
+        pressure,
+        d_p,
+        grad_p,
+    }
+}
+
+fn derive_unique_layout_field_by_unit(
+    layout: &solver::ir::StateLayout,
+    unit: solver::units::UnitDim,
+    label: &str,
+    preferred_name: Option<&str>,
+) -> String {
+    if let Some(name) = preferred_name {
+        if let Some(field) = layout.field(name) {
+            if field.unit() == unit {
+                return name.to_string();
+            }
+        }
+    }
+
+    let candidates: Vec<_> = layout
+        .fields()
+        .iter()
+        .filter(|f| f.unit() == unit)
+        .map(|f| f.name().to_string())
+        .collect();
+
+    match candidates.as_slice() {
+        [] => panic!("missing required '{label}' state field (unit={unit})"),
+        [only] => only.clone(),
+        many => panic!(
+            "ambiguous '{label}' state field for coupled-incompressible kernels: [{}]",
+            many.join(", ")
+        ),
+    }
+}
+
+fn ir_eos_from_model(eos: solver::model::EosSpec) -> solver::ir::EosSpec {
+    match eos {
+        solver::model::EosSpec::IdealGas { gamma } => solver::ir::EosSpec::IdealGas { gamma },
+        solver::model::EosSpec::Constant => solver::ir::EosSpec::Constant,
+    }
 }
 
 fn sanitize_rust_ident(raw: &str) -> String {

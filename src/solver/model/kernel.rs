@@ -5,7 +5,6 @@ pub enum KernelKind {
     PressureAssembly,
     UpdateFieldsFromCoupled,
     FluxRhieChow,
-    SystemMain,
 
     // Transitional: KT flux module bridge for the generic-coupled pipeline.
     //
@@ -33,8 +32,6 @@ impl KernelId {
     pub const PRESSURE_ASSEMBLY: KernelId = KernelId("pressure_assembly");
     pub const UPDATE_FIELDS_FROM_COUPLED: KernelId = KernelId("update_fields_from_coupled");
     pub const FLUX_RHIE_CHOW: KernelId = KernelId("flux_rhie_chow");
-
-    pub const SYSTEM_MAIN: KernelId = KernelId("system_main");
 
     // Transitional stable ids for KT flux module + primitive recovery.
     //
@@ -141,7 +138,6 @@ impl From<KernelKind> for KernelId {
             KernelKind::PressureAssembly => KernelId::PRESSURE_ASSEMBLY,
             KernelKind::UpdateFieldsFromCoupled => KernelId::UPDATE_FIELDS_FROM_COUPLED,
             KernelKind::FluxRhieChow => KernelId::FLUX_RHIE_CHOW,
-            KernelKind::SystemMain => KernelId::SYSTEM_MAIN,
 
             KernelKind::KtGradients => KernelId::KT_GRADIENTS,
             KernelKind::FluxKt => KernelId::FLUX_KT,
@@ -455,8 +451,7 @@ pub fn derive_kernel_codegen_fields_for_model(
         | KernelKind::FluxRhieChow => {
             derive_rhie_chow_fields(model, &mut out)?;
         }
-        KernelKind::SystemMain
-        | KernelKind::KtGradients
+        KernelKind::KtGradients
         | KernelKind::FluxKt
         | KernelKind::GenericCoupledAssembly
         | KernelKind::GenericCoupledApply
@@ -567,7 +562,6 @@ pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
         KernelKind::PressureAssembly => "pressure_assembly.wgsl".to_string(),
         KernelKind::UpdateFieldsFromCoupled => "update_fields_from_coupled.wgsl".to_string(),
         KernelKind::FluxRhieChow => "flux_rhie_chow.wgsl".to_string(),
-        KernelKind::SystemMain => "system_main.wgsl".to_string(),
 
         // Transitional KT flux module bridge.
         KernelKind::KtGradients => "kt_gradients.wgsl".to_string(),
@@ -639,7 +633,6 @@ pub fn generate_kernel_wgsl_for_model(
                 required_codegen_field(&fields, "grad_p"),
             )
         }
-        KernelKind::SystemMain => cfd2_codegen::solver::codegen::generate_wgsl(&discrete),
 
         KernelKind::KtGradients => {
             cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(

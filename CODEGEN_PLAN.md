@@ -37,6 +37,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Removed field-name-specific bridges (`CodegenIncompressibleMomentumFields`); coupled kernels accept names and models provide per-kernel derived codegen fields (`derive_kernel_codegen_fields_for_model`).
 - Derived primitive recovery ordering is dependency-ordered (toposort) so derived→derived references are well-defined.
 - Mesh-level CSR adjacency buffers are owned by mesh resources (no per-backend duplication), and CSR binding semantics are explicitly DOF/system-level where required.
+- Removed transitional `system_main.wgsl` artifact/hack (no “representative model” generation).
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
@@ -49,7 +50,6 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
 - Reduce build-time kernel-specific glue:
   - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.
-  - Next: replace remaining transitional “system_main from representative model” hack with a truly model-independent shared module (or emit it as part of the recipe).
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing

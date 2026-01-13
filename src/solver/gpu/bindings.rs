@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 5cbb4a8f5598a46ec3309e0b32850cffad4ecb01e895ec9b0ad63a66d58430c0
+// SourceHash: 8a3f7cf82de7a0bc01414881bf96b4b86bc1d34f3b0505bc9b3205e4b76105b0
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -27,7 +27,6 @@ pub enum ShaderEntry {
     GeneratedKtGradients,
     GeneratedPrepareCoupled,
     GeneratedPressureAssembly,
-    GeneratedSystemMain,
     GeneratedUpdateFieldsFromCoupled,
     GenericCoupledSchurSetup,
     GmresCgs,
@@ -41,10 +40,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedCoupledAssemblyMerged => generated :: coupled_assembly_merged :: create_pipeline_layout (device) , Self :: GeneratedFluxKt => generated :: flux_kt :: create_pipeline_layout (device) , Self :: GeneratedFluxRhieChow => generated :: flux_rhie_chow :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedKtGradients => generated :: kt_gradients :: create_pipeline_layout (device) , Self :: GeneratedPrepareCoupled => generated :: prepare_coupled :: create_pipeline_layout (device) , Self :: GeneratedPressureAssembly => generated :: pressure_assembly :: create_pipeline_layout (device) , Self :: GeneratedSystemMain => generated :: system_main :: create_pipeline_layout (device) , Self :: GeneratedUpdateFieldsFromCoupled => generated :: update_fields_from_coupled :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Preconditioner => preconditioner :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedCoupledAssemblyMerged => generated :: coupled_assembly_merged :: create_pipeline_layout (device) , Self :: GeneratedFluxKt => generated :: flux_kt :: create_pipeline_layout (device) , Self :: GeneratedFluxRhieChow => generated :: flux_rhie_chow :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedKtGradients => generated :: kt_gradients :: create_pipeline_layout (device) , Self :: GeneratedPrepareCoupled => generated :: prepare_coupled :: create_pipeline_layout (device) , Self :: GeneratedPressureAssembly => generated :: pressure_assembly :: create_pipeline_layout (device) , Self :: GeneratedUpdateFieldsFromCoupled => generated :: update_fields_from_coupled :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Preconditioner => preconditioner :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedCoupledAssemblyMerged => { generated :: coupled_assembly_merged :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxKt => { generated :: flux_kt :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxRhieChow => { generated :: flux_rhie_chow :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedKtGradients => { generated :: kt_gradients :: create_shader_module_embed_source (device) } , Self :: GeneratedPrepareCoupled => { generated :: prepare_coupled :: create_shader_module_embed_source (device) } , Self :: GeneratedPressureAssembly => { generated :: pressure_assembly :: create_shader_module_embed_source (device) } , Self :: GeneratedSystemMain => { generated :: system_main :: create_shader_module_embed_source (device) } , Self :: GeneratedUpdateFieldsFromCoupled => { generated :: update_fields_from_coupled :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Preconditioner => { preconditioner :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedCoupledAssemblyMerged => { generated :: coupled_assembly_merged :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxKt => { generated :: flux_kt :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxRhieChow => { generated :: flux_rhie_chow :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedKtGradients => { generated :: kt_gradients :: create_shader_module_embed_source (device) } , Self :: GeneratedPrepareCoupled => { generated :: prepare_coupled :: create_shader_module_embed_source (device) } , Self :: GeneratedPressureAssembly => { generated :: pressure_assembly :: create_shader_module_embed_source (device) } , Self :: GeneratedUpdateFieldsFromCoupled => { generated :: update_fields_from_coupled :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Preconditioner => { preconditioner :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -14922,136 +14921,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs[idx] = _e296;
     return;
 }
-"#;
-    }
-    pub mod system_main {
-        use super::{_root, _root::*};
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 0],
-            ) -> [wgpu::BindGroupLayout; 0] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedSystemMain::PipelineLayout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("system_main.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-fn term_ddt_U_upwind(vol: f32, rho: f32, dt: f32, dt_old: f32, time_scheme: u32, phi_n: vec2<f32>, phi_nm1_: vec2<f32>) -> vec3<f32> {
-    var diag: f32;
-    var rhs_x: f32;
-    var rhs_y: f32;
-
-    let base_coeff = ((rho * vol) / dt);
-    diag = base_coeff;
-    rhs_x = (base_coeff * phi_n.x);
-    rhs_y = (base_coeff * phi_n.y);
-    if (time_scheme == 1u) {
-        let r = (dt / dt_old);
-        diag = ((base_coeff * ((r * 2f) + 1f)) / (r + 1f));
-        let factor_n = (r + 1f);
-        let factor_nm1_ = ((r * r) / (r + 1f));
-        rhs_x = (base_coeff * ((factor_n * phi_n.x) - (factor_nm1_ * phi_nm1_.x)));
-        rhs_y = (base_coeff * ((factor_n * phi_n.y) - (factor_nm1_ * phi_nm1_.y)));
-    }
-    let _e45 = diag;
-    let _e46 = rhs_x;
-    let _e47 = rhs_y;
-    return vec3<f32>(_e45, _e46, _e47);
-}
-
-fn codegen_conv_coeff(flux: f32) -> vec2<f32> {
-    var conv_coeff_diag: f32 = 0f;
-    var conv_coeff_off: f32 = 0f;
-
-    if (flux > 0f) {
-        conv_coeff_diag = flux;
-    } else {
-        conv_coeff_off = flux;
-    }
-    let _e6 = conv_coeff_diag;
-    let _e7 = conv_coeff_off;
-    return vec2<f32>(_e6, _e7);
-}
-
-fn term_div_phi_U_upwind(flux_1: f32, phi_own: vec2<f32>, phi_neigh: vec2<f32>, grad_own_u: vec2<f32>, grad_own_v: vec2<f32>, grad_neigh_u: vec2<f32>, grad_neigh_v: vec2<f32>, r_upwind: vec2<f32>, r_downwind: vec2<f32>, r_cd: vec2<f32>) -> vec4<f32> {
-    var phi_upwind: vec2<f32>;
-    var phi_ho: vec2<f32>;
-
-    let _e1 = codegen_conv_coeff(flux_1);
-    let diag_coeff = _e1.x;
-    let off_coeff = _e1.y;
-    phi_upwind = phi_own;
-    phi_ho = phi_own;
-    if (flux_1 <= 0f) {
-        phi_upwind = phi_neigh;
-        phi_ho = phi_neigh;
-    }
-    let _e11 = phi_ho.x;
-    let _e13 = phi_upwind.x;
-    let rhs_corr_x = (flux_1 * (_e11 - _e13));
-    let _e17 = phi_ho.y;
-    let _e19 = phi_upwind.y;
-    let rhs_corr_y = (flux_1 * (_e17 - _e19));
-    return vec4<f32>(diag_coeff, off_coeff, rhs_corr_x, rhs_corr_y);
-}
-
-fn term_laplacian_U_upwind(mu: f32, area: f32, dist: f32) -> vec2<f32> {
-    let coeff = ((mu * area) / dist);
-    return vec2<f32>(coeff, -(coeff));
-}
-
-fn term_grad_p_upwind(area_1: f32, normal: vec2<f32>, lambda: f32) -> vec4<f32> {
-    let force_x = (area_1 * normal.x);
-    let force_y = (area_1 * normal.y);
-    let off_u = ((1f - lambda) * force_x);
-    let off_v = ((1f - lambda) * force_y);
-    let diag_u = (lambda * force_x);
-    let diag_v = (lambda * force_y);
-    return vec4<f32>(off_u, off_v, diag_u, diag_v);
-}
-
-fn assemble_U() {
-    let _e11 = term_ddt_U_upwind(1f, 1f, 1f, 1f, 0u, vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
-    let _e40 = term_div_phi_U_upwind(0f, vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
-    let _e44 = term_laplacian_U_upwind(1f, 1f, 1f);
-    let _e50 = term_grad_p_upwind(1f, vec2<f32>(0f, 0f), 0.5f);
-    return;
-}
-
-fn term_laplacian_p_upwind(mu_1: f32, area_2: f32, dist_1: f32) -> vec2<f32> {
-    let coeff_1 = ((mu_1 * area_2) / dist_1);
-    return vec2<f32>(coeff_1, -(coeff_1));
-}
-
-fn assemble_p() {
-    let _e3 = term_laplacian_p_upwind(1f, 1f, 1f);
-    return;
-}
-
-fn main() {
-    assemble_U();
-    assemble_p();
-    return;
-}
-
-fn codegen_diff_coeff(mu_2: f32, area_3: f32, dist_2: f32) -> f32 {
-    return ((mu_2 * area_3) / dist_2);
-}
-
 "#;
     }
     pub mod update_fields_from_coupled {

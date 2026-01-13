@@ -194,16 +194,6 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    // Transitional: generate shared "system_main.wgsl" from a representative model.
-    let system_main_model = solver::model::incompressible_momentum_model();
-    solver::model::kernel::emit_model_kernel_wgsl(
-        &manifest_dir,
-        &system_main_model,
-        &schemes,
-        solver::model::KernelKind::SystemMain,
-    )
-    .unwrap_or_else(|err| panic!("codegen failed (system_main): {err}"));
-
     for model in solver::model::all_models() {
         solver::model::kernel::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
             .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
@@ -320,10 +310,6 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
         (
             "schur_precond_generic",
             shader_dir.join("schur_precond_generic.wgsl"),
-        ),
-        (
-            "system_main",
-            gen_dir.join("system_main.wgsl"),
         ),
         (
             "coupled_assembly_merged",

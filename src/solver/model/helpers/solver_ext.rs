@@ -1,5 +1,5 @@
 use crate::solver::gpu::GpuUnifiedSolver;
-use crate::solver::gpu::plans::plan_instance::{PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::EosSpec;
 use std::future::Future;
@@ -203,16 +203,11 @@ pub trait SolverIncompressibleControlsExt {
 
 impl SolverIncompressibleControlsExt for GpuUnifiedSolver {
     fn set_incompressible_outer_correctors(&mut self, iters: u32) -> Result<(), String> {
-        self.set_plan_param(
-            PlanParam::IncompressibleOuterCorrectors,
-            PlanParamValue::U32(iters),
-        )
+        // Coupled/implicit paths use the unified `outer_iters` knob.
+        self.set_plan_named_param("outer_iters", PlanParamValue::Usize(iters as usize))
     }
 
     fn incompressible_set_should_stop(&mut self, value: bool) {
-        let _ = self.set_plan_param(
-            PlanParam::IncompressibleShouldStop,
-            PlanParamValue::Bool(value),
-        );
+        let _ = value;
     }
 }

@@ -39,6 +39,8 @@ pub(crate) struct GenericCoupledProgramResources {
     update_graph: ModuleGraph<GeneratedKernelsModule>,
     explicit_graph: ModuleGraph<GeneratedKernelsModule>,
     outer_iters: usize,
+    nonconverged_relax: f32,
+    implicit_base_alpha_u: Option<f32>,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
     krylov: Option<GenericCoupledKrylovResources>,
@@ -187,6 +189,8 @@ impl GenericCoupledProgramResources {
             update_graph,
             explicit_graph,
             outer_iters,
+            nonconverged_relax: 1.0,
+            implicit_base_alpha_u: None,
             linear_solver,
             schur,
             krylov,
@@ -775,6 +779,45 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         .solve_linear_system_cg(r.linear_solver.max_iters, r.linear_solver.tolerance);
 }
 
+pub(crate) fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
+    let queue = plan.context.queue.clone();
+    let converged = plan.last_linear_stats.converged;
+    let r = res_mut(plan);
+
+    let base_alpha_u = r.fields.constants.values().alpha_u;
+    r.implicit_base_alpha_u = Some(base_alpha_u);
+
+    if converged {
+        return;
+    }
+
+    let apply_alpha_u = base_alpha_u * r.nonconverged_relax.max(0.0);
+    if (apply_alpha_u - base_alpha_u).abs() > 1e-6 {
+        {
+            let values = r.fields.constants.values_mut();
+            values.alpha_u = apply_alpha_u;
+        }
+        r.fields.constants.write(&queue);
+    }
+}
+
+pub(crate) fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    let Some(base_alpha_u) = r.implicit_base_alpha_u.take() else {
+        return;
+    };
+
+    let current_alpha_u = r.fields.constants.values().alpha_u;
+    if (current_alpha_u - base_alpha_u).abs() > 1e-6 {
+        {
+            let values = r.fields.constants.values_mut();
+            values.alpha_u = base_alpha_u;
+        }
+        r.fields.constants.write(&queue);
+    }
+}
+
 pub(crate) fn assembly_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
@@ -870,6 +913,17 @@ pub(crate) fn param_outer_iters(
         return Err("OuterIters expects Usize".to_string());
     };
     res_mut(plan).outer_iters = iters.max(1);
+    Ok(())
+}
+
+pub(crate) fn param_nonconverged_relax(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(alpha) = value else {
+        return Err("NonconvergedRelax expects F32".to_string());
+    };
+    res_mut(plan).nonconverged_relax = alpha.max(0.0);
     Ok(())
 }
 

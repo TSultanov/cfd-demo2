@@ -267,7 +267,9 @@ fn implicit_snapshot_run(
     generic_coupled_model::implicit_snapshot_run(plan, context, GraphExecMode::SingleSubmit)
 }
 
-fn host_implicit_set_alpha_for_apply(_plan: &mut GpuProgramPlan) {}
+fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
+    generic_coupled_model::host_implicit_set_alpha_for_apply(plan);
+}
 
 fn implicit_apply_graph_run(
     plan: &GpuProgramPlan,
@@ -277,7 +279,9 @@ fn implicit_apply_graph_run(
     generic_coupled_model::apply_graph_run(plan, context, mode)
 }
 
-fn host_implicit_restore_alpha(_plan: &mut GpuProgramPlan) {}
+fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
+    generic_coupled_model::host_implicit_restore_alpha(plan);
+}
 
 fn host_implicit_advance_outer_idx(_plan: &mut GpuProgramPlan) {}
 
@@ -367,6 +371,7 @@ fn set_param_fallback_generic_coupled(
         PlanParam::LowMachThetaFloor => {
             generic_coupled_model::param_low_mach_theta_floor(plan, value)
         }
+        PlanParam::NonconvergedRelax => generic_coupled_model::param_nonconverged_relax(plan, value),
         PlanParam::OuterIters => generic_coupled_model::param_outer_iters(plan, value),
         PlanParam::DetailedProfilingEnabled => {
             generic_coupled_model::param_detailed_profiling(plan, value)

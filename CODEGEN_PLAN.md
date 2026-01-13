@@ -9,6 +9,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - All model-dependent WGSL is generated (no handwritten physics kernels).
 - Host bind groups are assembled purely from generated binding metadata + a uniform resource registry (no `KernelId`-specific bind-group code).
 - Adding a new model/PDE requires editing only `src/solver/model/definitions.rs` (and model-side helpers under `src/solver/model/*`), not lowering/codegen/runtime glue.
+- The *public* solver API is model-agnostic: no built-in notions of `U/p/rho`, `gamma`, “inlet velocity”, or “incompressible-only” controls in `UnifiedSolver` itself (those belong in model-specific helper layers, not the core solver).
 
 ## Non-Negotiable Invariants
 - **No solver-family switches in orchestration:** runtime must not branch on “compressible vs incompressible vs generic”.
@@ -54,24 +55,43 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
 - Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 
-### 2) Retire `PlanParam` as global plumbing
-- Replace `PlanParam`-based “global knobs” with typed, module-owned uniforms/config deltas routed through the recipe.
-- Done when: new configuration does not add `PlanParam` enum cases.
+### 2) Make `UnifiedSolver` truly model-agnostic (API + host-side math)
+Current `GpuUnifiedSolver` (`src/solver/gpu/unified_solver.rs`) still contains model-specific assumptions:
+- Field-name heuristics (`U/u`, `rho`, etc.) and convenience accessors (`get_u/get_p/get_rho`) baked into the core type.
+- Hard-coded thermodynamics (`gamma=1.4`) in `set_uniform_state` / `set_state_fields`.
+- Family/model-specific controls and naming (`set_incompressible_outer_correctors`, `set_inlet_velocity`, etc.) wired through global `PlanParam`.
 
-### 3) Handwritten WGSL (treat infrastructure the same way)
+Target:
+- Core solver exposes only generic operations: `set_param(id, value)`, `set_field(name, values)`, `step()`, `read_state()`, etc.
+- Any “physics-aware” helpers live alongside models (e.g. `model::helpers::euler::pack_conservative_state(...)`), not in the solver core.
+- Boundary driving (e.g. inlet velocity) is described declaratively by the model (or recipe), not by ad-hoc host-side special-casing.
+
+### 3) Retire `PlanParam` as global plumbing
+- Replace `PlanParam` with typed, module-owned uniforms/config deltas routed through the recipe (or a model-declared parameter table).
+- Done when: new configuration does not add `PlanParam` enum cases, and common runtime controls are described by model/method metadata instead of a global enum.
+
+### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
 - Done when: runtime consumes only registry-provided WGSL (no ad-hoc `include_str!` modules).
 
-### 4) Contract Tests
+### 5) Contract Tests
 - Add regression tests that fail if:
   - `kernel_registry` has special-case lookup paths
   - lowering selects a backend by “family”
   - adding a kernel requires editing a central `match` (bind groups / pipeline selection)
   - `build.rs` contains per-model hardcoding or kernel-kind-specific codegen glue
 
+### 6) Validation Tests (OpenFOAM reference suite)
+- After any solver or numerical-method change, run the OpenFOAM reference tests to catch whole-field regressions:
+  - `cargo test openfoam_ -- --nocapture`
+- If a change intentionally alters the reference target, regenerate the datasets and re-run:
+  - `bash scripts/regenerate_openfoam_reference_data.sh`
+
 ## Recommended Sequence (high leverage)
-1) Retire model-specific codegen bridges and handwritten physics kernels; keep solver infrastructure next.
-2) Retire `PlanParam` and add contract tests to lock in invariants.
+1) Make `UnifiedSolver` surface model-agnostic (remove solver-core physics assumptions; push helpers into model-side code).
+2) Retire `PlanParam` and replace with model/method-declared runtime controls.
+3) Finish flux-module boundary semantics + method knobs in the IR/DSL.
+4) Add/expand contract tests and keep OpenFOAM reference tests green (or intentionally updated) during refactors.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

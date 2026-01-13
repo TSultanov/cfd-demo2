@@ -19,7 +19,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 
 ## Current Baseline (already implemented, for context only)
 - Models are expressed as `EquationSystem` via the fvm/fvc AST in `src/solver/model/definitions.rs`.
-- Build-time codegen exists (`crates/cfd2_codegen`) and emits WGSL into `src/solver/gpu/shaders/generated` via `src/solver/compiler/emit.rs`.
+- Build-time codegen exists (`crates/cfd2_codegen`) and emits WGSL into `src/solver/gpu/shaders/generated` from `build.rs` (no runtime compilation).
 - Kernel schedule/phase/dispatch is model-owned and recipe-driven (`src/solver/model/kernel.rs`, `src/solver/gpu/recipe.rs`).
 - Lowering uses a single universal spec/ops path (no per-family selection in `lower_program_model_driven`).
 - Kernel registry lookup is uniform for all kernels via `(model_id, KernelId)` (`src/solver/gpu/lowering/kernel_registry.rs`).
@@ -32,19 +32,24 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Generic-coupled integrated as a backend variant inside `UniversalProgramResources` (no separate plan selection path).
 - Kernel constants/time integration are owned by the recipe-level `UnifiedFieldResources` (no per-backend constants buffer).
 - `build.rs` discovers models via `definitions.rs` (adding a model does not require editing `build.rs`).
+- Build-time “compiler” code is model/PDE-agnostic and lives in `crates/cfd2_codegen` (no `src/solver/compiler` module).
 - Handwritten infrastructure kernels can be routed through the same kernel registry + binding-metadata path (e.g. `generic_coupled_schur_setup`).
+- Removed field-name-specific bridges (`CodegenIncompressibleMomentumFields`); coupled kernels accept names and models provide per-kernel derived codegen fields (`derive_kernel_codegen_fields_for_model`).
+- Derived primitive recovery ordering is dependency-ordered (toposort) so derived→derived references are well-defined.
+- Mesh-level CSR adjacency buffers are owned by mesh resources (no per-backend duplication), and CSR binding semantics are explicitly DOF/system-level where required.
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
 ### 1) Plan Resources (single universal runtime resource graph)
-- Converge plan/runtime plumbing between explicit/implicit and generic-coupled so new solver modes do not introduce new plan/resource structs or wiring paths.
-- Decide and document the canonical linear-system representation for generic-coupled (block-on-scalar-CSR vs DOF-level CSR), and make kernel bindings reflect that choice.
+- Finish converging plan/runtime plumbing between explicit/implicit and generic-coupled so new solver modes do not introduce new plan/resource structs or wiring paths.
+- Document the canonical linear-system representation(s) (DOF/system CSR vs scalar CSR used for mesh adjacency), and make all kernel bindings reflect that choice consistently.
 
 ### 2) Codegen (remove model-specific generators; IR-driven kernels)
 - Retire legacy coupled-incompressible kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`, `flux_rhie_chow`) and drive assembly/update/flux kernels from IR + layout only (no 2D-only assumptions baked into the generator).
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
-- Progress: derived primitive recovery is dependency-ordered (toposort) so derived→derived references are well-defined.
-- Done: removed `CodegenIncompressibleMomentumFields`; field-name inference for coupled-incompressible kernels lives in model/build-time emit (not in `crates/cfd2_codegen`, which remains PDE-agnostic).
+- Eliminate remaining build-time kernel-specific glue by making kernel emission fully data-driven:
+  - Model/recipe emits a list of kernel artifacts to generate (kernel id + generator kind + parameters + output name).
+  - `build.rs` iterates those artifacts without `match KernelKind` and without naming/parameter knowledge.
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing
@@ -60,7 +65,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
   - `kernel_registry` has special-case lookup paths
   - lowering selects a backend by “family”
   - adding a kernel requires editing a central `match` (bind groups / pipeline selection)
-  - `build.rs` contains per-model hardcoding
+  - `build.rs` contains per-model hardcoding or kernel-kind-specific codegen glue
 
 ## Recommended Sequence (high leverage)
 1) Converge plan resources into one universal runtime graph/resources layer.

@@ -9,6 +9,7 @@ pub mod eos;
 pub mod flux_module;
 pub mod primitives;
 pub mod linear_solver;
+pub mod helpers;
 
 pub use definitions::{
     all_models, compressible_model, compressible_system, generic_diffusion_demo_model,

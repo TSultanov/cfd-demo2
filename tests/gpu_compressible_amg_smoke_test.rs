@@ -1,5 +1,7 @@
 use cfd2::solver::mesh::generate_cut_cell_mesh;
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
+use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
+use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;

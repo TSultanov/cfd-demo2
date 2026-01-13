@@ -5,6 +5,11 @@ use crate::solver::mesh::{
 use crate::solver::model::{
     compressible_model, incompressible_momentum_model, ModelPreconditionerSpec,
 };
+use crate::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverIncompressibleControlsExt,
+    SolverIncompressibleStatsExt,
+};
+use crate::solver::gpu::helpers::SolverPlanParamsExt;
 use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
 use crate::solver::scheme::Scheme;
 use crate::solver::{SolverConfig, UnifiedSolver};

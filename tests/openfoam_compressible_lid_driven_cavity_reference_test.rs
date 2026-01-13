@@ -2,6 +2,8 @@
 mod common;
 
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
+use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -106,8 +108,39 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     let ux_err = common::rel_l2(&ux_sol, &ux_ref, 1e-12);
     let uy_err = common::rel_l2(&uy_sol, &uy_ref, 1e-12);
 
+    let rms = |xs: &[f64]| -> f64 {
+        if xs.is_empty() {
+            return 0.0;
+        }
+        (xs.iter().map(|v| v * v).sum::<f64>() / xs.len() as f64).sqrt()
+    };
+    let rms_diff = |a: &[f64], b: &[f64]| -> f64 {
+        if a.is_empty() || b.is_empty() {
+            return 0.0;
+        }
+        assert_eq!(a.len(), b.len());
+        (a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y) * (x - y))
+            .sum::<f64>()
+            / a.len() as f64)
+            .sqrt()
+    };
+    let max_abs = |xs: &[f64]| -> f64 {
+        xs.iter().map(|v| v.abs()).fold(0.0, f64::max)
+    };
+
+    let ux_rms_ref = rms(&ux_ref);
+    let uy_rms_ref = rms(&uy_ref);
+    let ux_rms_sol = rms(&ux_sol);
+    let uy_rms_sol = rms(&uy_sol);
+    let ux_rms_diff = rms_diff(&ux_sol, &ux_ref);
+    let uy_rms_diff = rms_diff(&uy_sol, &uy_ref);
+    let ux_max_sol = max_abs(&ux_sol);
+    let uy_max_sol = max_abs(&uy_sol);
+
     assert!(
         p_err < 2.0 && ux_err < 2.0 && uy_err < 2.0,
-        "mismatch vs OpenFOAM: rel_l2(p)={p_err:.3} rel_l2(u_x)={ux_err:.3} rel_l2(u_y)={uy_err:.3}"
+        "mismatch vs OpenFOAM: rel_l2(p)={p_err:.3} rel_l2(u_x)={ux_err:.3} rel_l2(u_y)={uy_err:.3} | rms_ref(u_x)={ux_rms_ref:.3e} rms_ref(u_y)={uy_rms_ref:.3e} | rms_sol(u_x)={ux_rms_sol:.3e} rms_sol(u_y)={uy_rms_sol:.3e} | rms_diff(u_x)={ux_rms_diff:.3e} rms_diff(u_y)={uy_rms_diff:.3e} | max_abs_sol(u_x)={ux_max_sol:.3e} max_abs_sol(u_y)={uy_max_sol:.3e}"
     );
 }

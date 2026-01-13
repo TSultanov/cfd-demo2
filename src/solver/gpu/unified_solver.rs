@@ -1,13 +1,14 @@
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::plans::build_plan_instance;
 use crate::solver::gpu::plans::plan_instance::{
-    PlanAction, PlanInitConfig, PlanParam, PlanParamValue,
+    PlanAction, PlanInitConfig, PlanParam, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::GpuProgramPlan;
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
+use crate::solver::model::backend::FieldKind;
 use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
@@ -37,13 +38,6 @@ pub struct GpuUnifiedSolver {
 }
 
 impl GpuUnifiedSolver {
-    fn offset_for_any(&self, fields: &[&str]) -> Option<usize> {
-        fields
-            .iter()
-            .find_map(|name| self.model.state_layout.offset_for(name))
-            .map(|v| v as usize)
-    }
-
     pub async fn new(
         mesh: &Mesh,
         model: ModelSpec,
@@ -97,54 +91,24 @@ impl GpuUnifiedSolver {
         self.plan.dt()
     }
 
+    pub fn step_stats(&self) -> PlanStepStats {
+        self.plan.step_stats()
+    }
+
     pub fn state_buffer(&self) -> &wgpu::Buffer {
         self.plan.state_buffer()
     }
 
+    pub(crate) fn set_plan_param(
+        &mut self,
+        param: PlanParam,
+        value: PlanParamValue,
+    ) -> Result<(), String> {
+        self.plan.set_param(param, value)
+    }
+
     pub fn set_dt(&mut self, dt: f32) {
         let _ = self.plan.set_param(PlanParam::Dt, PlanParamValue::F32(dt));
-    }
-
-    pub fn set_dtau(&mut self, dtau: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::Dtau, PlanParamValue::F32(dtau));
-    }
-
-    pub fn set_viscosity(&mut self, mu: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::Viscosity, PlanParamValue::F32(mu));
-    }
-
-    pub fn set_density(&mut self, rho: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::Density, PlanParamValue::F32(rho));
-    }
-
-    pub fn set_alpha_u(&mut self, alpha_u: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::AlphaU, PlanParamValue::F32(alpha_u));
-    }
-
-    pub fn set_alpha_p(&mut self, alpha_p: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::AlphaP, PlanParamValue::F32(alpha_p));
-    }
-
-    pub fn set_inlet_velocity(&mut self, velocity: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::InletVelocity, PlanParamValue::F32(velocity));
-    }
-
-    pub fn set_ramp_time(&mut self, time: f32) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::RampTime, PlanParamValue::F32(time));
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
@@ -174,139 +138,6 @@ impl GpuUnifiedSolver {
         {
             self.config.preconditioner = preconditioner;
         }
-    }
-
-    pub fn set_outer_iters(&mut self, iters: usize) {
-        let _ = self
-            .plan
-            .set_param(PlanParam::OuterIters, PlanParamValue::Usize(iters));
-    }
-
-    pub fn set_incompressible_outer_correctors(&mut self, iters: u32) -> Result<(), String> {
-        self.plan.set_param(
-            PlanParam::IncompressibleOuterCorrectors,
-            PlanParamValue::U32(iters),
-        )
-    }
-
-    pub fn incompressible_set_should_stop(&mut self, value: bool) {
-        let _ = self.plan.set_param(
-            PlanParam::IncompressibleShouldStop,
-            PlanParamValue::Bool(value),
-        );
-    }
-
-    pub fn incompressible_should_stop(&self) -> bool {
-        self.plan.step_stats().should_stop.unwrap_or(false)
-    }
-
-    pub fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)> {
-        let stats = self.plan.step_stats();
-        Some((
-            stats.outer_iterations?,
-            stats.outer_residual_u?,
-            stats.outer_residual_p?,
-        ))
-    }
-
-    pub fn incompressible_linear_stats(
-        &self,
-    ) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)> {
-        self.plan.step_stats().linear_stats
-    }
-
-    pub fn incompressible_degenerate_count(&self) -> Option<u32> {
-        self.plan.step_stats().degenerate_count
-    }
-
-    pub fn set_u(&mut self, u: &[(f64, f64)]) {
-        let _ = self.set_field_vec2_any(&["U", "u"], u);
-    }
-
-    pub fn set_p(&mut self, p: &[f64]) {
-        let _ = self.set_field_scalar("p", p);
-    }
-
-    pub fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        let stride = self.model.state_layout.stride() as usize;
-        let Some(offset_rho) = self.offset_for_any(&["rho"]) else {
-            return;
-        };
-        let Some(offset_rho_u) = self.offset_for_any(&["rho_u"]) else {
-            return;
-        };
-        let Some(offset_rho_e) = self.offset_for_any(&["rho_e"]) else {
-            return;
-        };
-        let Some(offset_p) = self.offset_for_any(&["p"]) else {
-            return;
-        };
-        let Some(offset_u) = self.offset_for_any(&["u", "U"]) else {
-            return;
-        };
-
-        let gamma = 1.4f32;
-        let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
-        let rho_e = p / (gamma - 1.0) + ke;
-
-        let mut state = vec![0.0f32; self.num_cells() as usize * stride];
-        for cell in 0..self.num_cells() as usize {
-            let base = cell * stride;
-            state[base + offset_rho] = rho;
-            state[base + offset_rho_u] = rho * u[0];
-            state[base + offset_rho_u + 1] = rho * u[1];
-            state[base + offset_rho_e] = rho_e;
-            state[base + offset_p] = p;
-            state[base + offset_u] = u[0];
-            state[base + offset_u + 1] = u[1];
-        }
-        let _ = self.plan.write_state_bytes(bytemuck::cast_slice(&state));
-    }
-
-    pub fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]) {
-        if rho.len() != self.num_cells() as usize
-            || u.len() != self.num_cells() as usize
-            || p.len() != self.num_cells() as usize
-        {
-            return;
-        }
-
-        let stride = self.model.state_layout.stride() as usize;
-        let Some(offset_rho) = self.offset_for_any(&["rho"]) else {
-            return;
-        };
-        let Some(offset_rho_u) = self.offset_for_any(&["rho_u"]) else {
-            return;
-        };
-        let Some(offset_rho_e) = self.offset_for_any(&["rho_e"]) else {
-            return;
-        };
-        let Some(offset_p) = self.offset_for_any(&["p"]) else {
-            return;
-        };
-        let Some(offset_u) = self.offset_for_any(&["u", "U"]) else {
-            return;
-        };
-
-        let gamma = 1.4f32;
-        let mut state = vec![0.0f32; self.num_cells() as usize * stride];
-        for cell in 0..self.num_cells() as usize {
-            let base = cell * stride;
-            let rho_val = rho[cell];
-            let u_val = u[cell];
-            let p_val = p[cell];
-            let ke = 0.5 * rho_val * (u_val[0] * u_val[0] + u_val[1] * u_val[1]);
-            let rho_e = p_val / (gamma - 1.0) + ke;
-
-            state[base + offset_rho] = rho_val;
-            state[base + offset_rho_u] = rho_val * u_val[0];
-            state[base + offset_rho_u + 1] = rho_val * u_val[1];
-            state[base + offset_rho_e] = rho_e;
-            state[base + offset_p] = p_val;
-            state[base + offset_u] = u_val[0];
-            state[base + offset_u + 1] = u_val[1];
-        }
-        let _ = self.plan.write_state_bytes(bytemuck::cast_slice(&state));
     }
 
     pub fn step(&mut self) {
@@ -366,14 +197,35 @@ impl GpuUnifiedSolver {
         bytemuck::cast_slice(&raw).to_vec()
     }
 
+    pub fn write_state_f32(&mut self, state: &[f32]) -> Result<(), String> {
+        let stride = self.model.state_layout.stride() as usize;
+        let expected = self.num_cells() as usize * stride;
+        if state.len() != expected {
+            return Err(format!(
+                "state length {} does not match expected {} (= num_cells {} * stride {})",
+                state.len(),
+                expected,
+                self.num_cells(),
+                stride
+            ));
+        }
+        self.plan.write_state_bytes(bytemuck::cast_slice(state))
+    }
+
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
         let stride = self.model.state_layout.stride() as usize;
-        let offset = self
+        let state_field = self
             .model
             .state_layout
-            .offset_for(field)
-            .ok_or_else(|| format!("field '{field}' not found in layout"))?
-            as usize;
+            .field(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?;
+        if state_field.kind() != FieldKind::Scalar {
+            return Err(format!(
+                "field '{field}' is not scalar (kind={})",
+                state_field.kind().as_str()
+            ));
+        }
+        let offset = state_field.offset() as usize;
         if values.len() != self.num_cells() as usize {
             return Err(format!(
                 "value length {} does not match num_cells {}",
@@ -395,51 +247,80 @@ impl GpuUnifiedSolver {
     pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
         let data = self.read_state_f32().await;
         let stride = self.model.state_layout.stride() as usize;
-        let offset = self
+        let state_field = self
             .model
             .state_layout
-            .offset_for(field)
-            .ok_or_else(|| format!("field '{field}' not found in layout"))?
-            as usize;
+            .field(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?;
+        if state_field.kind() != FieldKind::Scalar {
+            return Err(format!(
+                "field '{field}' is not scalar (kind={})",
+                state_field.kind().as_str()
+            ));
+        }
+        let offset = state_field.offset() as usize;
         Ok((0..self.num_cells() as usize)
             .map(|i| data[i * stride + offset] as f64)
             .collect())
     }
 
-    pub async fn get_p(&self) -> Vec<f64> {
-        let data = self.read_state_f32().await;
+    pub fn set_field_vec2(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
         let stride = self.model.state_layout.stride() as usize;
-        let offset = self.model.state_layout.offset_for("p").unwrap_or(0) as usize;
-        (0..self.num_cells() as usize)
-            .map(|i| data[i * stride + offset] as f64)
-            .collect()
-    }
-
-    pub async fn get_u(&self) -> Vec<(f64, f64)> {
-        let data = self.read_state_f32().await;
-        let stride = self.model.state_layout.stride() as usize;
-        let offset = self
+        let state_field = self
             .model
             .state_layout
-            .offset_for("U")
-            .or_else(|| self.model.state_layout.offset_for("u"))
-            .unwrap_or(0) as usize;
-        (0..self.num_cells() as usize)
+            .field(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?;
+        if state_field.kind() != FieldKind::Vector2 {
+            return Err(format!(
+                "field '{field}' is not Vector2 (kind={})",
+                state_field.kind().as_str()
+            ));
+        }
+        let offset = state_field.offset() as usize;
+        if values.len() != self.num_cells() as usize {
+            return Err(format!(
+                "value length {} does not match num_cells {}",
+                values.len(),
+                self.num_cells()
+            ));
+        }
+
+        let mut state = pollster::block_on(async { self.read_state_f32().await });
+        if state.len() != self.num_cells() as usize * stride {
+            state.resize(self.num_cells() as usize * stride, 0.0);
+        }
+        for (i, &(x, y)) in values.iter().enumerate() {
+            let base = i * stride + offset;
+            state[base] = x as f32;
+            state[base + 1] = y as f32;
+        }
+        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
+    }
+
+    pub async fn get_field_vec2(&self, field: &str) -> Result<Vec<(f64, f64)>, String> {
+        let data = self.read_state_f32().await;
+        let stride = self.model.state_layout.stride() as usize;
+        let state_field = self
+            .model
+            .state_layout
+            .field(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?;
+        if state_field.kind() != FieldKind::Vector2 {
+            return Err(format!(
+                "field '{field}' is not Vector2 (kind={})",
+                state_field.kind().as_str()
+            ));
+        }
+        let offset = state_field.offset() as usize;
+        Ok((0..self.num_cells() as usize)
             .map(|i| {
                 let base = i * stride + offset;
                 (data[base] as f64, data[base + 1] as f64)
             })
-            .collect()
+            .collect())
     }
 
-    pub async fn get_rho(&self) -> Vec<f64> {
-        let data = self.read_state_f32().await;
-        let stride = self.model.state_layout.stride() as usize;
-        let offset = self.model.state_layout.offset_for("rho").unwrap_or(0) as usize;
-        (0..self.num_cells() as usize)
-            .map(|i| data[i * stride + offset] as f64)
-            .collect()
-    }
 
     pub fn set_linear_system(&mut self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         let Some(debug) = self.plan.linear_system_debug() else {
@@ -480,24 +361,4 @@ impl GpuUnifiedSolver {
         })
     }
 
-    fn set_field_vec2_any(&mut self, fields: &[&str], values: &[(f64, f64)]) -> Result<(), String> {
-        let stride = self.model.state_layout.stride() as usize;
-        let offset = self
-            .offset_for_any(fields)
-            .ok_or_else(|| format!("field '{}' not found in layout", fields.join("'/'")))?;
-        if values.len() != self.num_cells() as usize {
-            return Err(format!(
-                "value length {} does not match num_cells {}",
-                values.len(),
-                self.num_cells()
-            ));
-        }
-        let mut state = pollster::block_on(async { self.read_state_f32().await });
-        for (i, &(x, y)) in values.iter().enumerate() {
-            let base = i * stride + offset;
-            state[base] = x as f32;
-            state[base + 1] = y as f32;
-        }
-        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
-    }
 }

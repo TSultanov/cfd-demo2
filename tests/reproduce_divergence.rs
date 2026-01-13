@@ -1,4 +1,6 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
+use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverIncompressibleStatsExt};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;

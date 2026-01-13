@@ -1,7 +1,9 @@
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
+use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
 use cfd2::solver::mesh::{
     generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh,
 };
+use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
 use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;

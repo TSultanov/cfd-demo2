@@ -2,6 +2,8 @@
 mod common;
 
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
+use cfd2::solver::model::helpers::SolverFieldAliasesExt;
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;

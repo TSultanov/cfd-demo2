@@ -24,12 +24,16 @@ use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::model::{KernelId, ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
     fields: UnifiedFieldResources,
     time_integration: TimeIntegrationModule,
     kernels: GeneratedKernelsModule,
+    init_prepare_graph: ModuleGraph<GeneratedKernelsModule>,
+    dp_init_enabled: bool,
+    dp_init_needed: AtomicBool,
     assembly_graph: ModuleGraph<GeneratedKernelsModule>,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -73,6 +77,15 @@ impl GenericCoupledProgramResources {
         //
         // Some models (e.g., compressible KT flux) require a gradient stage before flux.
         // Keep gradients optional so diffusion-only models don't fail graph construction.
+        let init_prepare_graph = build_optional_graph_for_phase(
+            recipe,
+            KernelPhase::Preparation,
+            &kernels,
+            "generic_coupled",
+        )?
+        .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
+        let dp_init_enabled = recipe.kernels.iter().any(|k| k.phase == KernelPhase::Preparation);
+
         let has_gradients = recipe
             .kernels
             .iter()
@@ -166,6 +179,9 @@ impl GenericCoupledProgramResources {
             fields,
             time_integration: TimeIntegrationModule::new(),
             kernels,
+            init_prepare_graph,
+            dp_init_enabled,
+            dp_init_needed: AtomicBool::new(dp_init_enabled),
             assembly_graph,
             apply_graph,
             update_graph,
@@ -774,6 +790,31 @@ pub(crate) fn assembly_graph_run(
     )
 }
 
+pub(crate) fn init_prepare_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    let r = res(plan);
+    if !r.dp_init_enabled || !r.dp_init_needed.load(Ordering::Relaxed) {
+        return (0.0, None);
+    }
+    run_module_graph(
+        &r.init_prepare_graph,
+        context,
+        &r.kernels,
+        r.runtime_dims(),
+        mode,
+    )
+}
+
+pub(crate) fn clear_dp_init_needed(plan: &mut GpuProgramPlan) {
+    let r = res_mut(plan);
+    if r.dp_init_enabled {
+        r.dp_init_needed.store(false, Ordering::Relaxed);
+    }
+}
+
 pub(crate) fn update_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
@@ -839,6 +880,9 @@ pub(crate) fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Resu
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     r.time_integration.set_dt(dt, &mut r.fields.constants, &queue);
+    if r.dp_init_enabled {
+        r.dp_init_needed.store(true, Ordering::Relaxed);
+    }
     Ok(())
 }
 
@@ -919,6 +963,9 @@ pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
         values.density = rho;
     }
     r.fields.constants.write(&queue);
+    if r.dp_init_enabled {
+        r.dp_init_needed.store(true, Ordering::Relaxed);
+    }
     if let Some(layout) = inlet_layout {
         update_inlet_conserved_bc_with_layout(r, &queue, &layout);
     }

@@ -57,7 +57,7 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     solver.initialize_history();
 
     // Pseudo-time stepping towards the SIMPLE steady solution.
-    for _ in 0..250 {
+    for _ in 0..80 {
         solver.step();
     }
 

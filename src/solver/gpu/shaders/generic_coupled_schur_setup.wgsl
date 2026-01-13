@@ -75,14 +75,15 @@ fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) 
     }
     diag_p_inv[cell] = safe_inverse(diag_p);
 
-    // Update Rhie–Chow pressure mobility d_p ≈ vol / A_U, where A_U is the assembled
+    // Update Rhie–Chow pressure mobility d_p ≈ 1 / A_U, where A_U is the assembled
     // momentum diagonal (integrated over the cell volume).
     //
     // For vector velocities we use the mean of the per-component diagonal inverses.
     if (params.d_p_offset != 0xffffffffu && params.state_stride > 0u) {
         var d_p: f32 = 0.0;
         if (params.u_len > 0u) {
-            d_p = cell_vol * sum_u_inv / f32(params.u_len);
+            // Mean diagonal inverse across velocity components.
+            d_p = sum_u_inv / f32(params.u_len);
         }
         state[cell * params.state_stride + params.d_p_offset] = d_p;
     }

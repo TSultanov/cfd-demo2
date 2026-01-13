@@ -1,5 +1,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KernelKind {
+    /// Initialize auxiliary Rhie–Chow mobility `d_p` before flux/assembly.
+    ///
+    /// This is emitted for models that include a `d_p` field in the state layout.
+    DpInit,
+
     /// Flux-module gradients stage (optional).
     ///
     /// Some flux modules (e.g. KT) require precomputed gradients of the coupled unknowns.
@@ -24,6 +29,8 @@ pub enum KernelKind {
 pub struct KernelId(pub &'static str);
 
 impl KernelId {
+    pub const DP_INIT: KernelId = KernelId("dp_init");
+
     pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 
@@ -120,6 +127,7 @@ impl KernelId {
 impl From<KernelKind> for KernelId {
     fn from(kind: KernelKind) -> Self {
         match kind {
+            KernelKind::DpInit => KernelId::DP_INIT,
             KernelKind::FluxModuleGradients => KernelId::FLUX_MODULE_GRADIENTS,
             KernelKind::FluxModule => KernelId::FLUX_MODULE,
 
@@ -213,6 +221,9 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
     match model.method {
         MethodSpec::CoupledIncompressible => {
             let mut kernels = Vec::new();
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(KernelKind::DpInit);
+            }
             if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
                 gradients,
                 ..
@@ -284,6 +295,13 @@ pub fn derive_kernel_specs_for_model(
             }
 
             let mut kernels = Vec::new();
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(ModelKernelSpec {
+                    id: KernelId::DP_INIT,
+                    phase: KernelPhaseId::Preparation,
+                    dispatch: DispatchKindId::Cells,
+                });
+            }
             if let Some(FluxModuleSpec::Kernel { gradients, .. }) = &model.flux_module {
                 if gradients.is_some() {
                     kernels.push(ModelKernelSpec {
@@ -386,6 +404,7 @@ pub fn derive_kernel_specs_for_model(
 
 pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
     match kind {
+        KernelKind::DpInit => format!("dp_init_{model_id}.wgsl"),
         KernelKind::FluxModuleGradients => format!("flux_module_gradients_{model_id}.wgsl"),
         KernelKind::FluxModule => format!("flux_module_{model_id}.wgsl"),
 
@@ -405,6 +424,17 @@ pub fn generate_kernel_wgsl_for_model(
     let discrete: DiscreteSystem = lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
 
     let wgsl = match kind {
+        KernelKind::DpInit => {
+            let stride = model.state_layout.stride();
+            let Some(d_p) = model.state_layout.field("d_p") else {
+                return Err("DpInit requested but model has no 'd_p' field in state layout".to_string());
+            };
+            if d_p.kind() != crate::solver::model::backend::FieldKind::Scalar {
+                return Err("DpInit requires 'd_p' to be a scalar field".to_string());
+            }
+            let d_p_offset = d_p.offset();
+            cfd2_codegen::solver::codegen::generate_dp_init_wgsl(stride, d_p_offset)
+        }
         KernelKind::FluxModuleGradients => match &model.flux_module {
             Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
                 gradients: Some(_),

@@ -270,20 +270,17 @@ fn has_coupled_resources(_plan: &GpuProgramPlan) -> bool {
 }
 
 fn coupled_graph_init_prepare_run(
-    _plan: &GpuProgramPlan,
-    _context: &crate::solver::gpu::context::GpuContext,
-    _mode: GraphExecMode,
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    // No dedicated init_prepare stage for the generic coupled backend.
-    (0.0, None)
+    generic_coupled_model::init_prepare_graph_run(plan, context, mode)
 }
 
 fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
-    // Outer corrector loops are not modeled generically yet.
-    //
-    // The coupled program uses a fixed single corrector so it remains PDE-agnostic.
-    let _ = plan;
-    1
+    // Use the same `OuterIters` knob as the implicit path so tests/UI can control the number of
+    // nonlinear corrector iterations per step for coupled methods (e.g. incompressible SIMPLE).
+    generic_coupled_model::count_outer_iters(plan)
 }
 
 fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
@@ -296,7 +293,10 @@ fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
-    let _ = plan;
+    // After the first iteration begins, we can stop running one-time preparation
+    // kernels (e.g. `dp_init`) on subsequent steps unless a parameter change
+    // re-enables them.
+    generic_coupled_model::clear_dp_init_needed(plan);
 }
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {

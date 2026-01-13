@@ -526,6 +526,10 @@ fn state_component_at_side(
     let interior = state_component_at(layout, buffer, Expr::ident("neigh_idx"), field, component);
 
     // Boundary neighbor uses BC tables (if the field is an unknown); otherwise fall back to owner.
+    //
+    // Important: for *interior* faces, we always want the true neighbor cell value, even for
+    // auxiliary state fields (e.g. `d_p`, `grad_p`) that are not part of the solved-for unknown
+    // set. Only boundary faces need special handling.
     let owner = state_component_at(layout, buffer, Expr::ident("owner"), field, component);
 
     let Some(state_field) = layout.field(field) else {
@@ -556,23 +560,24 @@ fn state_component_at_side(
             format!("{field}_{suffix}")
         }
     };
-    let Some(unknown_offset) = flux_layout.offset_for(&comp_name) else {
-        return owner;
+
+    let boundary_neighbor = if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
+        let bc_table_idx = Expr::ident("boundary_type") * Expr::from(flux_layout.stride)
+            + Expr::from(unknown_offset);
+        let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
+        let value = dsl::array_access("bc_value", bc_table_idx);
+
+        // GpuBcKind: ZeroGradient=0, Dirichlet=1, Neumann=2 (value is dphi/dn).
+        dsl::select(
+            dsl::select(owner.clone(), value.clone(), kind.eq(Expr::from(1u32))),
+            owner.clone() + value * Expr::ident("d_own"),
+            kind.eq(Expr::from(2u32)),
+        )
+    } else {
+        owner.clone()
     };
 
-    let bc_table_idx =
-        Expr::ident("boundary_type") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
-    let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
-    let value = dsl::array_access("bc_value", bc_table_idx);
-
-    // GpuBcKind: ZeroGradient=0, Dirichlet=1, Neumann=2 (value is dphi/dn).
-    let from_bc = dsl::select(
-        dsl::select(owner.clone(), value.clone(), kind.eq(Expr::from(1u32))),
-        owner.clone() + value * Expr::ident("d_own"),
-        kind.eq(Expr::from(2u32)),
-    );
-
-    dsl::select(interior, from_bc, Expr::ident("is_boundary"))
+    dsl::select(interior, boundary_neighbor, Expr::ident("is_boundary"))
 }
 
 fn lower_scalar(

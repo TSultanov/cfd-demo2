@@ -734,37 +734,16 @@ fn rhie_chow_flux_module_kernel(
         grad_p,
     };
 
-    // Rhie–Chow mass flux:
-    // phi = rho * (u_n * area + d_p_face * area * (grad_p·n - (p_N - p_O)/dist))
+    // Pressure-free predictor flux used in the continuity equation RHS:
+    //   phi ≈ rho * (u_f · n) * area
+    //
+    // The pressure equation's Laplacian term supplies the pressure correction.
     let u_face = V::Lerp(
         Box::new(V::state_vec2(FaceSide::Owner, fields.momentum.clone())),
         Box::new(V::state_vec2(FaceSide::Neighbor, fields.momentum.clone())),
     );
     let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
-
-    let d_p_face = S::Lerp(
-        Box::new(S::state(FaceSide::Owner, fields.d_p.clone())),
-        Box::new(S::state(FaceSide::Neighbor, fields.d_p.clone())),
-    );
-    let grad_p_face = V::Lerp(
-        Box::new(V::state_vec2(FaceSide::Owner, fields.grad_p.clone())),
-        Box::new(V::state_vec2(FaceSide::Neighbor, fields.grad_p.clone())),
-    );
-    let grad_p_n = S::Dot(Box::new(grad_p_face), Box::new(V::normal()));
-
-    let p_own = S::state(FaceSide::Owner, fields.pressure.clone());
-    let p_neigh = S::state(FaceSide::Neighbor, fields.pressure.clone());
-    let p_grad_f = S::Div(Box::new(S::Sub(Box::new(p_neigh), Box::new(p_own))), Box::new(S::dist()));
-
-    let rc_term = S::Mul(
-        Box::new(S::Mul(Box::new(d_p_face), Box::new(S::area()))),
-        Box::new(S::Sub(Box::new(grad_p_n), Box::new(p_grad_f))),
-    );
-
-    let phi_inner = S::Add(
-        Box::new(S::Mul(Box::new(u_n), Box::new(S::area()))),
-        Box::new(rc_term),
-    );
+    let phi_inner = S::Mul(Box::new(u_n), Box::new(S::area()));
     let rho_face = density_face_expr(layout);
     let phi = S::Mul(Box::new(rho_face), Box::new(phi_inner));
 

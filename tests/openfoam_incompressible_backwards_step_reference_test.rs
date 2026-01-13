@@ -45,11 +45,11 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     solver.set_alpha_u(0.7);
     solver.set_alpha_p(0.3);
     solver.set_outer_iters(3);
-    solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
+    solver.set_u(&vec![(1.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
 
-    for _ in 0..60 {
+    for _ in 0..100 {
         solver.step();
     }
 

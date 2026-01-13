@@ -204,23 +204,25 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
                 Some(owner)
             };
 
+            // For boundary faces, map to the diagonal entry.
+            //
+            // Assembly kernels rely on `cell_face_matrix_indices` to produce a valid CSR rank for
+            // every (cell, face) pair. Using the diagonal for boundary faces keeps neighbor-rank
+            // indexing well-defined and matches the intended "ghost equals owner" convention.
             let target_col = match neighbor {
                 Some(n) => n as u32,
-                None => u32::MAX,
+                None => i as u32,
             };
 
-            if target_col == u32::MAX {
-                cell_face_matrix_indices.push(u32::MAX);
-            } else {
-                let row_start = scalar_row_offsets[i as usize] as usize;
-                let row_end = scalar_row_offsets[i as usize + 1] as usize;
-                let cols = &scalar_col_indices[row_start..row_end];
+            let row_start = scalar_row_offsets[i as usize] as usize;
+            let row_end = scalar_row_offsets[i as usize + 1] as usize;
+            let cols = &scalar_col_indices[row_start..row_end];
 
-                if let Ok(idx) = cols.binary_search(&target_col) {
-                    cell_face_matrix_indices.push((row_start + idx) as u32);
-                } else {
-                    cell_face_matrix_indices.push(u32::MAX);
-                }
+            if let Ok(idx) = cols.binary_search(&target_col) {
+                cell_face_matrix_indices.push((row_start + idx) as u32);
+            } else {
+                // Should not happen: scalar CSR always contains the diagonal and any true neighbor.
+                cell_face_matrix_indices.push(u32::MAX);
             }
         }
     }

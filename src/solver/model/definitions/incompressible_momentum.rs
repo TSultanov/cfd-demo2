@@ -163,6 +163,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         state_layout: layout,
         boundaries,
 
+        extra_kernels: Vec::new(),
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
@@ -176,6 +177,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             kernel: flux_kernel,
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
+        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
@@ -407,4 +409,3 @@ fn rhie_chow_flux_module_kernel(
 
     Ok(FluxModuleKernelSpec::ScalarReplicated { phi })
 }
-

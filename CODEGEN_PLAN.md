@@ -80,6 +80,9 @@ Done when:
   - central kernel registries/matches in runtime.
 - Module composition (order/phase/dispatch) is emitted by `(ModelSpec + method selection + runtime config)` and validated by contract tests.
 
+Progress (partial):
+- `ModelSpec` can now inject additional kernel passes (`extra_kernels`) and provide build-time WGSL generators for them (`generated_kernels`), so new module kernels can be added from model definitions without extending central kernel-template matches.
+
 ### 1) Flux Modules (boundary + reconstruction + method knobs)
 - Flux kernels are now IR-driven, but boundary handling is still incomplete: flux modules need to consume the same boundary condition tables (`bc_kind`/`bc_value`) that assembly uses so Dirichlet/Neumann boundaries affect fluxes (not just zero-gradient extrapolation).
 - Add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.

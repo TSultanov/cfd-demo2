@@ -1320,6 +1320,7 @@ mod tests {
             state_layout: layout,
             boundaries: BoundarySpec::default(),
 
+            extra_kernels: Vec::new(),
             linear_solver: Some(ModelLinearSolverSpec {
                 preconditioner: ModelPreconditionerSpec::Schur {
                     omega: 1.0,
@@ -1329,6 +1330,7 @@ mod tests {
             }),
             flux_module: None,
             primitives: primitives::PrimitiveDerivations::default(),
+            generated_kernels: Vec::new(),
             gpu: ModelGpuSpec::default(),
         }
         .with_derived_gpu();

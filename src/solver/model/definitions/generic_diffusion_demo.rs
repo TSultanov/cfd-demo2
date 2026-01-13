@@ -45,9 +45,11 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         state_layout: layout,
         boundaries,
 
+        extra_kernels: Vec::new(),
         linear_solver: None,
         flux_module: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
+        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
@@ -90,11 +92,12 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         state_layout: layout,
         boundaries,
 
+        extra_kernels: Vec::new(),
         linear_solver: None,
         flux_module: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
+        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
 }
-

@@ -16,6 +16,12 @@ pub struct ModelSpec {
     pub state_layout: StateLayout,
     pub boundaries: BoundarySpec,
 
+    /// Optional, model-defined kernel schedule extensions.
+    ///
+    /// This is the first step toward pluggable numerical “modules” (Gap 0 in `CODEGEN_PLAN.md`):
+    /// models can inject additional kernels without requiring edits to central kernel registries.
+    pub extra_kernels: Vec<crate::solver::model::kernel::ModelKernelSpec>,
+
     /// Optional model-owned linear solver configuration.
     ///
     /// When present, this is treated as authoritative by solver families that
@@ -27,6 +33,12 @@ pub struct ModelSpec {
 
     /// Derived primitive recovery expressions (empty if primitives = conserved state)
     pub primitives: crate::solver::model::primitives::PrimitiveDerivations,
+
+    /// Optional, model-defined build-time WGSL generators for extra kernels in `extra_kernels`.
+    ///
+    /// This allows adding new model/method modules without growing global `match` statements in
+    /// `src/solver/model/kernel.rs` or `build.rs`.
+    pub generated_kernels: Vec<crate::solver::model::kernel::ModelKernelGeneratorSpec>,
 
     pub gpu: crate::solver::model::gpu_spec::ModelGpuSpec,
 }

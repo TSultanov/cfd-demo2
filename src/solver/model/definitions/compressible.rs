@@ -162,12 +162,14 @@ pub fn compressible_model() -> ModelSpec {
         state_layout: layout,
         boundaries,
 
+        extra_kernels: Vec::new(),
         linear_solver: None,
         flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
             gradients: None,
             kernel: flux_kernel,
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::euler_ideal_gas(gamma),
+        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()

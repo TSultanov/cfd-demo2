@@ -418,27 +418,67 @@ pub fn derive_kernel_specs_for_model(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CoupledIncompressibleKernelFields {
-    pub momentum: String,
-    pub pressure: String,
-    pub d_p: String,
-    pub grad_p: String,
+fn collect_coefficient_fields(
+    coeff: &crate::solver::model::backend::Coefficient,
+    out: &mut Vec<crate::solver::model::backend::FieldRef>,
+) {
+    use crate::solver::model::backend::Coefficient;
+    match coeff {
+        Coefficient::Constant { .. } => {}
+        Coefficient::Field(field) => out.push(*field),
+        Coefficient::Product(lhs, rhs) => {
+            collect_coefficient_fields(lhs, out);
+            collect_coefficient_fields(rhs, out);
+        }
+    }
 }
 
-pub fn derive_coupled_incompressible_kernel_fields(
+pub type KernelCodegenFieldMap = std::collections::BTreeMap<String, String>;
+
+/// Derive kernel-specific codegen parameters from the model math + layout.
+///
+/// This is intentionally *kernel-agnostic plumbing*: it exposes derived values as a
+/// string-keyed map so build-time codegen can remain generic.
+///
+/// Note: legacy kernels may rely on naming conventions for auxiliary fields. Those
+/// conventions are validated against `ModelSpec.state_layout` here.
+pub fn derive_kernel_codegen_fields_for_model(
     model: &crate::solver::model::ModelSpec,
-) -> Result<CoupledIncompressibleKernelFields, String> {
+    kind: KernelKind,
+) -> Result<KernelCodegenFieldMap, String> {
+    let mut out = KernelCodegenFieldMap::new();
+    match kind {
+        KernelKind::PrepareCoupled
+        | KernelKind::CoupledAssembly
+        | KernelKind::PressureAssembly
+        | KernelKind::UpdateFieldsFromCoupled
+        | KernelKind::FluxRhieChow => {
+            derive_rhie_chow_fields(model, &mut out)?;
+        }
+        KernelKind::SystemMain
+        | KernelKind::KtGradients
+        | KernelKind::FluxKt
+        | KernelKind::GenericCoupledAssembly
+        | KernelKind::GenericCoupledApply
+        | KernelKind::GenericCoupledUpdate => {}
+    }
+    Ok(out)
+}
+
+fn derive_rhie_chow_fields(
+    model: &crate::solver::model::ModelSpec,
+    out: &mut KernelCodegenFieldMap,
+) -> Result<(), String> {
     use crate::solver::model::backend::{FieldKind, TermOp};
 
     let req = analyze_kernel_requirements(&model.system);
-    let coupling = req
-        .pressure_coupling
-        .ok_or_else(|| "model does not contain a unique momentum-pressure coupling".to_string())?;
+    let coupling = req.pressure_coupling.ok_or_else(|| {
+        "missing unique momentum-pressure coupling required for Rhie–Chow kernels".to_string()
+    })?;
 
     if coupling.momentum.kind() != FieldKind::Vector2 {
         return Err(format!(
-            "legacy coupled-incompressible kernels require Vector2 momentum, got {} for '{}'",
+            "Rhie–Chow kernels require Vector2 momentum, got {} for '{}'",
             coupling.momentum.kind().as_str(),
             coupling.momentum.name()
         ));
@@ -477,11 +517,6 @@ pub fn derive_coupled_incompressible_kernel_fields(
         ));
     }
 
-    // Rhie–Chow expects a per-cell scalar coefficient field `d_p` in state.
-    //
-    // We derive it structurally from the pressure Laplacian coefficient by selecting
-    // the unique coefficient field that lives in the state layout (named coefficients
-    // like `rho` are provided via uniforms and won't appear in the layout).
     let layout_coeff_fields: Vec<_> = coeff_fields
         .into_iter()
         .filter(|f| model.state_layout.field(f.name()).is_some())
@@ -511,34 +546,12 @@ pub fn derive_coupled_incompressible_kernel_fields(
         ));
     }
 
-    if model.state_layout.field(&d_p).is_none() {
-        return Err(format!(
-            "state layout missing required pressure coefficient field '{}' (from pressure laplacian)",
-            d_p
-        ));
-    }
+    out.insert("momentum".to_string(), coupling.momentum.name().to_string());
+    out.insert("pressure".to_string(), coupling.pressure.name().to_string());
+    out.insert("d_p".to_string(), d_p);
+    out.insert("grad_p".to_string(), grad_p);
 
-    Ok(CoupledIncompressibleKernelFields {
-        momentum: coupling.momentum.name().to_string(),
-        pressure: coupling.pressure.name().to_string(),
-        d_p,
-        grad_p,
-    })
-}
-
-fn collect_coefficient_fields(
-    coeff: &crate::solver::model::backend::Coefficient,
-    out: &mut Vec<crate::solver::model::backend::FieldRef>,
-) {
-    use crate::solver::model::backend::Coefficient;
-    match coeff {
-        Coefficient::Constant { .. } => {}
-        Coefficient::Field(field) => out.push(*field),
-        Coefficient::Product(lhs, rhs) => {
-            collect_coefficient_fields(lhs, out);
-            collect_coefficient_fields(rhs, out);
-        }
-    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

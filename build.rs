@@ -914,58 +914,73 @@ fn generate_kernel_wgsl_for_model(
 ) -> String {
     match kind {
         solver::model::KernelKind::PrepareCoupled => {
-            let fields = solver::model::kernel::derive_coupled_incompressible_kernel_fields(model)
-                .unwrap_or_else(|e| panic!("failed to derive coupled fields for model '{}': {e}", model.id));
+            let fields =
+                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
+                    .unwrap_or_else(|e| {
+                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
+                    });
             cfd2_codegen::solver::codegen::prepare_coupled::generate_prepare_coupled_wgsl(
                 discrete,
                 &model.state_layout,
-                &fields.momentum,
-                &fields.pressure,
-                &fields.d_p,
-                &fields.grad_p,
+                required_field(&fields, "momentum"),
+                required_field(&fields, "pressure"),
+                required_field(&fields, "d_p"),
+                required_field(&fields, "grad_p"),
             )
         }
         solver::model::KernelKind::CoupledAssembly => {
-            let fields = solver::model::kernel::derive_coupled_incompressible_kernel_fields(model)
-                .unwrap_or_else(|e| panic!("failed to derive coupled fields for model '{}': {e}", model.id));
+            let fields =
+                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
+                    .unwrap_or_else(|e| {
+                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
+                    });
             cfd2_codegen::solver::codegen::coupled_assembly::generate_coupled_assembly_wgsl(
                 discrete,
                 &model.state_layout,
-                &fields.momentum,
-                &fields.pressure,
-                &fields.d_p,
+                required_field(&fields, "momentum"),
+                required_field(&fields, "pressure"),
+                required_field(&fields, "d_p"),
             )
         }
         solver::model::KernelKind::PressureAssembly => {
-            let fields = solver::model::kernel::derive_coupled_incompressible_kernel_fields(model)
-                .unwrap_or_else(|e| panic!("failed to derive coupled fields for model '{}': {e}", model.id));
+            let fields =
+                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
+                    .unwrap_or_else(|e| {
+                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
+                    });
             cfd2_codegen::solver::codegen::pressure_assembly::generate_pressure_assembly_wgsl(
                 discrete,
                 &model.state_layout,
-                &fields.pressure,
-                &fields.d_p,
-                &fields.grad_p,
+                required_field(&fields, "pressure"),
+                required_field(&fields, "d_p"),
+                required_field(&fields, "grad_p"),
             )
         }
         solver::model::KernelKind::UpdateFieldsFromCoupled => {
-            let fields = solver::model::kernel::derive_coupled_incompressible_kernel_fields(model)
-                .unwrap_or_else(|e| panic!("failed to derive coupled fields for model '{}': {e}", model.id));
+            let fields =
+                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
+                    .unwrap_or_else(|e| {
+                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
+                    });
             cfd2_codegen::solver::codegen::update_fields_from_coupled::generate_update_fields_from_coupled_wgsl(
                 &model.state_layout,
-                &fields.momentum,
-                &fields.pressure,
+                required_field(&fields, "momentum"),
+                required_field(&fields, "pressure"),
             )
         }
         solver::model::KernelKind::FluxRhieChow => {
-            let fields = solver::model::kernel::derive_coupled_incompressible_kernel_fields(model)
-                .unwrap_or_else(|e| panic!("failed to derive coupled fields for model '{}': {e}", model.id));
+            let fields =
+                solver::model::kernel::derive_kernel_codegen_fields_for_model(model, kind)
+                    .unwrap_or_else(|e| {
+                        panic!("failed to derive kernel codegen fields for model '{}': {e}", model.id)
+                    });
             cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
                 discrete,
                 &model.state_layout,
-                &fields.momentum,
-                &fields.pressure,
-                &fields.d_p,
-                &fields.grad_p,
+                required_field(&fields, "momentum"),
+                required_field(&fields, "pressure"),
+                required_field(&fields, "d_p"),
+                required_field(&fields, "grad_p"),
             )
         }
         solver::model::KernelKind::SystemMain => cfd2_codegen::solver::codegen::generate_wgsl(discrete),
@@ -1009,6 +1024,15 @@ fn generate_kernel_wgsl_for_model(
             )
         }
     }
+}
+
+fn required_field<'a>(
+    map: &'a solver::model::kernel::KernelCodegenFieldMap,
+    key: &str,
+) -> &'a str {
+    map.get(key)
+        .map(|s| s.as_str())
+        .unwrap_or_else(|| panic!("missing required derived kernel field '{key}'"))
 }
 
 fn ir_eos_from_model(eos: solver::model::EosSpec) -> solver::ir::EosSpec {

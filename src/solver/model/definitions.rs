@@ -1,5 +1,5 @@
 use super::backend::ast::{
-    fvc, fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
+    fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
     FieldRef, FluxRef,
 };
 use super::backend::state_layout::StateLayout;
@@ -303,7 +303,7 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
             Coefficient::field(fields.mu).expect("mu must be scalar"),
             fields.u,
         )
-        + fvc::grad(fields.p))
+        + fvm::grad(fields.p))
     .eqn(fields.u);
 
     let pressure = (fvm::laplacian(
@@ -426,7 +426,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 
     ModelSpec {
         id: "incompressible_momentum",
-        method: crate::solver::model::method::MethodSpec::GenericCoupled,
+        method: crate::solver::model::method::MethodSpec::CoupledIncompressible,
         eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
@@ -441,7 +441,9 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             },
         }),
         flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-            gradients: None,
+            gradients: Some(
+                crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
+            ),
             kernel: flux_kernel,
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
@@ -469,7 +471,7 @@ pub fn compressible_model() -> ModelSpec {
     ]);
 
     let gamma = 1.4;
-    let flux_kernel = compressible_euler_central_upwind_flux_module_kernel(&system, gamma)
+    let flux_kernel = compressible_euler_central_upwind_flux_module_kernel(&system, &fields, gamma)
         .expect("failed to build compressible flux kernel spec");
 
     ModelSpec {
@@ -518,6 +520,55 @@ fn rhie_chow_flux_module_kernel(
                 collect_coeff_fields(rhs, out);
             }
         }
+    }
+
+    fn find_grad_field_for_scalar(
+        layout: &StateLayout,
+        scalar: &str,
+        unit: UnitDim,
+    ) -> Result<String, String> {
+        let expected = format!("grad_{scalar}");
+        if let Some(f) = layout.field(&expected) {
+            if f.kind() == FieldKind::Vector2 {
+                return Ok(expected);
+            }
+        }
+
+        let mut candidates = Vec::new();
+        for f in layout.fields() {
+            if f.kind() != FieldKind::Vector2 {
+                continue;
+            }
+            if f.unit() != unit {
+                continue;
+            }
+            candidates.push(f.name().to_string());
+        }
+
+        match candidates.as_slice() {
+            [only] => Ok(only.clone()),
+            [] => Err(format!(
+                "state layout missing required gradient field for '{scalar}' (expected '{expected}' or a unique Vector2 field with unit {unit})"
+            )),
+            many => Err(format!(
+                "state layout has multiple candidate gradient fields for '{scalar}' (unit {unit}); add an explicit '{expected}' field or disambiguate: [{}]",
+                many.join(", ")
+            )),
+        }
+    }
+
+    fn density_face_expr(layout: &StateLayout) -> S {
+        // Prefer a state-layout density when present (variable-density extension);
+        // otherwise fall back to the global constant density uniform.
+        if let Some(rho) = layout.field("rho") {
+            if rho.kind() == FieldKind::Scalar {
+                return S::Lerp(
+                    Box::new(S::state(FaceSide::Owner, "rho")),
+                    Box::new(S::state(FaceSide::Neighbor, "rho")),
+                );
+            }
+        }
+        S::constant("density")
     }
 
     // Infer (momentum, pressure) coupling from the declared equation system.
@@ -610,12 +661,7 @@ fn rhie_chow_flux_module_kernel(
         }
     };
 
-    let grad_p = format!("grad_{pressure}");
-    if layout.field(&grad_p).is_none() {
-        return Err(format!(
-            "state layout missing required pressure-gradient field '{grad_p}' (expected by Rhie–Chow)"
-        ));
-    }
+    let grad_p = find_grad_field_for_scalar(layout, &pressure, si::PRESSURE_GRADIENT)?;
 
     let fields = RhieChowFields {
         momentum,
@@ -655,13 +701,15 @@ fn rhie_chow_flux_module_kernel(
         Box::new(S::Mul(Box::new(u_n), Box::new(S::area()))),
         Box::new(rc_term),
     );
-    let phi = S::Mul(Box::new(S::constant("density")), Box::new(phi_inner));
+    let rho_face = density_face_expr(layout);
+    let phi = S::Mul(Box::new(rho_face), Box::new(phi_inner));
 
     Ok(FluxModuleKernelSpec::ScalarReplicated { phi })
 }
 
 fn compressible_euler_central_upwind_flux_module_kernel(
     system: &EquationSystem,
+    fields: &CompressibleFields,
     gamma: f32,
 ) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
     use crate::solver::ir::{FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec};
@@ -672,9 +720,13 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let ex = V::vec2(S::lit(1.0), S::lit(0.0));
     let ey = V::vec2(S::lit(0.0), S::lit(1.0));
 
-    let rho = |side: FaceSide| S::state(side, "rho");
-    let rho_e = |side: FaceSide| S::state(side, "rho_e");
-    let rho_u = |side: FaceSide| V::state_vec2(side, "rho_u");
+    let rho_name = fields.rho.name();
+    let rho_u_name = fields.rho_u.name();
+    let rho_e_name = fields.rho_e.name();
+
+    let rho = |side: FaceSide| S::state(side, rho_name);
+    let rho_e = |side: FaceSide| S::state(side, rho_e_name);
+    let rho_u = |side: FaceSide| V::state_vec2(side, rho_u_name);
     let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
     let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
 
@@ -724,36 +776,30 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let mut flux_right = Vec::new();
 
     for name in &components {
-        match name.as_str() {
-            "rho" => {
+        if name == rho_name {
                 u_left.push(rho(FaceSide::Owner));
                 u_right.push(rho(FaceSide::Neighbor));
                 flux_left.push(flux_mass(FaceSide::Owner));
                 flux_right.push(flux_mass(FaceSide::Neighbor));
-            }
-            "rho_u_x" => {
+        } else if name == &format!("{rho_u_name}_x") {
                 u_left.push(rho_u_x(FaceSide::Owner));
                 u_right.push(rho_u_x(FaceSide::Neighbor));
                 flux_left.push(flux_mom_x(FaceSide::Owner));
                 flux_right.push(flux_mom_x(FaceSide::Neighbor));
-            }
-            "rho_u_y" => {
+        } else if name == &format!("{rho_u_name}_y") {
                 u_left.push(rho_u_y(FaceSide::Owner));
                 u_right.push(rho_u_y(FaceSide::Neighbor));
                 flux_left.push(flux_mom_y(FaceSide::Owner));
                 flux_right.push(flux_mom_y(FaceSide::Neighbor));
-            }
-            "rho_e" => {
+        } else if name == rho_e_name {
                 u_left.push(rho_e(FaceSide::Owner));
                 u_right.push(rho_e(FaceSide::Neighbor));
                 flux_left.push(flux_energy(FaceSide::Owner));
                 flux_right.push(flux_energy(FaceSide::Neighbor));
-            }
-            other => {
-                return Err(format!(
-                    "compressible central-upwind kernel builder does not know how to flux component '{other}'"
-                ));
-            }
+        } else {
+            return Err(format!(
+                "compressible central-upwind kernel builder does not know how to flux component '{name}'"
+            ));
         }
     }
 
@@ -916,7 +962,7 @@ mod tests {
 
         let pressure = &system.equations()[1];
         assert_eq!(pressure.target().name(), "p");
-        assert_eq!(pressure.terms().len(), 1);
+        assert_eq!(pressure.terms().len(), 2);
         assert_eq!(pressure.terms()[0].op, TermOp::Laplacian);
         match &pressure.terms()[0].coeff {
             Some(Coefficient::Product(lhs, rhs)) => {
@@ -925,6 +971,7 @@ mod tests {
             }
             other => panic!("expected coefficient product, got {:?}", other),
         }
+        assert_eq!(pressure.terms()[1].op, TermOp::DivFlux);
     }
 
     #[test]

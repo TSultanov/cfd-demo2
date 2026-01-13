@@ -1,6 +1,7 @@
 pub mod coeff_expr;
 pub mod dsl;
 pub mod flux_module;
+pub mod flux_module_gradients;
 pub mod generic_coupled_kernels;
 pub mod ir;
 pub mod plan;
@@ -13,6 +14,7 @@ pub mod wgsl_ast;
 pub mod wgsl_dsl;
 
 pub use flux_module::generate_flux_module_wgsl;
+pub use flux_module_gradients::generate_flux_module_gradients_wgsl;
 pub use ir::{lower_system, DiscreteEquation, DiscreteOp, DiscreteOpKind, DiscreteSystem};
 pub use state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
 pub use wgsl::{generate_wgsl, generate_wgsl_library};

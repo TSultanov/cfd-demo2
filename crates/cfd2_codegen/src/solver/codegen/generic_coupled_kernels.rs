@@ -273,7 +273,7 @@ fn base_update_items() -> Vec<Item> {
         Type::array(Type::F32),
         1,
         0,
-        AccessMode::Read,
+        AccessMode::ReadWrite,
     ));
     items
 }
@@ -834,8 +834,37 @@ fn main_update_fn(system: &DiscreteSystem, layout: &StateLayout, primitives: &[(
 
     for (u_idx, (field, component)) in unknowns.iter().enumerate() {
         let target = state_component(layout, "state", "idx", field.name(), *component);
-        let value = dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
-        stmts.push(dsl::assign_expr(target, value));
+        let x_entry =
+            dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
+        let value = x_entry.clone();
+
+        // Under-relaxation for SIMPLE-like coupled solvers.
+        //
+        // Only apply when the coupled unknown is a velocity-like field (`U`/`u`) or pressure (`p`).
+        // Other models (e.g. compressible conserved variables) keep alpha=1 to avoid altering
+        // time-accurate updates.
+        let alpha = match field.name() {
+            "p" => Expr::ident("constants").field("alpha_p"),
+            "U" | "u" => Expr::ident("constants").field("alpha_u"),
+            _ => Expr::lit_f32(1.0),
+        };
+        let prev = target.clone();
+        let prev_is_finite =
+            prev.clone().eq(prev.clone()) & dsl::abs(prev.clone()).lt(Expr::lit_f32(3.4e38));
+        let value_is_finite =
+            value.clone().eq(value.clone()) & dsl::abs(value.clone()).lt(Expr::lit_f32(3.4e38));
+
+        // Avoid propagating NaN/Inf from the linear solver into the state.
+        // If the previous iterate is already non-finite, prefer a finite `value`.
+        let relaxed = Expr::call_named(
+            "mix",
+            vec![prev.clone(), value.clone(), alpha],
+        );
+        let candidate = dsl::select(value.clone(), relaxed, prev_is_finite);
+        let out = dsl::select(prev.clone(), candidate, value_is_finite);
+
+        stmts.push(dsl::assign_expr(target, out.clone()));
+        stmts.push(dsl::assign_expr(x_entry, out));
     }
 
      // Optional primitive recovery (derived primitives from conserved state).

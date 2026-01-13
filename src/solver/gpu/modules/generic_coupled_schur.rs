@@ -7,12 +7,17 @@ use crate::solver::model::KernelId;
 const WORKGROUP_SIZE: u32 = 64;
 
 use crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 pub struct GenericCoupledSchurPreconditioner {
     schur: CoupledSchurModule,
     setup_pipeline: wgpu::ComputePipeline,
-    setup_bg: wgpu::BindGroup,
+    setup_bg_ping_pong: Vec<wgpu::BindGroup>,
     setup_params: wgpu::Buffer,
+    state_step_index: Arc<AtomicUsize>,
+    state_stride: u32,
+    d_p_offset: u32,
     num_cells: u32,
     unknowns_per_cell: u32,
     p: u32,
@@ -29,9 +34,12 @@ impl GenericCoupledSchurPreconditioner {
         pressure_row_offsets: &wgpu::Buffer,
         pressure_col_indices: &wgpu::Buffer,
         pressure_values: &wgpu::Buffer,
-        setup_bg: wgpu::BindGroup,
+        setup_bg_ping_pong: Vec<wgpu::BindGroup>,
         setup_pipeline: wgpu::ComputePipeline,
         setup_params: wgpu::Buffer,
+        state_step_index: Arc<AtomicUsize>,
+        state_stride: u32,
+        d_p_offset: u32,
         unknowns_per_cell: u32,
         p: u32,
         u_len: u32,
@@ -50,8 +58,11 @@ impl GenericCoupledSchurPreconditioner {
                 crate::solver::model::KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
             ),
             setup_pipeline,
-            setup_bg,
+            setup_bg_ping_pong,
             setup_params,
+            state_step_index,
+            state_stride,
+            d_p_offset,
             num_cells,
             unknowns_per_cell,
             p,
@@ -79,35 +90,50 @@ impl GenericCoupledSchurPreconditioner {
         diag_u_inv: &wgpu::Buffer,
         diag_p_inv: &wgpu::Buffer,
         p_matrix_values: &wgpu::Buffer,
+        state_buffers: &[wgpu::Buffer; 3],
+        cell_vols: &wgpu::Buffer,
         setup_params: &wgpu::Buffer,
-    ) -> Result<wgpu::BindGroup, String> {
+    ) -> Result<Vec<wgpu::BindGroup>, String> {
         let src = kernel_registry::kernel_source_by_id(
             "",
             KernelId::GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE,
         )?;
         let bgl = pipeline.get_bind_group_layout(0);
-        wgsl_reflect::create_bind_group_from_bindings(
-            device,
-            "Generic Coupled Schur Setup BG",
-            &bgl,
-            src.bindings,
-            0,
-            |name| {
-                let buf = match name {
-                    "scalar_row_offsets" => scalar_row_offsets,
-                    "diagonal_indices" => diagonal_indices,
-                    "matrix_values" => matrix_values,
-                    "diag_u_inv" => diag_u_inv,
-                    "diag_p_inv" => diag_p_inv,
-                    "p_matrix_values" => p_matrix_values,
-                    "params" => setup_params,
-                    _ => return None,
-                };
-                Some(wgpu::BindingResource::Buffer(
-                    buf.as_entire_buffer_binding(),
-                ))
-            },
-        )
+
+        let mut out = Vec::with_capacity(3);
+        for phase in 0..3usize {
+            let (idx_state, _, _) = crate::solver::gpu::modules::state::ping_pong_indices(phase);
+            let state = &state_buffers[idx_state];
+
+            let label = format!("Generic Coupled Schur Setup BG (phase {phase})");
+            let bg = wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &label,
+                &bgl,
+                src.bindings,
+                0,
+                |name| {
+                    let buf = match name {
+                        "scalar_row_offsets" => scalar_row_offsets,
+                        "diagonal_indices" => diagonal_indices,
+                        "matrix_values" => matrix_values,
+                        "diag_u_inv" => diag_u_inv,
+                        "diag_p_inv" => diag_p_inv,
+                        "p_matrix_values" => p_matrix_values,
+                        "state" => state,
+                        "cell_vols" => cell_vols,
+                        "params" => setup_params,
+                        _ => return None,
+                    };
+                    Some(wgpu::BindingResource::Buffer(
+                        buf.as_entire_buffer_binding(),
+                    ))
+                },
+            )?;
+            out.push(bg);
+        }
+
+        Ok(out)
     }
 
     pub fn set_pressure_kind(&mut self, kind: CoupledPressureSolveKind) {
@@ -134,12 +160,18 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
             self.unknowns_per_cell,
             self.p,
             self.u_len,
-            0,
-            0,
+            self.state_stride,
+            self.d_p_offset,
             self.u0123,
             self.u4567,
         );
         queue.write_buffer(&self.setup_params, 0, bytemuck::bytes_of(&params));
+
+        let phase = self.state_step_index.load(Ordering::Relaxed) % 3;
+        let setup_bg = self
+            .setup_bg_ping_pong
+            .get(phase)
+            .unwrap_or_else(|| panic!("missing schur setup bind group for phase {phase}"));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Generic Coupled Schur Setup"),
@@ -150,7 +182,7 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.setup_pipeline);
-            pass.set_bind_group(0, &self.setup_bg, &[]);
+            pass.set_bind_group(0, setup_bg, &[]);
             pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
         }
         queue.submit(Some(encoder.finish()));

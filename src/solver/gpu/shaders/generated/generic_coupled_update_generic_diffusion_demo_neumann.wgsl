@@ -35,7 +35,7 @@ var<uniform> constants: Constants;
 // Group 1: Solution
 
 @group(1) @binding(0) 
-var<storage, read> x: array<f32>;
+var<storage, read_write> x: array<f32>;
 
 @compute
 @workgroup_size(64)
@@ -45,5 +45,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= num_cells) {
         return;
     }
-    state[idx * 1u + 0u] = x[idx * 1u + 0u];
+    state[idx * 1u + 0u] = select(state[idx * 1u + 0u], select(x[idx * 1u + 0u], mix(state[idx * 1u + 0u], x[idx * 1u + 0u], 1.0), state[idx * 1u + 0u] == state[idx * 1u + 0u] && abs(state[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 1u + 0u] == x[idx * 1u + 0u] && abs(x[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0);
+    x[idx * 1u + 0u] = select(state[idx * 1u + 0u], select(x[idx * 1u + 0u], mix(state[idx * 1u + 0u], x[idx * 1u + 0u], 1.0), state[idx * 1u + 0u] == state[idx * 1u + 0u] && abs(state[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 1u + 0u] == x[idx * 1u + 0u] && abs(x[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0);
 }

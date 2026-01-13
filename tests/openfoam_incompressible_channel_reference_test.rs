@@ -49,7 +49,9 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     solver.set_ramp_time(0.0);
     solver.set_alpha_u(0.7);
     solver.set_alpha_p(0.3);
-    solver.set_outer_iters(6);
+    solver
+        .set_incompressible_outer_correctors(6)
+        .expect("set outer correctors");
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();

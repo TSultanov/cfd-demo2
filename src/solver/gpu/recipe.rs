@@ -287,8 +287,9 @@ impl SolverRecipe {
         }
 
         // Linear solver spec
+        let max_restart = 30;
         let linear_solver = LinearSolverSpec {
-            solver_type: LinearSolverType::Fgmres { max_restart: 30 },
+            solver_type: LinearSolverType::Fgmres { max_restart },
             preconditioner,
             max_iters: 100,
             tolerance: 1e-6,

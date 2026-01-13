@@ -35,7 +35,7 @@ var<uniform> constants: Constants;
 // Group 1: Solution
 
 @group(1) @binding(0) 
-var<storage, read> x: array<f32>;
+var<storage, read_write> x: array<f32>;
 
 @compute
 @workgroup_size(64)
@@ -45,7 +45,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= num_cells) {
         return;
     }
-    state[idx * 8u + 0u] = x[idx * 3u + 0u];
-    state[idx * 8u + 1u] = x[idx * 3u + 1u];
-    state[idx * 8u + 2u] = x[idx * 3u + 2u];
+    state[idx * 8u + 0u] = select(state[idx * 8u + 0u], select(x[idx * 3u + 0u], mix(state[idx * 8u + 0u], x[idx * 3u + 0u], constants.alpha_u), state[idx * 8u + 0u] == state[idx * 8u + 0u] && abs(state[idx * 8u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 3u + 0u] == x[idx * 3u + 0u] && abs(x[idx * 3u + 0u]) < 340000000000000000000000000000000000000.0);
+    x[idx * 3u + 0u] = select(state[idx * 8u + 0u], select(x[idx * 3u + 0u], mix(state[idx * 8u + 0u], x[idx * 3u + 0u], constants.alpha_u), state[idx * 8u + 0u] == state[idx * 8u + 0u] && abs(state[idx * 8u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 3u + 0u] == x[idx * 3u + 0u] && abs(x[idx * 3u + 0u]) < 340000000000000000000000000000000000000.0);
+    state[idx * 8u + 1u] = select(state[idx * 8u + 1u], select(x[idx * 3u + 1u], mix(state[idx * 8u + 1u], x[idx * 3u + 1u], constants.alpha_u), state[idx * 8u + 1u] == state[idx * 8u + 1u] && abs(state[idx * 8u + 1u]) < 340000000000000000000000000000000000000.0), x[idx * 3u + 1u] == x[idx * 3u + 1u] && abs(x[idx * 3u + 1u]) < 340000000000000000000000000000000000000.0);
+    x[idx * 3u + 1u] = select(state[idx * 8u + 1u], select(x[idx * 3u + 1u], mix(state[idx * 8u + 1u], x[idx * 3u + 1u], constants.alpha_u), state[idx * 8u + 1u] == state[idx * 8u + 1u] && abs(state[idx * 8u + 1u]) < 340000000000000000000000000000000000000.0), x[idx * 3u + 1u] == x[idx * 3u + 1u] && abs(x[idx * 3u + 1u]) < 340000000000000000000000000000000000000.0);
+    state[idx * 8u + 2u] = select(state[idx * 8u + 2u], select(x[idx * 3u + 2u], mix(state[idx * 8u + 2u], x[idx * 3u + 2u], constants.alpha_p), state[idx * 8u + 2u] == state[idx * 8u + 2u] && abs(state[idx * 8u + 2u]) < 340000000000000000000000000000000000000.0), x[idx * 3u + 2u] == x[idx * 3u + 2u] && abs(x[idx * 3u + 2u]) < 340000000000000000000000000000000000000.0);
+    x[idx * 3u + 2u] = select(state[idx * 8u + 2u], select(x[idx * 3u + 2u], mix(state[idx * 8u + 2u], x[idx * 3u + 2u], constants.alpha_p), state[idx * 8u + 2u] == state[idx * 8u + 2u] && abs(state[idx * 8u + 2u]) < 340000000000000000000000000000000000000.0), x[idx * 3u + 2u] == x[idx * 3u + 2u] && abs(x[idx * 3u + 2u]) < 340000000000000000000000000000000000000.0);
 }

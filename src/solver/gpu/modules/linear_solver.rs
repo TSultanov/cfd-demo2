@@ -22,10 +22,21 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
 ) -> LinearSolverStats {
     let start = Instant::now();
 
-    // 1. Zero initial guess (assuming x0 = 0 for now, or we could pass init option)
+    // 1. Zero initial guess (assuming x0 = 0 for now).
     zero_buffer(context, system.x(), n);
 
     let rhs_norm = krylov.rhs_norm(context, system, n);
+    if !rhs_norm.is_finite() {
+        let stats = LinearSolverStats {
+            iterations: 0,
+            residual: rhs_norm,
+            converged: false,
+            diverged: true,
+            time: start.elapsed(),
+        };
+        debug_log(0, rhs_norm, rhs_norm, false);
+        return stats;
+    }
     if rhs_norm <= tol_abs {
         let stats = LinearSolverStats {
             iterations: 0,

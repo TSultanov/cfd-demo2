@@ -211,11 +211,22 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
     use crate::solver::model::MethodSpec;
 
     match model.method {
-        MethodSpec::CoupledIncompressible => KernelPlan::new(vec![
-            KernelKind::FluxModule,
-            KernelKind::GenericCoupledAssembly,
-            KernelKind::GenericCoupledUpdate,
-        ]),
+        MethodSpec::CoupledIncompressible => {
+            let mut kernels = Vec::new();
+            if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+                gradients,
+                ..
+            }) = &model.flux_module
+            {
+                if gradients.is_some() {
+                    kernels.push(KernelKind::FluxModuleGradients);
+                }
+                kernels.push(KernelKind::FluxModule);
+            }
+            kernels.push(KernelKind::GenericCoupledAssembly);
+            kernels.push(KernelKind::GenericCoupledUpdate);
+            KernelPlan::new(kernels)
+        }
         MethodSpec::GenericCoupled => {
             let mut kernels = Vec::new();
             // Optional flux module stage.
@@ -272,23 +283,33 @@ pub fn derive_kernel_specs_for_model(
                 return Err("CoupledIncompressible requires a flux_module in ModelSpec".to_string());
             }
 
-            Ok(vec![
-                ModelKernelSpec {
+            let mut kernels = Vec::new();
+            if let Some(FluxModuleSpec::Kernel { gradients, .. }) = &model.flux_module {
+                if gradients.is_some() {
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::FLUX_MODULE_GRADIENTS,
+                        phase: KernelPhaseId::Gradients,
+                        dispatch: DispatchKindId::Cells,
+                    });
+                }
+                kernels.push(ModelKernelSpec {
                     id: KernelId::FLUX_MODULE,
                     phase: KernelPhaseId::FluxComputation,
                     dispatch: DispatchKindId::Faces,
-                },
-                ModelKernelSpec {
-                    id: KernelId::GENERIC_COUPLED_ASSEMBLY,
-                    phase: KernelPhaseId::Assembly,
-                    dispatch: DispatchKindId::Cells,
-                },
-                ModelKernelSpec {
-                    id: KernelId::GENERIC_COUPLED_UPDATE,
-                    phase: KernelPhaseId::Update,
-                    dispatch: DispatchKindId::Cells,
-                },
-            ])
+                });
+            }
+            kernels.push(ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_ASSEMBLY,
+                phase: KernelPhaseId::Assembly,
+                dispatch: DispatchKindId::Cells,
+            });
+            kernels.push(ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_UPDATE,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+            });
+
+            Ok(kernels)
         }
         MethodSpec::GenericCoupled => {
             let mut kernels = Vec::new();
@@ -389,13 +410,16 @@ pub fn generate_kernel_wgsl_for_model(
                 gradients: Some(_),
                 ..
             }) => {
-                return Err(
-                    "FluxModuleGradients is not yet supported for Kernel-based flux modules"
-                        .to_string(),
-                );
+                let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+                cfd2_codegen::solver::codegen::generate_flux_module_gradients_wgsl(
+                    &model.state_layout,
+                    &flux_layout,
+                )?
             }
             _ => {
-                return Err("FluxModuleGradients requested but model has no gradients stage".to_string());
+                return Err(
+                    "FluxModuleGradients requested but model has no gradients stage".to_string(),
+                );
             }
         },
         KernelKind::FluxModule => match &model.flux_module {

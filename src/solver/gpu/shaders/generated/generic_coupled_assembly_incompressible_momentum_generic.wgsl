@@ -248,8 +248,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 diag_1 += phi_1;
             }
         }
-        rhs_0 += 1.0 * 0.5 * area * normal.x * (state[idx * 8u + 2u] + state[other_idx * 8u + 2u]);
-        rhs_1 += 1.0 * 0.5 * area * normal.y * (state[idx * 8u + 2u] + state[other_idx * 8u + 2u]);
+        matrix_values[start_row_0 + diag_rank * 3u + 2u] += 1.0 * 0.5 * area * normal.x;
+        matrix_values[start_row_0 + neighbor_rank * 3u + 2u] += 1.0 * 0.5 * area * normal.x;
+        matrix_values[start_row_1 + diag_rank * 3u + 2u] += 1.0 * 0.5 * area * normal.y;
+        matrix_values[start_row_1 + neighbor_rank * 3u + 2u] += 1.0 * 0.5 * area * normal.y;
         let diff_coeff_p = constants.density * state[idx * 8u + 3u] * area / dist;
         if (!is_boundary) {
             diag_2 += diff_coeff_p;

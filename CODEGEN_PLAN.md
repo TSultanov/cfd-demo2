@@ -31,6 +31,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Single generated-kernel module used across stepping backends (no `ModelKernelsModule`, no per-family kernel modules).
 - Generic-coupled integrated as a backend variant inside `UniversalProgramResources` (no separate plan selection path).
 - Kernel constants/time integration are owned by the recipe-level `UnifiedFieldResources` (no per-backend constants buffer).
+- `build.rs` discovers models via `definitions.rs` (adding a model does not require editing `build.rs`).
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
@@ -44,20 +45,15 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Add derived-primitive dependency validation/toposort (or explicitly forbid derived→derived at validation time).
 - Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
-### 3) Build-Time Model Discovery (edit `definitions.rs` only)
-- Remove hard-coded model enumeration in `build.rs` (the explicit calls to `*_model()`).
-- Expose a model registry from `src/solver/model/definitions.rs` (e.g. `pub fn all_models() -> Vec<ModelSpec>`), and have `build.rs` iterate it to emit kernels/registries.
-- Done when: adding a model requires editing only `src/solver/model/definitions.rs`.
-
-### 4) Retire `PlanParam` as global plumbing
+### 3) Retire `PlanParam` as global plumbing
 - Replace `PlanParam`-based “global knobs” with typed, module-owned uniforms/config deltas routed through the recipe.
 - Done when: new configuration does not add `PlanParam` enum cases.
 
-### 5) Handwritten WGSL (treat infrastructure the same way)
+### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
 - Done when: runtime consumes only registry-provided WGSL (no ad-hoc `include_str!` modules).
 
-### 6) Contract Tests
+### 5) Contract Tests
 - Add regression tests that fail if:
   - `kernel_registry` has special-case lookup paths
   - lowering selects a backend by “family”
@@ -67,8 +63,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 ## Recommended Sequence (high leverage)
 1) Converge plan resources into one universal runtime graph/resources layer.
 2) Retire model-specific codegen bridges and handwritten physics kernels; keep solver infrastructure next.
-3) Remove build-time per-model hardcoding (discover models from `definitions.rs`).
-4) Retire `PlanParam` and add contract tests to lock in invariants.
+3) Retire `PlanParam` and add contract tests to lock in invariants.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

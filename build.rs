@@ -132,6 +132,7 @@ mod solver {
         }
         #[allow(unused_imports)]
         pub use definitions::{
+            all_models,
             compressible_model, compressible_system, generic_diffusion_demo_model,
             generic_diffusion_demo_neumann_model, incompressible_momentum_model,
             incompressible_momentum_generic_model,
@@ -212,43 +213,12 @@ fn main() {
     if let Err(err) = solver::compiler::emit_system_main_wgsl(&manifest_dir) {
         panic!("codegen failed: {}", err);
     }
-    let model = solver::model::incompressible_momentum_model();
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
-    if let Err(err) =
-        solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
-    {
-        panic!("codegen failed: {}", err);
-    }
-
-    let model_generic = solver::model::incompressible_momentum_generic_model();
-    if let Err(err) =
-        solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &model_generic, &schemes)
-    {
-        panic!("codegen failed: {}", err);
-    }
-    let compressible_model = solver::model::compressible_model();
-    if let Err(err) =
-        solver::compiler::emit_model_kernels_wgsl(
-            &manifest_dir,
-            &compressible_model,
-            &schemes,
-        )
-    {
-        panic!("codegen failed: {}", err);
-    }
-    let generic_model = solver::model::generic_diffusion_demo_model();
-    if let Err(err) =
-        solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &generic_model, &schemes)
-    {
-        panic!("codegen failed: {}", err);
-    }
-    let generic_neumann_model = solver::model::generic_diffusion_demo_neumann_model();
-    if let Err(err) = solver::compiler::emit_model_kernels_wgsl(
-        &manifest_dir,
-        &generic_neumann_model,
-        &schemes,
-    ) {
-        panic!("codegen failed: {}", err);
+    for model in solver::model::all_models() {
+        if let Err(err) = solver::compiler::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
+        {
+            panic!("codegen failed for model '{}': {}", model.id, err);
+        }
     }
 
     generate_wgsl_binding_meta(&manifest_dir);

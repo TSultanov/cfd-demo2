@@ -576,6 +576,19 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
     .with_derived_gpu()
 }
 
+/// Build-time model registry.
+///
+/// This is the single list `build.rs` iterates for WGSL emission and registry generation.
+pub fn all_models() -> Vec<ModelSpec> {
+    vec![
+        incompressible_momentum_model(),
+        incompressible_momentum_generic_model(),
+        compressible_model(),
+        generic_diffusion_demo_model(),
+        generic_diffusion_demo_neumann_model(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

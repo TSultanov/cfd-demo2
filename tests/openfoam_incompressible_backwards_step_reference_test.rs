@@ -113,9 +113,11 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     let u_x_err = common::rel_l2(&u_x_sol, &u_x_ref, 1e-12);
     let u_y_err = common::rel_l2(&u_y_sol, &u_y_ref, 1e-12);
     let (p_err, p_shift) = common::rel_l2_best_shift(&p_sol, &p_ref, 1e-12);
+    let (p_err_affine, p_scale_affine, p_shift_affine) =
+        common::rel_l2_best_affine(&p_sol, &p_ref, 1e-12);
 
     assert!(
-        u_x_err < 0.6 && u_y_err < 3.0 && p_err < 0.6,
-        "mismatch vs OpenFOAM: rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} rel_l2(p)={p_err:.3} (best shift {p_shift:.3e})"
+        u_x_err < 0.6 && u_y_err < 3.0 && p_err_affine < 0.25,
+        "mismatch vs OpenFOAM: rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} rel_l2(p)={p_err:.3} (best shift {p_shift:.3e}, best affine err={p_err_affine:.3} scale={p_scale_affine:.3e} shift={p_shift_affine:.3e})"
     );
 }

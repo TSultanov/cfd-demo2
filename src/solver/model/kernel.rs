@@ -5,6 +5,19 @@ pub enum KernelKind {
     /// This is emitted for models that include a `d_p` field in the state layout.
     DpInit,
 
+    /// Update auxiliary Rhie–Chow mobility `d_p` from the assembled momentum diagonal.
+    ///
+    /// This is emitted for models that include a `d_p` field in the state layout.
+    DpUpdateFromDiag,
+
+    /// Apply a SIMPLE-style pressure correction to the velocity field:
+    ///   U := U - d_p * grad(p)
+    ///
+    /// This is emitted for coupled incompressible models that include `(U, d_p, grad_p)` in the
+    /// state layout. It is intended as a transitional correction step while the unified solver
+    /// converges towards a fully model-agnostic coupled formulation.
+    RhieChowCorrectVelocity,
+
     /// Flux-module gradients stage (optional).
     ///
     /// Some flux modules (e.g. KT) require precomputed gradients of the coupled unknowns.
@@ -30,6 +43,8 @@ pub struct KernelId(pub &'static str);
 
 impl KernelId {
     pub const DP_INIT: KernelId = KernelId("dp_init");
+    pub const DP_UPDATE_FROM_DIAG: KernelId = KernelId("dp_update_from_diag");
+    pub const RHIE_CHOW_CORRECT_VELOCITY: KernelId = KernelId("rhie_chow/correct_velocity");
 
     pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
@@ -78,8 +93,7 @@ impl KernelId {
     pub const SCHUR_PRECOND_PREDICT_AND_FORM: KernelId =
         KernelId("schur_precond/predict_and_form_schur");
     pub const SCHUR_PRECOND_RELAX_PRESSURE: KernelId = KernelId("schur_precond/relax_pressure");
-    pub const SCHUR_PRECOND_CORRECT_VELOCITY: KernelId =
-        KernelId("schur_precond/correct_velocity");
+    pub const SCHUR_PRECOND_CORRECT_VELOCITY: KernelId = KernelId("schur_precond/correct_velocity");
 
     pub const SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM: KernelId =
         KernelId("schur_precond_generic/predict_and_form_schur");
@@ -91,8 +105,7 @@ impl KernelId {
     pub const GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE: KernelId =
         KernelId("generic_coupled_schur_setup/build_diag_and_pressure");
 
-    pub const PRECONDITIONER_BUILD_SCHUR_RHS: KernelId =
-        KernelId("preconditioner/build_schur_rhs");
+    pub const PRECONDITIONER_BUILD_SCHUR_RHS: KernelId = KernelId("preconditioner/build_schur_rhs");
     pub const PRECONDITIONER_FINALIZE_PRECOND: KernelId =
         KernelId("preconditioner/finalize_precond");
     pub const PRECONDITIONER_SPMV_PHAT_V: KernelId = KernelId("preconditioner/spmv_phat_v");
@@ -128,6 +141,8 @@ impl From<KernelKind> for KernelId {
     fn from(kind: KernelKind) -> Self {
         match kind {
             KernelKind::DpInit => KernelId::DP_INIT,
+            KernelKind::DpUpdateFromDiag => KernelId::DP_UPDATE_FROM_DIAG,
+            KernelKind::RhieChowCorrectVelocity => KernelId::RHIE_CHOW_CORRECT_VELOCITY,
             KernelKind::FluxModuleGradients => KernelId::FLUX_MODULE_GRADIENTS,
             KernelKind::FluxModule => KernelId::FLUX_MODULE,
 
@@ -232,10 +247,16 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
                 if gradients.is_some() {
                     kernels.push(KernelKind::FluxModuleGradients);
                 }
+                if gradients.is_some() && model.state_layout.field("d_p").is_some() {
+                    kernels.push(KernelKind::RhieChowCorrectVelocity);
+                }
                 kernels.push(KernelKind::FluxModule);
             }
             kernels.push(KernelKind::GenericCoupledAssembly);
             kernels.push(KernelKind::GenericCoupledUpdate);
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(KernelKind::DpUpdateFromDiag);
+            }
             KernelPlan::new(kernels)
         }
         MethodSpec::GenericCoupled => {
@@ -257,6 +278,9 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
 
             kernels.push(KernelKind::GenericCoupledAssembly);
             kernels.push(KernelKind::GenericCoupledUpdate);
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(KernelKind::DpUpdateFromDiag);
+            }
             KernelPlan::new(kernels)
         }
         MethodSpec::GenericCoupledImplicit { .. } => {
@@ -277,6 +301,9 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
 
             kernels.push(KernelKind::GenericCoupledAssembly);
             kernels.push(KernelKind::GenericCoupledUpdate);
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(KernelKind::DpUpdateFromDiag);
+            }
             KernelPlan::new(kernels)
         }
     }
@@ -310,6 +337,13 @@ pub fn derive_kernel_specs_for_model(
                         dispatch: DispatchKindId::Cells,
                     });
                 }
+                if gradients.is_some() && model.state_layout.field("d_p").is_some() {
+                    kernels.push(ModelKernelSpec {
+                        id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
+                        phase: KernelPhaseId::Gradients,
+                        dispatch: DispatchKindId::Cells,
+                    });
+                }
                 kernels.push(ModelKernelSpec {
                     id: KernelId::FLUX_MODULE,
                     phase: KernelPhaseId::FluxComputation,
@@ -326,6 +360,13 @@ pub fn derive_kernel_specs_for_model(
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
             });
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(ModelKernelSpec {
+                    id: KernelId::DP_UPDATE_FROM_DIAG,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                });
+            }
 
             Ok(kernels)
         }
@@ -360,6 +401,13 @@ pub fn derive_kernel_specs_for_model(
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
             });
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(ModelKernelSpec {
+                    id: KernelId::DP_UPDATE_FROM_DIAG,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                });
+            }
 
             Ok(kernels)
         }
@@ -396,6 +444,13 @@ pub fn derive_kernel_specs_for_model(
                 phase: KernelPhaseId::Apply,
                 dispatch: DispatchKindId::Cells,
             });
+            if model.state_layout.field("d_p").is_some() {
+                kernels.push(ModelKernelSpec {
+                    id: KernelId::DP_UPDATE_FROM_DIAG,
+                    phase: KernelPhaseId::Apply,
+                    dispatch: DispatchKindId::Cells,
+                });
+            }
 
             Ok(kernels)
         }
@@ -405,6 +460,10 @@ pub fn derive_kernel_specs_for_model(
 pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
     match kind {
         KernelKind::DpInit => format!("dp_init_{model_id}.wgsl"),
+        KernelKind::DpUpdateFromDiag => format!("dp_update_from_diag_{model_id}.wgsl"),
+        KernelKind::RhieChowCorrectVelocity => {
+            format!("rhie_chow_correct_velocity_{model_id}.wgsl")
+        }
         KernelKind::FluxModuleGradients => format!("flux_module_gradients_{model_id}.wgsl"),
         KernelKind::FluxModule => format!("flux_module_{model_id}.wgsl"),
 
@@ -421,7 +480,8 @@ pub fn generate_kernel_wgsl_for_model(
 ) -> Result<String, String> {
     use cfd2_codegen::solver::codegen::{lower_system, DiscreteSystem};
 
-    let discrete: DiscreteSystem = lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
+    let discrete: DiscreteSystem =
+        lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
 
     let wgsl = match kind {
         KernelKind::DpInit => {
@@ -434,6 +494,198 @@ pub fn generate_kernel_wgsl_for_model(
             }
             let d_p_offset = d_p.offset();
             cfd2_codegen::solver::codegen::generate_dp_init_wgsl(stride, d_p_offset)
+        }
+        KernelKind::DpUpdateFromDiag => {
+            use crate::solver::model::backend::{Coefficient as BackendCoeff, FieldKind, TermOp};
+
+            fn collect_coeff_fields(coeff: &BackendCoeff, out: &mut Vec<crate::solver::model::backend::FieldRef>) {
+                match coeff {
+                    BackendCoeff::Constant { .. } => {}
+                    BackendCoeff::Field(field) => out.push(*field),
+                    BackendCoeff::Product(lhs, rhs) => {
+                        collect_coeff_fields(lhs, out);
+                        collect_coeff_fields(rhs, out);
+                    }
+                }
+            }
+
+            let stride = model.state_layout.stride();
+            let Some(d_p) = model.state_layout.field("d_p") else {
+                return Err("DpUpdateFromDiag requested but model has no 'd_p' field in state layout".to_string());
+            };
+            if d_p.kind() != FieldKind::Scalar {
+                return Err("DpUpdateFromDiag requires 'd_p' to be a scalar field".to_string());
+            }
+            let d_p_offset = d_p.offset();
+
+            let equations = model.system.equations();
+            let mut eq_by_target = std::collections::HashMap::new();
+            for (idx, eq) in equations.iter().enumerate() {
+                eq_by_target.insert(*eq.target(), idx);
+            }
+
+            // Infer the velocity-like (vector) equation that couples to a pressure-like scalar
+            // whose Laplacian coefficient references `d_p`.
+            let mut candidates = Vec::new();
+            for eq in equations {
+                if !matches!(eq.target().kind(), FieldKind::Vector2 | FieldKind::Vector3) {
+                    continue;
+                }
+                for term in eq.terms() {
+                    if term.op != TermOp::Grad || term.field.kind() != FieldKind::Scalar {
+                        continue;
+                    }
+                    let Some(&p_eq_idx) = eq_by_target.get(&term.field) else {
+                        continue;
+                    };
+                    let p_eq = &equations[p_eq_idx];
+                    let Some(lap) = p_eq.terms().iter().find(|t| t.op == TermOp::Laplacian) else {
+                        continue;
+                    };
+                    let Some(coeff) = &lap.coeff else {
+                        continue;
+                    };
+                    let mut coeff_fields = Vec::new();
+                    collect_coeff_fields(coeff, &mut coeff_fields);
+                    if coeff_fields.iter().any(|f| f.name() == "d_p") {
+                        candidates.push(*eq.target());
+                    }
+                }
+            }
+
+            let momentum = match candidates.as_slice() {
+                [only] => *only,
+                [] => {
+                    return Err(
+                        "DpUpdateFromDiag requires a unique momentum-pressure coupling referencing 'd_p'".to_string(),
+                    )
+                }
+                many => {
+                    return Err(format!(
+                        "DpUpdateFromDiag requires a unique momentum-pressure coupling referencing 'd_p', found {} candidates: [{}]",
+                        many.len(),
+                        many.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
+                    ))
+                }
+            };
+
+            let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+            let mut u_indices = Vec::new();
+            for component in 0..momentum.kind().component_count() as u32 {
+                let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
+                    return Err(format!(
+                        "DpUpdateFromDiag: missing unknown offset for momentum field '{}' component {}",
+                        momentum.name(),
+                        component
+                    ));
+                };
+                u_indices.push(offset);
+            }
+
+            cfd2_codegen::solver::codegen::generate_dp_update_from_diag_wgsl(
+                stride,
+                d_p_offset,
+                model.system.unknowns_per_cell(),
+                &u_indices,
+            )?
+        }
+        KernelKind::RhieChowCorrectVelocity => {
+            use crate::solver::model::backend::{Coefficient as BackendCoeff, FieldKind, TermOp};
+
+            fn collect_coeff_fields(
+                coeff: &BackendCoeff,
+                out: &mut Vec<crate::solver::model::backend::FieldRef>,
+            ) {
+                match coeff {
+                    BackendCoeff::Constant { .. } => {}
+                    BackendCoeff::Field(field) => out.push(*field),
+                    BackendCoeff::Product(lhs, rhs) => {
+                        collect_coeff_fields(lhs, out);
+                        collect_coeff_fields(rhs, out);
+                    }
+                }
+            }
+
+            let stride = model.state_layout.stride();
+            let d_p = model
+                .state_layout
+                .offset_for("d_p")
+                .ok_or_else(|| "RhieChowCorrectVelocity requires 'd_p' in state layout".to_string())?;
+
+            let equations = model.system.equations();
+            let mut eq_by_target = std::collections::HashMap::new();
+            for (idx, eq) in equations.iter().enumerate() {
+                eq_by_target.insert(*eq.target(), idx);
+            }
+
+            let mut candidates = Vec::new();
+            for eq in equations {
+                if !matches!(eq.target().kind(), FieldKind::Vector2 | FieldKind::Vector3) {
+                    continue;
+                }
+                for term in eq.terms() {
+                    if term.op != TermOp::Grad || term.field.kind() != FieldKind::Scalar {
+                        continue;
+                    }
+                    let Some(&p_eq_idx) = eq_by_target.get(&term.field) else {
+                        continue;
+                    };
+                    let p_eq = &model.system.equations()[p_eq_idx];
+                    let Some(lap) = p_eq.terms().iter().find(|t| t.op == TermOp::Laplacian) else {
+                        continue;
+                    };
+                    let Some(coeff) = &lap.coeff else {
+                        continue;
+                    };
+                    let mut coeff_fields = Vec::new();
+                    collect_coeff_fields(coeff, &mut coeff_fields);
+                    if coeff_fields.iter().any(|f| f.name() == "d_p") {
+                        candidates.push((*eq.target(), term.field));
+                    }
+                }
+            }
+
+            let (momentum, pressure) = match candidates.as_slice() {
+                [(m, p)] => (*m, *p),
+                [] => {
+                    return Err(
+                        "RhieChowCorrectVelocity requires a unique momentum-pressure coupling referencing 'd_p'".to_string(),
+                    )
+                }
+                many => {
+                    return Err(format!(
+                        "RhieChowCorrectVelocity requires a unique momentum-pressure coupling referencing 'd_p', found {} candidates",
+                        many.len()
+                    ))
+                }
+            };
+
+            if momentum.kind() != FieldKind::Vector2 {
+                return Err("RhieChowCorrectVelocity currently supports only Vector2 momentum fields".to_string());
+            }
+
+            let u_x = model
+                .state_layout
+                .component_offset(momentum.name(), 0)
+                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[0]' in state layout", momentum.name()))?;
+            let u_y = model
+                .state_layout
+                .component_offset(momentum.name(), 1)
+                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[1]' in state layout", momentum.name()))?;
+
+            let grad_name = format!("grad_{}", pressure.name());
+            let grad_p_x = model
+                .state_layout
+                .component_offset(&grad_name, 0)
+                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[0]' in state layout", grad_name))?;
+            let grad_p_y = model
+                .state_layout
+                .component_offset(&grad_name, 1)
+                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[1]' in state layout", grad_name))?;
+
+            cfd2_codegen::solver::codegen::generate_rhie_chow_correct_velocity_wgsl(
+                stride, u_x, u_y, d_p, grad_p_x, grad_p_y,
+            )
         }
         KernelKind::FluxModuleGradients => match &model.flux_module {
             Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {

@@ -436,8 +436,11 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,
-                layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[u0, u1], p)
-                    .expect("invalid SchurBlockLayout"),
+                layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
+                    &[u0, u1],
+                    p,
+                )
+                .expect("invalid SchurBlockLayout"),
             },
         }),
         flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
@@ -571,8 +574,10 @@ fn rhie_chow_flux_module_kernel(
     system: &EquationSystem,
     layout: &StateLayout,
 ) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
-    use crate::solver::ir::{FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxModuleKernelSpec};
     use super::backend::{Coefficient as BackendCoeff, FieldKind, FieldRef, TermOp};
+    use crate::solver::ir::{
+        FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxModuleKernelSpec,
+    };
     use std::collections::{HashMap, HashSet};
 
     fn collect_coeff_fields(coeff: &BackendCoeff, out: &mut Vec<FieldRef>) {
@@ -695,14 +700,20 @@ fn rhie_chow_flux_module_kernel(
     let pressure_eq = equations
         .iter()
         .find(|eq| eq.target().name() == pressure)
-        .ok_or_else(|| format!("missing pressure equation for inferred pressure field '{pressure}'"))?;
+        .ok_or_else(|| {
+            format!("missing pressure equation for inferred pressure field '{pressure}'")
+        })?;
     let pressure_laplacian = pressure_eq
         .terms()
         .iter()
         .find(|t| t.op == TermOp::Laplacian)
-        .ok_or_else(|| format!("pressure equation for '{pressure}' must include a laplacian term"))?;
+        .ok_or_else(|| {
+            format!("pressure equation for '{pressure}' must include a laplacian term")
+        })?;
     let Some(coeff) = &pressure_laplacian.coeff else {
-        return Err(format!("pressure laplacian coefficient for '{pressure}' is missing"));
+        return Err(format!(
+            "pressure laplacian coefficient for '{pressure}' is missing"
+        ));
     };
     let mut coeff_fields = Vec::new();
     collect_coeff_fields(coeff, &mut coeff_fields);
@@ -734,18 +745,46 @@ fn rhie_chow_flux_module_kernel(
         grad_p,
     };
 
-    // Pressure-free predictor flux used in the continuity equation RHS:
-    //   phi ≈ rho * (u_f · n) * area
+    // Rhie–Chow-style mass flux:
+    //   phi = rho * (u_f · n) * area  -  rho * d_p_f * ((p_N - p_O) / dist) * area
     //
-    // The pressure equation's Laplacian term supplies the pressure correction.
+    // Notes:
+    // - `d_p` is inferred from the pressure equation Laplacian coefficient and is expected to be
+    //   updated by the coupled pressure/momentum preconditioner (and seeded by `dp_init`).
+    // - The pressure gradient term uses the same face-normal distance projection (`dist`) as the
+    //   Laplacian discretization, so the pressure equation's Laplacian term and this correction
+    //   term stay numerically consistent.
+    //
+    // This definition is intentionally "general": it only relies on the model-declared
+    // momentum/pressure coupling and the presence of `(d_p, grad_p)` in the state layout.
     let u_face = V::Lerp(
         Box::new(V::state_vec2(FaceSide::Owner, fields.momentum.clone())),
         Box::new(V::state_vec2(FaceSide::Neighbor, fields.momentum.clone())),
     );
     let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
-    let phi_inner = S::Mul(Box::new(u_n), Box::new(S::area()));
     let rho_face = density_face_expr(layout);
-    let phi = S::Mul(Box::new(rho_face), Box::new(phi_inner));
+    let phi_pred = S::Mul(
+        Box::new(S::Mul(Box::new(rho_face.clone()), Box::new(u_n))),
+        Box::new(S::area()),
+    );
+
+    let d_p_face = S::Lerp(
+        Box::new(S::state(FaceSide::Owner, fields.d_p.clone())),
+        Box::new(S::state(FaceSide::Neighbor, fields.d_p.clone())),
+    );
+    let dp = S::Sub(
+        Box::new(S::state(FaceSide::Neighbor, fields.pressure.clone())),
+        Box::new(S::state(FaceSide::Owner, fields.pressure.clone())),
+    );
+    let dp_over_dist = S::Div(Box::new(dp), Box::new(S::dist()));
+    let phi_p = S::Mul(
+        Box::new(S::Mul(
+            Box::new(S::Mul(Box::new(rho_face), Box::new(d_p_face))),
+            Box::new(dp_over_dist),
+        )),
+        Box::new(S::area()),
+    );
+    let phi = S::Sub(Box::new(phi_pred), Box::new(phi_p));
 
     Ok(FluxModuleKernelSpec::ScalarReplicated { phi })
 }
@@ -755,10 +794,16 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     fields: &CompressibleFields,
     gamma: f32,
 ) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
-    use crate::solver::ir::{FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec};
+    use crate::solver::ir::{
+        FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
+    };
 
     let flux_layout = FluxLayout::from_system(system);
-    let components: Vec<String> = flux_layout.components.iter().map(|c| c.name.clone()).collect();
+    let components: Vec<String> = flux_layout
+        .components
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
 
     let ex = V::vec2(S::lit(1.0), S::lit(0.0));
     let ey = V::vec2(S::lit(0.0), S::lit(1.0));
@@ -774,12 +819,7 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
 
     let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
-    let u_vec = |side: FaceSide| {
-        V::MulScalar(
-            Box::new(rho_u(side)),
-            Box::new(inv_rho(side)),
-        )
-    };
+    let u_vec = |side: FaceSide| V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho(side)));
     let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
 
     let p = |side: FaceSide| S::primitive(side, "p");
@@ -820,25 +860,25 @@ fn compressible_euler_central_upwind_flux_module_kernel(
 
     for name in &components {
         if name == rho_name {
-                u_left.push(rho(FaceSide::Owner));
-                u_right.push(rho(FaceSide::Neighbor));
-                flux_left.push(flux_mass(FaceSide::Owner));
-                flux_right.push(flux_mass(FaceSide::Neighbor));
+            u_left.push(rho(FaceSide::Owner));
+            u_right.push(rho(FaceSide::Neighbor));
+            flux_left.push(flux_mass(FaceSide::Owner));
+            flux_right.push(flux_mass(FaceSide::Neighbor));
         } else if name == &format!("{rho_u_name}_x") {
-                u_left.push(rho_u_x(FaceSide::Owner));
-                u_right.push(rho_u_x(FaceSide::Neighbor));
-                flux_left.push(flux_mom_x(FaceSide::Owner));
-                flux_right.push(flux_mom_x(FaceSide::Neighbor));
+            u_left.push(rho_u_x(FaceSide::Owner));
+            u_right.push(rho_u_x(FaceSide::Neighbor));
+            flux_left.push(flux_mom_x(FaceSide::Owner));
+            flux_right.push(flux_mom_x(FaceSide::Neighbor));
         } else if name == &format!("{rho_u_name}_y") {
-                u_left.push(rho_u_y(FaceSide::Owner));
-                u_right.push(rho_u_y(FaceSide::Neighbor));
-                flux_left.push(flux_mom_y(FaceSide::Owner));
-                flux_right.push(flux_mom_y(FaceSide::Neighbor));
+            u_left.push(rho_u_y(FaceSide::Owner));
+            u_right.push(rho_u_y(FaceSide::Neighbor));
+            flux_left.push(flux_mom_y(FaceSide::Owner));
+            flux_right.push(flux_mom_y(FaceSide::Neighbor));
         } else if name == rho_e_name {
-                u_left.push(rho_e(FaceSide::Owner));
-                u_right.push(rho_e(FaceSide::Neighbor));
-                flux_left.push(flux_energy(FaceSide::Owner));
-                flux_right.push(flux_energy(FaceSide::Neighbor));
+            u_left.push(rho_e(FaceSide::Owner));
+            u_right.push(rho_e(FaceSide::Neighbor));
+            flux_left.push(flux_energy(FaceSide::Owner));
+            flux_right.push(flux_energy(FaceSide::Neighbor));
         } else {
             return Err(format!(
                 "compressible central-upwind kernel builder does not know how to flux component '{name}'"
@@ -849,7 +889,10 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let a_plus = S::Max(
         Box::new(S::lit(0.0)),
         Box::new(S::Max(
-            Box::new(S::Add(Box::new(u_n(FaceSide::Owner)), Box::new(c(FaceSide::Owner)))),
+            Box::new(S::Add(
+                Box::new(u_n(FaceSide::Owner)),
+                Box::new(c(FaceSide::Owner)),
+            )),
             Box::new(S::Add(
                 Box::new(u_n(FaceSide::Neighbor)),
                 Box::new(c(FaceSide::Neighbor)),
@@ -859,7 +902,10 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let a_minus = S::Min(
         Box::new(S::lit(0.0)),
         Box::new(S::Min(
-            Box::new(S::Sub(Box::new(u_n(FaceSide::Owner)), Box::new(c(FaceSide::Owner)))),
+            Box::new(S::Sub(
+                Box::new(u_n(FaceSide::Owner)),
+                Box::new(c(FaceSide::Owner)),
+            )),
             Box::new(S::Sub(
                 Box::new(u_n(FaceSide::Neighbor)),
                 Box::new(c(FaceSide::Neighbor)),
@@ -1028,7 +1074,9 @@ mod tests {
         assert!(model
             .kernel_plan()
             .contains(KernelKind::GenericCoupledAssembly));
-        assert!(model.kernel_plan().contains(KernelKind::GenericCoupledUpdate));
+        assert!(model
+            .kernel_plan()
+            .contains(KernelKind::GenericCoupledUpdate));
     }
 
     #[test]
@@ -1040,8 +1088,12 @@ mod tests {
 
         // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.
         assert!(model.kernel_plan().contains(KernelKind::FluxModule));
-        assert!(model.kernel_plan().contains(KernelKind::GenericCoupledAssembly));
-        assert!(model.kernel_plan().contains(KernelKind::GenericCoupledUpdate));
+        assert!(model
+            .kernel_plan()
+            .contains(KernelKind::GenericCoupledAssembly));
+        assert!(model
+            .kernel_plan()
+            .contains(KernelKind::GenericCoupledUpdate));
     }
 
     #[test]

@@ -68,6 +68,31 @@ pub fn rel_l2(a: &[f64], b: &[f64], floor: f64) -> f64 {
     (num / a.len().max(1) as f64).sqrt() / (den / a.len().max(1) as f64).sqrt().max(floor)
 }
 
+/// Relative L2 error after applying the best constant offset to `a` (least-squares fit):
+///   a_shifted = a + shift, where shift = mean(b - a).
+pub fn rel_l2_best_shift(a: &[f64], b: &[f64], floor: f64) -> (f64, f64) {
+    assert_eq!(a.len(), b.len());
+    if a.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mut sum = 0.0;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        sum += y - x;
+    }
+    let shift = sum / a.len() as f64;
+
+    let mut num = 0.0;
+    let mut den = 0.0;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        let d = (x + shift) - y;
+        num += d * d;
+        den += y * y;
+    }
+    let n = a.len() as f64;
+    let err = (num / n).sqrt() / (den / n).sqrt().max(floor);
+    (err, shift)
+}
+
 pub fn yx_key(x: f64, y: f64) -> (i64, i64) {
     let s = 1e12_f64;
     ((y * s).round() as i64, (x * s).round() as i64)

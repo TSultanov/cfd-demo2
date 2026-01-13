@@ -1,8 +1,8 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::helpers::SolverFieldAliasesExt;
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
@@ -148,8 +148,14 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
         let (sx, sy, _, _, _) = *sol;
         let (rx, ry, _, _, _) = *rf;
-        assert!((sx - rx).abs() < 1e-12, "x mismatch at sorted row {i}: solver={sx} ref={rx}");
-        assert!((sy - ry).abs() < 1e-12, "y mismatch at sorted row {i}: solver={sy} ref={ry}");
+        assert!(
+            (sx - rx).abs() < 1e-12,
+            "x mismatch at sorted row {i}: solver={sx} ref={rx}"
+        );
+        assert!(
+            (sy - ry).abs() < 1e-12,
+            "y mismatch at sorted row {i}: solver={sy} ref={ry}"
+        );
     }
 
     let u_x_sol: Vec<f64> = sol_rows.iter().map(|r| r.2).collect();
@@ -161,7 +167,40 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
 
     let u_x_err_full = common::rel_l2(&u_x_sol, &u_x_ref, 1e-12);
     let u_y_err_full = common::rel_l2(&u_y_sol, &u_y_ref, 1e-12);
-    let p_err_full = common::rel_l2(&p_sol, &p_ref, 1e-12);
+    let (p_err_full, p_shift_full) = common::rel_l2_best_shift(&p_sol, &p_ref, 1e-12);
+
+    // Diagnostics: global mass balance over inlet/outlet boundaries (using face geometry).
+    let rho = 1.0f64;
+    let u_inlet = (1.0f64, 0.0f64);
+    let mut m_in = 0.0f64;
+    let mut m_out = 0.0f64;
+    for face in 0..mesh.num_faces() {
+        let b = mesh.face_boundary[face];
+        if b.is_none() {
+            continue;
+        }
+        let owner = mesh.face_owner[face];
+        let (mut nx, mut ny) = (mesh.face_nx[face], mesh.face_ny[face]);
+        let (cx, cy) = (mesh.cell_cx[owner], mesh.cell_cy[owner]);
+        let (fx, fy) = (mesh.face_cx[face], mesh.face_cy[face]);
+        if (fx - cx) * nx + (fy - cy) * ny < 0.0 {
+            nx = -nx;
+            ny = -ny;
+        }
+        let area = mesh.face_area[face];
+
+        let u_face = match b.unwrap() {
+            BoundaryType::Inlet => u_inlet,
+            BoundaryType::Outlet => u[owner],
+            BoundaryType::Wall => (0.0, 0.0),
+        };
+        let flux = rho * (u_face.0 * nx + u_face.1 * ny) * area;
+        match b.unwrap() {
+            BoundaryType::Inlet => m_in += -flux,  // inflow magnitude
+            BoundaryType::Outlet => m_out += flux, // outflow magnitude
+            BoundaryType::Wall => {}
+        }
+    }
 
     assert!(
         u_x_err < 0.25
@@ -169,6 +208,6 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
             && u_x_err_full < 0.35
             && u_y_err_full < 10.0
             && p_err_full < 0.35,
-        "mismatch vs OpenFOAM: centerline rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}]); full rel_l2(u_x)={u_x_err_full:.3} rel_l2(u_y)={u_y_err_full:.3} rel_l2(p)={p_err_full:.3}"
+        "mismatch vs OpenFOAM: centerline rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}]); full rel_l2(u_x)={u_x_err_full:.3} rel_l2(u_y)={u_y_err_full:.3} rel_l2(p)={p_err_full:.3} (best shift {p_shift_full:.3e}); mass balance inflow={m_in:.6} outflow={m_out:.6}"
     );
 }

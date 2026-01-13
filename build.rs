@@ -1,8 +1,8 @@
+use cfd2_codegen::compiler as codegen_compiler;
 use glob::glob;
 use std::fs;
 use std::path::PathBuf;
 use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
-use cfd2_codegen::compiler as codegen_compiler;
 
 #[allow(dead_code)]
 mod solver {
@@ -42,7 +42,10 @@ mod solver {
             ));
         }
         pub mod eos {
-            include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/model/eos.rs"));
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/eos.rs"
+            ));
         }
         pub mod flux_layout {
             include!(concat!(
@@ -119,27 +122,25 @@ mod solver {
         }
         #[allow(unused_imports)]
         pub use definitions::{
-            all_models,
-            compressible_model, compressible_system, generic_diffusion_demo_model,
-            generic_diffusion_demo_neumann_model, incompressible_momentum_model,
-            incompressible_momentum_generic_model,
-            incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
-            IncompressibleMomentumFields, ModelSpec,
+            all_models, compressible_model, compressible_system, generic_diffusion_demo_model,
+            generic_diffusion_demo_neumann_model, incompressible_momentum_generic_model,
+            incompressible_momentum_model, incompressible_momentum_system, CompressibleFields,
+            GenericCoupledFields, IncompressibleMomentumFields, ModelSpec,
         };
+        #[allow(unused_imports)]
+        pub use eos::EosSpec;
         #[allow(unused_imports)]
         pub use flux_layout::{FluxComponent, FluxLayout};
         #[allow(unused_imports)]
         pub use flux_module::{FluxModuleSpec, ReconstructionSpec};
         #[allow(unused_imports)]
-        pub use primitives::PrimitiveDerivations;
-        #[allow(unused_imports)]
-        pub use eos::EosSpec;
-        #[allow(unused_imports)]
-        pub use method::MethodSpec;
-        #[allow(unused_imports)]
         pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
         #[allow(unused_imports)]
         pub use kernel::{KernelKind, KernelPlan};
+        #[allow(unused_imports)]
+        pub use method::MethodSpec;
+        #[allow(unused_imports)]
+        pub use primitives::PrimitiveDerivations;
     }
 }
 
@@ -155,8 +156,8 @@ fn main() {
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
-    for entry in glob("crates/cfd2_codegen/src/solver/codegen/**/*.rs")
-        .expect("Failed to read codegen glob")
+    for entry in
+        glob("crates/cfd2_codegen/src/solver/codegen/**/*.rs").expect("Failed to read codegen glob")
     {
         match entry {
             Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
@@ -428,15 +429,16 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     let flux_module_models = discover_per_model_kernel(&gen_dir, "flux_module");
     let flux_module_gradients_models = discover_per_model_kernel(&gen_dir, "flux_module_gradients");
     let dp_init_models = discover_per_model_kernel(&gen_dir, "dp_init");
+    let dp_update_from_diag_models = discover_per_model_kernel(&gen_dir, "dp_update_from_diag");
+    let rhie_chow_correct_velocity_models =
+        discover_per_model_kernel(&gen_dir, "rhie_chow_correct_velocity");
 
     // (KernelKind variant, generated module name, stable KernelId string)
-    let entries: &[(&str, &str, &str)] = &[
-        (
-            "GenericCoupledApply",
-            "generic_coupled_apply",
-            "generic_coupled_apply",
-        ),
-    ];
+    let entries: &[(&str, &str, &str)] = &[(
+        "GenericCoupledApply",
+        "generic_coupled_apply",
+        "generic_coupled_apply",
+    )];
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)
     // These are handwritten WGSL kernels that we want to route through the same registry path.
@@ -526,7 +528,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "linear_solver",
             "create_cg_update_p_pipeline_embed_source",
         ),
-
         // AMG
         (
             "amg/smooth_op",
@@ -543,12 +544,7 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "amg",
             "create_prolongate_op_pipeline_embed_source",
         ),
-        (
-            "amg/clear",
-            "amg",
-            "create_clear_pipeline_embed_source",
-        ),
-
+        ("amg/clear", "amg", "create_clear_pipeline_embed_source"),
         // Packing helpers
         (
             "amg_pack/pack_component",
@@ -560,7 +556,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "amg_pack",
             "create_unpack_component_pipeline_embed_source",
         ),
-
         // Block preconditioner
         (
             "block_precond/build_block_inv",
@@ -572,7 +567,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "block_precond",
             "create_apply_block_precond_pipeline_embed_source",
         ),
-
         // Schur preconditioner
         (
             "schur_precond/predict_and_form_schur",
@@ -589,7 +583,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "schur_precond",
             "create_correct_velocity_pipeline_embed_source",
         ),
-
         // Generic schur preconditioner (model-owned layout)
         (
             "schur_precond_generic/predict_and_form_schur",
@@ -606,14 +599,12 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "schur_precond_generic",
             "create_correct_velocity_pipeline_embed_source",
         ),
-
         // Generic-coupled Schur setup (extract diagonal/pressure blocks).
         (
             "generic_coupled_schur_setup/build_diag_and_pressure",
             "generic_coupled_schur_setup",
             "create_build_diag_and_pressure_pipeline_embed_source",
         ),
-
         // Coupled-solver preconditioner
         (
             "preconditioner/build_schur_rhs",
@@ -635,7 +626,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
             "preconditioner",
             "create_spmv_shat_t_pipeline_embed_source",
         ),
-
         // GMRES ops/logic/CGS
         (
             "gmres_ops/spmv",
@@ -804,7 +794,9 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
 
     for (model_id, mod_id, bindings) in &flux_module_models {
         let module_name = format!("flux_module_{mod_id}");
-        code.push_str(&format!("        (\"{model_id}\", \"flux_module\") => {{\n"));
+        code.push_str(&format!(
+            "        (\"{model_id}\", \"flux_module\") => {{\n"
+        ));
         code.push_str("            use crate::solver::gpu::bindings::generated::");
         code.push_str(&format!("{module_name} as kernel;\n"));
         code.push_str("            Some((\n");
@@ -861,6 +853,48 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         code.push_str("        }\n");
     }
 
+    for (model_id, mod_id, bindings) in &dp_update_from_diag_models {
+        let module_name = format!("dp_update_from_diag_{mod_id}");
+        code.push_str(&format!(
+            "        (\"{model_id}\", \"dp_update_from_diag\") => {{\n"
+        ));
+        code.push_str("            use crate::solver::gpu::bindings::generated::");
+        code.push_str(&format!("{module_name} as kernel;\n"));
+        code.push_str("            Some((\n");
+        code.push_str("                kernel::SHADER_STRING,\n");
+        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
+        code.push_str("                &[\n");
+        for (group, binding, name) in bindings {
+            code.push_str(&format!(
+                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
+            ));
+        }
+        code.push_str("                ],\n");
+        code.push_str("            ))\n");
+        code.push_str("        }\n");
+    }
+
+    for (model_id, mod_id, bindings) in &rhie_chow_correct_velocity_models {
+        let module_name = format!("rhie_chow_correct_velocity_{mod_id}");
+        code.push_str(&format!(
+            "        (\"{model_id}\", \"rhie_chow/correct_velocity\") => {{\n"
+        ));
+        code.push_str("            use crate::solver::gpu::bindings::generated::");
+        code.push_str(&format!("{module_name} as kernel;\n"));
+        code.push_str("            Some((\n");
+        code.push_str("                kernel::SHADER_STRING,\n");
+        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
+        code.push_str("                &[\n");
+        for (group, binding, name) in bindings {
+            code.push_str(&format!(
+                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
+            ));
+        }
+        code.push_str("                ],\n");
+        code.push_str("            ))\n");
+        code.push_str("        }\n");
+    }
+
     for (_variant, module, kernel_id) in entries {
         let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
         code.push_str(&format!("        (_, \"{kernel_id}\") => Some((\n"));
@@ -878,7 +912,9 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
         code.push_str(&format!("        (_, \"{kernel_id}\") => Some((\n"));
         code.push_str(&format!("            bindings::{module}::SHADER_STRING,\n"));
-        code.push_str(&format!("            bindings::{module}::compute::{ctor},\n"));
+        code.push_str(&format!(
+            "            bindings::{module}::compute::{ctor},\n"
+        ));
         code.push_str(&format!("            wgsl_meta::{bindings_const},\n"));
         code.push_str("        )),\n");
     }
@@ -889,7 +925,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
 
     write_if_changed(&out_path, &code);
 }
-
 
 fn sanitize_rust_ident(raw: &str) -> String {
     let mut out = String::new();

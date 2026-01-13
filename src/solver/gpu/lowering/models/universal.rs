@@ -179,6 +179,36 @@ pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     set_param_fallback_generic_coupled(plan, param, value)
 }
 
+pub(in crate::solver::gpu::lowering) fn set_named_param_fallback(
+    plan: &mut GpuProgramPlan,
+    name: &str,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let param = match name {
+        "dt" => PlanParam::Dt,
+        "dtau" => PlanParam::Dtau,
+        "advection_scheme" => PlanParam::AdvectionScheme,
+        "time_scheme" => PlanParam::TimeScheme,
+        "preconditioner" => PlanParam::Preconditioner,
+        "viscosity" => PlanParam::Viscosity,
+        "density" => PlanParam::Density,
+        "alpha_u" => PlanParam::AlphaU,
+        "alpha_p" => PlanParam::AlphaP,
+        "inlet_velocity" => PlanParam::InletVelocity,
+        "ramp_time" => PlanParam::RampTime,
+        "low_mach.model" => PlanParam::LowMachModel,
+        "low_mach.theta_floor" => PlanParam::LowMachThetaFloor,
+        "outer_iters" => PlanParam::OuterIters,
+        "detailed_profiling_enabled" => PlanParam::DetailedProfilingEnabled,
+        _ => {
+            return Err(format!(
+                "unknown named parameter '{name}'; supported: dt, dtau, advection_scheme, time_scheme, preconditioner, viscosity, density, alpha_u, alpha_p, inlet_velocity, ramp_time, low_mach.model, low_mach.theta_floor, outer_iters, detailed_profiling_enabled"
+            ));
+        }
+    };
+    set_param_fallback_generic_coupled(plan, param, value)
+}
+
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     plan: &mut GpuProgramPlan,
 ) -> Option<&mut dyn PlanLinearSystemDebug> {

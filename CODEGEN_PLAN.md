@@ -100,6 +100,10 @@ Target:
 - Replace `PlanParam` with typed, module-owned uniforms/config deltas routed through the recipe (or a model-declared parameter table).
 - Done when: new configuration does not add `PlanParam` enum cases, and common runtime controls are described by model/method metadata instead of a global enum.
 
+Progress (transitional):
+- Added a string-keyed “named parameter” path (`GpuProgramPlan::set_named_param`) so new runtime knobs can be introduced without growing the global `PlanParam` enum.
+- Current universal fallback maps a small set of names onto existing `PlanParam` handlers; next step is to move these knobs into module-owned parameter tables and delete the global enum plumbing.
+
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
 - Done when: runtime consumes only registry-provided WGSL (no ad-hoc `include_str!` modules).

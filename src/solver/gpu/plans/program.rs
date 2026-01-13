@@ -15,6 +15,8 @@ pub(crate) type ProgramInitRun = fn(&GpuProgramPlan);
 pub(crate) type ProgramParamHandler = fn(&mut GpuProgramPlan, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramSetParamFallback =
     fn(&mut GpuProgramPlan, PlanParam, PlanParamValue) -> Result<(), String>;
+pub(crate) type ProgramSetNamedParamFallback =
+    fn(&mut GpuProgramPlan, &str, PlanParamValue) -> Result<(), String>;
 pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
 pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
@@ -431,6 +433,8 @@ pub(crate) struct ModelGpuProgramSpec {
     pub initialize_history: Option<ProgramInitRun>,
     pub params: HashMap<PlanParam, ProgramParamHandler>,
     pub set_param_fallback: Option<ProgramSetParamFallback>,
+    pub named_params: HashMap<&'static str, ProgramParamHandler>,
+    pub set_named_param_fallback: Option<ProgramSetNamedParamFallback>,
     pub step_stats: Option<ProgramStepStatsFn>,
     pub step_with_stats: Option<ProgramStepWithStatsFn>,
     pub linear_debug: Option<ProgramLinearDebugProvider>,
@@ -479,6 +483,20 @@ impl GpuProgramPlan {
         Err("parameter is not supported by this plan".into())
     }
 
+    pub fn set_supported_named_param(
+        &mut self,
+        name: &str,
+        value: PlanParamValue,
+    ) -> Result<(), String> {
+        if let Some(handler) = self.spec.named_params.get(name).copied() {
+            return handler(self, value);
+        }
+        if let Some(fallback) = self.spec.set_named_param_fallback {
+            return fallback(self, name, value);
+        }
+        Err("named parameter is not supported by this plan".into())
+    }
+
     pub fn num_cells(&self) -> u32 {
         (self.spec.num_cells)(self)
     }
@@ -501,6 +519,10 @@ impl GpuProgramPlan {
 
     pub fn set_param(&mut self, param: PlanParam, value: PlanParamValue) -> Result<(), String> {
         self.set_supported_param(param, value)
+    }
+
+    pub fn set_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {
+        self.set_supported_named_param(name, value)
     }
 
     pub fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {

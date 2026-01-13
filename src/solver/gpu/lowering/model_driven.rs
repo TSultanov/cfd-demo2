@@ -249,33 +249,27 @@ async fn lower_parts_for_model(
             })
         }
         crate::solver::gpu::recipe::SteppingMode::Explicit => {
-            let plan =
-                crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources::new(
-                    mesh,
-                    model.clone(),
-                    recipe.clone(),
-                    device,
-                    queue,
-                )
-                .await?;
-
-            let context = crate::solver::gpu::context::GpuContext {
-                device: plan.common.context.device.clone(),
-                queue: plan.common.context.queue.clone(),
-            };
-            let profiling_stats = std::sync::Arc::clone(&plan.common.profiling_stats);
-
-            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources
-                .insert(models::universal::UniversalProgramResources::new_explicit_implicit(plan));
+            let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
+                mesh,
+                model.clone(),
+                recipe.clone(),
+                device,
+                queue,
+            )
+            .await?;
 
             let mut ops = ProgramOpRegistry::new();
             models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
+            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
+            resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
+                built.backend,
+            ));
+
             Ok(LoweredProgramParts {
-                model: model.clone(),
-                context,
-                profiling_stats,
+                model: built.model,
+                context: built.context,
+                profiling_stats: built.profiling_stats,
                 resources,
                 spec: ModelGpuProgramSpecParts {
                     ops,
@@ -284,11 +278,11 @@ async fn lower_parts_for_model(
                     dt: models::universal::spec_dt,
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
-                    initialize_history: Some(models::universal::init_history),
+                    initialize_history: None,
                     params: HashMap::new(),
                     set_param_fallback: Some(models::universal::set_param_fallback),
                     step_stats: Some(models::universal::step_stats),
-                    step_with_stats: Some(models::universal::step_with_stats),
+                    step_with_stats: None,
                     linear_debug: Some(models::universal::linear_debug_provider),
                 },
             })

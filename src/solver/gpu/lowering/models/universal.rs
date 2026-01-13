@@ -2,7 +2,6 @@ use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExe
 use crate::solver::gpu::lowering::models::generic_coupled as generic_coupled_model;
 use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
-use crate::solver::gpu::plans::explicit_implicit::ExplicitImplicitPlanResources;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
 };
@@ -17,15 +16,8 @@ pub(in crate::solver::gpu::lowering) struct UniversalProgramResources {
 }
 
 enum UniversalBackend {
-    ExplicitImplicit(ExplicitImplicitBackend),
     GenericCoupled(GenericCoupledBackend),
     Coupled(CoupledBackend),
-}
-
-struct ExplicitImplicitBackend {
-    plan: ExplicitImplicitPlanResources,
-    implicit_outer_idx: usize,
-    implicit_stats: Vec<LinearSolverStats>,
 }
 
 struct CoupledBackend {
@@ -41,18 +33,6 @@ struct GenericCoupledBackend {
 }
 
 impl UniversalProgramResources {
-    pub(in crate::solver::gpu::lowering) fn new_explicit_implicit(
-        plan: ExplicitImplicitPlanResources,
-    ) -> Self {
-        Self {
-            backend: UniversalBackend::ExplicitImplicit(ExplicitImplicitBackend {
-                plan,
-                implicit_outer_idx: 0,
-                implicit_stats: Vec::new(),
-            }),
-        }
-    }
-
     pub(in crate::solver::gpu::lowering) fn new_generic_coupled(
         plan: GenericCoupledProgramResources,
     ) -> Self {
@@ -95,9 +75,6 @@ impl UniversalProgramResources {
 impl PlanLinearSystemDebug for UniversalProgramResources {
     fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         match &self.backend {
-            UniversalBackend::ExplicitImplicit(b) => {
-                PlanLinearSystemDebug::set_linear_system(&b.plan, matrix_values, rhs)
-            }
             UniversalBackend::GenericCoupled(b) => {
                 PlanLinearSystemDebug::set_linear_system(&b.plan, matrix_values, rhs)
             }
@@ -114,9 +91,6 @@ impl PlanLinearSystemDebug for UniversalProgramResources {
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
         match &mut self.backend {
-            UniversalBackend::ExplicitImplicit(b) => {
-                PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
-            }
             UniversalBackend::GenericCoupled(b) => {
                 PlanLinearSystemDebug::solve_linear_system_with_size(&mut b.plan, n, max_iters, tol)
             }
@@ -128,9 +102,6 @@ impl PlanLinearSystemDebug for UniversalProgramResources {
 
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
         match &self.backend {
-            UniversalBackend::ExplicitImplicit(b) => {
-                PlanLinearSystemDebug::get_linear_solution(&b.plan)
-            }
             UniversalBackend::GenericCoupled(b) => {
                 PlanLinearSystemDebug::get_linear_solution(&b.plan)
             }
@@ -153,36 +124,9 @@ fn wrap_mut(plan: &mut GpuProgramPlan) -> &mut UniversalProgramResources {
         .expect("missing UniversalProgramResources")
 }
 
-fn explicit_implicit(plan: &GpuProgramPlan) -> Option<&ExplicitImplicitPlanResources> {
-    match &wrap(plan).backend {
-        UniversalBackend::ExplicitImplicit(b) => Some(&b.plan),
-        UniversalBackend::GenericCoupled(_) => None,
-        UniversalBackend::Coupled(_) => None,
-    }
-}
-
-fn explicit_implicit_mut(plan: &mut GpuProgramPlan) -> Option<&mut ExplicitImplicitPlanResources> {
-    match &mut wrap_mut(plan).backend {
-        UniversalBackend::ExplicitImplicit(b) => Some(&mut b.plan),
-        UniversalBackend::GenericCoupled(_) => None,
-        UniversalBackend::Coupled(_) => None,
-    }
-}
-
-fn explicit_implicit_backend_mut(
-    plan: &mut GpuProgramPlan,
-) -> Option<&mut ExplicitImplicitBackend> {
-    match &mut wrap_mut(plan).backend {
-        UniversalBackend::ExplicitImplicit(b) => Some(b),
-        UniversalBackend::GenericCoupled(_) => None,
-        UniversalBackend::Coupled(_) => None,
-    }
-}
-
 fn coupled(plan: &GpuProgramPlan) -> Option<&GpuSolver> {
     match &wrap(plan).backend {
         UniversalBackend::Coupled(b) => Some(&b.plan),
-        UniversalBackend::ExplicitImplicit(_) => None,
         UniversalBackend::GenericCoupled(_) => None,
     }
 }
@@ -190,7 +134,6 @@ fn coupled(plan: &GpuProgramPlan) -> Option<&GpuSolver> {
 fn coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GpuSolver> {
     match &mut wrap_mut(plan).backend {
         UniversalBackend::Coupled(b) => Some(&mut b.plan),
-        UniversalBackend::ExplicitImplicit(_) => None,
         UniversalBackend::GenericCoupled(_) => None,
     }
 }
@@ -198,7 +141,6 @@ fn coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GpuSolver> {
 fn coupled_backend(plan: &GpuProgramPlan) -> Option<&CoupledBackend> {
     match &wrap(plan).backend {
         UniversalBackend::Coupled(b) => Some(b),
-        UniversalBackend::ExplicitImplicit(_) => None,
         UniversalBackend::GenericCoupled(_) => None,
     }
 }
@@ -206,7 +148,6 @@ fn coupled_backend(plan: &GpuProgramPlan) -> Option<&CoupledBackend> {
 fn coupled_backend_mut(plan: &mut GpuProgramPlan) -> Option<&mut CoupledBackend> {
     match &mut wrap_mut(plan).backend {
         UniversalBackend::Coupled(b) => Some(b),
-        UniversalBackend::ExplicitImplicit(_) => None,
         UniversalBackend::GenericCoupled(_) => None,
     }
 }
@@ -299,9 +240,6 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
     if generic_coupled(plan).is_some() {
         return generic_coupled_model::spec_num_cells(plan);
     }
-    if let Some(solver) = explicit_implicit(plan) {
-        return solver.num_cells;
-    }
     if let Some(solver) = coupled(plan) {
         return solver.num_cells;
     }
@@ -311,9 +249,6 @@ pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) ->
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
     if generic_coupled(plan).is_some() {
         return generic_coupled_model::spec_time(plan);
-    }
-    if let Some(solver) = explicit_implicit(plan) {
-        return solver.time_integration.time as f32;
     }
     if let Some(solver) = coupled(plan) {
         return solver.time_integration.time as f32;
@@ -325,9 +260,6 @@ pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
     if generic_coupled(plan).is_some() {
         return generic_coupled_model::spec_dt(plan);
     }
-    if let Some(solver) = explicit_implicit(plan) {
-        return solver.time_integration.dt;
-    }
     if let Some(solver) = coupled(plan) {
         return solver.time_integration.dt;
     }
@@ -337,9 +269,6 @@ pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
     if generic_coupled(plan).is_some() {
         return generic_coupled_model::spec_state_buffer(plan);
-    }
-    if let Some(solver) = explicit_implicit(plan) {
-        return solver.fields.state.state();
     }
     if let Some(solver) = coupled(plan) {
         return solver.fields.state.state();
@@ -354,10 +283,6 @@ pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     if generic_coupled(plan).is_some() {
         return generic_coupled_model::spec_write_state_bytes(plan, bytes);
     }
-    if let Some(solver) = explicit_implicit(plan) {
-        solver.write_state_bytes(bytes);
-        return Ok(());
-    }
     if let Some(solver) = coupled(plan) {
         solver.fields.state.write_all(&plan.context.queue, bytes);
         return Ok(());
@@ -366,15 +291,11 @@ pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
 }
 
 pub(in crate::solver::gpu::lowering) fn init_history(plan: &GpuProgramPlan) {
-    if let Some(solver) = explicit_implicit(plan) {
-        solver.initialize_history();
-        return;
-    }
     if let Some(solver) = coupled(plan) {
         solver.initialize_history();
         return;
     }
-    panic!("missing solver resources (initialize_history)");
+    // Generic-coupled time integration seeds history via `TimeIntegrationModule::set_dt`.
 }
 
 pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
@@ -392,22 +313,10 @@ pub(in crate::solver::gpu::lowering) fn set_param_fallback(
     if generic_coupled_mut(plan).is_some() {
         return set_param_fallback_generic_coupled(plan, param, value);
     }
-    if explicit_implicit_mut(plan).is_some() {
-        return set_param_fallback_compressible(plan, param, value);
-    }
     if coupled_mut(plan).is_some() {
         return set_param_fallback_coupled(plan, param, value);
     }
     Err("missing solver resources (set_param_fallback)".into())
-}
-
-pub(in crate::solver::gpu::lowering) fn step_with_stats(
-    plan: &mut GpuProgramPlan,
-) -> Result<Vec<LinearSolverStats>, String> {
-    if explicit_implicit_mut(plan).is_some() {
-        return step_with_stats_compressible(plan);
-    }
-    Err("step_with_stats is only supported for non-coupled stepping".into())
 }
 
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
@@ -417,18 +326,10 @@ pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     Some(u as &mut dyn PlanLinearSystemDebug)
 }
 
-// --- Compressible handlers (explicit/implicit) ---
-
-fn should_use_explicit(plan: &GpuProgramPlan) -> bool {
-    explicit_implicit(plan)
-        .expect("missing universal explicit/implicit backend")
-        .should_use_explicit()
-}
+// --- Generic-coupled handlers (explicit/implicit) ---
 
 fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
-    let solver = explicit_implicit_mut(plan).expect("missing universal explicit/implicit backend");
-    solver.advance_ping_pong_and_time();
-    solver.pre_step_copy();
+    generic_coupled_model::host_prepare_step(plan);
 }
 
 fn explicit_graph_run(
@@ -436,297 +337,69 @@ fn explicit_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
-    solver.graphs.run_explicit(
-        context,
-        &solver.kernels,
-        solver.runtime_dims(),
-        mode,
-        solver.needs_gradients,
-    )
+    generic_coupled_model::explicit_graph_run(plan, context, mode)
 }
 
 fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
-    explicit_implicit_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .finalize_dt_old();
+    generic_coupled_model::host_finalize_step(plan);
 }
 
 fn implicit_outer_iters(plan: &GpuProgramPlan) -> usize {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::count_outer_iters(plan);
-    }
-    explicit_implicit(plan)
-        .expect("missing universal explicit/implicit backend")
-        .outer_iters
+    generic_coupled_model::count_outer_iters(plan)
 }
 
 fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        generic_coupled_model::host_prepare_step(plan);
-        return;
-    }
-    let solver = explicit_implicit_mut(plan).expect("missing universal explicit/implicit backend");
-    solver.advance_ping_pong_and_time();
-    solver.pre_step_copy();
-    solver.implicit_set_base_alpha();
-
-    let wrap =
-        explicit_implicit_backend_mut(plan).expect("missing universal explicit/implicit backend");
-    wrap.implicit_outer_idx = 0;
-    wrap.implicit_stats.clear();
+    generic_coupled_model::host_prepare_step(plan);
 }
 
-fn host_implicit_set_iter_params(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    // Env overrides are intentionally not supported. These should be driven by recipe/model.
-    let tol_base = 1e-8f32;
-    let warm_scale = 100.0f32;
-    let warm_iters = 4usize;
-    let retry_scale = 0.5f32;
-    let max_restart = 80usize;
-    let retry_restart = 160usize;
-
-    let idx = explicit_implicit_backend_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_outer_idx;
-    let tol = if idx < warm_iters {
-        tol_base * warm_scale
-    } else {
-        tol_base
-    };
-    let retry_tol = (tol * retry_scale).min(tol_base);
-
-    explicit_implicit_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_set_iteration_params(tol, retry_tol, max_restart, retry_restart);
-}
+fn host_implicit_set_iter_params(_plan: &mut GpuProgramPlan) {}
 
 fn implicit_grad_assembly_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::assembly_graph_run(plan, context, mode);
-    }
-    let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
-    solver.graphs.run_implicit_grad_assembly(
-        context,
-        &solver.kernels,
-        solver.runtime_dims(),
-        mode,
-        solver.needs_gradients,
-    )
+    generic_coupled_model::assembly_graph_run(plan, context, mode)
 }
 
 fn host_implicit_solve_fgmres(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        generic_coupled_model::host_solve_linear_system(plan);
-        return;
-    }
-    explicit_implicit_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_solve_fgmres();
+    generic_coupled_model::host_solve_linear_system(plan);
 }
 
-fn host_implicit_record_stats(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    let stats = explicit_implicit(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_last_stats();
-    explicit_implicit_backend_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_stats
-        .push(stats);
-}
+fn host_implicit_record_stats(_plan: &mut GpuProgramPlan) {}
 
 fn implicit_snapshot_run(
     plan: &GpuProgramPlan,
-    _context: &crate::solver::gpu::context::GpuContext,
+    context: &crate::solver::gpu::context::GpuContext,
     _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::implicit_snapshot_run(
-            plan,
-            &crate::solver::gpu::context::GpuContext {
-                device: plan.context.device.clone(),
-                queue: plan.context.queue.clone(),
-            },
-            GraphExecMode::SingleSubmit,
-        );
-    }
-    let start = std::time::Instant::now();
-    explicit_implicit(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_snapshot();
-    (start.elapsed().as_secs_f64(), None)
+    generic_coupled_model::implicit_snapshot_run(plan, context, GraphExecMode::SingleSubmit)
 }
 
-fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    explicit_implicit_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_set_alpha_for_apply();
-}
+fn host_implicit_set_alpha_for_apply(_plan: &mut GpuProgramPlan) {}
 
 fn implicit_apply_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::apply_graph_run(plan, context, mode);
-    }
-    let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
-    solver
-        .graphs
-        .run_implicit_apply(context, &solver.kernels, solver.runtime_dims(), mode)
+    generic_coupled_model::apply_graph_run(plan, context, mode)
 }
 
-fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    explicit_implicit_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_restore_alpha();
-}
+fn host_implicit_restore_alpha(_plan: &mut GpuProgramPlan) {}
 
-fn host_implicit_advance_outer_idx(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        return;
-    }
-    explicit_implicit_backend_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .implicit_outer_idx += 1;
-}
+fn host_implicit_advance_outer_idx(_plan: &mut GpuProgramPlan) {}
 
 fn primitive_update_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    if generic_coupled(plan).is_some() {
-        return generic_coupled_model::update_graph_run(plan, context, mode);
-    }
-    let solver = explicit_implicit(plan).expect("missing universal explicit/implicit backend");
-    solver
-        .graphs
-        .run_primitive_update(context, &solver.kernels, solver.runtime_dims(), mode)
+    generic_coupled_model::update_graph_run(plan, context, mode)
 }
 
 fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
-    if generic_coupled_mut(plan).is_some() {
-        generic_coupled_model::host_finalize_step(plan);
-        return;
-    }
-    explicit_implicit_mut(plan)
-        .expect("missing universal explicit/implicit backend")
-        .finalize_dt_old();
-}
-
-fn step_with_stats_compressible(
-    plan: &mut GpuProgramPlan,
-) -> Result<Vec<LinearSolverStats>, String> {
-    if should_use_explicit(plan) {
-        plan.step();
-        Ok(Vec::new())
-    } else {
-        plan.step();
-        Ok(std::mem::take(
-            &mut explicit_implicit_backend_mut(plan)
-                .expect("missing universal explicit/implicit backend")
-                .implicit_stats,
-        ))
-    }
-}
-
-fn set_param_fallback_compressible(
-    plan: &mut GpuProgramPlan,
-    param: PlanParam,
-    value: PlanParamValue,
-) -> Result<(), String> {
-    let model_owns_preconditioner = plan
-        .model
-        .linear_solver
-        .map(|spec| {
-            matches!(
-                spec.preconditioner,
-                crate::solver::model::ModelPreconditionerSpec::Schur { .. }
-            )
-        })
-        .unwrap_or(false);
-
-    let solver = explicit_implicit_mut(plan).expect("missing universal explicit/implicit backend");
-    match (param, value) {
-        (PlanParam::Dt, PlanParamValue::F32(dt)) => {
-            solver.set_dt(dt);
-            Ok(())
-        }
-        (PlanParam::AdvectionScheme, PlanParamValue::Scheme(scheme)) => {
-            solver.set_scheme(scheme.gpu_id());
-            Ok(())
-        }
-        (PlanParam::TimeScheme, PlanParamValue::TimeScheme(scheme)) => {
-            solver.set_time_scheme(scheme as u32);
-            Ok(())
-        }
-        (PlanParam::Preconditioner, PlanParamValue::Preconditioner(preconditioner)) => {
-            if model_owns_preconditioner {
-                return Err("preconditioner is model-owned for this model".to_string());
-            }
-            solver.set_precond_type(preconditioner);
-            Ok(())
-        }
-        (PlanParam::Viscosity, PlanParamValue::F32(mu)) => {
-            solver.set_viscosity(mu);
-            Ok(())
-        }
-        (PlanParam::AlphaU, PlanParamValue::F32(alpha)) => {
-            solver.set_alpha_u(alpha);
-            Ok(())
-        }
-        (PlanParam::InletVelocity, PlanParamValue::F32(velocity)) => {
-            solver.set_inlet_velocity(velocity);
-            Ok(())
-        }
-        (PlanParam::Dtau, PlanParamValue::F32(dtau)) => {
-            solver.set_dtau(dtau);
-            Ok(())
-        }
-        (PlanParam::OuterIters, PlanParamValue::Usize(iters)) => {
-            solver.set_outer_iters(iters);
-            Ok(())
-        }
-        (PlanParam::LowMachModel, PlanParamValue::LowMachModel(model)) => {
-            solver.set_precond_model(model as u32);
-            Ok(())
-        }
-        (PlanParam::LowMachThetaFloor, PlanParamValue::F32(theta)) => {
-            solver.set_precond_theta_floor(theta);
-            Ok(())
-        }
-        (PlanParam::NonconvergedRelax, PlanParamValue::F32(relax)) => {
-            solver.set_nonconverged_relax(relax);
-            Ok(())
-        }
-        (PlanParam::DetailedProfilingEnabled, PlanParamValue::Bool(enable)) => {
-            if enable {
-                solver.common.profiling_stats.enable();
-            } else {
-                solver.common.profiling_stats.disable();
-            }
-            Ok(())
-        }
-        _ => Err("parameter is not supported by this plan".into()),
-    }
+    generic_coupled_model::host_finalize_step(plan);
 }
 
 // --- Coupled handlers ---

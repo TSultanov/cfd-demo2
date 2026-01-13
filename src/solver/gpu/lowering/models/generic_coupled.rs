@@ -13,7 +13,7 @@ use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
-    build_graph_for_phases, build_optional_graph_for_phase,
+    build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
 use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
@@ -33,6 +33,7 @@ pub(crate) struct GenericCoupledProgramResources {
     assembly_graph: ModuleGraph<GeneratedKernelsModule>,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
+    explicit_graph: ModuleGraph<GeneratedKernelsModule>,
     outer_iters: usize,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
@@ -122,6 +123,22 @@ impl GenericCoupledProgramResources {
         )?
         .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
 
+        // Explicit stepping uses a single graph op; build a combined graph covering all
+        // compute phases that might be present in explicit recipes.
+        let explicit_graph = build_optional_graph_for_phases(
+            recipe,
+            &[
+                KernelPhase::Gradients,
+                KernelPhase::FluxComputation,
+                KernelPhase::Assembly,
+                KernelPhase::Apply,
+                KernelPhase::Update,
+            ],
+            &kernels,
+            "generic_coupled",
+        )?
+        .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
+
         let outer_iters = match recipe.stepping {
             crate::solver::gpu::recipe::SteppingMode::Implicit { outer_iters } => outer_iters,
             _ => 1,
@@ -151,6 +168,7 @@ impl GenericCoupledProgramResources {
             assembly_graph,
             apply_graph,
             update_graph,
+            explicit_graph,
             outer_iters,
             linear_solver,
             schur,
@@ -740,6 +758,15 @@ pub(crate) fn update_graph_run(
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
     run_module_graph(&r.update_graph, context, &r.kernels, r.runtime_dims(), mode)
+}
+
+pub(crate) fn explicit_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    let r = res(plan);
+    run_module_graph(&r.explicit_graph, context, &r.kernels, r.runtime_dims(), mode)
 }
 
 pub(crate) fn apply_graph_run(

@@ -39,11 +39,11 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Mesh-level CSR adjacency buffers are owned by mesh resources (no per-backend duplication), and CSR binding semantics are explicitly DOF/system-level where required.
 - Removed transitional `system_main.wgsl` artifact/hack (no “representative model” generation).
 - Converged duplicated WGSL AST sources (single canonical implementation in codegen).
+- Explicit stepping uses the same generic-coupled backend resources (no separate explicit/implicit plan/resources path).
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
 ### 1) Plan Resources (single universal runtime resource graph)
-- Finish converging plan/runtime plumbing between explicit/implicit and generic-coupled so new solver modes do not introduce new plan/resource structs or wiring paths.
 - Document the canonical linear-system representation(s) (DOF/system CSR vs scalar CSR used for mesh adjacency), and make all kernel bindings reflect that choice consistently.
 
 ### 2) Codegen (remove model-specific generators; IR-driven kernels)

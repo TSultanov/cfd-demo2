@@ -115,6 +115,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
             Some(BoundaryType::Inlet) => 1,
             Some(BoundaryType::Outlet) => 2,
             Some(BoundaryType::Wall) => 3,
+            Some(BoundaryType::SlipWall) => 4,
         })
         .collect();
     let b_face_boundary = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

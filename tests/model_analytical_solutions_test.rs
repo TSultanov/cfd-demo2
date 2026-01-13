@@ -314,7 +314,7 @@ fn laplace_linear_solution_matches() {
 
     let boundary_value = |boundary: BoundaryType, x: f64, _y: f64| match boundary {
         BoundaryType::Inlet | BoundaryType::Outlet => Some(a + b * x),
-        BoundaryType::Wall => None,
+        BoundaryType::Wall | BoundaryType::SlipWall => None,
     };
 
     let (matrix, rhs) = assemble_scalar_system(&mesh, &system, 1.0, None, None, boundary_value);
@@ -334,7 +334,7 @@ fn poisson_quadratic_solution_matches() {
 
     let boundary_value = |boundary: BoundaryType, x: f64, _y: f64| match boundary {
         BoundaryType::Inlet | BoundaryType::Outlet => Some(x * (1.0 - x)),
-        BoundaryType::Wall => None,
+        BoundaryType::Wall | BoundaryType::SlipWall => None,
     };
 
     let source: Vec<f64> = mesh.cell_cx.iter().map(|_| 2.0).collect();
@@ -358,7 +358,7 @@ fn heat_equation_single_step_matches() {
 
     let boundary_value = |boundary: BoundaryType, x: f64, _y: f64| match boundary {
         BoundaryType::Inlet | BoundaryType::Outlet => Some((std::f64::consts::PI * x).sin()),
-        BoundaryType::Wall => None,
+        BoundaryType::Wall | BoundaryType::SlipWall => None,
     };
 
     let phi_old: Vec<f64> = mesh

@@ -43,7 +43,7 @@ mod tests {
                         outlet_faces += 1;
                         assert!((cx - domain_size.x).abs() < 1e-3, "Outlet face not at x=L");
                     }
-                    BoundaryType::Wall => {
+                    BoundaryType::Wall | BoundaryType::SlipWall => {
                         // Could be top/bottom or obstacle
                         if (cy - 0.0).abs() < 1e-3 || (cy - domain_size.y).abs() < 1e-3 {
                             wall_faces += 1;

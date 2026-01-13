@@ -194,13 +194,13 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
         let u_face = match b.unwrap() {
             BoundaryType::Inlet => u_inlet,
             BoundaryType::Outlet => u[owner],
-            BoundaryType::Wall => (0.0, 0.0),
+            BoundaryType::Wall | BoundaryType::SlipWall => (0.0, 0.0),
         };
         let flux = rho * (u_face.0 * nx + u_face.1 * ny) * area;
         match b.unwrap() {
             BoundaryType::Inlet => m_in += -flux,  // inflow magnitude
             BoundaryType::Outlet => m_out += flux, // outflow magnitude
-            BoundaryType::Wall => {}
+            BoundaryType::Wall | BoundaryType::SlipWall => {}
         }
     }
 

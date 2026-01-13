@@ -1,10 +1,10 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model;
+use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -24,10 +24,10 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
         ny,
         length,
         height,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundaryType::SlipWall,
+        BoundaryType::SlipWall,
+        BoundaryType::SlipWall,
+        BoundaryType::SlipWall,
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
@@ -113,10 +113,7 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
         p_rel < 0.5,
         "pressure perturbation mismatch vs OpenFOAM: rel_l2={p_rel:.3}"
     );
-    assert!(
-        ux_rel < 2.0,
-        "u_x mismatch vs OpenFOAM: rel_l2={ux_rel:.3}"
-    );
+    assert!(ux_rel < 2.0, "u_x mismatch vs OpenFOAM: rel_l2={ux_rel:.3}");
 
     // Full-field comparison (for Ny=1 this is identical to the centerline, but we keep a
     // separate reference CSV to validate whole-field export/mapping).
@@ -147,8 +144,14 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
         let (sx, sy, _, _) = *sol;
         let (rx, ry, _, _) = *rf;
-        assert!((sx - rx).abs() < 1e-12, "x mismatch at sorted row {i}: solver={sx} ref={rx}");
-        assert!((sy - ry).abs() < 1e-12, "y mismatch at sorted row {i}: solver={sy} ref={ry}");
+        assert!(
+            (sx - rx).abs() < 1e-12,
+            "x mismatch at sorted row {i}: solver={sx} ref={rx}"
+        );
+        assert!(
+            (sy - ry).abs() < 1e-12,
+            "y mismatch at sorted row {i}: solver={sy} ref={ry}"
+        );
     }
 
     let p_out_dp: Vec<f64> = sol_rows.iter().map(|r| r.2 - p0).collect();

@@ -100,15 +100,17 @@ impl BoundarySpec {
         }
 
         let coupled_stride = unknowns.len();
-        let mut kind = vec![GpuBcKind::ZeroGradient as u32; 4 * coupled_stride];
-        let mut value = vec![0.0_f32; 4 * coupled_stride];
 
         let boundary_types = [
             GpuBoundaryType::None,
             GpuBoundaryType::Inlet,
             GpuBoundaryType::Outlet,
             GpuBoundaryType::Wall,
+            GpuBoundaryType::SlipWall,
         ];
+
+        let mut kind = vec![GpuBcKind::ZeroGradient as u32; boundary_types.len() * coupled_stride];
+        let mut value = vec![0.0_f32; boundary_types.len() * coupled_stride];
 
         for (b_i, &b) in boundary_types.iter().enumerate() {
             for (u_idx, (field, component)) in unknowns.iter().enumerate() {
@@ -395,6 +397,11 @@ pub fn incompressible_momentum_model() -> ModelSpec {
                 GpuBoundaryType::Wall,
                 2,
                 BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
+                2,
+                BoundaryCondition::zero_gradient(si::INV_TIME),
             ),
     );
     boundaries.set_field(
@@ -408,6 +415,11 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
                 1,
                 BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
             )
@@ -492,6 +504,11 @@ pub fn compressible_model() -> ModelSpec {
                 GpuBoundaryType::Wall,
                 1,
                 BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
+                1,
+                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
             ),
     );
     boundaries.set_field(
@@ -512,6 +529,11 @@ pub fn compressible_model() -> ModelSpec {
             .set_uniform(
                 GpuBoundaryType::Wall,
                 2,
+                BoundaryCondition::dirichlet(0.0, si::MOMENTUM_DENSITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
+                2,
                 BoundaryCondition::zero_gradient(si::MOMENTUM_DENSITY / si::LENGTH),
             ),
     );
@@ -531,6 +553,11 @@ pub fn compressible_model() -> ModelSpec {
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
                 1,
                 BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
             ),
@@ -828,24 +855,77 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
     let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
 
+    // Viscous terms (simple Laplacian-style model):
+    // - Momentum: add `-mu * (u_N - u_O) / dist` to the face-normal momentum flux.
+    // - Energy: add `-(tau·n)·u_avg - k * (T_N - T_O) / dist`,
+    //   with `tau·n ≈ mu * (u_N - u_O) / dist`, `T = p / rho` (R=1), and `k = mu * Cp / Pr`.
+    //
+    // This is intentionally a low-Mach-friendly stabilizer; it is not a full Newtonian stress
+    // tensor discretization on skewed meshes.
+    let mu = S::constant("viscosity");
+    let dist = S::dist();
+
+    let u_o = u_vec(FaceSide::Owner);
+    let u_nbr = u_vec(FaceSide::Neighbor);
+    let du = V::Sub(Box::new(u_nbr.clone()), Box::new(u_o.clone()));
+    let inv_dist = S::Div(Box::new(S::lit(1.0)), Box::new(dist.clone()));
+
+    let du_x = S::Dot(Box::new(du.clone()), Box::new(ex.clone()));
+    let du_y = S::Dot(Box::new(du.clone()), Box::new(ey.clone()));
+    let grad_n_u_x = S::Mul(Box::new(du_x), Box::new(inv_dist.clone()));
+    let grad_n_u_y = S::Mul(Box::new(du_y), Box::new(inv_dist.clone()));
+    let visc_mom_x = S::Neg(Box::new(S::Mul(Box::new(mu.clone()), Box::new(grad_n_u_x))));
+    let visc_mom_y = S::Neg(Box::new(S::Mul(Box::new(mu.clone()), Box::new(grad_n_u_y))));
+
+    let u_avg = V::MulScalar(
+        Box::new(V::Add(Box::new(u_o), Box::new(u_nbr))),
+        Box::new(S::lit(0.5)),
+    );
+    let grad_n_u_vec = V::MulScalar(Box::new(du), Box::new(inv_dist.clone()));
+    let tau_dot_n_dot_u = S::Mul(
+        Box::new(mu.clone()),
+        Box::new(S::Dot(Box::new(grad_n_u_vec), Box::new(u_avg))),
+    );
+    let visc_work = S::Neg(Box::new(tau_dot_n_dot_u));
+
+    let t = |side: FaceSide| S::Div(Box::new(p(side)), Box::new(rho(side)));
+    let d_t = S::Sub(
+        Box::new(t(FaceSide::Neighbor)),
+        Box::new(t(FaceSide::Owner)),
+    );
+    let cp_over_pr = gamma / (gamma - 1.0); // Cp for R=1, with Pr=1 (matches OpenFOAM reference cases)
+    let kappa = S::Mul(Box::new(mu), Box::new(S::lit(cp_over_pr)));
+    let heat_flux = S::Neg(Box::new(S::Mul(
+        Box::new(S::Mul(Box::new(kappa), Box::new(d_t))),
+        Box::new(inv_dist),
+    )));
+    let visc_energy = S::Add(Box::new(visc_work), Box::new(heat_flux));
+
     let flux_mass = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_n(side)));
     let flux_mom_x = |side: FaceSide| {
         S::Add(
             Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
-            Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
+                Box::new(visc_mom_x.clone()),
+            )),
         )
     };
     let flux_mom_y = |side: FaceSide| {
         S::Add(
             Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
-            Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
+                Box::new(visc_mom_y.clone()),
+            )),
         )
     };
     let flux_energy = |side: FaceSide| {
-        S::Mul(
+        let inviscid = S::Mul(
             Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
             Box::new(u_n(side)),
-        )
+        );
+        S::Add(Box::new(inviscid), Box::new(visc_energy.clone()))
     };
 
     let mut u_left = Vec::new();

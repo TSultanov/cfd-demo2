@@ -46,20 +46,6 @@ pub(crate) async fn build_generic_coupled_backend(
         GpuConstants::default(),
     );
 
-    // Create buffer for scalar row offsets (mesh-level CSR structure)
-    // This is used by assembly kernels to iterate over cell neighbors
-    let b_scalar_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("GenericCoupled scalar_row_offsets"),
-        contents: cast_slice(&runtime.common.mesh.row_offsets),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let b_scalar_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("GenericCoupled scalar_col_indices"),
-        contents: cast_slice(&runtime.common.mesh.col_indices),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
-
     let (bc_kind, bc_value) = model
         .boundaries
         .to_gpu_tables(&model.system)
@@ -88,11 +74,20 @@ pub(crate) async fn build_generic_coupled_backend(
             runtime.linear_port_space.buffer(runtime.linear_ports.rhs),
         )
         .with_buffer("x", runtime.linear_port_space.buffer(runtime.linear_ports.x))
+        .with_buffer(
+            "row_offsets",
+            runtime
+                .linear_port_space
+                .buffer(runtime.linear_ports.row_offsets),
+        )
+        .with_buffer(
+            "col_indices",
+            runtime
+                .linear_port_space
+                .buffer(runtime.linear_ports.col_indices),
+        )
         .with_buffer("bc_kind", &b_bc_kind)
         .with_buffer("bc_value", &b_bc_value)
-        .with_buffer("scalar_row_offsets", &b_scalar_row_offsets)
-        .with_buffer("row_offsets", &b_scalar_row_offsets)
-        .with_buffer("col_indices", &b_scalar_col_indices)
         .with_buffer("y", runtime.linear_port_space.buffer(runtime.linear_ports.rhs));
 
     let kernels = GeneratedKernelsModule::new_from_recipe(
@@ -115,8 +110,6 @@ pub(crate) async fn build_generic_coupled_backend(
         kernels,
         &model,
         &recipe,
-        b_scalar_row_offsets,
-        b_scalar_col_indices,
         b_bc_kind,
         b_bc_value,
     )?;

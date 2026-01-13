@@ -37,8 +37,6 @@ pub(crate) struct GenericCoupledProgramResources {
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
     krylov: Option<GenericCoupledKrylovResources>,
-    _b_scalar_row_offsets: wgpu::Buffer,
-    _b_scalar_col_indices: wgpu::Buffer,
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
 }
@@ -67,8 +65,6 @@ impl GenericCoupledProgramResources {
         kernels: GeneratedKernelsModule,
         model: &ModelSpec,
         recipe: &SolverRecipe,
-        b_scalar_row_offsets: wgpu::Buffer,
-        b_scalar_col_indices: wgpu::Buffer,
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
     ) -> Result<Self, String> {
@@ -132,12 +128,14 @@ impl GenericCoupledProgramResources {
         };
 
         let linear_solver = recipe.linear_solver.clone();
+        let scalar_row_offsets = &runtime.common.mesh.b_scalar_row_offsets;
+        let scalar_col_indices = &runtime.common.mesh.b_scalar_col_indices;
         let schur = build_generic_schur(
             model,
             recipe,
             &runtime,
-            &b_scalar_row_offsets,
-            &b_scalar_col_indices,
+            scalar_row_offsets,
+            scalar_col_indices,
         )?;
         let krylov = if schur.is_some() {
             None
@@ -157,8 +155,6 @@ impl GenericCoupledProgramResources {
             linear_solver,
             schur,
             krylov,
-            _b_scalar_row_offsets: b_scalar_row_offsets,
-            _b_scalar_col_indices: b_scalar_col_indices,
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
         })

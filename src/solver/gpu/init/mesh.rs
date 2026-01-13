@@ -14,6 +14,8 @@ pub struct MeshResources {
     pub b_cell_faces: wgpu::Buffer,
     pub b_cell_face_matrix_indices: wgpu::Buffer,
     pub b_diagonal_indices: wgpu::Buffer,
+    pub b_scalar_row_offsets: wgpu::Buffer,
+    pub b_scalar_col_indices: wgpu::Buffer,
     pub row_offsets: Vec<u32>,
     pub col_indices: Vec<u32>,
 }
@@ -33,6 +35,8 @@ impl MeshResources {
             "cell_faces" => Some(&self.b_cell_faces),
             "cell_face_matrix_indices" => Some(&self.b_cell_face_matrix_indices),
             "diagonal_indices" => Some(&self.b_diagonal_indices),
+            "scalar_row_offsets" => Some(&self.b_scalar_row_offsets),
+            "scalar_col_indices" => Some(&self.b_scalar_col_indices),
             _ => None,
         }
     }
@@ -68,6 +72,18 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         current_offset += list.len() as u32;
     }
     row_offsets[num_cells as usize] = current_offset;
+
+    let b_scalar_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Mesh scalar_row_offsets"),
+        contents: bytemuck::cast_slice(&row_offsets),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+
+    let b_scalar_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Mesh scalar_col_indices"),
+        contents: bytemuck::cast_slice(&col_indices),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
 
     // --- Mesh Buffers ---
     let face_owner: Vec<u32> = mesh.face_owner.iter().map(|&x| x as u32).collect();
@@ -247,6 +263,8 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         b_cell_faces,
         b_cell_face_matrix_indices,
         b_diagonal_indices,
+        b_scalar_row_offsets,
+        b_scalar_col_indices,
         row_offsets,
         col_indices,
     }

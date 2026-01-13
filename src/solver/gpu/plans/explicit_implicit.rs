@@ -306,7 +306,7 @@ impl ExplicitImplicitPlanResources {
             )
             .with_buffer(
                 "row_offsets",
-                lowered.ports.buffer(lowered.scalar_row_offsets_port),
+                lowered.ports.buffer(lowered.system_ports.row_offsets),
             )
             .with_buffer("col_indices", lowered.ports.buffer(lowered.system_ports.col_indices))
             .with_buffer("y", lowered.ports.buffer(lowered.system_ports.rhs));

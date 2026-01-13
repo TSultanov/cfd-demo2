@@ -264,6 +264,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
+        var phi_2: f32 = fluxes[face_idx * 3u + 2u];
+        if (owner != idx) {
+            phi_2 -= phi_2 * 2.0;
+        }
+        rhs_2 -= phi_2;
     }
     matrix_values[start_row_0 + diag_rank * 3u + 0u] += diag_0;
     rhs[idx * 3u + 0u] = rhs_0;

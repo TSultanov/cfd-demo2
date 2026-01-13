@@ -306,7 +306,7 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
         + fvc::grad(fields.p))
     .eqn(fields.u);
 
-    let pressure = fvm::laplacian(
+    let pressure = (fvm::laplacian(
         Coefficient::product(
             Coefficient::field(fields.rho).expect("rho must be scalar"),
             Coefficient::field(fields.d_p).expect("d_p must be scalar"),
@@ -314,6 +314,11 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
         .expect("pressure coefficient must be scalar"),
         fields.p,
     )
+    // SIMPLE-style pressure correction source term.
+    //
+    // Enforce continuity via div(phi) = 0 by solving a Poisson equation whose RHS is the
+    // divergence of the current face mass flux.
+    + fvm::div_flux(fields.phi, fields.p))
     .eqn(fields.p);
 
     let mut system = EquationSystem::new();
@@ -373,13 +378,59 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         .ok_or_else(|| "incompressible_momentum_model missing p in state layout".to_string())
         .expect("state layout validation failed");
 
+    let mut boundaries = BoundarySpec::default();
+    boundaries.set_field(
+        "U",
+        FieldBoundarySpec::new()
+            // Inlet velocity is applied via the runtime `InletVelocity` plan param, which updates
+            // the GPU `bc_value` table for `GpuBoundaryType::Inlet` (see `param_inlet_velocity`).
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+            )
+            // Outlet: do not constrain velocity (Neumann/zeroGradient).
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                2,
+                BoundaryCondition::zero_gradient(si::INV_TIME),
+            )
+            // Walls: no-slip.
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+            ),
+    );
+    boundaries.set_field(
+        "p",
+        FieldBoundarySpec::new()
+            // Inlet and walls: zero-gradient pressure.
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+            )
+            // Outlet: fix gauge by pinning pressure to 0.
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                1,
+                BoundaryCondition::dirichlet(0.0, si::PRESSURE),
+            ),
+    );
+
     ModelSpec {
         id: "incompressible_momentum",
         method: crate::solver::model::method::MethodSpec::GenericCoupled,
         eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
-        boundaries: BoundarySpec::default(),
+        boundaries,
 
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {

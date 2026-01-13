@@ -8,8 +8,8 @@ use super::wgsl_ast::{
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::{
-    FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FluxLayout,
-    FluxModuleKernelSpec, StateLayout,
+    FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FieldKind,
+    FluxLayout, FluxModuleKernelSpec, StateLayout,
 };
 use crate::solver::shared::PrimitiveExpr;
 
@@ -53,6 +53,10 @@ fn base_items() -> Vec<Item> {
     items.extend(mesh_bindings());
     items.push(Item::Comment("Group 1: Fields".to_string()));
     items.extend(state_bindings());
+    items.push(Item::Comment(
+        "Group 2: Boundary conditions (per boundary type x unknown)".to_string(),
+    ));
+    items.extend(boundary_bindings());
     items
 }
 
@@ -173,6 +177,13 @@ fn state_bindings() -> Vec<Item> {
     ]
 }
 
+fn boundary_bindings() -> Vec<Item> {
+    vec![
+        storage_var("bc_kind", Type::array(Type::U32), 2, 0, AccessMode::Read),
+        storage_var("bc_value", Type::array(Type::F32), 2, 1, AccessMode::Read),
+    ]
+}
+
 fn main_fn(
     layout: &StateLayout,
     flux_layout: &FluxLayout,
@@ -225,6 +236,10 @@ fn main_body(
     stmts.push(dsl::let_expr(
         "neighbor",
         dsl::array_access("face_neighbor", Expr::ident("idx")),
+    ));
+    stmts.push(dsl::let_expr(
+        "is_boundary",
+        Expr::ident("neighbor").eq(-1),
     ));
     // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
     // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
@@ -314,10 +329,18 @@ fn face_stmts(
         "c_neigh",
         dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
     ));
-    body.push(dsl::let_typed_expr(
+    body.push(dsl::var_typed_expr(
         "c_neigh_vec",
         Type::vec2_f32(),
-        typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr(),
+        Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
+    ));
+    body.push(dsl::if_block_expr(
+        Expr::ident("is_boundary"),
+        dsl::block(vec![dsl::assign_expr(
+            Expr::ident("c_neigh_vec"),
+            Expr::ident("face_center_vec"),
+        )]),
+        None,
     ));
 
     body.push(dsl::let_expr(
@@ -361,7 +384,8 @@ fn face_stmts(
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => {
             let phi_expr = lower_scalar(phi, layout, primitives, flux_layout);
-            body.push(dsl::let_expr("phi", phi_expr));
+            body.push(dsl::var_typed_expr("phi", Type::F32, Some(phi_expr)));
+
             for u_idx in 0..flux_stride {
                 body.push(dsl::assign_expr(
                     dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, u_idx),
@@ -438,8 +462,10 @@ fn lower_vec2(
             lower_scalar(y, layout, primitives, flux_layout),
         ]),
         FaceVec2Expr::StateVec2 { side, field } => {
-            let idx = side_cell_idx(*side);
-            state_vec2_at(layout, "state", idx, field)
+            typed::VecExpr::<2>::from_components([
+                state_component_at_side(layout, "state", *side, field, 0, flux_layout),
+                state_component_at_side(layout, "state", *side, field, 1, flux_layout),
+            ])
         }
         FaceVec2Expr::Add(a, b) => {
             let a = lower_vec2(a, layout, primitives, flux_layout);
@@ -470,13 +496,6 @@ fn lower_vec2(
     }
 }
 
-fn side_cell_idx(side: FaceSide) -> Expr {
-    match side {
-        FaceSide::Owner => Expr::ident("owner"),
-        FaceSide::Neighbor => Expr::ident("neigh_idx"),
-    }
-}
-
 fn state_component_at(
     layout: &StateLayout,
     buffer: &str,
@@ -491,15 +510,69 @@ fn state_component_at(
     Expr::ident(buffer).index(idx * stride + offset)
 }
 
-fn state_scalar_at(layout: &StateLayout, buffer: &str, idx: Expr, field: &str) -> Expr {
-    state_component_at(layout, buffer, idx, field, 0)
-}
+fn state_component_at_side(
+    layout: &StateLayout,
+    buffer: &str,
+    side: FaceSide,
+    field: &str,
+    component: u32,
+    flux_layout: &FluxLayout,
+) -> Expr {
+    if side == FaceSide::Owner {
+        return state_component_at(layout, buffer, Expr::ident("owner"), field, component);
+    }
 
-fn state_vec2_at(layout: &StateLayout, buffer: &str, idx: Expr, field: &str) -> typed::VecExpr<2> {
-    typed::VecExpr::<2>::from_components([
-        state_component_at(layout, buffer, idx.clone(), field, 0),
-        state_component_at(layout, buffer, idx, field, 1),
-    ])
+    // Interior neighbor value.
+    let interior = state_component_at(layout, buffer, Expr::ident("neigh_idx"), field, component);
+
+    // Boundary neighbor uses BC tables (if the field is an unknown); otherwise fall back to owner.
+    let owner = state_component_at(layout, buffer, Expr::ident("owner"), field, component);
+
+    let Some(state_field) = layout.field(field) else {
+        panic!("missing field '{field}' in state layout");
+    };
+    let comp_name = match state_field.kind() {
+        FieldKind::Scalar => {
+            if component != 0 {
+                return owner;
+            }
+            field.to_string()
+        }
+        FieldKind::Vector2 => {
+            let suffix = match component {
+                0 => "x",
+                1 => "y",
+                _ => return owner,
+            };
+            format!("{field}_{suffix}")
+        }
+        FieldKind::Vector3 => {
+            let suffix = match component {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                _ => return owner,
+            };
+            format!("{field}_{suffix}")
+        }
+    };
+    let Some(unknown_offset) = flux_layout.offset_for(&comp_name) else {
+        return owner;
+    };
+
+    let bc_table_idx =
+        Expr::ident("boundary_type") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
+    let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
+    let value = dsl::array_access("bc_value", bc_table_idx);
+
+    // GpuBcKind: ZeroGradient=0, Dirichlet=1, Neumann=2 (value is dphi/dn).
+    let from_bc = dsl::select(
+        dsl::select(owner.clone(), value.clone(), kind.eq(Expr::from(1u32))),
+        owner.clone() + value * Expr::ident("d_own"),
+        kind.eq(Expr::from(2u32)),
+    );
+
+    dsl::select(interior, from_bc, Expr::ident("is_boundary"))
 }
 
 fn lower_scalar(
@@ -508,7 +581,6 @@ fn lower_scalar(
     primitives: &HashMap<&str, &PrimitiveExpr>,
     flux_layout: &FluxLayout,
 ) -> Expr {
-    let _ = flux_layout;
     match expr {
         FaceScalarExpr::Literal(v) => Expr::lit_f32(*v),
         FaceScalarExpr::Builtin(b) => match b {
@@ -519,14 +591,20 @@ fn lower_scalar(
         },
         FaceScalarExpr::Constant { name } => Expr::ident("constants").field(name.clone()),
         FaceScalarExpr::State { side, name } => {
-            let idx = side_cell_idx(*side);
-            state_scalar_at(layout, "state", idx, name)
+            state_component_at_side(layout, "state", *side, name, 0, flux_layout)
         }
         FaceScalarExpr::Primitive { side, name } => {
             let prim = primitives.get(name.as_str()).unwrap_or_else(|| {
                 panic!("primitive '{}' not found in PrimitiveDerivations", name)
             });
-            lower_primitive_expr(prim, layout, side_cell_idx(*side), "state")
+            // Boundary faces do not have a true neighbor cell index; fall back to the owner
+            // index for primitive evaluation on boundary faces.
+            let idx = if *side == FaceSide::Owner {
+                Expr::ident("owner")
+            } else {
+                dsl::select(Expr::ident("neigh_idx"), Expr::ident("owner"), Expr::ident("is_boundary"))
+            };
+            lower_primitive_expr(prim, layout, idx, "state")
         }
         FaceScalarExpr::Add(a, b) => {
             lower_scalar(a, layout, primitives, flux_layout)

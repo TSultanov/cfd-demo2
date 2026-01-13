@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: e6df2a7372ab257846dac247217e6126e0878215d7858e948e0e72aaebafb845
+// SourceHash: 63f6028d7289baca1e401e936c904fc66fa0d0f03bee08b7daf6ce7c3dd20805
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -4664,6 +4664,84 @@ pub mod generated {
                 pass.set_bind_group(1, &self.0, &[]);
             }
         }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup2::LayoutDescriptor"),
+                    entries: &[
+                        #[doc = " @binding(0): \"bc_kind\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"bc_value\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleCompressible::BindGroup2"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
         #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
         #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
         #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
@@ -4674,19 +4752,21 @@ pub mod generated {
         pub struct WgpuBindGroups<'a> {
             pub bind_group0: &'a WgpuBindGroup0,
             pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
         }
         impl<'a> WgpuBindGroups<'a> {
             pub fn set(&self, pass: &mut impl SetBindGroup) {
                 self.bind_group0.set(pass);
                 self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
             }
         }
         #[derive(Debug)]
         pub struct WgpuPipelineLayout;
         impl WgpuPipelineLayout {
             pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 2],
-            ) -> [wgpu::BindGroupLayout; 2] {
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
                 entries
             }
         }
@@ -4696,6 +4776,7 @@ pub mod generated {
                 bind_group_layouts: &[
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
                 ],
                 push_constant_ranges: &[],
             })
@@ -4754,11 +4835,16 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var neigh_idx: u32;
     var normal_vec: vec2<f32>;
+    var c_neigh_vec: vec2<f32>;
     var lambda: f32 = 0.5f;
 
     let _e5 = constants.stride_x;
@@ -4768,6 +4854,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let owner = face_owner[idx];
     let neighbor = face_neighbor[idx];
+    let is_boundary = (neighbor == -1i);
     neigh_idx = owner;
     if (neighbor != -1i) {
         neigh_idx = u32(neighbor);
@@ -4775,241 +4862,438 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let area = face_areas[idx];
     let boundary_type = face_boundary[idx];
     let face_center = face_centers[idx];
-    let _e34 = face_normals[idx].x;
-    let _e38 = face_normals[idx].y;
-    normal_vec = vec2<f32>(_e34, _e38);
+    let _e36 = face_normals[idx].x;
+    let _e40 = face_normals[idx].y;
+    normal_vec = vec2<f32>(_e36, _e40);
     let c_owner = cell_centers[owner];
     let c_owner_vec = vec2<f32>(c_owner.x, c_owner.y);
     let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-    let _e51 = normal_vec;
-    if (dot((face_center_vec - c_owner_vec), _e51) < 0f) {
-        let _e55 = normal_vec;
-        normal_vec = -(_e55);
+    let _e53 = normal_vec;
+    if (dot((face_center_vec - c_owner_vec), _e53) < 0f) {
+        let _e57 = normal_vec;
+        normal_vec = -(_e57);
     }
-    let _e58 = neigh_idx;
-    let c_neigh = cell_centers[_e58];
-    let c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    let _e60 = neigh_idx;
+    let c_neigh = cell_centers[_e60];
+    c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    if is_boundary {
+        c_neigh_vec = face_center_vec;
+    }
     let d_own = distance(c_owner_vec, face_center_vec);
-    let d_neigh = distance(c_neigh_vec, face_center_vec);
+    let _e68 = c_neigh_vec;
+    let d_neigh = distance(_e68, face_center_vec);
     let total_dist = (d_own + d_neigh);
     if (total_dist > 0.000001f) {
         lambda = (d_neigh / total_dist);
     }
-    let _e71 = lambda;
-    let lambda_other = (1f - _e71);
-    let d_vec = (c_neigh_vec - c_owner_vec);
-    let _e75 = normal_vec;
-    let dist_proj = abs(dot(d_vec, _e75));
+    let _e75 = lambda;
+    let lambda_other = (1f - _e75);
+    let _e78 = c_neigh_vec;
+    let d_vec = (_e78 - c_owner_vec);
+    let _e80 = normal_vec;
+    let dist_proj = abs(dot(d_vec, _e80));
     let dist = max(dist_proj, 0.000001f);
-    let _e86 = state[((owner * 7u) + 1u)];
-    let _e93 = state[((owner * 7u) + 2u)];
-    let _e103 = state[((owner * 7u) + 0u)];
-    let _e106 = normal_vec;
-    let _e114 = state[((owner * 7u) + 3u)];
-    let _e121 = state[((owner * 7u) + 1u)];
-    let _e128 = state[((owner * 7u) + 1u)];
-    let _e136 = state[((owner * 7u) + 2u)];
-    let _e143 = state[((owner * 7u) + 2u)];
-    let _e154 = state[((owner * 7u) + 0u)];
-    let _e165 = state[((owner * 7u) + 0u)];
-    let _e169 = neigh_idx;
-    let _e176 = state[((_e169 * 7u) + 1u)];
-    let _e177 = neigh_idx;
-    let _e184 = state[((_e177 * 7u) + 2u)];
-    let _e188 = neigh_idx;
-    let _e195 = state[((_e188 * 7u) + 0u)];
-    let _e198 = normal_vec;
-    let _e200 = neigh_idx;
-    let _e207 = state[((_e200 * 7u) + 3u)];
-    let _e208 = neigh_idx;
-    let _e215 = state[((_e208 * 7u) + 1u)];
-    let _e216 = neigh_idx;
-    let _e223 = state[((_e216 * 7u) + 1u)];
-    let _e225 = neigh_idx;
-    let _e232 = state[((_e225 * 7u) + 2u)];
+    let _e91 = state[((owner * 7u) + 1u)];
+    let _e98 = state[((owner * 7u) + 2u)];
+    let _e108 = state[((owner * 7u) + 0u)];
+    let _e111 = normal_vec;
+    let _e119 = state[((owner * 7u) + 3u)];
+    let _e126 = state[((owner * 7u) + 1u)];
+    let _e133 = state[((owner * 7u) + 1u)];
+    let _e141 = state[((owner * 7u) + 2u)];
+    let _e148 = state[((owner * 7u) + 2u)];
+    let _e159 = state[((owner * 7u) + 0u)];
+    let _e170 = state[((owner * 7u) + 0u)];
+    let _e174 = neigh_idx;
+    let _e181 = state[((_e174 * 7u) + 1u)];
+    let _e188 = state[((owner * 7u) + 1u)];
+    let _e195 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e202 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e212 = state[((owner * 7u) + 1u)];
+    let _e219 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e228 = bc_kind[((boundary_type * 4u) + 1u)];
     let _e233 = neigh_idx;
     let _e240 = state[((_e233 * 7u) + 2u)];
-    let _e245 = neigh_idx;
-    let _e252 = state[((_e245 * 7u) + 0u)];
-    let _e257 = neigh_idx;
-    let _e264 = state[((_e257 * 7u) + 0u)];
-    let a_plus = max(0f, max((dot(((vec2<f32>(_e86, _e93) * 1f) / vec2(_e103)), _e106) + sqrt(((0.55999994f * (_e114 - ((0.5f * ((_e121 * _e128) + (_e136 * _e143))) / _e154))) / _e165))), (dot(((vec2<f32>(_e176, _e184) * 1f) / vec2(_e195)), _e198) + sqrt(((0.55999994f * (_e207 - ((0.5f * ((_e215 * _e223) + (_e232 * _e240))) / _e252))) / _e264)))));
-    let _e277 = state[((owner * 7u) + 1u)];
-    let _e284 = state[((owner * 7u) + 2u)];
-    let _e294 = state[((owner * 7u) + 0u)];
-    let _e297 = normal_vec;
-    let _e305 = state[((owner * 7u) + 3u)];
-    let _e312 = state[((owner * 7u) + 1u)];
-    let _e319 = state[((owner * 7u) + 1u)];
-    let _e327 = state[((owner * 7u) + 2u)];
-    let _e334 = state[((owner * 7u) + 2u)];
-    let _e345 = state[((owner * 7u) + 0u)];
-    let _e356 = state[((owner * 7u) + 0u)];
-    let _e360 = neigh_idx;
-    let _e367 = state[((_e360 * 7u) + 1u)];
-    let _e368 = neigh_idx;
-    let _e375 = state[((_e368 * 7u) + 2u)];
-    let _e379 = neigh_idx;
-    let _e386 = state[((_e379 * 7u) + 0u)];
-    let _e389 = normal_vec;
-    let _e391 = neigh_idx;
-    let _e398 = state[((_e391 * 7u) + 3u)];
-    let _e399 = neigh_idx;
-    let _e406 = state[((_e399 * 7u) + 1u)];
-    let _e407 = neigh_idx;
-    let _e414 = state[((_e407 * 7u) + 1u)];
-    let _e416 = neigh_idx;
-    let _e423 = state[((_e416 * 7u) + 2u)];
-    let _e424 = neigh_idx;
-    let _e431 = state[((_e424 * 7u) + 2u)];
-    let _e436 = neigh_idx;
-    let _e443 = state[((_e436 * 7u) + 0u)];
-    let _e448 = neigh_idx;
-    let _e455 = state[((_e448 * 7u) + 0u)];
-    let a_minus = min(0f, min((dot(((vec2<f32>(_e277, _e284) * 1f) / vec2(_e294)), _e297) - sqrt(((0.55999994f * (_e305 - ((0.5f * ((_e312 * _e319) + (_e327 * _e334))) / _e345))) / _e356))), (dot(((vec2<f32>(_e367, _e375) * 1f) / vec2(_e386)), _e389) - sqrt(((0.55999994f * (_e398 - ((0.5f * ((_e406 * _e414) + (_e423 * _e431))) / _e443))) / _e455)))));
+    let _e247 = state[((owner * 7u) + 2u)];
+    let _e254 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e261 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e271 = state[((owner * 7u) + 2u)];
+    let _e278 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e287 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e295 = neigh_idx;
+    let _e302 = state[((_e295 * 7u) + 0u)];
+    let _e309 = state[((owner * 7u) + 0u)];
+    let _e316 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e323 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e333 = state[((owner * 7u) + 0u)];
+    let _e340 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e349 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e356 = normal_vec;
+    let _e358 = neigh_idx;
+    let _e366 = state[((select(_e358, owner, is_boundary) * 7u) + 3u)];
+    let _e367 = neigh_idx;
+    let _e375 = state[((select(_e367, owner, is_boundary) * 7u) + 1u)];
+    let _e376 = neigh_idx;
+    let _e384 = state[((select(_e376, owner, is_boundary) * 7u) + 1u)];
+    let _e386 = neigh_idx;
+    let _e394 = state[((select(_e386, owner, is_boundary) * 7u) + 2u)];
+    let _e395 = neigh_idx;
+    let _e403 = state[((select(_e395, owner, is_boundary) * 7u) + 2u)];
+    let _e408 = neigh_idx;
+    let _e416 = state[((select(_e408, owner, is_boundary) * 7u) + 0u)];
+    let _e421 = neigh_idx;
+    let _e428 = state[((_e421 * 7u) + 0u)];
+    let _e435 = state[((owner * 7u) + 0u)];
+    let _e442 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e449 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e459 = state[((owner * 7u) + 0u)];
+    let _e466 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e475 = bc_kind[((boundary_type * 4u) + 0u)];
+    let a_plus = max(0f, max((dot(((vec2<f32>(_e91, _e98) * 1f) / vec2(_e108)), _e111) + sqrt(((0.55999994f * (_e119 - ((0.5f * ((_e126 * _e133) + (_e141 * _e148))) / _e159))) / _e170))), (dot(((vec2<f32>(select(_e181, select(select(_e188, _e195, (_e202 == 1u)), (_e212 + (_e219 * d_own)), (_e228 == 2u)), is_boundary), select(_e240, select(select(_e247, _e254, (_e261 == 1u)), (_e271 + (_e278 * d_own)), (_e287 == 2u)), is_boundary)) * 1f) / vec2(select(_e302, select(select(_e309, _e316, (_e323 == 1u)), (_e333 + (_e340 * d_own)), (_e349 == 2u)), is_boundary))), _e356) + sqrt(((0.55999994f * (_e366 - ((0.5f * ((_e375 * _e384) + (_e394 * _e403))) / _e416))) / select(_e428, select(select(_e435, _e442, (_e449 == 1u)), (_e459 + (_e466 * d_own)), (_e475 == 2u)), is_boundary))))));
+    let _e492 = state[((owner * 7u) + 1u)];
+    let _e499 = state[((owner * 7u) + 2u)];
+    let _e509 = state[((owner * 7u) + 0u)];
+    let _e512 = normal_vec;
+    let _e520 = state[((owner * 7u) + 3u)];
+    let _e527 = state[((owner * 7u) + 1u)];
+    let _e534 = state[((owner * 7u) + 1u)];
+    let _e542 = state[((owner * 7u) + 2u)];
+    let _e549 = state[((owner * 7u) + 2u)];
+    let _e560 = state[((owner * 7u) + 0u)];
+    let _e571 = state[((owner * 7u) + 0u)];
+    let _e575 = neigh_idx;
+    let _e582 = state[((_e575 * 7u) + 1u)];
+    let _e589 = state[((owner * 7u) + 1u)];
+    let _e596 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e603 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e613 = state[((owner * 7u) + 1u)];
+    let _e620 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e629 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e634 = neigh_idx;
+    let _e641 = state[((_e634 * 7u) + 2u)];
+    let _e648 = state[((owner * 7u) + 2u)];
+    let _e655 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e662 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e672 = state[((owner * 7u) + 2u)];
+    let _e679 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e688 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e696 = neigh_idx;
+    let _e703 = state[((_e696 * 7u) + 0u)];
+    let _e710 = state[((owner * 7u) + 0u)];
+    let _e717 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e724 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e734 = state[((owner * 7u) + 0u)];
+    let _e741 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e750 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e757 = normal_vec;
+    let _e759 = neigh_idx;
+    let _e767 = state[((select(_e759, owner, is_boundary) * 7u) + 3u)];
+    let _e768 = neigh_idx;
+    let _e776 = state[((select(_e768, owner, is_boundary) * 7u) + 1u)];
+    let _e777 = neigh_idx;
+    let _e785 = state[((select(_e777, owner, is_boundary) * 7u) + 1u)];
+    let _e787 = neigh_idx;
+    let _e795 = state[((select(_e787, owner, is_boundary) * 7u) + 2u)];
+    let _e796 = neigh_idx;
+    let _e804 = state[((select(_e796, owner, is_boundary) * 7u) + 2u)];
+    let _e809 = neigh_idx;
+    let _e817 = state[((select(_e809, owner, is_boundary) * 7u) + 0u)];
+    let _e822 = neigh_idx;
+    let _e829 = state[((_e822 * 7u) + 0u)];
+    let _e836 = state[((owner * 7u) + 0u)];
+    let _e843 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e850 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e860 = state[((owner * 7u) + 0u)];
+    let _e867 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e876 = bc_kind[((boundary_type * 4u) + 0u)];
+    let a_minus = min(0f, min((dot(((vec2<f32>(_e492, _e499) * 1f) / vec2(_e509)), _e512) - sqrt(((0.55999994f * (_e520 - ((0.5f * ((_e527 * _e534) + (_e542 * _e549))) / _e560))) / _e571))), (dot(((vec2<f32>(select(_e582, select(select(_e589, _e596, (_e603 == 1u)), (_e613 + (_e620 * d_own)), (_e629 == 2u)), is_boundary), select(_e641, select(select(_e648, _e655, (_e662 == 1u)), (_e672 + (_e679 * d_own)), (_e688 == 2u)), is_boundary)) * 1f) / vec2(select(_e703, select(select(_e710, _e717, (_e724 == 1u)), (_e734 + (_e741 * d_own)), (_e750 == 2u)), is_boundary))), _e757) - sqrt(((0.55999994f * (_e767 - ((0.5f * ((_e776 * _e785) + (_e795 * _e804))) / _e817))) / select(_e829, select(select(_e836, _e843, (_e850 == 1u)), (_e860 + (_e867 * d_own)), (_e876 == 2u)), is_boundary))))));
     let denom = max((a_plus - a_minus), 0.000001f);
-    let _e477 = state[((owner * 7u) + 0u)];
-    let _e485 = state[((owner * 7u) + 1u)];
-    let _e492 = state[((owner * 7u) + 2u)];
-    let _e502 = state[((owner * 7u) + 0u)];
-    let _e505 = normal_vec;
-    let _e508 = neigh_idx;
-    let _e515 = state[((_e508 * 7u) + 0u)];
-    let _e517 = neigh_idx;
-    let _e524 = state[((_e517 * 7u) + 1u)];
-    let _e525 = neigh_idx;
-    let _e532 = state[((_e525 * 7u) + 2u)];
-    let _e536 = neigh_idx;
-    let _e543 = state[((_e536 * 7u) + 0u)];
-    let _e546 = normal_vec;
-    let _e551 = neigh_idx;
-    let _e558 = state[((_e551 * 7u) + 0u)];
-    let _e565 = state[((owner * 7u) + 0u)];
-    fluxes[((idx * 4u) + 0u)] = ((((((a_plus * _e477) * dot(((vec2<f32>(_e485, _e492) * 1f) / vec2(_e502)), _e505)) - ((a_minus * _e515) * dot(((vec2<f32>(_e524, _e532) * 1f) / vec2(_e543)), _e546))) + ((a_plus * a_minus) * (_e558 - _e565))) / denom) * area);
-    let _e583 = state[((owner * 7u) + 1u)];
-    let _e590 = state[((owner * 7u) + 2u)];
-    let _e602 = state[((owner * 7u) + 1u)];
-    let _e609 = state[((owner * 7u) + 2u)];
-    let _e619 = state[((owner * 7u) + 0u)];
-    let _e622 = normal_vec;
-    let _e631 = state[((owner * 7u) + 3u)];
-    let _e638 = state[((owner * 7u) + 1u)];
-    let _e645 = state[((owner * 7u) + 1u)];
-    let _e653 = state[((owner * 7u) + 2u)];
-    let _e660 = state[((owner * 7u) + 2u)];
-    let _e671 = state[((owner * 7u) + 0u)];
-    let _e676 = normal_vec;
-    let _e684 = neigh_idx;
-    let _e691 = state[((_e684 * 7u) + 1u)];
-    let _e692 = neigh_idx;
-    let _e699 = state[((_e692 * 7u) + 2u)];
-    let _e705 = neigh_idx;
-    let _e712 = state[((_e705 * 7u) + 1u)];
-    let _e713 = neigh_idx;
-    let _e720 = state[((_e713 * 7u) + 2u)];
-    let _e724 = neigh_idx;
-    let _e731 = state[((_e724 * 7u) + 0u)];
-    let _e734 = normal_vec;
-    let _e737 = neigh_idx;
-    let _e744 = state[((_e737 * 7u) + 3u)];
-    let _e745 = neigh_idx;
-    let _e752 = state[((_e745 * 7u) + 1u)];
-    let _e753 = neigh_idx;
-    let _e760 = state[((_e753 * 7u) + 1u)];
-    let _e762 = neigh_idx;
-    let _e769 = state[((_e762 * 7u) + 2u)];
-    let _e770 = neigh_idx;
-    let _e777 = state[((_e770 * 7u) + 2u)];
-    let _e782 = neigh_idx;
-    let _e789 = state[((_e782 * 7u) + 0u)];
-    let _e794 = normal_vec;
-    let _e804 = neigh_idx;
-    let _e811 = state[((_e804 * 7u) + 1u)];
-    let _e812 = neigh_idx;
-    let _e819 = state[((_e812 * 7u) + 2u)];
-    let _e831 = state[((owner * 7u) + 1u)];
-    let _e838 = state[((owner * 7u) + 2u)];
-    fluxes[((idx * 4u) + 1u)] = (((((a_plus * ((dot(vec2<f32>(_e583, _e590), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(_e602, _e609) * 1f) / vec2(_e619)), _e622)) + ((0.39999998f * (_e631 - ((0.5f * ((_e638 * _e645) + (_e653 * _e660))) / _e671))) * dot(_e676, vec2<f32>(1f, 0f))))) - (a_minus * ((dot(vec2<f32>(_e691, _e699), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(_e712, _e720) * 1f) / vec2(_e731)), _e734)) + ((0.39999998f * (_e744 - ((0.5f * ((_e752 * _e760) + (_e769 * _e777))) / _e789))) * dot(_e794, vec2<f32>(1f, 0f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(_e811, _e819), vec2<f32>(1f, 0f)) - dot(vec2<f32>(_e831, _e838), vec2<f32>(1f, 0f))))) / denom) * area);
-    let _e861 = state[((owner * 7u) + 1u)];
-    let _e868 = state[((owner * 7u) + 2u)];
-    let _e880 = state[((owner * 7u) + 1u)];
-    let _e887 = state[((owner * 7u) + 2u)];
-    let _e897 = state[((owner * 7u) + 0u)];
-    let _e900 = normal_vec;
-    let _e909 = state[((owner * 7u) + 3u)];
-    let _e916 = state[((owner * 7u) + 1u)];
-    let _e923 = state[((owner * 7u) + 1u)];
-    let _e931 = state[((owner * 7u) + 2u)];
-    let _e938 = state[((owner * 7u) + 2u)];
-    let _e949 = state[((owner * 7u) + 0u)];
-    let _e954 = normal_vec;
-    let _e962 = neigh_idx;
-    let _e969 = state[((_e962 * 7u) + 1u)];
-    let _e970 = neigh_idx;
-    let _e977 = state[((_e970 * 7u) + 2u)];
-    let _e983 = neigh_idx;
-    let _e990 = state[((_e983 * 7u) + 1u)];
-    let _e991 = neigh_idx;
-    let _e998 = state[((_e991 * 7u) + 2u)];
-    let _e1002 = neigh_idx;
-    let _e1009 = state[((_e1002 * 7u) + 0u)];
-    let _e1012 = normal_vec;
-    let _e1015 = neigh_idx;
-    let _e1022 = state[((_e1015 * 7u) + 3u)];
-    let _e1023 = neigh_idx;
-    let _e1030 = state[((_e1023 * 7u) + 1u)];
-    let _e1031 = neigh_idx;
-    let _e1038 = state[((_e1031 * 7u) + 1u)];
-    let _e1040 = neigh_idx;
-    let _e1047 = state[((_e1040 * 7u) + 2u)];
-    let _e1048 = neigh_idx;
-    let _e1055 = state[((_e1048 * 7u) + 2u)];
-    let _e1060 = neigh_idx;
-    let _e1067 = state[((_e1060 * 7u) + 0u)];
-    let _e1072 = normal_vec;
-    let _e1082 = neigh_idx;
-    let _e1089 = state[((_e1082 * 7u) + 1u)];
-    let _e1090 = neigh_idx;
-    let _e1097 = state[((_e1090 * 7u) + 2u)];
-    let _e1109 = state[((owner * 7u) + 1u)];
-    let _e1116 = state[((owner * 7u) + 2u)];
-    fluxes[((idx * 4u) + 2u)] = (((((a_plus * ((dot(vec2<f32>(_e861, _e868), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(_e880, _e887) * 1f) / vec2(_e897)), _e900)) + ((0.39999998f * (_e909 - ((0.5f * ((_e916 * _e923) + (_e931 * _e938))) / _e949))) * dot(_e954, vec2<f32>(0f, 1f))))) - (a_minus * ((dot(vec2<f32>(_e969, _e977), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(_e990, _e998) * 1f) / vec2(_e1009)), _e1012)) + ((0.39999998f * (_e1022 - ((0.5f * ((_e1030 * _e1038) + (_e1047 * _e1055))) / _e1067))) * dot(_e1072, vec2<f32>(0f, 1f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(_e1089, _e1097), vec2<f32>(0f, 1f)) - dot(vec2<f32>(_e1109, _e1116), vec2<f32>(0f, 1f))))) / denom) * area);
-    let _e1139 = state[((owner * 7u) + 3u)];
-    let _e1146 = state[((owner * 7u) + 3u)];
-    let _e1153 = state[((owner * 7u) + 1u)];
-    let _e1160 = state[((owner * 7u) + 1u)];
-    let _e1168 = state[((owner * 7u) + 2u)];
-    let _e1175 = state[((owner * 7u) + 2u)];
-    let _e1186 = state[((owner * 7u) + 0u)];
-    let _e1199 = state[((owner * 7u) + 1u)];
-    let _e1206 = state[((owner * 7u) + 2u)];
-    let _e1216 = state[((owner * 7u) + 0u)];
-    let _e1219 = normal_vec;
-    let _e1222 = neigh_idx;
-    let _e1229 = state[((_e1222 * 7u) + 3u)];
-    let _e1230 = neigh_idx;
-    let _e1237 = state[((_e1230 * 7u) + 3u)];
-    let _e1238 = neigh_idx;
-    let _e1245 = state[((_e1238 * 7u) + 1u)];
-    let _e1246 = neigh_idx;
-    let _e1253 = state[((_e1246 * 7u) + 1u)];
-    let _e1255 = neigh_idx;
-    let _e1262 = state[((_e1255 * 7u) + 2u)];
-    let _e1263 = neigh_idx;
-    let _e1270 = state[((_e1263 * 7u) + 2u)];
-    let _e1275 = neigh_idx;
-    let _e1282 = state[((_e1275 * 7u) + 0u)];
-    let _e1289 = neigh_idx;
-    let _e1296 = state[((_e1289 * 7u) + 1u)];
-    let _e1297 = neigh_idx;
-    let _e1304 = state[((_e1297 * 7u) + 2u)];
-    let _e1308 = neigh_idx;
-    let _e1315 = state[((_e1308 * 7u) + 0u)];
-    let _e1318 = normal_vec;
-    let _e1323 = neigh_idx;
-    let _e1330 = state[((_e1323 * 7u) + 3u)];
-    let _e1337 = state[((owner * 7u) + 3u)];
-    fluxes[((idx * 4u) + 3u)] = ((((((a_plus * (_e1139 + (0.39999998f * (_e1146 - ((0.5f * ((_e1153 * _e1160) + (_e1168 * _e1175))) / _e1186))))) * dot(((vec2<f32>(_e1199, _e1206) * 1f) / vec2(_e1216)), _e1219)) - ((a_minus * (_e1229 + (0.39999998f * (_e1237 - ((0.5f * ((_e1245 * _e1253) + (_e1262 * _e1270))) / _e1282))))) * dot(((vec2<f32>(_e1296, _e1304) * 1f) / vec2(_e1315)), _e1318))) + ((a_plus * a_minus) * (_e1330 - _e1337))) / denom) * area);
+    let _e902 = state[((owner * 7u) + 0u)];
+    let _e910 = state[((owner * 7u) + 1u)];
+    let _e917 = state[((owner * 7u) + 2u)];
+    let _e927 = state[((owner * 7u) + 0u)];
+    let _e930 = normal_vec;
+    let _e933 = neigh_idx;
+    let _e940 = state[((_e933 * 7u) + 0u)];
+    let _e947 = state[((owner * 7u) + 0u)];
+    let _e954 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e961 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e971 = state[((owner * 7u) + 0u)];
+    let _e978 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e987 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e993 = neigh_idx;
+    let _e1000 = state[((_e993 * 7u) + 1u)];
+    let _e1007 = state[((owner * 7u) + 1u)];
+    let _e1014 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1021 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1031 = state[((owner * 7u) + 1u)];
+    let _e1038 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1047 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1052 = neigh_idx;
+    let _e1059 = state[((_e1052 * 7u) + 2u)];
+    let _e1066 = state[((owner * 7u) + 2u)];
+    let _e1073 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1080 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1090 = state[((owner * 7u) + 2u)];
+    let _e1097 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1106 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1114 = neigh_idx;
+    let _e1121 = state[((_e1114 * 7u) + 0u)];
+    let _e1128 = state[((owner * 7u) + 0u)];
+    let _e1135 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e1142 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e1152 = state[((owner * 7u) + 0u)];
+    let _e1159 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e1168 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e1175 = normal_vec;
+    let _e1180 = neigh_idx;
+    let _e1187 = state[((_e1180 * 7u) + 0u)];
+    let _e1194 = state[((owner * 7u) + 0u)];
+    let _e1201 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e1208 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e1218 = state[((owner * 7u) + 0u)];
+    let _e1225 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e1234 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e1245 = state[((owner * 7u) + 0u)];
+    fluxes[((idx * 4u) + 0u)] = ((((((a_plus * _e902) * dot(((vec2<f32>(_e910, _e917) * 1f) / vec2(_e927)), _e930)) - ((a_minus * select(_e940, select(select(_e947, _e954, (_e961 == 1u)), (_e971 + (_e978 * d_own)), (_e987 == 2u)), is_boundary)) * dot(((vec2<f32>(select(_e1000, select(select(_e1007, _e1014, (_e1021 == 1u)), (_e1031 + (_e1038 * d_own)), (_e1047 == 2u)), is_boundary), select(_e1059, select(select(_e1066, _e1073, (_e1080 == 1u)), (_e1090 + (_e1097 * d_own)), (_e1106 == 2u)), is_boundary)) * 1f) / vec2(select(_e1121, select(select(_e1128, _e1135, (_e1142 == 1u)), (_e1152 + (_e1159 * d_own)), (_e1168 == 2u)), is_boundary))), _e1175))) + ((a_plus * a_minus) * (select(_e1187, select(select(_e1194, _e1201, (_e1208 == 1u)), (_e1218 + (_e1225 * d_own)), (_e1234 == 2u)), is_boundary) - _e1245))) / denom) * area);
+    let _e1263 = state[((owner * 7u) + 1u)];
+    let _e1270 = state[((owner * 7u) + 2u)];
+    let _e1282 = state[((owner * 7u) + 1u)];
+    let _e1289 = state[((owner * 7u) + 2u)];
+    let _e1299 = state[((owner * 7u) + 0u)];
+    let _e1302 = normal_vec;
+    let _e1311 = state[((owner * 7u) + 3u)];
+    let _e1318 = state[((owner * 7u) + 1u)];
+    let _e1325 = state[((owner * 7u) + 1u)];
+    let _e1333 = state[((owner * 7u) + 2u)];
+    let _e1340 = state[((owner * 7u) + 2u)];
+    let _e1351 = state[((owner * 7u) + 0u)];
+    let _e1356 = normal_vec;
+    let _e1364 = neigh_idx;
+    let _e1371 = state[((_e1364 * 7u) + 1u)];
+    let _e1378 = state[((owner * 7u) + 1u)];
+    let _e1385 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1392 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1402 = state[((owner * 7u) + 1u)];
+    let _e1409 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1418 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1423 = neigh_idx;
+    let _e1430 = state[((_e1423 * 7u) + 2u)];
+    let _e1437 = state[((owner * 7u) + 2u)];
+    let _e1444 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1451 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1461 = state[((owner * 7u) + 2u)];
+    let _e1468 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1477 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1487 = neigh_idx;
+    let _e1494 = state[((_e1487 * 7u) + 1u)];
+    let _e1501 = state[((owner * 7u) + 1u)];
+    let _e1508 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1515 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1525 = state[((owner * 7u) + 1u)];
+    let _e1532 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1541 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1546 = neigh_idx;
+    let _e1553 = state[((_e1546 * 7u) + 2u)];
+    let _e1560 = state[((owner * 7u) + 2u)];
+    let _e1567 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1574 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1584 = state[((owner * 7u) + 2u)];
+    let _e1591 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1600 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1608 = neigh_idx;
+    let _e1615 = state[((_e1608 * 7u) + 0u)];
+    let _e1622 = state[((owner * 7u) + 0u)];
+    let _e1629 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e1636 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e1646 = state[((owner * 7u) + 0u)];
+    let _e1653 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e1662 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e1669 = normal_vec;
+    let _e1672 = neigh_idx;
+    let _e1680 = state[((select(_e1672, owner, is_boundary) * 7u) + 3u)];
+    let _e1681 = neigh_idx;
+    let _e1689 = state[((select(_e1681, owner, is_boundary) * 7u) + 1u)];
+    let _e1690 = neigh_idx;
+    let _e1698 = state[((select(_e1690, owner, is_boundary) * 7u) + 1u)];
+    let _e1700 = neigh_idx;
+    let _e1708 = state[((select(_e1700, owner, is_boundary) * 7u) + 2u)];
+    let _e1709 = neigh_idx;
+    let _e1717 = state[((select(_e1709, owner, is_boundary) * 7u) + 2u)];
+    let _e1722 = neigh_idx;
+    let _e1730 = state[((select(_e1722, owner, is_boundary) * 7u) + 0u)];
+    let _e1735 = normal_vec;
+    let _e1745 = neigh_idx;
+    let _e1752 = state[((_e1745 * 7u) + 1u)];
+    let _e1759 = state[((owner * 7u) + 1u)];
+    let _e1766 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1773 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1783 = state[((owner * 7u) + 1u)];
+    let _e1790 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e1799 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e1804 = neigh_idx;
+    let _e1811 = state[((_e1804 * 7u) + 2u)];
+    let _e1818 = state[((owner * 7u) + 2u)];
+    let _e1825 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1832 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1842 = state[((owner * 7u) + 2u)];
+    let _e1849 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e1858 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e1874 = state[((owner * 7u) + 1u)];
+    let _e1881 = state[((owner * 7u) + 2u)];
+    fluxes[((idx * 4u) + 1u)] = (((((a_plus * ((dot(vec2<f32>(_e1263, _e1270), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(_e1282, _e1289) * 1f) / vec2(_e1299)), _e1302)) + ((0.39999998f * (_e1311 - ((0.5f * ((_e1318 * _e1325) + (_e1333 * _e1340))) / _e1351))) * dot(_e1356, vec2<f32>(1f, 0f))))) - (a_minus * ((dot(vec2<f32>(select(_e1371, select(select(_e1378, _e1385, (_e1392 == 1u)), (_e1402 + (_e1409 * d_own)), (_e1418 == 2u)), is_boundary), select(_e1430, select(select(_e1437, _e1444, (_e1451 == 1u)), (_e1461 + (_e1468 * d_own)), (_e1477 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(select(_e1494, select(select(_e1501, _e1508, (_e1515 == 1u)), (_e1525 + (_e1532 * d_own)), (_e1541 == 2u)), is_boundary), select(_e1553, select(select(_e1560, _e1567, (_e1574 == 1u)), (_e1584 + (_e1591 * d_own)), (_e1600 == 2u)), is_boundary)) * 1f) / vec2(select(_e1615, select(select(_e1622, _e1629, (_e1636 == 1u)), (_e1646 + (_e1653 * d_own)), (_e1662 == 2u)), is_boundary))), _e1669)) + ((0.39999998f * (_e1680 - ((0.5f * ((_e1689 * _e1698) + (_e1708 * _e1717))) / _e1730))) * dot(_e1735, vec2<f32>(1f, 0f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e1752, select(select(_e1759, _e1766, (_e1773 == 1u)), (_e1783 + (_e1790 * d_own)), (_e1799 == 2u)), is_boundary), select(_e1811, select(select(_e1818, _e1825, (_e1832 == 1u)), (_e1842 + (_e1849 * d_own)), (_e1858 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) - dot(vec2<f32>(_e1874, _e1881), vec2<f32>(1f, 0f))))) / denom) * area);
+    let _e1904 = state[((owner * 7u) + 1u)];
+    let _e1911 = state[((owner * 7u) + 2u)];
+    let _e1923 = state[((owner * 7u) + 1u)];
+    let _e1930 = state[((owner * 7u) + 2u)];
+    let _e1940 = state[((owner * 7u) + 0u)];
+    let _e1943 = normal_vec;
+    let _e1952 = state[((owner * 7u) + 3u)];
+    let _e1959 = state[((owner * 7u) + 1u)];
+    let _e1966 = state[((owner * 7u) + 1u)];
+    let _e1974 = state[((owner * 7u) + 2u)];
+    let _e1981 = state[((owner * 7u) + 2u)];
+    let _e1992 = state[((owner * 7u) + 0u)];
+    let _e1997 = normal_vec;
+    let _e2005 = neigh_idx;
+    let _e2012 = state[((_e2005 * 7u) + 1u)];
+    let _e2019 = state[((owner * 7u) + 1u)];
+    let _e2026 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2033 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2043 = state[((owner * 7u) + 1u)];
+    let _e2050 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2059 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2064 = neigh_idx;
+    let _e2071 = state[((_e2064 * 7u) + 2u)];
+    let _e2078 = state[((owner * 7u) + 2u)];
+    let _e2085 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2092 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2102 = state[((owner * 7u) + 2u)];
+    let _e2109 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2118 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2128 = neigh_idx;
+    let _e2135 = state[((_e2128 * 7u) + 1u)];
+    let _e2142 = state[((owner * 7u) + 1u)];
+    let _e2149 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2156 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2166 = state[((owner * 7u) + 1u)];
+    let _e2173 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2182 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2187 = neigh_idx;
+    let _e2194 = state[((_e2187 * 7u) + 2u)];
+    let _e2201 = state[((owner * 7u) + 2u)];
+    let _e2208 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2215 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2225 = state[((owner * 7u) + 2u)];
+    let _e2232 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2241 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2249 = neigh_idx;
+    let _e2256 = state[((_e2249 * 7u) + 0u)];
+    let _e2263 = state[((owner * 7u) + 0u)];
+    let _e2270 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e2277 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e2287 = state[((owner * 7u) + 0u)];
+    let _e2294 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e2303 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e2310 = normal_vec;
+    let _e2313 = neigh_idx;
+    let _e2321 = state[((select(_e2313, owner, is_boundary) * 7u) + 3u)];
+    let _e2322 = neigh_idx;
+    let _e2330 = state[((select(_e2322, owner, is_boundary) * 7u) + 1u)];
+    let _e2331 = neigh_idx;
+    let _e2339 = state[((select(_e2331, owner, is_boundary) * 7u) + 1u)];
+    let _e2341 = neigh_idx;
+    let _e2349 = state[((select(_e2341, owner, is_boundary) * 7u) + 2u)];
+    let _e2350 = neigh_idx;
+    let _e2358 = state[((select(_e2350, owner, is_boundary) * 7u) + 2u)];
+    let _e2363 = neigh_idx;
+    let _e2371 = state[((select(_e2363, owner, is_boundary) * 7u) + 0u)];
+    let _e2376 = normal_vec;
+    let _e2386 = neigh_idx;
+    let _e2393 = state[((_e2386 * 7u) + 1u)];
+    let _e2400 = state[((owner * 7u) + 1u)];
+    let _e2407 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2414 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2424 = state[((owner * 7u) + 1u)];
+    let _e2431 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2440 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2445 = neigh_idx;
+    let _e2452 = state[((_e2445 * 7u) + 2u)];
+    let _e2459 = state[((owner * 7u) + 2u)];
+    let _e2466 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2473 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2483 = state[((owner * 7u) + 2u)];
+    let _e2490 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2499 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2515 = state[((owner * 7u) + 1u)];
+    let _e2522 = state[((owner * 7u) + 2u)];
+    fluxes[((idx * 4u) + 2u)] = (((((a_plus * ((dot(vec2<f32>(_e1904, _e1911), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(_e1923, _e1930) * 1f) / vec2(_e1940)), _e1943)) + ((0.39999998f * (_e1952 - ((0.5f * ((_e1959 * _e1966) + (_e1974 * _e1981))) / _e1992))) * dot(_e1997, vec2<f32>(0f, 1f))))) - (a_minus * ((dot(vec2<f32>(select(_e2012, select(select(_e2019, _e2026, (_e2033 == 1u)), (_e2043 + (_e2050 * d_own)), (_e2059 == 2u)), is_boundary), select(_e2071, select(select(_e2078, _e2085, (_e2092 == 1u)), (_e2102 + (_e2109 * d_own)), (_e2118 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(select(_e2135, select(select(_e2142, _e2149, (_e2156 == 1u)), (_e2166 + (_e2173 * d_own)), (_e2182 == 2u)), is_boundary), select(_e2194, select(select(_e2201, _e2208, (_e2215 == 1u)), (_e2225 + (_e2232 * d_own)), (_e2241 == 2u)), is_boundary)) * 1f) / vec2(select(_e2256, select(select(_e2263, _e2270, (_e2277 == 1u)), (_e2287 + (_e2294 * d_own)), (_e2303 == 2u)), is_boundary))), _e2310)) + ((0.39999998f * (_e2321 - ((0.5f * ((_e2330 * _e2339) + (_e2349 * _e2358))) / _e2371))) * dot(_e2376, vec2<f32>(0f, 1f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e2393, select(select(_e2400, _e2407, (_e2414 == 1u)), (_e2424 + (_e2431 * d_own)), (_e2440 == 2u)), is_boundary), select(_e2452, select(select(_e2459, _e2466, (_e2473 == 1u)), (_e2483 + (_e2490 * d_own)), (_e2499 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) - dot(vec2<f32>(_e2515, _e2522), vec2<f32>(0f, 1f))))) / denom) * area);
+    let _e2545 = state[((owner * 7u) + 3u)];
+    let _e2552 = state[((owner * 7u) + 3u)];
+    let _e2559 = state[((owner * 7u) + 1u)];
+    let _e2566 = state[((owner * 7u) + 1u)];
+    let _e2574 = state[((owner * 7u) + 2u)];
+    let _e2581 = state[((owner * 7u) + 2u)];
+    let _e2592 = state[((owner * 7u) + 0u)];
+    let _e2605 = state[((owner * 7u) + 1u)];
+    let _e2612 = state[((owner * 7u) + 2u)];
+    let _e2622 = state[((owner * 7u) + 0u)];
+    let _e2625 = normal_vec;
+    let _e2628 = neigh_idx;
+    let _e2635 = state[((_e2628 * 7u) + 3u)];
+    let _e2642 = state[((owner * 7u) + 3u)];
+    let _e2649 = bc_value[((boundary_type * 4u) + 3u)];
+    let _e2656 = bc_kind[((boundary_type * 4u) + 3u)];
+    let _e2666 = state[((owner * 7u) + 3u)];
+    let _e2673 = bc_value[((boundary_type * 4u) + 3u)];
+    let _e2682 = bc_kind[((boundary_type * 4u) + 3u)];
+    let _e2687 = neigh_idx;
+    let _e2695 = state[((select(_e2687, owner, is_boundary) * 7u) + 3u)];
+    let _e2696 = neigh_idx;
+    let _e2704 = state[((select(_e2696, owner, is_boundary) * 7u) + 1u)];
+    let _e2705 = neigh_idx;
+    let _e2713 = state[((select(_e2705, owner, is_boundary) * 7u) + 1u)];
+    let _e2715 = neigh_idx;
+    let _e2723 = state[((select(_e2715, owner, is_boundary) * 7u) + 2u)];
+    let _e2724 = neigh_idx;
+    let _e2732 = state[((select(_e2724, owner, is_boundary) * 7u) + 2u)];
+    let _e2737 = neigh_idx;
+    let _e2745 = state[((select(_e2737, owner, is_boundary) * 7u) + 0u)];
+    let _e2752 = neigh_idx;
+    let _e2759 = state[((_e2752 * 7u) + 1u)];
+    let _e2766 = state[((owner * 7u) + 1u)];
+    let _e2773 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2780 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2790 = state[((owner * 7u) + 1u)];
+    let _e2797 = bc_value[((boundary_type * 4u) + 1u)];
+    let _e2806 = bc_kind[((boundary_type * 4u) + 1u)];
+    let _e2811 = neigh_idx;
+    let _e2818 = state[((_e2811 * 7u) + 2u)];
+    let _e2825 = state[((owner * 7u) + 2u)];
+    let _e2832 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2839 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2849 = state[((owner * 7u) + 2u)];
+    let _e2856 = bc_value[((boundary_type * 4u) + 2u)];
+    let _e2865 = bc_kind[((boundary_type * 4u) + 2u)];
+    let _e2873 = neigh_idx;
+    let _e2880 = state[((_e2873 * 7u) + 0u)];
+    let _e2887 = state[((owner * 7u) + 0u)];
+    let _e2894 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e2901 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e2911 = state[((owner * 7u) + 0u)];
+    let _e2918 = bc_value[((boundary_type * 4u) + 0u)];
+    let _e2927 = bc_kind[((boundary_type * 4u) + 0u)];
+    let _e2934 = normal_vec;
+    let _e2939 = neigh_idx;
+    let _e2946 = state[((_e2939 * 7u) + 3u)];
+    let _e2953 = state[((owner * 7u) + 3u)];
+    let _e2960 = bc_value[((boundary_type * 4u) + 3u)];
+    let _e2967 = bc_kind[((boundary_type * 4u) + 3u)];
+    let _e2977 = state[((owner * 7u) + 3u)];
+    let _e2984 = bc_value[((boundary_type * 4u) + 3u)];
+    let _e2993 = bc_kind[((boundary_type * 4u) + 3u)];
+    let _e3004 = state[((owner * 7u) + 3u)];
+    fluxes[((idx * 4u) + 3u)] = ((((((a_plus * (_e2545 + (0.39999998f * (_e2552 - ((0.5f * ((_e2559 * _e2566) + (_e2574 * _e2581))) / _e2592))))) * dot(((vec2<f32>(_e2605, _e2612) * 1f) / vec2(_e2622)), _e2625)) - ((a_minus * (select(_e2635, select(select(_e2642, _e2649, (_e2656 == 1u)), (_e2666 + (_e2673 * d_own)), (_e2682 == 2u)), is_boundary) + (0.39999998f * (_e2695 - ((0.5f * ((_e2704 * _e2713) + (_e2723 * _e2732))) / _e2745))))) * dot(((vec2<f32>(select(_e2759, select(select(_e2766, _e2773, (_e2780 == 1u)), (_e2790 + (_e2797 * d_own)), (_e2806 == 2u)), is_boundary), select(_e2818, select(select(_e2825, _e2832, (_e2839 == 1u)), (_e2849 + (_e2856 * d_own)), (_e2865 == 2u)), is_boundary)) * 1f) / vec2(select(_e2880, select(select(_e2887, _e2894, (_e2901 == 1u)), (_e2911 + (_e2918 * d_own)), (_e2927 == 2u)), is_boundary))), _e2934))) + ((a_plus * a_minus) * (select(_e2946, select(select(_e2953, _e2960, (_e2967 == 1u)), (_e2977 + (_e2984 * d_own)), (_e2993 == 2u)), is_boundary) - _e3004))) / denom) * area);
     return;
 }
 "#;
@@ -5363,6 +5647,86 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 pass.set_bind_group(1, &self.0, &[]);
             }
         }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some(
+                        "GeneratedFluxModuleIncompressibleMomentum::BindGroup2::LayoutDescriptor",
+                    ),
+                    entries: &[
+                        #[doc = " @binding(0): \"bc_kind\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"bc_value\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleIncompressibleMomentum::BindGroup2"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
         #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
         #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
         #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
@@ -5373,19 +5737,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub struct WgpuBindGroups<'a> {
             pub bind_group0: &'a WgpuBindGroup0,
             pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
         }
         impl<'a> WgpuBindGroups<'a> {
             pub fn set(&self, pass: &mut impl SetBindGroup) {
                 self.bind_group0.set(pass);
                 self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
             }
         }
         #[derive(Debug)]
         pub struct WgpuPipelineLayout;
         impl WgpuPipelineLayout {
             pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 2],
-            ) -> [wgpu::BindGroupLayout; 2] {
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
                 entries
             }
         }
@@ -5395,6 +5761,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 bind_group_layouts: &[
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
                 ],
                 push_constant_ranges: &[],
             })
@@ -5453,12 +5820,18 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var neigh_idx: u32;
     var normal_vec: vec2<f32>;
+    var c_neigh_vec: vec2<f32>;
     var lambda: f32 = 0.5f;
+    var phi: f32;
 
     let _e5 = constants.stride_x;
     let idx = ((global_id.y * _e5) + global_id.x);
@@ -5467,6 +5840,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let owner = face_owner[idx];
     let neighbor = face_neighbor[idx];
+    let is_boundary = (neighbor == -1i);
     neigh_idx = owner;
     if (neighbor != -1i) {
         neigh_idx = u32(neighbor);
@@ -5474,60 +5848,83 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let area = face_areas[idx];
     let boundary_type = face_boundary[idx];
     let face_center = face_centers[idx];
-    let _e34 = face_normals[idx].x;
-    let _e38 = face_normals[idx].y;
-    normal_vec = vec2<f32>(_e34, _e38);
+    let _e36 = face_normals[idx].x;
+    let _e40 = face_normals[idx].y;
+    normal_vec = vec2<f32>(_e36, _e40);
     let c_owner = cell_centers[owner];
     let c_owner_vec = vec2<f32>(c_owner.x, c_owner.y);
     let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-    let _e51 = normal_vec;
-    if (dot((face_center_vec - c_owner_vec), _e51) < 0f) {
-        let _e55 = normal_vec;
-        normal_vec = -(_e55);
+    let _e53 = normal_vec;
+    if (dot((face_center_vec - c_owner_vec), _e53) < 0f) {
+        let _e57 = normal_vec;
+        normal_vec = -(_e57);
     }
-    let _e58 = neigh_idx;
-    let c_neigh = cell_centers[_e58];
-    let c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    let _e60 = neigh_idx;
+    let c_neigh = cell_centers[_e60];
+    c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    if is_boundary {
+        c_neigh_vec = face_center_vec;
+    }
     let d_own = distance(c_owner_vec, face_center_vec);
-    let d_neigh = distance(c_neigh_vec, face_center_vec);
+    let _e68 = c_neigh_vec;
+    let d_neigh = distance(_e68, face_center_vec);
     let total_dist = (d_own + d_neigh);
     if (total_dist > 0.000001f) {
         lambda = (d_neigh / total_dist);
     }
-    let _e71 = lambda;
-    let lambda_other = (1f - _e71);
-    let d_vec = (c_neigh_vec - c_owner_vec);
-    let _e75 = normal_vec;
-    let dist_proj = abs(dot(d_vec, _e75));
+    let _e75 = lambda;
+    let lambda_other = (1f - _e75);
+    let _e78 = c_neigh_vec;
+    let d_vec = (_e78 - c_owner_vec);
+    let _e80 = normal_vec;
+    let dist_proj = abs(dot(d_vec, _e80));
     let dist = max(dist_proj, 0.000001f);
-    let _e82 = constants.density;
-    let _e89 = state[((owner * 8u) + 0u)];
-    let _e96 = state[((owner * 8u) + 1u)];
-    let _e98 = lambda;
-    let _e100 = neigh_idx;
-    let _e107 = state[((_e100 * 8u) + 0u)];
-    let _e108 = neigh_idx;
-    let _e115 = state[((_e108 * 8u) + 1u)];
-    let _e119 = normal_vec;
-    let _e128 = state[((owner * 8u) + 3u)];
-    let _e129 = lambda;
-    let _e131 = neigh_idx;
-    let _e138 = state[((_e131 * 8u) + 3u)];
-    let _e148 = state[((owner * 8u) + 4u)];
-    let _e155 = state[((owner * 8u) + 5u)];
-    let _e157 = lambda;
-    let _e159 = neigh_idx;
-    let _e166 = state[((_e159 * 8u) + 4u)];
-    let _e167 = neigh_idx;
-    let _e174 = state[((_e167 * 8u) + 5u)];
-    let _e178 = normal_vec;
-    let _e180 = neigh_idx;
-    let _e187 = state[((_e180 * 8u) + 2u)];
-    let _e194 = state[((owner * 8u) + 2u)];
-    let phi = (_e82 * ((dot(((vec2<f32>(_e89, _e96) * _e98) + (vec2<f32>(_e107, _e115) * lambda_other)), _e119) * area) + ((((_e128 * _e129) + (_e138 * lambda_other)) * area) * (dot(((vec2<f32>(_e148, _e155) * _e157) + (vec2<f32>(_e166, _e174) * lambda_other)), _e178) - ((_e187 - _e194) / dist)))));
-    fluxes[((idx * 3u) + 0u)] = phi;
-    fluxes[((idx * 3u) + 1u)] = phi;
-    fluxes[((idx * 3u) + 2u)] = phi;
+    let _e87 = constants.density;
+    let _e94 = state[((owner * 8u) + 0u)];
+    let _e101 = state[((owner * 8u) + 1u)];
+    let _e103 = lambda;
+    let _e105 = neigh_idx;
+    let _e112 = state[((_e105 * 8u) + 0u)];
+    let _e119 = state[((owner * 8u) + 0u)];
+    let _e126 = bc_value[((boundary_type * 3u) + 0u)];
+    let _e133 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e143 = state[((owner * 8u) + 0u)];
+    let _e150 = bc_value[((boundary_type * 3u) + 0u)];
+    let _e159 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e164 = neigh_idx;
+    let _e171 = state[((_e164 * 8u) + 1u)];
+    let _e178 = state[((owner * 8u) + 1u)];
+    let _e185 = bc_value[((boundary_type * 3u) + 1u)];
+    let _e192 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e202 = state[((owner * 8u) + 1u)];
+    let _e209 = bc_value[((boundary_type * 3u) + 1u)];
+    let _e218 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e226 = normal_vec;
+    let _e235 = state[((owner * 8u) + 3u)];
+    let _e236 = lambda;
+    let _e244 = state[((owner * 8u) + 3u)];
+    let _e254 = state[((owner * 8u) + 4u)];
+    let _e261 = state[((owner * 8u) + 5u)];
+    let _e263 = lambda;
+    let _e271 = state[((owner * 8u) + 4u)];
+    let _e278 = state[((owner * 8u) + 5u)];
+    let _e282 = normal_vec;
+    let _e284 = neigh_idx;
+    let _e291 = state[((_e284 * 8u) + 2u)];
+    let _e298 = state[((owner * 8u) + 2u)];
+    let _e305 = bc_value[((boundary_type * 3u) + 2u)];
+    let _e312 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e322 = state[((owner * 8u) + 2u)];
+    let _e329 = bc_value[((boundary_type * 3u) + 2u)];
+    let _e338 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e349 = state[((owner * 8u) + 2u)];
+    phi = (_e87 * ((dot(((vec2<f32>(_e94, _e101) * _e103) + (vec2<f32>(select(_e112, select(select(_e119, _e126, (_e133 == 1u)), (_e143 + (_e150 * d_own)), (_e159 == 2u)), is_boundary), select(_e171, select(select(_e178, _e185, (_e192 == 1u)), (_e202 + (_e209 * d_own)), (_e218 == 2u)), is_boundary)) * lambda_other)), _e226) * area) + ((((_e235 * _e236) + (_e244 * lambda_other)) * area) * (dot(((vec2<f32>(_e254, _e261) * _e263) + (vec2<f32>(_e271, _e278) * lambda_other)), _e282) - ((select(_e291, select(select(_e298, _e305, (_e312 == 1u)), (_e322 + (_e329 * d_own)), (_e338 == 2u)), is_boundary) - _e349) / dist)))));
+    let _e363 = phi;
+    fluxes[((idx * 3u) + 0u)] = _e363;
+    let _e370 = phi;
+    fluxes[((idx * 3u) + 1u)] = _e370;
+    let _e377 = phi;
+    fluxes[((idx * 3u) + 2u)] = _e377;
     return;
 }
 "#;
@@ -5797,6 +6194,57 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 pass.set_bind_group(1, &self.0, &[]);
             }
         }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup2"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
         #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
         #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
         #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
@@ -5807,19 +6255,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub struct WgpuBindGroups<'a> {
             pub bind_group0: &'a WgpuBindGroup0,
             pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
         }
         impl<'a> WgpuBindGroups<'a> {
             pub fn set(&self, pass: &mut impl SetBindGroup) {
                 self.bind_group0.set(pass);
                 self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
             }
         }
         #[derive(Debug)]
         pub struct WgpuPipelineLayout;
         impl WgpuPipelineLayout {
             pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 2],
-            ) -> [wgpu::BindGroupLayout; 2] {
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
                 entries
             }
         }
@@ -5829,6 +6279,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 bind_group_layouts: &[
                     &WgpuBindGroup0::get_bind_group_layout(device),
                     &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
                 ],
                 push_constant_ranges: &[],
             })
@@ -5887,12 +6338,18 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var neigh_idx: u32;
     var normal_vec: vec2<f32>;
+    var c_neigh_vec: vec2<f32>;
     var lambda: f32 = 0.5f;
+    var phi: f32;
 
     let _e5 = constants.stride_x;
     let idx = ((global_id.y * _e5) + global_id.x);
@@ -5901,6 +6358,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let owner = face_owner[idx];
     let neighbor = face_neighbor[idx];
+    let is_boundary = (neighbor == -1i);
     neigh_idx = owner;
     if (neighbor != -1i) {
         neigh_idx = u32(neighbor);
@@ -5908,60 +6366,83 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let area = face_areas[idx];
     let boundary_type = face_boundary[idx];
     let face_center = face_centers[idx];
-    let _e34 = face_normals[idx].x;
-    let _e38 = face_normals[idx].y;
-    normal_vec = vec2<f32>(_e34, _e38);
+    let _e36 = face_normals[idx].x;
+    let _e40 = face_normals[idx].y;
+    normal_vec = vec2<f32>(_e36, _e40);
     let c_owner = cell_centers[owner];
     let c_owner_vec = vec2<f32>(c_owner.x, c_owner.y);
     let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-    let _e51 = normal_vec;
-    if (dot((face_center_vec - c_owner_vec), _e51) < 0f) {
-        let _e55 = normal_vec;
-        normal_vec = -(_e55);
+    let _e53 = normal_vec;
+    if (dot((face_center_vec - c_owner_vec), _e53) < 0f) {
+        let _e57 = normal_vec;
+        normal_vec = -(_e57);
     }
-    let _e58 = neigh_idx;
-    let c_neigh = cell_centers[_e58];
-    let c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    let _e60 = neigh_idx;
+    let c_neigh = cell_centers[_e60];
+    c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    if is_boundary {
+        c_neigh_vec = face_center_vec;
+    }
     let d_own = distance(c_owner_vec, face_center_vec);
-    let d_neigh = distance(c_neigh_vec, face_center_vec);
+    let _e68 = c_neigh_vec;
+    let d_neigh = distance(_e68, face_center_vec);
     let total_dist = (d_own + d_neigh);
     if (total_dist > 0.000001f) {
         lambda = (d_neigh / total_dist);
     }
-    let _e71 = lambda;
-    let lambda_other = (1f - _e71);
-    let d_vec = (c_neigh_vec - c_owner_vec);
-    let _e75 = normal_vec;
-    let dist_proj = abs(dot(d_vec, _e75));
+    let _e75 = lambda;
+    let lambda_other = (1f - _e75);
+    let _e78 = c_neigh_vec;
+    let d_vec = (_e78 - c_owner_vec);
+    let _e80 = normal_vec;
+    let dist_proj = abs(dot(d_vec, _e80));
     let dist = max(dist_proj, 0.000001f);
-    let _e82 = constants.density;
-    let _e89 = state[((owner * 8u) + 0u)];
-    let _e96 = state[((owner * 8u) + 1u)];
-    let _e98 = lambda;
-    let _e100 = neigh_idx;
-    let _e107 = state[((_e100 * 8u) + 0u)];
-    let _e108 = neigh_idx;
-    let _e115 = state[((_e108 * 8u) + 1u)];
-    let _e119 = normal_vec;
-    let _e128 = state[((owner * 8u) + 3u)];
-    let _e129 = lambda;
-    let _e131 = neigh_idx;
-    let _e138 = state[((_e131 * 8u) + 3u)];
-    let _e148 = state[((owner * 8u) + 4u)];
-    let _e155 = state[((owner * 8u) + 5u)];
-    let _e157 = lambda;
-    let _e159 = neigh_idx;
-    let _e166 = state[((_e159 * 8u) + 4u)];
-    let _e167 = neigh_idx;
-    let _e174 = state[((_e167 * 8u) + 5u)];
-    let _e178 = normal_vec;
-    let _e180 = neigh_idx;
-    let _e187 = state[((_e180 * 8u) + 2u)];
-    let _e194 = state[((owner * 8u) + 2u)];
-    let phi = (_e82 * ((dot(((vec2<f32>(_e89, _e96) * _e98) + (vec2<f32>(_e107, _e115) * lambda_other)), _e119) * area) + ((((_e128 * _e129) + (_e138 * lambda_other)) * area) * (dot(((vec2<f32>(_e148, _e155) * _e157) + (vec2<f32>(_e166, _e174) * lambda_other)), _e178) - ((_e187 - _e194) / dist)))));
-    fluxes[((idx * 3u) + 0u)] = phi;
-    fluxes[((idx * 3u) + 1u)] = phi;
-    fluxes[((idx * 3u) + 2u)] = phi;
+    let _e87 = constants.density;
+    let _e94 = state[((owner * 8u) + 0u)];
+    let _e101 = state[((owner * 8u) + 1u)];
+    let _e103 = lambda;
+    let _e105 = neigh_idx;
+    let _e112 = state[((_e105 * 8u) + 0u)];
+    let _e119 = state[((owner * 8u) + 0u)];
+    let _e126 = bc_value[((boundary_type * 3u) + 0u)];
+    let _e133 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e143 = state[((owner * 8u) + 0u)];
+    let _e150 = bc_value[((boundary_type * 3u) + 0u)];
+    let _e159 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e164 = neigh_idx;
+    let _e171 = state[((_e164 * 8u) + 1u)];
+    let _e178 = state[((owner * 8u) + 1u)];
+    let _e185 = bc_value[((boundary_type * 3u) + 1u)];
+    let _e192 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e202 = state[((owner * 8u) + 1u)];
+    let _e209 = bc_value[((boundary_type * 3u) + 1u)];
+    let _e218 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e226 = normal_vec;
+    let _e235 = state[((owner * 8u) + 3u)];
+    let _e236 = lambda;
+    let _e244 = state[((owner * 8u) + 3u)];
+    let _e254 = state[((owner * 8u) + 4u)];
+    let _e261 = state[((owner * 8u) + 5u)];
+    let _e263 = lambda;
+    let _e271 = state[((owner * 8u) + 4u)];
+    let _e278 = state[((owner * 8u) + 5u)];
+    let _e282 = normal_vec;
+    let _e284 = neigh_idx;
+    let _e291 = state[((_e284 * 8u) + 2u)];
+    let _e298 = state[((owner * 8u) + 2u)];
+    let _e305 = bc_value[((boundary_type * 3u) + 2u)];
+    let _e312 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e322 = state[((owner * 8u) + 2u)];
+    let _e329 = bc_value[((boundary_type * 3u) + 2u)];
+    let _e338 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e349 = state[((owner * 8u) + 2u)];
+    phi = (_e87 * ((dot(((vec2<f32>(_e94, _e101) * _e103) + (vec2<f32>(select(_e112, select(select(_e119, _e126, (_e133 == 1u)), (_e143 + (_e150 * d_own)), (_e159 == 2u)), is_boundary), select(_e171, select(select(_e178, _e185, (_e192 == 1u)), (_e202 + (_e209 * d_own)), (_e218 == 2u)), is_boundary)) * lambda_other)), _e226) * area) + ((((_e235 * _e236) + (_e244 * lambda_other)) * area) * (dot(((vec2<f32>(_e254, _e261) * _e263) + (vec2<f32>(_e271, _e278) * lambda_other)), _e282) - ((select(_e291, select(select(_e298, _e305, (_e312 == 1u)), (_e322 + (_e329 * d_own)), (_e338 == 2u)), is_boundary) - _e349) / dist)))));
+    let _e363 = phi;
+    fluxes[((idx * 3u) + 0u)] = _e363;
+    let _e370 = phi;
+    fluxes[((idx * 3u) + 1u)] = _e370;
+    let _e377 = phi;
+    fluxes[((idx * 3u) + 2u)] = _e377;
     return;
 }
 "#;
@@ -9221,6 +9702,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var dist: f32;
     var phi_0_: f32;
     var phi_1_: f32;
+    var phi_2_: f32;
 
     let idx = global_id.x;
     if (idx >= arrayLength((&cell_vols))) {
@@ -9599,27 +10081,37 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
+            let _e1171 = fluxes[((face_idx * 3u) + 2u)];
+            phi_2_ = _e1171;
+            if (owner != idx) {
+                let _e1174 = phi_2_;
+                let _e1177 = phi_2_;
+                phi_2_ = (_e1177 - (_e1174 * 2f));
+            }
+            let _e1179 = phi_2_;
+            let _e1180 = rhs_2_;
+            rhs_2_ = (_e1180 - _e1179);
         }
         continuing {
-            let _e1166 = k;
-            k = (_e1166 + 1u);
+            let _e1183 = k;
+            k = (_e1183 + 1u);
         }
     }
-    let _e1175 = diag_0_;
-    let _e1176 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1176 + _e1175);
-    let _e1184 = rhs_0_;
-    rhs[((idx * 3u) + 0u)] = _e1184;
-    let _e1192 = diag_1_;
-    let _e1193 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1193 + _e1192);
-    let _e1201 = rhs_1_;
-    rhs[((idx * 3u) + 1u)] = _e1201;
-    let _e1209 = diag_2_;
-    let _e1210 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1210 + _e1209);
-    let _e1218 = rhs_2_;
-    rhs[((idx * 3u) + 2u)] = _e1218;
+    let _e1192 = diag_0_;
+    let _e1193 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
+    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1193 + _e1192);
+    let _e1201 = rhs_0_;
+    rhs[((idx * 3u) + 0u)] = _e1201;
+    let _e1209 = diag_1_;
+    let _e1210 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
+    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1210 + _e1209);
+    let _e1218 = rhs_1_;
+    rhs[((idx * 3u) + 1u)] = _e1218;
+    let _e1226 = diag_2_;
+    let _e1227 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
+    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1227 + _e1226);
+    let _e1235 = rhs_2_;
+    rhs[((idx * 3u) + 2u)] = _e1235;
     return;
 }
 "#;
@@ -10176,6 +10668,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var dist: f32;
     var phi_0_: f32;
     var phi_1_: f32;
+    var phi_2_: f32;
 
     let idx = global_id.x;
     if (idx >= arrayLength((&cell_vols))) {
@@ -10554,27 +11047,37 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
+            let _e1171 = fluxes[((face_idx * 3u) + 2u)];
+            phi_2_ = _e1171;
+            if (owner != idx) {
+                let _e1174 = phi_2_;
+                let _e1177 = phi_2_;
+                phi_2_ = (_e1177 - (_e1174 * 2f));
+            }
+            let _e1179 = phi_2_;
+            let _e1180 = rhs_2_;
+            rhs_2_ = (_e1180 - _e1179);
         }
         continuing {
-            let _e1166 = k;
-            k = (_e1166 + 1u);
+            let _e1183 = k;
+            k = (_e1183 + 1u);
         }
     }
-    let _e1175 = diag_0_;
-    let _e1176 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1176 + _e1175);
-    let _e1184 = rhs_0_;
-    rhs[((idx * 3u) + 0u)] = _e1184;
-    let _e1192 = diag_1_;
-    let _e1193 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1193 + _e1192);
-    let _e1201 = rhs_1_;
-    rhs[((idx * 3u) + 1u)] = _e1201;
-    let _e1209 = diag_2_;
-    let _e1210 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1210 + _e1209);
-    let _e1218 = rhs_2_;
-    rhs[((idx * 3u) + 2u)] = _e1218;
+    let _e1192 = diag_0_;
+    let _e1193 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
+    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e1193 + _e1192);
+    let _e1201 = rhs_0_;
+    rhs[((idx * 3u) + 0u)] = _e1201;
+    let _e1209 = diag_1_;
+    let _e1210 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
+    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e1210 + _e1209);
+    let _e1218 = rhs_1_;
+    rhs[((idx * 3u) + 1u)] = _e1218;
+    let _e1226 = diag_2_;
+    let _e1227 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
+    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e1227 + _e1226);
+    let _e1235 = rhs_2_;
+    rhs[((idx * 3u) + 2u)] = _e1235;
     return;
 }
 "#;

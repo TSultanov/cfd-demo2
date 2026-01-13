@@ -937,6 +937,28 @@ pub(crate) fn param_inlet_velocity(
     let PlanParamValue::F32(velocity) = value else {
         return Err("invalid value type".into());
     };
+
+    let (coupled_stride, u0_idx, u1_idx) = {
+        let coupled_stride = plan.model.system.unknowns_per_cell() as u32;
+        let mut u0_idx: Option<u32> = None;
+        let mut u1_idx: Option<u32> = None;
+        let mut idx: u32 = 0;
+        for eqn in plan.model.system.equations() {
+            let field = eqn.target();
+            let comps = field.kind().component_count() as u32;
+            if field.name() == "U" {
+                if comps > 0 {
+                    u0_idx = Some(idx + 0);
+                }
+                if comps > 1 {
+                    u1_idx = Some(idx + 1);
+                }
+            }
+            idx += comps;
+        }
+        (coupled_stride, u0_idx, u1_idx)
+    };
+
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
@@ -944,6 +966,24 @@ pub(crate) fn param_inlet_velocity(
         values.inlet_velocity = velocity;
     }
     r.fields.constants.write(&queue);
+
+    // Inlet velocity is expressed via model BC tables for models that opt-in.
+    //
+    // For example, `incompressible_momentum_model()` defines `U` as Dirichlet at
+    // `GpuBoundaryType::Inlet` but uses a placeholder value; this updates the
+    // `bc_value` buffer so tests and the UI can drive the inlet at runtime.
+    if coupled_stride > 0 {
+        let inlet = crate::solver::gpu::enums::GpuBoundaryType::Inlet as u32;
+        if let Some(u0) = u0_idx {
+            let offset_bytes = ((inlet * coupled_stride + u0) * 4) as u64;
+            queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&velocity));
+        }
+        if let Some(u1) = u1_idx {
+            let zero = 0.0f32;
+            let offset_bytes = ((inlet * coupled_stride + u1) * 4) as u64;
+            queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&zero));
+        }
+    }
     Ok(())
 }
 

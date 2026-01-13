@@ -64,6 +64,14 @@ var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
 
+// Group 2: Boundary conditions (per boundary type x unknown)
+
+@group(2) @binding(0) 
+var<storage, read> bc_kind: array<u32>;
+
+@group(2) @binding(1) 
+var<storage, read> bc_value: array<f32>;
+
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -73,6 +81,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let owner = face_owner[idx];
     let neighbor = face_neighbor[idx];
+    let is_boundary = neighbor == -1;
     var neigh_idx: u32 = owner;
     if (neighbor != -1) {
         neigh_idx = u32(neighbor);
@@ -88,7 +97,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         normal_vec = -normal_vec;
     }
     let c_neigh = cell_centers[neigh_idx];
-    let c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
+    var c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
+    if (is_boundary) {
+        c_neigh_vec = face_center_vec;
+    }
     let d_own = distance(c_owner_vec, face_center_vec);
     let d_neigh = distance(c_neigh_vec, face_center_vec);
     let total_dist = d_own + d_neigh;
@@ -100,7 +112,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
     let dist_proj = abs(dot(d_vec, normal_vec));
     let dist = max(dist_proj, 0.000001);
-    let phi = constants.density * (dot(vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]) * lambda + vec2<f32>(state[neigh_idx * 8u + 0u], state[neigh_idx * 8u + 1u]) * lambda_other, normal_vec) * area + (state[owner * 8u + 3u] * lambda + state[neigh_idx * 8u + 3u] * lambda_other) * area * (dot(vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]) * lambda + vec2<f32>(state[neigh_idx * 8u + 4u], state[neigh_idx * 8u + 5u]) * lambda_other, normal_vec) - (state[neigh_idx * 8u + 2u] - state[owner * 8u + 2u]) / dist));
+    var phi: f32 = constants.density * (dot(vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]) * lambda + vec2<f32>(select(state[neigh_idx * 8u + 0u], select(select(state[owner * 8u + 0u], bc_value[boundary_type * 3u + 0u], bc_kind[boundary_type * 3u + 0u] == 1u), state[owner * 8u + 0u] + bc_value[boundary_type * 3u + 0u] * d_own, bc_kind[boundary_type * 3u + 0u] == 2u), is_boundary), select(state[neigh_idx * 8u + 1u], select(select(state[owner * 8u + 1u], bc_value[boundary_type * 3u + 1u], bc_kind[boundary_type * 3u + 1u] == 1u), state[owner * 8u + 1u] + bc_value[boundary_type * 3u + 1u] * d_own, bc_kind[boundary_type * 3u + 1u] == 2u), is_boundary)) * lambda_other, normal_vec) * area + (state[owner * 8u + 3u] * lambda + state[owner * 8u + 3u] * lambda_other) * area * (dot(vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]) * lambda + vec2<f32>(state[owner * 8u + 4u], state[owner * 8u + 5u]) * lambda_other, normal_vec) - (select(state[neigh_idx * 8u + 2u], select(select(state[owner * 8u + 2u], bc_value[boundary_type * 3u + 2u], bc_kind[boundary_type * 3u + 2u] == 1u), state[owner * 8u + 2u] + bc_value[boundary_type * 3u + 2u] * d_own, bc_kind[boundary_type * 3u + 2u] == 2u), is_boundary) - state[owner * 8u + 2u]) / dist));
     fluxes[idx * 3u + 0u] = phi;
     fluxes[idx * 3u + 1u] = phi;
     fluxes[idx * 3u + 2u] = phi;

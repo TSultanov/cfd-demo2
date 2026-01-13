@@ -40,78 +40,33 @@ impl ModelSpec {
     }
 
     pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
-        let has_kt_flux = matches!(
-            self.flux_module,
-            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })
-        );
-
         // Flux storage is model-driven.
         //
         // - If the model has an explicit flux module, store face fluxes for each coupled
         //   unknown component.
-        let flux = match &self.flux_module {
-            Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. }) => {
-                // Flux modules write into a packed per-unknown-component face flux table.
-                //
-                // Even if the method computes a single scalar face flux (phi), it is replicated
-                // into all coupled unknown-component slots so assembly can remain layout-driven.
-                Some(FluxSpec {
-                    stride: self.system.unknowns_per_cell(),
-                })
-            }
-            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
-                // Conservative KT fluxes are stored per-unknown component.
-                Some(FluxSpec {
-                    stride: self.system.unknowns_per_cell(),
-                })
-            }
-            Some(crate::solver::model::flux_module::FluxModuleSpec::Convective { .. }) => {
-                // Generic convective flux uses a scalar face flux, replicated across the packed
-                // per-unknown-component slots.
-                Some(FluxSpec {
-                    stride: self.system.unknowns_per_cell(),
-                })
-            }
-            None => None,
-        };
+        let flux = self.flux_module.as_ref().map(|_| FluxSpec {
+            // Flux modules write into a packed per-unknown-component face flux table.
+            //
+            // Even if the module computes a single scalar face flux (phi), it is replicated
+            // into all coupled unknown-component slots so assembly can remain layout-driven.
+            stride: self.system.unknowns_per_cell(),
+        });
 
-        // Low-Mach parameters are currently required by the KT flux kernel bridge.
-        let requires_low_mach_params = has_kt_flux;
+        // Low-Mach parameters are currently only used by compressible models/tests.
+        let requires_low_mach_params = matches!(
+            self.eos,
+            crate::solver::model::eos::EosSpec::IdealGas { .. }
+        );
 
-        let gradient_storage = if has_kt_flux {
-            // Legacy EI kernels expect per-component gradient buffers (e.g. grad_rho_u_x).
-            GradientStorage::PerFieldComponents
-        } else {
-            match self.method {
-                crate::solver::model::method::MethodSpec::GenericCoupled
-                | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. } => {
-                    GradientStorage::PackedState
-                }
-                crate::solver::model::method::MethodSpec::CoupledIncompressible => {
-                    GradientStorage::PackedState
-                }
+        let gradient_storage = match self.method {
+            crate::solver::model::method::MethodSpec::GenericCoupled
+            | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. }
+            | crate::solver::model::method::MethodSpec::CoupledIncompressible => {
+                GradientStorage::PackedState
             }
         };
 
-        let required_gradient_fields = if has_kt_flux {
-            use crate::solver::model::gpu_spec::expand_field_components;
-            use std::collections::HashSet;
-
-            // KT uses per-component gradients of the coupled unknowns (conserved variables),
-            // derived from the equation targets in the model's `EquationSystem`.
-            let mut out = Vec::new();
-            let mut seen = HashSet::new();
-            for eq in self.system.equations() {
-                for name in expand_field_components(*eq.target()) {
-                    if seen.insert(name.clone()) {
-                        out.push(name);
-                    }
-                }
-            }
-            out
-        } else {
-            Vec::new()
-        };
+        let required_gradient_fields = Vec::new();
 
         ModelGpuSpec {
             flux,
@@ -402,6 +357,8 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_p,
         fields.grad_component,
     ]);
+    let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
+        .expect("failed to derive Rhie–Chow flux formula from model system/layout");
 
     let u0 = layout
         .component_offset("U", 0)
@@ -432,8 +389,9 @@ pub fn incompressible_momentum_model() -> ModelSpec {
                     .expect("invalid SchurBlockLayout"),
             },
         }),
-        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow {
-            alpha_u: None,
+        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+            gradients: None,
+            kernel: flux_kernel,
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
         gpu: ModelGpuSpec::default(),
@@ -460,6 +418,8 @@ pub fn compressible_model() -> ModelSpec {
     ]);
 
     let gamma = 1.4;
+    let flux_kernel = compressible_euler_central_upwind_flux_module_kernel(&system, gamma)
+        .expect("failed to build compressible flux kernel spec");
 
     ModelSpec {
         id: "compressible",
@@ -472,13 +432,310 @@ pub fn compressible_model() -> ModelSpec {
         boundaries: BoundarySpec::default(),
 
         linear_solver: None,
-        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor {
-            reconstruction: crate::solver::model::flux_module::ReconstructionSpec::FirstOrder,
+        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+            gradients: None,
+            kernel: flux_kernel,
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::euler_ideal_gas(gamma),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
+}
+
+#[derive(Debug, Clone)]
+struct RhieChowFields {
+    momentum: String,
+    pressure: String,
+    d_p: String,
+    grad_p: String,
+}
+
+fn rhie_chow_flux_module_kernel(
+    system: &EquationSystem,
+    layout: &StateLayout,
+) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
+    use crate::solver::ir::{FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxModuleKernelSpec};
+    use super::backend::{Coefficient as BackendCoeff, FieldKind, FieldRef, TermOp};
+    use std::collections::{HashMap, HashSet};
+
+    fn collect_coeff_fields(coeff: &BackendCoeff, out: &mut Vec<FieldRef>) {
+        match coeff {
+            BackendCoeff::Constant { .. } => {}
+            BackendCoeff::Field(field) => out.push(*field),
+            BackendCoeff::Product(lhs, rhs) => {
+                collect_coeff_fields(lhs, out);
+                collect_coeff_fields(rhs, out);
+            }
+        }
+    }
+
+    // Infer (momentum, pressure) coupling from the declared equation system.
+    let equations = system.equations();
+    let mut eq_by_target: HashMap<FieldRef, usize> = HashMap::new();
+    for (idx, eq) in equations.iter().enumerate() {
+        eq_by_target.insert(*eq.target(), idx);
+    }
+
+    let mut candidates = Vec::new();
+    for eq in equations {
+        if !matches!(eq.target().kind(), FieldKind::Vector2 | FieldKind::Vector3) {
+            continue;
+        }
+
+        let has_transport = eq
+            .terms()
+            .iter()
+            .any(|t| matches!(t.op, TermOp::Div | TermOp::Laplacian));
+        if !has_transport {
+            continue;
+        }
+
+        let mut grad_scalars: HashSet<FieldRef> = HashSet::new();
+        for term in eq.terms() {
+            if term.op == TermOp::Grad && term.field.kind() == FieldKind::Scalar {
+                grad_scalars.insert(term.field);
+            }
+        }
+
+        for pressure in grad_scalars {
+            let Some(&p_eq_idx) = eq_by_target.get(&pressure) else {
+                continue;
+            };
+            let p_eq = &equations[p_eq_idx];
+            let p_has_laplacian = p_eq.terms().iter().any(|t| t.op == TermOp::Laplacian);
+            if p_has_laplacian {
+                candidates.push((eq.target().name().to_string(), pressure.name().to_string()));
+            }
+        }
+    }
+
+    let (momentum, pressure) = match candidates.as_slice() {
+        [(m, p)] => (m.clone(), p.clone()),
+        [] => return Err("no unique momentum-pressure coupling found for Rhie–Chow".to_string()),
+        many => {
+            return Err(format!(
+                "Rhie–Chow requires a unique momentum-pressure coupling, found {} candidates: [{}]",
+                many.len(),
+                many.iter()
+                    .map(|(m, p)| format!("{m}↔{p}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    };
+
+    // Infer d_p from the pressure equation laplacian coefficient: pick the unique scalar field
+    // referenced by that coefficient that is present in the model's state layout.
+    let pressure_eq = equations
+        .iter()
+        .find(|eq| eq.target().name() == pressure)
+        .ok_or_else(|| format!("missing pressure equation for inferred pressure field '{pressure}'"))?;
+    let pressure_laplacian = pressure_eq
+        .terms()
+        .iter()
+        .find(|t| t.op == TermOp::Laplacian)
+        .ok_or_else(|| format!("pressure equation for '{pressure}' must include a laplacian term"))?;
+    let Some(coeff) = &pressure_laplacian.coeff else {
+        return Err(format!("pressure laplacian coefficient for '{pressure}' is missing"));
+    };
+    let mut coeff_fields = Vec::new();
+    collect_coeff_fields(coeff, &mut coeff_fields);
+    let layout_coeff_fields: Vec<_> = coeff_fields
+        .into_iter()
+        .filter(|f| layout.field(f.name()).is_some())
+        .collect();
+    let d_p = match layout_coeff_fields.as_slice() {
+        [only] => only.name().to_string(),
+        [] => {
+            return Err(format!(
+                "pressure laplacian coefficient for '{pressure}' does not reference any state-layout scalar fields"
+            ));
+        }
+        many => {
+            return Err(format!(
+                "pressure laplacian coefficient for '{pressure}' references multiple state-layout fields; cannot derive unique d_p: [{}]",
+                many.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    };
+
+    let grad_p = format!("grad_{pressure}");
+    if layout.field(&grad_p).is_none() {
+        return Err(format!(
+            "state layout missing required pressure-gradient field '{grad_p}' (expected by Rhie–Chow)"
+        ));
+    }
+
+    let fields = RhieChowFields {
+        momentum,
+        pressure,
+        d_p,
+        grad_p,
+    };
+
+    // Rhie–Chow mass flux:
+    // phi = rho * (u_n * area + d_p_face * area * (grad_p·n - (p_N - p_O)/dist))
+    let u_face = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Owner, fields.momentum.clone())),
+        Box::new(V::state_vec2(FaceSide::Neighbor, fields.momentum.clone())),
+    );
+    let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
+
+    let d_p_face = S::Lerp(
+        Box::new(S::state(FaceSide::Owner, fields.d_p.clone())),
+        Box::new(S::state(FaceSide::Neighbor, fields.d_p.clone())),
+    );
+    let grad_p_face = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Owner, fields.grad_p.clone())),
+        Box::new(V::state_vec2(FaceSide::Neighbor, fields.grad_p.clone())),
+    );
+    let grad_p_n = S::Dot(Box::new(grad_p_face), Box::new(V::normal()));
+
+    let p_own = S::state(FaceSide::Owner, fields.pressure.clone());
+    let p_neigh = S::state(FaceSide::Neighbor, fields.pressure.clone());
+    let p_grad_f = S::Div(Box::new(S::Sub(Box::new(p_neigh), Box::new(p_own))), Box::new(S::dist()));
+
+    let rc_term = S::Mul(
+        Box::new(S::Mul(Box::new(d_p_face), Box::new(S::area()))),
+        Box::new(S::Sub(Box::new(grad_p_n), Box::new(p_grad_f))),
+    );
+
+    let phi_inner = S::Add(
+        Box::new(S::Mul(Box::new(u_n), Box::new(S::area()))),
+        Box::new(rc_term),
+    );
+    let phi = S::Mul(Box::new(S::constant("density")), Box::new(phi_inner));
+
+    Ok(FluxModuleKernelSpec::ScalarReplicated { phi })
+}
+
+fn compressible_euler_central_upwind_flux_module_kernel(
+    system: &EquationSystem,
+    gamma: f32,
+) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
+    use crate::solver::ir::{FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec};
+
+    let flux_layout = FluxLayout::from_system(system);
+    let components: Vec<String> = flux_layout.components.iter().map(|c| c.name.clone()).collect();
+
+    let ex = V::vec2(S::lit(1.0), S::lit(0.0));
+    let ey = V::vec2(S::lit(0.0), S::lit(1.0));
+
+    let rho = |side: FaceSide| S::state(side, "rho");
+    let rho_e = |side: FaceSide| S::state(side, "rho_e");
+    let rho_u = |side: FaceSide| V::state_vec2(side, "rho_u");
+    let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
+    let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
+
+    let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
+    let u_vec = |side: FaceSide| {
+        V::MulScalar(
+            Box::new(rho_u(side)),
+            Box::new(inv_rho(side)),
+        )
+    };
+    let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
+
+    let p = |side: FaceSide| S::primitive(side, "p");
+    let c = |side: FaceSide| {
+        S::Sqrt(Box::new(S::Div(
+            Box::new(S::Mul(Box::new(S::lit(gamma)), Box::new(p(side)))),
+            Box::new(rho(side)),
+        )))
+    };
+
+    let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
+    let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
+
+    let flux_mass = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_n(side)));
+    let flux_mom_x = |side: FaceSide| {
+        S::Add(
+            Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
+            Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
+        )
+    };
+    let flux_mom_y = |side: FaceSide| {
+        S::Add(
+            Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
+            Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
+        )
+    };
+    let flux_energy = |side: FaceSide| {
+        S::Mul(
+            Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
+            Box::new(u_n(side)),
+        )
+    };
+
+    let mut u_left = Vec::new();
+    let mut u_right = Vec::new();
+    let mut flux_left = Vec::new();
+    let mut flux_right = Vec::new();
+
+    for name in &components {
+        match name.as_str() {
+            "rho" => {
+                u_left.push(rho(FaceSide::Owner));
+                u_right.push(rho(FaceSide::Neighbor));
+                flux_left.push(flux_mass(FaceSide::Owner));
+                flux_right.push(flux_mass(FaceSide::Neighbor));
+            }
+            "rho_u_x" => {
+                u_left.push(rho_u_x(FaceSide::Owner));
+                u_right.push(rho_u_x(FaceSide::Neighbor));
+                flux_left.push(flux_mom_x(FaceSide::Owner));
+                flux_right.push(flux_mom_x(FaceSide::Neighbor));
+            }
+            "rho_u_y" => {
+                u_left.push(rho_u_y(FaceSide::Owner));
+                u_right.push(rho_u_y(FaceSide::Neighbor));
+                flux_left.push(flux_mom_y(FaceSide::Owner));
+                flux_right.push(flux_mom_y(FaceSide::Neighbor));
+            }
+            "rho_e" => {
+                u_left.push(rho_e(FaceSide::Owner));
+                u_right.push(rho_e(FaceSide::Neighbor));
+                flux_left.push(flux_energy(FaceSide::Owner));
+                flux_right.push(flux_energy(FaceSide::Neighbor));
+            }
+            other => {
+                return Err(format!(
+                    "compressible central-upwind kernel builder does not know how to flux component '{other}'"
+                ));
+            }
+        }
+    }
+
+    let a_plus = S::Max(
+        Box::new(S::lit(0.0)),
+        Box::new(S::Max(
+            Box::new(S::Add(Box::new(u_n(FaceSide::Owner)), Box::new(c(FaceSide::Owner)))),
+            Box::new(S::Add(
+                Box::new(u_n(FaceSide::Neighbor)),
+                Box::new(c(FaceSide::Neighbor)),
+            )),
+        )),
+    );
+    let a_minus = S::Min(
+        Box::new(S::lit(0.0)),
+        Box::new(S::Min(
+            Box::new(S::Sub(Box::new(u_n(FaceSide::Owner)), Box::new(c(FaceSide::Owner)))),
+            Box::new(S::Sub(
+                Box::new(u_n(FaceSide::Neighbor)),
+                Box::new(c(FaceSide::Neighbor)),
+            )),
+        )),
+    );
+
+    Ok(FluxModuleKernelSpec::CentralUpwind {
+        components,
+        u_left,
+        u_right,
+        flux_left,
+        flux_right,
+        a_plus,
+        a_minus,
+    })
 }
 
 pub fn generic_diffusion_demo_model() -> ModelSpec {
@@ -640,8 +897,7 @@ mod tests {
         assert_eq!(model.system.equations()[1].terms().len(), 2);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
 
-        // Compressible uses the generic-coupled pipeline with a KT flux module stage.
-        assert!(model.kernel_plan().contains(KernelKind::FluxModuleGradients));
+        // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.
         assert!(model.kernel_plan().contains(KernelKind::FluxModule));
         assert!(model.kernel_plan().contains(KernelKind::GenericCoupledAssembly));
         assert!(model.kernel_plan().contains(KernelKind::GenericCoupledUpdate));

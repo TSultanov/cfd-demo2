@@ -6,35 +6,15 @@
 /// Flux computation module specification.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FluxModuleSpec {
-    /// Kurganov-Tadmor (central) flux for conservation laws.
+    /// A model-provided flux kernel specification expressed in IR terms.
     ///
-    /// Requires: state → primitives (p, u), EOS (sound speed)
-    /// Computes: convective + pressure fluxes for conserved variables
-    ///
-    /// Used by: compressible Euler, shallow water, etc.
-    KurganovTadmor {
-        /// Face value reconstruction method
-        reconstruction: ReconstructionSpec,
-    },
-
-    /// Rhie-Chow interpolation for incompressible momentum-pressure coupling.
-    ///
-    /// Requires: velocity, pressure, d_p field
-    /// Computes: mass flux phi on cell faces
-    ///
-    /// Used by: incompressible momentum solvers
-    RhieChow {
-        /// Momentum under-relaxation factor (if applicable)
-        alpha_u: Option<f32>,
-    },
-
-    /// Generic convective flux: F = phi * field (no pressure/momentum coupling).
-    ///
-    /// Requires: a pre-computed face flux field (e.g., "phi")
-    /// Computes: advective flux for the target field
-    Convective {
-        /// Name of the face flux field to use (e.g., "phi")
-        flux_field: String,
+    /// This is the PDE-agnostic boundary: codegen compiles this spec without hardcoded
+    /// physics assumptions.
+    Kernel {
+        /// Optional gradients stage kernel (currently unused by built-in models).
+        gradients: Option<crate::solver::ir::FluxModuleKernelSpec>,
+        /// Face flux computation kernel.
+        kernel: crate::solver::ir::FluxModuleKernelSpec,
     },
 }
 
@@ -66,9 +46,11 @@ pub enum LimiterSpec {
 
 impl Default for FluxModuleSpec {
     fn default() -> Self {
-        // Safe default: no flux computation (for pure diffusion models)
-        FluxModuleSpec::Convective {
-            flux_field: "phi".to_string(),
+        FluxModuleSpec::Kernel {
+            gradients: None,
+            kernel: crate::solver::ir::FluxModuleKernelSpec::ScalarReplicated {
+                phi: crate::solver::ir::FaceScalarExpr::lit(0.0),
+            },
         }
     }
 }

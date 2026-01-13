@@ -221,11 +221,15 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
             // Optional flux module stage.
             //
             // Emit a generic flux-module stage, plus an optional gradients stage for modules
-            // that require it (e.g. KT).
-            if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })) {
-                kernels.push(KernelKind::FluxModuleGradients);
-                kernels.push(KernelKind::FluxModule);
-            } else if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })) {
+            // that require it.
+            if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+                gradients,
+                ..
+            }) = &model.flux_module
+            {
+                if gradients.is_some() {
+                    kernels.push(KernelKind::FluxModuleGradients);
+                }
                 kernels.push(KernelKind::FluxModule);
             }
 
@@ -238,10 +242,14 @@ pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> 
             // Keep kernel ordering stable; phases are assigned by the recipe.
             let mut kernels = Vec::new();
 
-            if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. })) {
-                kernels.push(KernelKind::FluxModuleGradients);
-                kernels.push(KernelKind::FluxModule);
-            } else if matches!(model.flux_module, Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })) {
+            if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+                gradients,
+                ..
+            }) = &model.flux_module
+            {
+                if gradients.is_some() {
+                    kernels.push(KernelKind::FluxModuleGradients);
+                }
                 kernels.push(KernelKind::FluxModule);
             }
 
@@ -260,10 +268,8 @@ pub fn derive_kernel_specs_for_model(
 
     match model.method {
         MethodSpec::CoupledIncompressible => {
-            if !matches!(model.flux_module, Some(FluxModuleSpec::RhieChow { .. })) {
-                return Err(
-                    "CoupledIncompressible requires flux_module = RhieChow in ModelSpec".to_string(),
-                );
+            if model.flux_module.is_none() {
+                return Err("CoupledIncompressible requires a flux_module in ModelSpec".to_string());
             }
 
             Ok(vec![
@@ -288,26 +294,21 @@ pub fn derive_kernel_specs_for_model(
             let mut kernels = Vec::new();
 
             match &model.flux_module {
-                Some(FluxModuleSpec::RhieChow { .. }) => {
+                Some(FluxModuleSpec::Kernel { gradients, .. }) => {
+                    if gradients.is_some() {
+                        kernels.push(ModelKernelSpec {
+                            id: KernelId::FLUX_MODULE_GRADIENTS,
+                            phase: KernelPhaseId::Gradients,
+                            dispatch: DispatchKindId::Cells,
+                        });
+                    }
                     kernels.push(ModelKernelSpec {
                         id: KernelId::FLUX_MODULE,
                         phase: KernelPhaseId::FluxComputation,
                         dispatch: DispatchKindId::Faces,
                     });
                 }
-                Some(FluxModuleSpec::KurganovTadmor { .. }) => {
-                    kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_MODULE_GRADIENTS,
-                        phase: KernelPhaseId::Gradients,
-                        dispatch: DispatchKindId::Cells,
-                    });
-                    kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_MODULE,
-                        phase: KernelPhaseId::FluxComputation,
-                        dispatch: DispatchKindId::Faces,
-                    });
-                }
-                Some(FluxModuleSpec::Convective { .. }) | None => {}
+                None => {}
             }
 
             kernels.push(ModelKernelSpec {
@@ -327,26 +328,21 @@ pub fn derive_kernel_specs_for_model(
             let mut kernels = Vec::new();
 
             match &model.flux_module {
-                Some(FluxModuleSpec::RhieChow { .. }) => {
+                Some(FluxModuleSpec::Kernel { gradients, .. }) => {
+                    if gradients.is_some() {
+                        kernels.push(ModelKernelSpec {
+                            id: KernelId::FLUX_MODULE_GRADIENTS,
+                            phase: KernelPhaseId::Gradients,
+                            dispatch: DispatchKindId::Cells,
+                        });
+                    }
                     kernels.push(ModelKernelSpec {
                         id: KernelId::FLUX_MODULE,
                         phase: KernelPhaseId::FluxComputation,
                         dispatch: DispatchKindId::Faces,
                     });
                 }
-                Some(FluxModuleSpec::KurganovTadmor { .. }) => {
-                    kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_MODULE_GRADIENTS,
-                        phase: KernelPhaseId::Gradients,
-                        dispatch: DispatchKindId::Cells,
-                    });
-                    kernels.push(ModelKernelSpec {
-                        id: KernelId::FLUX_MODULE,
-                        phase: KernelPhaseId::FluxComputation,
-                        dispatch: DispatchKindId::Faces,
-                    });
-                }
-                Some(FluxModuleSpec::Convective { .. }) | None => {}
+                None => {}
             }
 
             kernels.push(ModelKernelSpec {
@@ -365,147 +361,6 @@ pub fn derive_kernel_specs_for_model(
             Ok(kernels)
         }
     }
-}
-
-fn collect_coefficient_fields(
-    coeff: &crate::solver::model::backend::Coefficient,
-    out: &mut Vec<crate::solver::model::backend::FieldRef>,
-) {
-    use crate::solver::model::backend::Coefficient;
-    match coeff {
-        Coefficient::Constant { .. } => {}
-        Coefficient::Field(field) => out.push(*field),
-        Coefficient::Product(lhs, rhs) => {
-            collect_coefficient_fields(lhs, out);
-            collect_coefficient_fields(rhs, out);
-        }
-    }
-}
-
-pub type KernelCodegenFieldMap = std::collections::BTreeMap<String, String>;
-
-/// Derive kernel-specific codegen parameters from the model math + layout.
-///
-/// This is intentionally *kernel-agnostic plumbing*: it exposes derived values as a
-/// string-keyed map so build-time codegen can remain generic.
-///
-/// Note: legacy kernels may rely on naming conventions for auxiliary fields. Those
-/// conventions are validated against `ModelSpec.state_layout` here.
-pub fn derive_kernel_codegen_fields_for_model(
-    model: &crate::solver::model::ModelSpec,
-    kind: KernelKind,
-) -> Result<KernelCodegenFieldMap, String> {
-    let mut out = KernelCodegenFieldMap::new();
-    match kind {
-        KernelKind::FluxModule => {
-            if matches!(
-                model.flux_module,
-                Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. })
-            ) {
-                derive_rhie_chow_fields(model, &mut out)?;
-            }
-        }
-        KernelKind::FluxModuleGradients
-        | KernelKind::GenericCoupledAssembly
-        | KernelKind::GenericCoupledApply
-        | KernelKind::GenericCoupledUpdate => {}
-    }
-    Ok(out)
-}
-
-fn derive_rhie_chow_fields(
-    model: &crate::solver::model::ModelSpec,
-    out: &mut KernelCodegenFieldMap,
-) -> Result<(), String> {
-    use crate::solver::model::backend::{FieldKind, TermOp};
-
-    let req = analyze_kernel_requirements(&model.system);
-    let coupling = req.pressure_coupling.ok_or_else(|| {
-        "missing unique momentum-pressure coupling required for Rhie–Chow kernels".to_string()
-    })?;
-
-    if coupling.momentum.kind() != FieldKind::Vector2 {
-        return Err(format!(
-            "Rhie–Chow kernels require Vector2 momentum, got {} for '{}'",
-            coupling.momentum.kind().as_str(),
-            coupling.momentum.name()
-        ));
-    }
-
-    let pressure_eq = model
-        .system
-        .equations()
-        .iter()
-        .find(|eq| *eq.target() == coupling.pressure)
-        .ok_or_else(|| {
-            format!(
-                "missing pressure equation for inferred pressure field '{}'",
-                coupling.pressure.name()
-            )
-        })?;
-
-    let pressure_laplacian = pressure_eq
-        .terms()
-        .iter()
-        .find(|t| t.op == TermOp::Laplacian)
-        .ok_or_else(|| {
-            format!(
-                "pressure equation for '{}' must include a laplacian term",
-                coupling.pressure.name()
-            )
-        })?;
-
-    let mut coeff_fields = Vec::new();
-    if let Some(coeff) = &pressure_laplacian.coeff {
-        collect_coefficient_fields(coeff, &mut coeff_fields);
-    } else {
-        return Err(format!(
-            "pressure laplacian coefficient for '{}' is missing",
-            coupling.pressure.name()
-        ));
-    }
-
-    let layout_coeff_fields: Vec<_> = coeff_fields
-        .into_iter()
-        .filter(|f| model.state_layout.field(f.name()).is_some())
-        .collect();
-    let d_p = match layout_coeff_fields.as_slice() {
-        [only] => only.name().to_string(),
-        [] => {
-            return Err(format!(
-                "pressure laplacian coefficient for '{}' does not reference any state-layout scalar fields",
-                coupling.pressure.name()
-            ));
-        }
-        many => {
-            return Err(format!(
-                "pressure laplacian coefficient for '{}' references multiple state-layout fields; cannot derive unique d_p: [{}]",
-                coupling.pressure.name(),
-                many.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
-            ));
-        }
-    };
-
-    let grad_p = format!("grad_{}", coupling.pressure.name());
-    if model.state_layout.field(&grad_p).is_none() {
-        return Err(format!(
-            "state layout missing required pressure-gradient field '{}' (expected by Rhie–Chow)",
-            grad_p
-        ));
-    }
-
-    out.insert("momentum".to_string(), coupling.momentum.name().to_string());
-    out.insert("pressure".to_string(), coupling.pressure.name().to_string());
-    out.insert("d_p".to_string(), d_p);
-    out.insert("grad_p".to_string(), grad_p);
-
-    Ok(())
-}
-
-fn required_codegen_field<'a>(map: &'a KernelCodegenFieldMap, key: &str) -> &'a str {
-    map.get(key)
-        .map(|s| s.as_str())
-        .unwrap_or_else(|| panic!("missing required derived kernel codegen field '{key}'"))
 }
 
 pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
@@ -530,40 +385,37 @@ pub fn generate_kernel_wgsl_for_model(
 
     let wgsl = match kind {
         KernelKind::FluxModuleGradients => match &model.flux_module {
-            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
-                cfd2_codegen::solver::codegen::kt_gradients::generate_kt_gradients_wgsl(
-                    &model.state_layout,
-                )
+            Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+                gradients: Some(_),
+                ..
+            }) => {
+                return Err(
+                    "FluxModuleGradients is not yet supported for Kernel-based flux modules"
+                        .to_string(),
+                );
             }
             _ => {
-                return Err("FluxModuleGradients requested but model has no gradients-based flux module".to_string());
+                return Err("FluxModuleGradients requested but model has no gradients stage".to_string());
             }
         },
         KernelKind::FluxModule => match &model.flux_module {
-            Some(crate::solver::model::flux_module::FluxModuleSpec::RhieChow { .. }) => {
-                let fields = derive_kernel_codegen_fields_for_model(model, KernelKind::FluxModule)?;
-                let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
-                cfd2_codegen::solver::codegen::flux_rhie_chow::generate_flux_rhie_chow_wgsl(
-                    &discrete,
-                    &model.state_layout,
-                    flux_stride,
-                    required_codegen_field(&fields, "momentum"),
-                    required_codegen_field(&fields, "pressure"),
-                    required_codegen_field(&fields, "d_p"),
-                    required_codegen_field(&fields, "grad_p"),
-                )
-            }
-            Some(crate::solver::model::flux_module::FluxModuleSpec::KurganovTadmor { .. }) => {
+            Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. }) => {
                 let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-                let eos = ir_eos_from_model(model.eos);
-                cfd2_codegen::solver::codegen::flux_kt::generate_flux_kt_wgsl(
+                let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+                let prims = model
+                    .primitives
+                    .ordered()
+                    .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
+                cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl(
                     &model.state_layout,
                     &flux_layout,
-                    &eos,
+                    flux_stride,
+                    &prims,
+                    kernel,
                 )
             }
-            Some(crate::solver::model::flux_module::FluxModuleSpec::Convective { .. }) | None => {
-                return Err("FluxModule requested but model has no flux module requiring a kernel".to_string());
+            None => {
+                return Err("FluxModule requested but model has no flux module".to_string());
             }
         },
 
@@ -624,109 +476,4 @@ pub fn emit_model_kernel_wgsl(
     cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, &wgsl)
 }
 
-fn ir_eos_from_model(eos: crate::solver::model::EosSpec) -> crate::solver::ir::EosSpec {
-    match eos {
-        crate::solver::model::EosSpec::IdealGas { gamma } => crate::solver::ir::EosSpec::IdealGas { gamma },
-        crate::solver::model::EosSpec::Constant => crate::solver::ir::EosSpec::Constant,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PressureCoupling {
-    momentum: crate::solver::model::backend::FieldRef,
-    pressure: crate::solver::model::backend::FieldRef,
-}
-
-#[derive(Debug, Clone, Default)]
-struct KernelRequirements {
-    pressure_coupling: Option<PressureCoupling>,
-}
-
-fn analyze_kernel_requirements(
-    system: &crate::solver::model::backend::EquationSystem,
-) -> KernelRequirements {
-    use crate::solver::model::backend::{FieldKind, FieldRef, TermOp};
-    use std::collections::{HashMap, HashSet};
-
-    let equations = system.equations();
-
-    // Build a lookup for equations by target field.
-    let mut eq_by_target: HashMap<FieldRef, usize> = HashMap::new();
-    for (idx, eq) in equations.iter().enumerate() {
-        eq_by_target.insert(*eq.target(), idx);
-    }
-
-    // Detect incompressible momentum+pressure coupling structurally:
-    // - find a vector-target equation that takes Grad(p) for some scalar p
-    // - require some transport operator (Div or Laplacian) on the momentum equation
-    // - require a Laplacian term on the pressure equation targeting p
-    let mut candidates: Vec<PressureCoupling> = Vec::new();
-    for eq in equations {
-        if !matches!(eq.target().kind(), FieldKind::Vector2 | FieldKind::Vector3) {
-            continue;
-        }
-
-        let momentum = *eq.target();
-        let has_transport = eq
-            .terms()
-            .iter()
-            .any(|t| matches!(t.op, TermOp::Div | TermOp::Laplacian));
-        if !has_transport {
-            continue;
-        }
-
-        let mut grad_scalars: HashSet<FieldRef> = HashSet::new();
-        for term in eq.terms() {
-            if term.op == TermOp::Grad && term.field.kind() == FieldKind::Scalar {
-                grad_scalars.insert(term.field);
-            }
-        }
-
-        for pressure in grad_scalars {
-            let Some(&p_eq_idx) = eq_by_target.get(&pressure) else {
-                continue;
-            };
-            let p_eq = &equations[p_eq_idx];
-            let p_has_laplacian = p_eq.terms().iter().any(|t| t.op == TermOp::Laplacian);
-            if p_has_laplacian {
-                candidates.push(PressureCoupling { momentum, pressure });
-            }
-        }
-    }
-
-    KernelRequirements {
-        pressure_coupling: (candidates.len() == 1).then(|| candidates[0]),
-    }
-}
-
-fn synthesize_kernel_plan(req: &KernelRequirements) -> KernelPlan {
-    if req.pressure_coupling.is_some() {
-        return KernelPlan::new(vec![
-            KernelKind::FluxModule,
-            KernelKind::GenericCoupledAssembly,
-            KernelKind::GenericCoupledUpdate,
-        ]);
-    }
-
-    KernelPlan::new(vec![
-        KernelKind::GenericCoupledAssembly,
-        KernelKind::GenericCoupledApply,
-        KernelKind::GenericCoupledUpdate,
-    ])
-}
-
-fn synthesize_kernel_ids(req: &KernelRequirements) -> Vec<KernelId> {
-    if req.pressure_coupling.is_some() {
-        return vec![
-            KernelId::FLUX_MODULE,
-            KernelId::GENERIC_COUPLED_ASSEMBLY,
-            KernelId::GENERIC_COUPLED_UPDATE,
-        ];
-    }
-
-    vec![
-        KernelId::GENERIC_COUPLED_ASSEMBLY,
-        KernelId::GENERIC_COUPLED_APPLY,
-        KernelId::GENERIC_COUPLED_UPDATE,
-    ]
-}
+// (intentionally no additional kernel-analysis helpers here; kernel selection is recipe-driven)

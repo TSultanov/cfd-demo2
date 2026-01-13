@@ -45,13 +45,14 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Stabilized the face-flux buffer contract: flux modules write a packed per-unknown-component face table (`flux_stride = system.unknowns_per_cell()`), and unified assembly indexes fluxes as `fluxes[face * flux_stride + u_idx]` (no scalar-stride special-casing).
 - Flux-module kernels are emitted per-model when they depend on `(ModelSpec.system, StateLayout, FluxLayout)` (no shared `flux_*.wgsl` artifacts across models).
 - Flux-module scheduling/lookup is unified behind stable `KernelId`s (`flux_module_gradients`, `flux_module`) rather than per-method kernel ids.
+- Retired handwritten flux WGSL generators (`flux_kt`, `flux_rhie_chow`) in favor of a PDE-agnostic IR-driven `flux_module` codegen path; flux math is declared in `src/solver/model/definitions.rs` and compiled generically.
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
-### 1) Codegen (remove model-specific generators; IR-driven kernels)
-- Retired coupled-backend-only kernel generators (`prepare_coupled`, `coupled_assembly`, `pressure_assembly`, `update_fields_from_coupled`); remaining: retire the handwritten/physics-specialized flux implementations (Rhie–Chow, KT bridge) in favor of IR-driven flux modules derived from the system math + `FluxLayout` only.
-- Reduce build-time kernel-specific glue:
-  - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.
+### 1) Flux Modules (boundary + reconstruction + method knobs)
+- Flux kernels are now IR-driven, but boundary handling is still incomplete: flux modules need to consume the same boundary condition tables (`bc_kind`/`bc_value`) that assembly uses so Dirichlet/Neumann boundaries affect fluxes (not just zero-gradient extrapolation).
+- Add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
+- Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 
 ### 2) Retire `PlanParam` as global plumbing
 - Replace `PlanParam`-based “global knobs” with typed, module-owned uniforms/config deltas routed through the recipe.

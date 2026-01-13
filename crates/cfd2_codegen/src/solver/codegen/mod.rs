@@ -1,10 +1,8 @@
 pub mod coeff_expr;
 pub mod dsl;
-pub mod flux_kt;
-pub mod flux_rhie_chow;
+pub mod flux_module;
 pub mod generic_coupled_kernels;
 pub mod ir;
-pub mod kt_gradients;
 pub mod plan;
 pub mod primitive_expr;
 pub mod reconstruction;
@@ -14,9 +12,7 @@ pub mod wgsl;
 pub mod wgsl_ast;
 pub mod wgsl_dsl;
 
-pub use flux_kt::generate_flux_kt_wgsl;
-pub use flux_rhie_chow::generate_flux_rhie_chow_wgsl;
+pub use flux_module::generate_flux_module_wgsl;
 pub use ir::{lower_system, DiscreteEquation, DiscreteOp, DiscreteOpKind, DiscreteSystem};
-pub use kt_gradients::generate_kt_gradients_wgsl;
 pub use state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
 pub use wgsl::{generate_wgsl, generate_wgsl_library};

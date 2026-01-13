@@ -139,4 +139,140 @@ impl FluxLayout {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FaceSide {
+    Owner,
+    Neighbor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FaceScalarBuiltin {
+    Area,
+    Dist,
+    Lambda,
+    LambdaOther,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FaceVec2Builtin {
+    Normal,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FaceVec2Expr {
+    Builtin(FaceVec2Builtin),
+    Vec2(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    StateVec2 { side: FaceSide, field: String },
+    Add(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
+    Sub(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
+    Neg(Box<FaceVec2Expr>),
+    MulScalar(Box<FaceVec2Expr>, Box<FaceScalarExpr>),
+    Lerp(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FaceScalarExpr {
+    Literal(f32),
+    Builtin(FaceScalarBuiltin),
+    /// Read a scalar from the shared `Constants` uniform buffer (e.g. `dt`, `density`).
+    Constant { name: String },
+    State { side: FaceSide, name: String },
+    Primitive { side: FaceSide, name: String },
+    Add(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Sub(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Mul(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Div(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Neg(Box<FaceScalarExpr>),
+    Abs(Box<FaceScalarExpr>),
+    Sqrt(Box<FaceScalarExpr>),
+    Max(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Min(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Lerp(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
+    Dot(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
+}
+
+impl FaceScalarExpr {
+    pub fn lit(v: f32) -> Self {
+        FaceScalarExpr::Literal(v)
+    }
+
+    pub fn area() -> Self {
+        FaceScalarExpr::Builtin(FaceScalarBuiltin::Area)
+    }
+
+    pub fn dist() -> Self {
+        FaceScalarExpr::Builtin(FaceScalarBuiltin::Dist)
+    }
+
+    pub fn lambda() -> Self {
+        FaceScalarExpr::Builtin(FaceScalarBuiltin::Lambda)
+    }
+
+    pub fn lambda_other() -> Self {
+        FaceScalarExpr::Builtin(FaceScalarBuiltin::LambdaOther)
+    }
+
+    pub fn state(side: FaceSide, name: impl Into<String>) -> Self {
+        FaceScalarExpr::State {
+            side,
+            name: name.into(),
+        }
+    }
+
+    pub fn constant(name: impl Into<String>) -> Self {
+        FaceScalarExpr::Constant { name: name.into() }
+    }
+
+    pub fn primitive(side: FaceSide, name: impl Into<String>) -> Self {
+        FaceScalarExpr::Primitive {
+            side,
+            name: name.into(),
+        }
+    }
+}
+
+impl FaceVec2Expr {
+    pub fn normal() -> Self {
+        FaceVec2Expr::Builtin(FaceVec2Builtin::Normal)
+    }
+
+    pub fn vec2(x: FaceScalarExpr, y: FaceScalarExpr) -> Self {
+        FaceVec2Expr::Vec2(Box::new(x), Box::new(y))
+    }
+
+    pub fn state_vec2(side: FaceSide, field: impl Into<String>) -> Self {
+        FaceVec2Expr::StateVec2 {
+            side,
+            field: field.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FluxModuleKernelSpec {
+    /// Compute a scalar face flux and replicate it into all coupled unknown-component slots.
+    ScalarReplicated { phi: FaceScalarExpr },
+
+    /// Central-upwind (Kurganov–Tadmor-style) numerical flux for a conservation law.
+    ///
+    /// All fluxes are expressed in the *face-normal* direction and are written as integrated
+    /// face fluxes (i.e., multiplied by face `area` at the end of the kernel).
+    CentralUpwind {
+        /// Coupled unknown-component names in packed order.
+        components: Vec<String>,
+        /// Reconstructed left state U_L (one scalar per component).
+        u_left: Vec<FaceScalarExpr>,
+        /// Reconstructed right state U_R (one scalar per component).
+        u_right: Vec<FaceScalarExpr>,
+        /// Physical flux F(U_L)·n (one scalar per component).
+        flux_left: Vec<FaceScalarExpr>,
+        /// Physical flux F(U_R)·n (one scalar per component).
+        flux_right: Vec<FaceScalarExpr>,
+        /// Upper wave speed bound (>= 0).
+        a_plus: FaceScalarExpr,
+        /// Lower wave speed bound (<= 0).
+        a_minus: FaceScalarExpr,
+    },
+}
+
 // Intentionally no test fixtures here: `cfd2_ir` must not depend on model definitions.

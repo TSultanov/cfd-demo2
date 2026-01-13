@@ -82,7 +82,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--mode",
-        choices=("incompressible_channel", "compressible_acoustic"),
+        choices=("incompressible_channel", "compressible_acoustic", "compressible_basic"),
         required=True,
         help="Output schema mode",
     )
@@ -113,11 +113,13 @@ def main() -> int:
         t_t, t_vals = parse_scalar_row(last_data_line(t_file), n)
         if abs(t_u - t_t) > 1e-12:
             raise ValueError(f"field times do not match: U={t_u}, T={t_t}")
+    else:
+        t_vals = None
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8", newline="") as f:
         f.write(f"# time={t_u:.16g}\n")
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         if args.mode == "incompressible_channel":
             w.writerow(["x", "y", "u_x", "u_y", "p"])
             rows = []
@@ -125,13 +127,20 @@ def main() -> int:
                 rows.append((loc.x, loc.y, u[0], u[1], p))
             rows.sort(key=lambda r: (r[1], r[0]))
             w.writerows(rows)
-        else:
-            t_t, t_vals = parse_scalar_row(last_data_line(t_file), n)
+        elif args.mode == "compressible_acoustic":
+            assert t_vals is not None
             w.writerow(["x", "y", "p", "u_x", "u_y", "T"])
             rows = []
             for loc, u, p, T in zip(locs, u_vecs, p_vals, t_vals):
                 rows.append((loc.x, loc.y, p, u[0], u[1], T))
             rows.sort(key=lambda r: (r[0], r[1]))
+            w.writerows(rows)
+        else:
+            w.writerow(["x", "y", "p", "u_x", "u_y"])
+            rows = []
+            for loc, u, p in zip(locs, u_vecs, p_vals):
+                rows.append((loc.x, loc.y, p, u[0], u[1]))
+            rows.sort(key=lambda r: (r[1], r[0]))
             w.writerows(rows)
 
     return 0

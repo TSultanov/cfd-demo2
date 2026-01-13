@@ -68,3 +68,12 @@ pub fn rel_l2(a: &[f64], b: &[f64], floor: f64) -> f64 {
     (num / a.len().max(1) as f64).sqrt() / (den / a.len().max(1) as f64).sqrt().max(floor)
 }
 
+pub fn yx_key(x: f64, y: f64) -> (i64, i64) {
+    let s = 1e12_f64;
+    ((y * s).round() as i64, (x * s).round() as i64)
+}
+
+pub fn xy_key(x: f64, y: f64) -> (i64, i64) {
+    let s = 1e12_f64;
+    ((x * s).round() as i64, (y * s).round() as i64)
+}

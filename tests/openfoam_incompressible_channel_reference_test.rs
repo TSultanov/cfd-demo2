@@ -136,12 +136,12 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
         .iter()
         .map(|r| (r[x_idx], r[y_idx], r[ux_idx], r[uy_idx], r[p_idx]))
         .collect();
-    ref_rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().then(a.0.partial_cmp(&b.0).unwrap()));
+    ref_rows.sort_by_key(|r| common::yx_key(r.0, r.1));
 
     let mut sol_rows: Vec<(f64, f64, f64, f64, f64)> = (0..mesh.num_cells())
         .map(|i| (mesh.cell_cx[i], mesh.cell_cy[i], u[i].0, u[i].1, p[i]))
         .collect();
-    sol_rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap().then(a.0.partial_cmp(&b.0).unwrap()));
+    sol_rows.sort_by_key(|r| common::yx_key(r.0, r.1));
 
     for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
         let (sx, sy, _, _, _) = *sol;

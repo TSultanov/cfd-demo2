@@ -911,6 +911,7 @@ pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
     let PlanParamValue::F32(rho) = value else {
         return Err("invalid value type".into());
     };
+    let inlet_layout = inlet_conserved_bc_layout(plan);
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
@@ -918,6 +919,9 @@ pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
         values.density = rho;
     }
     r.fields.constants.write(&queue);
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
     Ok(())
 }
 
@@ -957,6 +961,7 @@ pub(crate) fn param_inlet_velocity(
         return Err("invalid value type".into());
     };
 
+    let inlet_layout = inlet_conserved_bc_layout(plan);
     let (coupled_stride, u0_idx, u1_idx) = {
         let coupled_stride = plan.model.system.unknowns_per_cell() as u32;
         let mut u0_idx: Option<u32> = None;
@@ -1003,7 +1008,109 @@ pub(crate) fn param_inlet_velocity(
             queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&zero));
         }
     }
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct InletConservedBcLayout {
+    coupled_stride: u32,
+    rho_idx: u32,
+    rho_u_x_idx: u32,
+    rho_u_y_idx: Option<u32>,
+    rho_e_idx: Option<u32>,
+    gamma: f32,
+}
+
+fn inlet_conserved_bc_layout(plan: &GpuProgramPlan) -> Option<InletConservedBcLayout> {
+    let coupled_stride = plan.model.system.unknowns_per_cell() as u32;
+    if coupled_stride == 0 {
+        return None;
+    }
+
+    let mut rho_idx: Option<u32> = None;
+    let mut rho_u_x_idx: Option<u32> = None;
+    let mut rho_u_y_idx: Option<u32> = None;
+    let mut rho_e_idx: Option<u32> = None;
+
+    let mut idx: u32 = 0;
+    for eqn in plan.model.system.equations() {
+        let field = eqn.target();
+        let comps = field.kind().component_count() as u32;
+        match field.name() {
+            "rho" => {
+                if comps == 1 {
+                    rho_idx = Some(idx);
+                }
+            }
+            "rho_u" => {
+                if comps > 0 {
+                    rho_u_x_idx = Some(idx + 0);
+                }
+                if comps > 1 {
+                    rho_u_y_idx = Some(idx + 1);
+                }
+            }
+            "rho_e" => {
+                if comps == 1 {
+                    rho_e_idx = Some(idx);
+                }
+            }
+            _ => {}
+        }
+        idx += comps;
+    }
+
+    let rho_idx = rho_idx?;
+    let rho_u_x_idx = rho_u_x_idx?;
+
+    let gamma = match plan.model.eos {
+        crate::solver::model::eos::EosSpec::IdealGas { gamma } => gamma as f32,
+        _ => 1.4,
+    };
+
+    Some(InletConservedBcLayout {
+        coupled_stride,
+        rho_idx,
+        rho_u_x_idx,
+        rho_u_y_idx,
+        rho_e_idx,
+        gamma,
+    })
+}
+
+fn update_inlet_conserved_bc_with_layout(
+    r: &mut GenericCoupledProgramResources,
+    queue: &wgpu::Queue,
+    layout: &InletConservedBcLayout,
+) {
+    let inlet = crate::solver::gpu::enums::GpuBoundaryType::Inlet as u32;
+
+    let p0 = 1.0f32;
+    let values = r.fields.constants.values();
+    let rho0 = values.density;
+    let u0 = values.inlet_velocity;
+
+    let offset_bytes = ((inlet * layout.coupled_stride + layout.rho_idx) * 4) as u64;
+    queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&rho0));
+
+    let rho_u_x = rho0 * u0;
+    let offset_bytes = ((inlet * layout.coupled_stride + layout.rho_u_x_idx) * 4) as u64;
+    queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&rho_u_x));
+
+    if let Some(ruy_i) = layout.rho_u_y_idx {
+        let rho_u_y = 0.0f32;
+        let offset_bytes = ((inlet * layout.coupled_stride + ruy_i) * 4) as u64;
+        queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&rho_u_y));
+    }
+
+    if let Some(re_i) = layout.rho_e_idx {
+        let rho_e = p0 / (layout.gamma - 1.0) + 0.5 * rho0 * (u0 * u0);
+        let offset_bytes = ((inlet * layout.coupled_stride + re_i) * 4) as u64;
+        queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&rho_e));
+    }
 }
 
 pub(crate) fn param_ramp_time(

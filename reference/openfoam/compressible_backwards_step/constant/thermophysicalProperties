@@ -1,0 +1,47 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      thermophysicalProperties;
+}
+
+thermoType
+{
+    type            hePsiThermo;
+    mixture         pureMixture;
+    transport       const;
+    thermo          hConst;
+    equationOfState perfectGas;
+    specie          specie;
+    energy          sensibleInternalEnergy;
+}
+
+mixture
+{
+    specie
+    {
+        // Choose molWeight so that R_specific = RR/molWeight ≈ 1.
+        molWeight       8314.462618;
+    }
+    thermodynamics
+    {
+        // Cp such that gamma = Cp/(Cp - R) = 1.4 when R ≈ 1.
+        Cp              3.5;
+        Hf              0;
+    }
+    transport
+    {
+        mu              0;
+        Pr              1;
+    }
+}
+

@@ -1,0 +1,115 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+
+scale 1;
+
+// Backwards-facing step:
+// - Total: L=3, H_out=1
+// - Inlet height: H_in=0.5 => step_h=0.5
+// - Step at x=1
+// Mesh uses uniform dx=dy=0.1: Nx=30, Ny=10.
+
+vertices
+(
+    (0    0    0)
+    (1    0    0)
+    (3    0    0)
+
+    (0    0.5  0)
+    (1    0.5  0)
+    (3    0.5  0)
+
+    (0    1    0)
+    (1    1    0)
+    (3    1    0)
+
+    (0    0    0.01)
+    (1    0    0.01)
+    (3    0    0.01)
+
+    (0    0.5  0.01)
+    (1    0.5  0.01)
+    (3    0.5  0.01)
+
+    (0    1    0.01)
+    (1    1    0.01)
+    (3    1    0.01)
+);
+
+blocks
+(
+    // Upstream upper block: x=[0,1], y=[0.5,1]
+    hex (3 4 7 6 12 13 16 15) (10 5 1) simpleGrading (1 1 1)
+
+    // Downstream lower block: x=[1,3], y=[0,0.5]
+    hex (1 2 5 4 10 11 14 13) (20 5 1) simpleGrading (1 1 1)
+
+    // Downstream upper block: x=[1,3], y=[0.5,1]
+    hex (4 5 8 7 13 14 17 16) (20 5 1) simpleGrading (1 1 1)
+);
+
+edges ();
+
+boundary
+(
+    inlet
+    {
+        type patch;
+        faces ((3 6 15 12));
+    }
+    outlet
+    {
+        type patch;
+        faces
+        (
+            (2 11 14 5)
+            (5 14 17 8)
+        );
+    }
+    walls
+    {
+        type wall;
+        faces
+        (
+            // Top wall (two blocks)
+            (6 7 16 15)
+            (7 8 17 16)
+
+            // Bottom wall (downstream only)
+            (1 2 11 10)
+
+            // Step walls (horizontal + vertical)
+            (3 4 13 12)
+            (1 10 13 4)
+        );
+    }
+    frontAndBack
+    {
+        type empty;
+        faces
+        (
+            (3 4 7 6)
+            (12 15 16 13)
+
+            (1 2 5 4)
+            (10 13 14 11)
+
+            (4 5 8 7)
+            (13 16 17 14)
+        );
+    }
+);
+
+mergePatchPairs ();

@@ -474,6 +474,70 @@ pub fn compressible_model() -> ModelSpec {
     let flux_kernel = compressible_euler_central_upwind_flux_module_kernel(&system, &fields, gamma)
         .expect("failed to build compressible flux kernel spec");
 
+    let mut boundaries = BoundarySpec::default();
+    boundaries.set_field(
+        "rho",
+        FieldBoundarySpec::new()
+            // Inlet density is driven via the runtime `Density` plan param, which updates the
+            // GPU `bc_value` table for `GpuBoundaryType::Inlet` (see `param_density`).
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                1,
+                BoundaryCondition::dirichlet(1.0, si::DENSITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                1,
+                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+            ),
+    );
+    boundaries.set_field(
+        "rho_u",
+        FieldBoundarySpec::new()
+            // Inlet momentum density is driven via the runtime `InletVelocity` plan param
+            // (see `param_inlet_velocity`); initial value is a placeholder.
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::MOMENTUM_DENSITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                2,
+                BoundaryCondition::zero_gradient(si::MOMENTUM_DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                2,
+                BoundaryCondition::zero_gradient(si::MOMENTUM_DENSITY / si::LENGTH),
+            ),
+    );
+    boundaries.set_field(
+        "rho_e",
+        FieldBoundarySpec::new()
+            // Inlet energy is updated alongside rho/rho_u when inlet parameters change.
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                1,
+                BoundaryCondition::dirichlet(0.0, si::ENERGY_DENSITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                1,
+                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+            ),
+    );
+
     ModelSpec {
         id: "compressible",
         // Route compressible through the generic coupled pipeline; KT flux + primitive recovery
@@ -482,7 +546,7 @@ pub fn compressible_model() -> ModelSpec {
         eos: crate::solver::model::eos::EosSpec::IdealGas { gamma },
         system,
         state_layout: layout,
-        boundaries: BoundarySpec::default(),
+        boundaries,
 
         linear_solver: None,
         flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {

@@ -22,21 +22,7 @@ mod solver {
     }
 
     pub mod shared {
-        pub mod wgsl_ast {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/shared/wgsl_ast.rs"
-            ));
-        }
-
-        pub mod expr {
-            include!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/solver/shared/expr.rs"
-            ));
-        }
-
-        pub use expr::PrimitiveExpr;
+        pub use cfd2_ir::solver::shared::*;
     }
 
     pub mod ir {

@@ -38,6 +38,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Derived primitive recovery ordering is dependency-ordered (toposort) so derived→derived references are well-defined.
 - Mesh-level CSR adjacency buffers are owned by mesh resources (no per-backend duplication), and CSR binding semantics are explicitly DOF/system-level where required.
 - Removed transitional `system_main.wgsl` artifact/hack (no “representative model” generation).
+- Converged duplicated WGSL AST sources (single canonical implementation in codegen).
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
@@ -50,7 +51,6 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Define a stable “flux module contract” so KT/Rhie–Chow become module configurations writing packed face fluxes consistent with `FluxLayout` (no special-case scheduling/bindings).
 - Reduce build-time kernel-specific glue:
   - `build.rs` does not implement per-kernel generation; it loops models and delegates to model/kernel helpers for emission.
-- Converge duplicated WGSL AST sources (`src/solver/shared/wgsl_ast.rs` vs `crates/cfd2_codegen/src/solver/codegen/wgsl_ast.rs`).
 
 ### 3) Retire `PlanParam` as global plumbing
 - Replace `PlanParam`-based “global knobs” with typed, module-owned uniforms/config deltas routed through the recipe.

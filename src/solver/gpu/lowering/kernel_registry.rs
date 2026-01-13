@@ -1,5 +1,5 @@
 use crate::solver::gpu::wgsl_reflect::WgslBindingDesc;
-use crate::solver::model::{KernelId, KernelKind};
+use crate::solver::model::KernelId;
 use std::borrow::Cow;
 
 pub(crate) struct KernelSource {
@@ -9,11 +9,6 @@ pub(crate) struct KernelSource {
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/kernel_registry_map.rs"));
-}
-
-#[allow(dead_code)]
-pub(crate) fn kernel_source(model_id: &str, kind: KernelKind) -> Result<KernelSource, String> {
-    kernel_source_by_id(model_id, KernelId::from(kind))
 }
 
 pub(crate) fn kernel_source_by_id(

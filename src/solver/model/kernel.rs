@@ -1,39 +1,3 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum KernelKind {
-    /// Initialize auxiliary Rhie–Chow mobility `d_p` before flux/assembly.
-    ///
-    /// This is emitted for models that include a `d_p` field in the state layout.
-    DpInit,
-
-    /// Update auxiliary Rhie–Chow mobility `d_p` from the assembled momentum diagonal.
-    ///
-    /// This is emitted for models that include a `d_p` field in the state layout.
-    DpUpdateFromDiag,
-
-    /// Apply a SIMPLE-style pressure correction to the velocity field:
-    ///   U := U - d_p * grad(p)
-    ///
-    /// This is emitted for coupled incompressible models that include `(U, d_p, grad_p)` in the
-    /// state layout. It is intended as a transitional correction step while the unified solver
-    /// converges towards a fully model-agnostic coupled formulation.
-    RhieChowCorrectVelocity,
-
-    /// Flux-module gradients stage (optional).
-    ///
-    /// Some flux modules (e.g. KT) require precomputed gradients of the coupled unknowns.
-    FluxModuleGradients,
-
-    /// Flux computation stage (optional).
-    ///
-    /// This is a model-selected numerical module (KT, Rhie–Chow, etc.) and is emitted
-    /// as a per-model kernel in the registry keyed by `(model_id, KernelId)`.
-    FluxModule,
-
-    GenericCoupledAssembly,
-    GenericCoupledApply,
-    GenericCoupledUpdate,
-}
-
 /// Stable identifier for a compute kernel.
 ///
 /// This is used by the unified solver orchestration to decouple scheduling and lookup
@@ -137,67 +101,70 @@ impl KernelId {
     }
 }
 
-impl From<KernelKind> for KernelId {
-    fn from(kind: KernelKind) -> Self {
-        match kind {
-            KernelKind::DpInit => KernelId::DP_INIT,
-            KernelKind::DpUpdateFromDiag => KernelId::DP_UPDATE_FROM_DIAG,
-            KernelKind::RhieChowCorrectVelocity => KernelId::RHIE_CHOW_CORRECT_VELOCITY,
-            KernelKind::FluxModuleGradients => KernelId::FLUX_MODULE_GRADIENTS,
-            KernelKind::FluxModule => KernelId::FLUX_MODULE,
+/// Build-time-generated WGSL kernel templates.
+///
+/// Each template is emitted either per-model (when it depends on state/system layout)
+/// or once globally (shared infrastructure kernel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GeneratedKernelTemplate {
+    DpInit,
+    DpUpdateFromDiag,
+    RhieChowCorrectVelocity,
+    FluxModuleGradients,
+    FluxModule,
+    GenericCoupledAssembly,
+    GenericCoupledUpdate,
 
-            KernelKind::GenericCoupledAssembly => KernelId::GENERIC_COUPLED_ASSEMBLY,
-            KernelKind::GenericCoupledApply => KernelId::GENERIC_COUPLED_APPLY,
-            KernelKind::GenericCoupledUpdate => KernelId::GENERIC_COUPLED_UPDATE,
+    /// Shared kernel (no model id suffix).
+    GenericCoupledApply,
+}
+
+impl GeneratedKernelTemplate {
+    pub fn kernel_id(self) -> KernelId {
+        match self {
+            GeneratedKernelTemplate::DpInit => KernelId::DP_INIT,
+            GeneratedKernelTemplate::DpUpdateFromDiag => KernelId::DP_UPDATE_FROM_DIAG,
+            GeneratedKernelTemplate::RhieChowCorrectVelocity => {
+                KernelId::RHIE_CHOW_CORRECT_VELOCITY
+            }
+            GeneratedKernelTemplate::FluxModuleGradients => KernelId::FLUX_MODULE_GRADIENTS,
+            GeneratedKernelTemplate::FluxModule => KernelId::FLUX_MODULE,
+            GeneratedKernelTemplate::GenericCoupledAssembly => KernelId::GENERIC_COUPLED_ASSEMBLY,
+            GeneratedKernelTemplate::GenericCoupledUpdate => KernelId::GENERIC_COUPLED_UPDATE,
+            GeneratedKernelTemplate::GenericCoupledApply => KernelId::GENERIC_COUPLED_APPLY,
         }
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KernelPlan {
-    kernels: Vec<KernelKind>,
-}
-
-impl KernelPlan {
-    pub fn new(kernels: Vec<KernelKind>) -> Self {
-        Self { kernels }
+    pub fn file_prefix(self) -> &'static str {
+        match self {
+            GeneratedKernelTemplate::DpInit => "dp_init",
+            GeneratedKernelTemplate::DpUpdateFromDiag => "dp_update_from_diag",
+            GeneratedKernelTemplate::RhieChowCorrectVelocity => "rhie_chow_correct_velocity",
+            GeneratedKernelTemplate::FluxModuleGradients => "flux_module_gradients",
+            GeneratedKernelTemplate::FluxModule => "flux_module",
+            GeneratedKernelTemplate::GenericCoupledAssembly => "generic_coupled_assembly",
+            GeneratedKernelTemplate::GenericCoupledUpdate => "generic_coupled_update",
+            GeneratedKernelTemplate::GenericCoupledApply => "generic_coupled_apply",
+        }
     }
 
-    pub fn kernels(&self) -> &[KernelKind] {
-        &self.kernels
-    }
-
-    pub fn contains(&self, kind: KernelKind) -> bool {
-        self.kernels.contains(&kind)
+    pub fn is_per_model(self) -> bool {
+        !matches!(self, GeneratedKernelTemplate::GenericCoupledApply)
     }
 }
 
-pub fn derive_kernel_plan(system: &crate::solver::model::backend::EquationSystem) -> KernelPlan {
-    // Back-compat shim: without a `ModelSpec` we cannot select a method.
-    // Prefer the generic coupled path as a conservative default.
-    let _ = system;
-    KernelPlan::new(vec![
-        KernelKind::GenericCoupledAssembly,
-        KernelKind::GenericCoupledUpdate,
-    ])
-}
-
-/// Derive a kernel execution ordering in terms of stable `KernelId`s.
-///
-/// This is the model-structure-level kernel plan used by the unified solver.
-///
-/// Notes:
-/// - This returns only *which* kernels are required and their order.
-/// - Phase assignment and dispatch kind are decided by the solver recipe.
-/// - `KernelKind` is retained as a legacy/debug bridge.
-pub fn derive_kernel_ids(system: &crate::solver::model::backend::EquationSystem) -> Vec<KernelId> {
-    // Back-compat shim: without a `ModelSpec` we cannot select a method.
-    // Prefer the generic coupled path as a conservative default.
-    let _ = system;
-    vec![
-        KernelId::GENERIC_COUPLED_ASSEMBLY,
-        KernelId::GENERIC_COUPLED_UPDATE,
-    ]
+pub fn generated_template_for_kernel_id(kernel_id: KernelId) -> Option<GeneratedKernelTemplate> {
+    match kernel_id.as_str() {
+        "dp_init" => Some(GeneratedKernelTemplate::DpInit),
+        "dp_update_from_diag" => Some(GeneratedKernelTemplate::DpUpdateFromDiag),
+        "rhie_chow/correct_velocity" => Some(GeneratedKernelTemplate::RhieChowCorrectVelocity),
+        "flux_module_gradients" => Some(GeneratedKernelTemplate::FluxModuleGradients),
+        "flux_module" => Some(GeneratedKernelTemplate::FluxModule),
+        "generic_coupled_assembly" => Some(GeneratedKernelTemplate::GenericCoupledAssembly),
+        "generic_coupled_update" => Some(GeneratedKernelTemplate::GenericCoupledUpdate),
+        "generic_coupled_apply" => Some(GeneratedKernelTemplate::GenericCoupledApply),
+        _ => None,
+    }
 }
 
 /// Model-owned kernel phase classification (GPU-agnostic).
@@ -227,86 +194,6 @@ pub struct ModelKernelSpec {
     pub id: KernelId,
     pub phase: KernelPhaseId,
     pub dispatch: DispatchKindId,
-}
-
-/// Model-driven kernel plan: selected from `ModelSpec.method`.
-pub fn derive_kernel_plan_for_model(model: &crate::solver::model::ModelSpec) -> KernelPlan {
-    use crate::solver::model::MethodSpec;
-
-    match model.method {
-        MethodSpec::CoupledIncompressible => {
-            let mut kernels = Vec::new();
-            if model.state_layout.field("d_p").is_some() {
-                kernels.push(KernelKind::DpInit);
-            }
-            if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-                gradients,
-                ..
-            }) = &model.flux_module
-            {
-                if gradients.is_some() {
-                    kernels.push(KernelKind::FluxModuleGradients);
-                }
-                if gradients.is_some() && model.state_layout.field("d_p").is_some() {
-                    kernels.push(KernelKind::RhieChowCorrectVelocity);
-                }
-                kernels.push(KernelKind::FluxModule);
-            }
-            kernels.push(KernelKind::GenericCoupledAssembly);
-            kernels.push(KernelKind::GenericCoupledUpdate);
-            if model.state_layout.field("d_p").is_some() {
-                kernels.push(KernelKind::DpUpdateFromDiag);
-            }
-            KernelPlan::new(kernels)
-        }
-        MethodSpec::GenericCoupled => {
-            let mut kernels = Vec::new();
-            // Optional flux module stage.
-            //
-            // Emit a generic flux-module stage, plus an optional gradients stage for modules
-            // that require it.
-            if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-                gradients,
-                ..
-            }) = &model.flux_module
-            {
-                if gradients.is_some() {
-                    kernels.push(KernelKind::FluxModuleGradients);
-                }
-                kernels.push(KernelKind::FluxModule);
-            }
-
-            kernels.push(KernelKind::GenericCoupledAssembly);
-            kernels.push(KernelKind::GenericCoupledUpdate);
-            if model.state_layout.field("d_p").is_some() {
-                kernels.push(KernelKind::DpUpdateFromDiag);
-            }
-            KernelPlan::new(kernels)
-        }
-        MethodSpec::GenericCoupledImplicit { .. } => {
-            // For implicit outer iterations, update may be executed in the loop body.
-            // Keep kernel ordering stable; phases are assigned by the recipe.
-            let mut kernels = Vec::new();
-
-            if let Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-                gradients,
-                ..
-            }) = &model.flux_module
-            {
-                if gradients.is_some() {
-                    kernels.push(KernelKind::FluxModuleGradients);
-                }
-                kernels.push(KernelKind::FluxModule);
-            }
-
-            kernels.push(KernelKind::GenericCoupledAssembly);
-            kernels.push(KernelKind::GenericCoupledUpdate);
-            if model.state_layout.field("d_p").is_some() {
-                kernels.push(KernelKind::DpUpdateFromDiag);
-            }
-            KernelPlan::new(kernels)
-        }
-    }
 }
 
 pub fn derive_kernel_specs_for_model(
@@ -457,48 +344,65 @@ pub fn derive_kernel_specs_for_model(
     }
 }
 
-pub fn kernel_output_name(model_id: &str, kind: KernelKind) -> String {
-    match kind {
-        KernelKind::DpInit => format!("dp_init_{model_id}.wgsl"),
-        KernelKind::DpUpdateFromDiag => format!("dp_update_from_diag_{model_id}.wgsl"),
-        KernelKind::RhieChowCorrectVelocity => {
-            format!("rhie_chow_correct_velocity_{model_id}.wgsl")
-        }
-        KernelKind::FluxModuleGradients => format!("flux_module_gradients_{model_id}.wgsl"),
-        KernelKind::FluxModule => format!("flux_module_{model_id}.wgsl"),
+pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Result<String, String> {
+    let Some(template) = generated_template_for_kernel_id(kernel_id) else {
+        return Err(format!(
+            "KernelId '{}' is not a build-time generated kernel",
+            kernel_id.as_str()
+        ));
+    };
 
-        KernelKind::GenericCoupledAssembly => format!("generic_coupled_assembly_{model_id}.wgsl"),
-        KernelKind::GenericCoupledApply => "generic_coupled_apply.wgsl".to_string(),
-        KernelKind::GenericCoupledUpdate => format!("generic_coupled_update_{model_id}.wgsl"),
+    if template.is_per_model() {
+        Ok(format!("{}_{}.wgsl", template.file_prefix(), model_id))
+    } else {
+        Ok(format!("{}.wgsl", template.file_prefix()))
     }
 }
 
-pub fn generate_kernel_wgsl_for_model(
+pub fn generate_kernel_wgsl_for_model_by_id(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-    kind: KernelKind,
+    kernel_id: KernelId,
 ) -> Result<String, String> {
     use cfd2_codegen::solver::codegen::{lower_system, DiscreteSystem};
 
-    let discrete: DiscreteSystem =
-        lower_system(&model.system, schemes).map_err(|e| e.to_string())?;
+    let Some(template) = generated_template_for_kernel_id(kernel_id) else {
+        return Err(format!(
+            "KernelId '{}' is not a build-time generated kernel",
+            kernel_id.as_str()
+        ));
+    };
 
-    let wgsl = match kind {
-        KernelKind::DpInit => {
+    // Some kernels don't require a lowered system, but most do; keep this cheap and local.
+    let discrete: Option<DiscreteSystem> = match template {
+        GeneratedKernelTemplate::GenericCoupledAssembly
+        | GeneratedKernelTemplate::GenericCoupledUpdate => {
+            Some(lower_system(&model.system, schemes).map_err(|e| e.to_string())?)
+        }
+        _ => None,
+    };
+
+    let wgsl = match template {
+        GeneratedKernelTemplate::DpInit => {
             let stride = model.state_layout.stride();
             let Some(d_p) = model.state_layout.field("d_p") else {
-                return Err("DpInit requested but model has no 'd_p' field in state layout".to_string());
+                return Err(
+                    "dp_init requested but model has no 'd_p' field in state layout".to_string(),
+                );
             };
             if d_p.kind() != crate::solver::model::backend::FieldKind::Scalar {
-                return Err("DpInit requires 'd_p' to be a scalar field".to_string());
+                return Err("dp_init requires 'd_p' to be a scalar field".to_string());
             }
             let d_p_offset = d_p.offset();
             cfd2_codegen::solver::codegen::generate_dp_init_wgsl(stride, d_p_offset)
         }
-        KernelKind::DpUpdateFromDiag => {
+        GeneratedKernelTemplate::DpUpdateFromDiag => {
             use crate::solver::model::backend::{Coefficient as BackendCoeff, FieldKind, TermOp};
 
-            fn collect_coeff_fields(coeff: &BackendCoeff, out: &mut Vec<crate::solver::model::backend::FieldRef>) {
+            fn collect_coeff_fields(
+                coeff: &BackendCoeff,
+                out: &mut Vec<crate::solver::model::backend::FieldRef>,
+            ) {
                 match coeff {
                     BackendCoeff::Constant { .. } => {}
                     BackendCoeff::Field(field) => out.push(*field),
@@ -511,10 +415,13 @@ pub fn generate_kernel_wgsl_for_model(
 
             let stride = model.state_layout.stride();
             let Some(d_p) = model.state_layout.field("d_p") else {
-                return Err("DpUpdateFromDiag requested but model has no 'd_p' field in state layout".to_string());
+                return Err(
+                    "dp_update_from_diag requested but model has no 'd_p' field in state layout"
+                        .to_string(),
+                );
             };
             if d_p.kind() != FieldKind::Scalar {
-                return Err("DpUpdateFromDiag requires 'd_p' to be a scalar field".to_string());
+                return Err("dp_update_from_diag requires 'd_p' to be a scalar field".to_string());
             }
             let d_p_offset = d_p.offset();
 
@@ -557,12 +464,13 @@ pub fn generate_kernel_wgsl_for_model(
                 [only] => *only,
                 [] => {
                     return Err(
-                        "DpUpdateFromDiag requires a unique momentum-pressure coupling referencing 'd_p'".to_string(),
+                        "dp_update_from_diag requires a unique momentum-pressure coupling referencing 'd_p'"
+                            .to_string(),
                     )
                 }
                 many => {
                     return Err(format!(
-                        "DpUpdateFromDiag requires a unique momentum-pressure coupling referencing 'd_p', found {} candidates: [{}]",
+                        "dp_update_from_diag requires a unique momentum-pressure coupling referencing 'd_p', found {} candidates: [{}]",
                         many.len(),
                         many.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
                     ))
@@ -572,9 +480,10 @@ pub fn generate_kernel_wgsl_for_model(
             let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
             let mut u_indices = Vec::new();
             for component in 0..momentum.kind().component_count() as u32 {
-                let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
+                let Some(offset) = flux_layout.offset_for_field_component(momentum, component)
+                else {
                     return Err(format!(
-                        "DpUpdateFromDiag: missing unknown offset for momentum field '{}' component {}",
+                        "dp_update_from_diag: missing unknown offset for momentum field '{}' component {}",
                         momentum.name(),
                         component
                     ));
@@ -589,7 +498,7 @@ pub fn generate_kernel_wgsl_for_model(
                 &u_indices,
             )?
         }
-        KernelKind::RhieChowCorrectVelocity => {
+        GeneratedKernelTemplate::RhieChowCorrectVelocity => {
             use crate::solver::model::backend::{Coefficient as BackendCoeff, FieldKind, TermOp};
 
             fn collect_coeff_fields(
@@ -610,7 +519,9 @@ pub fn generate_kernel_wgsl_for_model(
             let d_p = model
                 .state_layout
                 .offset_for("d_p")
-                .ok_or_else(|| "RhieChowCorrectVelocity requires 'd_p' in state layout".to_string())?;
+                .ok_or_else(|| {
+                    "rhie_chow/correct_velocity requires 'd_p' in state layout".to_string()
+                })?;
 
             let equations = model.system.equations();
             let mut eq_by_target = std::collections::HashMap::new();
@@ -649,45 +560,69 @@ pub fn generate_kernel_wgsl_for_model(
                 [(m, p)] => (*m, *p),
                 [] => {
                     return Err(
-                        "RhieChowCorrectVelocity requires a unique momentum-pressure coupling referencing 'd_p'".to_string(),
+                        "rhie_chow/correct_velocity requires a unique momentum-pressure coupling referencing 'd_p'"
+                            .to_string(),
                     )
                 }
                 many => {
                     return Err(format!(
-                        "RhieChowCorrectVelocity requires a unique momentum-pressure coupling referencing 'd_p', found {} candidates",
+                        "rhie_chow/correct_velocity requires a unique momentum-pressure coupling referencing 'd_p', found {} candidates",
                         many.len()
                     ))
                 }
             };
 
             if momentum.kind() != FieldKind::Vector2 {
-                return Err("RhieChowCorrectVelocity currently supports only Vector2 momentum fields".to_string());
+                return Err(
+                    "rhie_chow/correct_velocity currently supports only Vector2 momentum fields"
+                        .to_string(),
+                );
             }
 
             let u_x = model
                 .state_layout
                 .component_offset(momentum.name(), 0)
-                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[0]' in state layout", momentum.name()))?;
+                .ok_or_else(|| {
+                    format!(
+                        "rhie_chow/correct_velocity requires '{}[0]' in state layout",
+                        momentum.name()
+                    )
+                })?;
             let u_y = model
                 .state_layout
                 .component_offset(momentum.name(), 1)
-                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[1]' in state layout", momentum.name()))?;
+                .ok_or_else(|| {
+                    format!(
+                        "rhie_chow/correct_velocity requires '{}[1]' in state layout",
+                        momentum.name()
+                    )
+                })?;
 
             let grad_name = format!("grad_{}", pressure.name());
             let grad_p_x = model
                 .state_layout
                 .component_offset(&grad_name, 0)
-                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[0]' in state layout", grad_name))?;
+                .ok_or_else(|| {
+                    format!(
+                        "rhie_chow/correct_velocity requires '{}[0]' in state layout",
+                        grad_name
+                    )
+                })?;
             let grad_p_y = model
                 .state_layout
                 .component_offset(&grad_name, 1)
-                .ok_or_else(|| format!("RhieChowCorrectVelocity requires '{}[1]' in state layout", grad_name))?;
+                .ok_or_else(|| {
+                    format!(
+                        "rhie_chow/correct_velocity requires '{}[1]' in state layout",
+                        grad_name
+                    )
+                })?;
 
             cfd2_codegen::solver::codegen::generate_rhie_chow_correct_velocity_wgsl(
                 stride, u_x, u_y, d_p, grad_p_x, grad_p_y,
             )
         }
-        KernelKind::FluxModuleGradients => match &model.flux_module {
+        GeneratedKernelTemplate::FluxModuleGradients => match &model.flux_module {
             Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
                 gradients: Some(_),
                 ..
@@ -700,11 +635,11 @@ pub fn generate_kernel_wgsl_for_model(
             }
             _ => {
                 return Err(
-                    "FluxModuleGradients requested but model has no gradients stage".to_string(),
+                    "flux_module_gradients requested but model has no gradients stage".to_string(),
                 );
             }
         },
-        KernelKind::FluxModule => match &model.flux_module {
+        GeneratedKernelTemplate::FluxModule => match &model.flux_module {
             Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. }) => {
                 let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
                 let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
@@ -721,39 +656,91 @@ pub fn generate_kernel_wgsl_for_model(
                 )
             }
             None => {
-                return Err("FluxModule requested but model has no flux module".to_string());
+                return Err("flux_module requested but model has no flux module".to_string());
             }
         },
 
-        KernelKind::GenericCoupledAssembly => {
+        GeneratedKernelTemplate::GenericCoupledAssembly => {
+            let Some(discrete) = discrete.as_ref() else {
+                return Err("missing lowered system for generic_coupled_assembly".to_string());
+            };
             let needs_gradients = crate::solver::ir::expand_schemes(&model.system, schemes)
                 .map(|e| e.needs_gradients())
                 .unwrap_or(false);
             let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
             cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
-                &discrete,
+                discrete,
                 &model.state_layout,
                 flux_stride,
                 needs_gradients,
             )
         }
-        KernelKind::GenericCoupledApply => {
-            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
-        }
-        KernelKind::GenericCoupledUpdate => {
+        GeneratedKernelTemplate::GenericCoupledUpdate => {
+            let Some(discrete) = discrete.as_ref() else {
+                return Err("missing lowered system for generic_coupled_update".to_string());
+            };
             let prims = model
                 .primitives
                 .ordered()
                 .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
             cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
-                &discrete,
+                discrete,
                 &model.state_layout,
                 &prims,
             )
         }
+
+        GeneratedKernelTemplate::GenericCoupledApply => {
+            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
+        }
     };
 
     Ok(wgsl)
+}
+
+pub fn generate_shared_kernel_wgsl_by_id(kernel_id: KernelId) -> Result<String, String> {
+    let Some(template) = generated_template_for_kernel_id(kernel_id) else {
+        return Err(format!(
+            "KernelId '{}' is not a build-time generated kernel",
+            kernel_id.as_str()
+        ));
+    };
+
+    if template.is_per_model() {
+        return Err(format!(
+            "KernelId '{}' is not a shared (global) kernel",
+            kernel_id.as_str()
+        ));
+    }
+
+    match template {
+        GeneratedKernelTemplate::GenericCoupledApply => Ok(
+            cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl(),
+        ),
+        _ => Err(format!(
+            "KernelId '{}' does not have a shared-kernel generator",
+            kernel_id.as_str()
+        )),
+    }
+}
+
+pub fn emit_shared_kernels_wgsl(
+    base_dir: impl AsRef<std::path::Path>,
+) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let base_dir = base_dir.as_ref();
+    let mut outputs = Vec::new();
+
+    // Shared kernel(s) are emitted once and keyed by kernel id only.
+    let kernel_id = KernelId::GENERIC_COUPLED_APPLY;
+    let filename = kernel_output_name_for_model("", kernel_id)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+    let wgsl = generate_shared_kernel_wgsl_by_id(kernel_id)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+    outputs.push(cfd2_codegen::compiler::write_generated_wgsl(
+        base_dir, filename, &wgsl,
+    )?);
+
+    Ok(outputs)
 }
 
 pub fn emit_model_kernels_wgsl(
@@ -762,22 +749,39 @@ pub fn emit_model_kernels_wgsl(
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut outputs = Vec::new();
-    let plan = model.kernel_plan();
-    for kind in plan.kernels() {
-        outputs.push(emit_model_kernel_wgsl(&base_dir, model, schemes, *kind)?);
+
+    let specs = derive_kernel_specs_for_model(model)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+
+    let mut seen: std::collections::HashSet<KernelId> = std::collections::HashSet::new();
+    for spec in specs {
+        let Some(template) = generated_template_for_kernel_id(spec.id) else {
+            continue;
+        };
+        if !template.is_per_model() {
+            continue;
+        }
+        if !seen.insert(spec.id) {
+            continue;
+        }
+        outputs.push(emit_model_kernel_wgsl_by_id(
+            &base_dir, model, schemes, spec.id,
+        )?);
     }
+
     Ok(outputs)
 }
 
-pub fn emit_model_kernel_wgsl(
+pub fn emit_model_kernel_wgsl_by_id(
     base_dir: impl AsRef<std::path::Path>,
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-    kind: KernelKind,
+    kernel_id: KernelId,
 ) -> std::io::Result<std::path::PathBuf> {
     let base_dir = base_dir.as_ref();
-    let filename = kernel_output_name(model.id, kind);
-    let wgsl = generate_kernel_wgsl_for_model(model, schemes, kind)
+    let filename = kernel_output_name_for_model(model.id, kernel_id)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+    let wgsl = generate_kernel_wgsl_for_model_by_id(model, schemes, kernel_id)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
     cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, &wgsl)
 }

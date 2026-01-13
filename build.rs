@@ -136,7 +136,7 @@ mod solver {
         #[allow(unused_imports)]
         pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
         #[allow(unused_imports)]
-        pub use kernel::{KernelKind, KernelPlan};
+        pub use kernel::KernelId;
         #[allow(unused_imports)]
         pub use method::MethodSpec;
         #[allow(unused_imports)]
@@ -180,6 +180,9 @@ fn main() {
         .output("src/solver/gpu/bindings.rs");
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
+
+    solver::model::kernel::emit_shared_kernels_wgsl(&manifest_dir)
+        .unwrap_or_else(|err| panic!("codegen failed for shared kernels: {err}"));
 
     for model in solver::model::all_models() {
         solver::model::kernel::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
@@ -334,111 +337,89 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("kernel_registry_map.rs");
 
-    // Discover which models have per-model generic-coupled kernels.
-    //
-    // These kernels are emitted as:
-    // - generic_coupled_assembly_<model_id>.wgsl
-    // - generic_coupled_update_<model_id>.wgsl
-    //
-    // We include them in the same registry mapping so runtime lookup goes through a single path.
     let gen_dir = codegen_compiler::generated_dir_for(manifest_dir);
-    let mut generic_coupled_models: Vec<(
-        String,
-        String,
-        Vec<(u32, u32, String)>,
-        Vec<(u32, u32, String)>,
-    )> = Vec::new();
 
-    let pattern = gen_dir
-        .join("generic_coupled_assembly_*.wgsl")
-        .to_string_lossy()
-        .to_string();
-    for entry in glob(&pattern).expect("Failed to read generic coupled assembly glob") {
-        let Ok(path) = entry else { continue };
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let Some(model_id) = stem.strip_prefix("generic_coupled_assembly_") else {
-            continue;
-        };
-        let update_path = gen_dir.join(format!("generic_coupled_update_{model_id}.wgsl"));
-        if !update_path.exists() {
-            continue;
-        }
-
-        let assembly_src = fs::read_to_string(&path).unwrap_or_else(|err| {
-            panic!("failed to read generated WGSL '{}': {err}", path.display())
-        });
-        let update_src = fs::read_to_string(&update_path).unwrap_or_else(|err| {
-            panic!(
-                "failed to read generated WGSL '{}': {err}",
-                update_path.display()
-            )
-        });
-
-        let assembly_bindings = parse_wgsl_bindings(&assembly_src);
-        let update_bindings = parse_wgsl_bindings(&update_src);
-
-        generic_coupled_models.push((
-            model_id.to_string(),
-            sanitize_rust_ident(model_id),
-            assembly_bindings,
-            update_bindings,
-        ));
-    }
-
-    generic_coupled_models.sort_by(|a, b| a.0.cmp(&b.0));
-    generic_coupled_models.dedup_by(|a, b| a.0 == b.0);
-
-    // Discover per-model flux-module kernels.
+    // Model-driven generated kernels (per-model).
     //
-    // Flux modules can depend on the model ordering/layout, so we treat them the same way as
-    // per-model generic-coupled kernels: lookup is keyed by (model_id, kernel_id).
-    fn discover_per_model_kernel(
-        gen_dir: &PathBuf,
-        prefix: &str,
-    ) -> Vec<(String, String, Vec<(u32, u32, String)>)> {
-        let pattern = gen_dir
-            .join(format!("{prefix}_*.wgsl"))
-            .to_string_lossy()
-            .to_string();
-        let mut out = Vec::new();
-        for entry in glob(&pattern).expect("Failed to read per-model kernel glob") {
-            let Ok(path) = entry else { continue };
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+    // The authoritative list is derived from each model's kernel specs; build.rs does not scan
+    // for prefix patterns (avoids adding per-kernel glue here when new modules appear).
+    let mut per_model_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> = Vec::new();
+    for model in solver::model::all_models() {
+        let specs =
+            solver::model::kernel::derive_kernel_specs_for_model(&model).unwrap_or_else(|err| {
+                panic!(
+                    "kernel spec derivation failed for model '{}': {err}",
+                    model.id
+                )
+            });
+
+        let mut seen = std::collections::HashSet::new();
+        for spec in specs {
+            let Some(template) = solver::model::kernel::generated_template_for_kernel_id(spec.id)
+            else {
                 continue;
             };
-            let Some(model_id) = stem.strip_prefix(&format!("{prefix}_")) else {
+            if !template.is_per_model() {
                 continue;
-            };
+            }
+            if !seen.insert(spec.id) {
+                continue;
+            }
+
+            let filename = solver::model::kernel::kernel_output_name_for_model(model.id, spec.id)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to compute output filename for model '{}' kernel '{}': {err}",
+                        model.id,
+                        spec.id.as_str()
+                    )
+                });
+            let path = gen_dir.join(filename);
             let src = fs::read_to_string(&path).unwrap_or_else(|err| {
                 panic!("failed to read generated WGSL '{}': {err}", path.display())
             });
             let bindings = parse_wgsl_bindings(&src);
-            out.push((
-                model_id.to_string(),
-                sanitize_rust_ident(model_id),
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
+            let module_name = sanitize_rust_ident(stem);
+            per_model_entries.push((
+                model.id.to_string(),
+                spec.id.as_str().to_string(),
+                module_name,
                 bindings,
             ));
         }
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out.dedup_by(|a, b| a.0 == b.0);
-        out
     }
 
-    let flux_module_models = discover_per_model_kernel(&gen_dir, "flux_module");
-    let flux_module_gradients_models = discover_per_model_kernel(&gen_dir, "flux_module_gradients");
-    let dp_init_models = discover_per_model_kernel(&gen_dir, "dp_init");
-    let dp_update_from_diag_models = discover_per_model_kernel(&gen_dir, "dp_update_from_diag");
-    let rhie_chow_correct_velocity_models =
-        discover_per_model_kernel(&gen_dir, "rhie_chow_correct_velocity");
+    per_model_entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    per_model_entries.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
 
-    // (KernelKind variant, generated module name, stable KernelId string)
-    let entries: &[(&str, &str, &str)] = &[(
-        "GenericCoupledApply",
-        "generic_coupled_apply",
-        "generic_coupled_apply",
-    )];
+    // Shared generated kernels (global, no model id suffix).
+    let mut shared_entries: Vec<(String, String, Vec<(u32, u32, String)>)> = Vec::new();
+    for &kernel_id in &[solver::model::KernelId::GENERIC_COUPLED_APPLY] {
+        let filename = solver::model::kernel::kernel_output_name_for_model("", kernel_id)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to compute output filename for shared kernel '{}': {err}",
+                    kernel_id.as_str()
+                )
+            });
+        let path = gen_dir.join(filename);
+        let src = fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!("failed to read generated WGSL '{}': {err}", path.display())
+        });
+        let bindings = parse_wgsl_bindings(&src);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
+        let module_name = sanitize_rust_ident(stem);
+        shared_entries.push((kernel_id.as_str().to_string(), module_name, bindings));
+    }
+    shared_entries.sort_by(|a, b| a.0.cmp(&b.0));
+    shared_entries.dedup_by(|a, b| a.0 == b.0);
 
     // (stable KernelId string, bindings module name, compute pipeline ctor function name)
     // These are handwritten WGSL kernels that we want to route through the same registry path.
@@ -712,38 +693,10 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     let mut code = String::new();
     code.push_str("// @generated by build.rs\n");
     code.push_str("// DO NOT EDIT MANUALLY\n\n");
-    code.push_str("use crate::solver::gpu::{bindings, wgsl_meta};\n");
-    code.push_str("use crate::solver::model::KernelKind;\n\n");
+    code.push_str("use crate::solver::gpu::{bindings, wgsl_meta};\n\n");
     code.push_str(
         "pub(crate) type KernelPipelineCtor = fn(&wgpu::Device) -> wgpu::ComputePipeline;\n\n",
     );
-    code.push_str("pub(crate) fn kernel_entry(\n");
-    code.push_str("    kind: KernelKind,\n");
-    code.push_str(") -> Option<(\n");
-    code.push_str("    &'static str,\n");
-    code.push_str("    KernelPipelineCtor,\n");
-    code.push_str("    &'static [crate::solver::gpu::wgsl_reflect::WgslBindingDesc],\n");
-    code.push_str(")> {\n");
-    code.push_str("    match kind {\n");
-
-    for (variant, module, _kernel_id) in entries {
-        let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
-        code.push_str(&format!("        KernelKind::{variant} => Some((\n"));
-        code.push_str(&format!(
-            "            bindings::generated::{module}::SHADER_STRING,\n"
-        ));
-        code.push_str(&format!(
-            "            bindings::generated::{module}::compute::create_main_pipeline_embed_source,\n"
-        ));
-        code.push_str(&format!("            wgsl_meta::{bindings_const},\n"));
-        code.push_str("        )),\n");
-    }
-
-    code.push_str("        _ => None,\n");
-    code.push_str("    }\n");
-    code.push_str("}\n");
-
-    code.push_str("\n");
     code.push_str("pub(crate) fn kernel_entry_by_id(\n");
     code.push_str("    model_id: &str,\n");
     code.push_str("    kernel_id: &str,\n");
@@ -754,48 +707,9 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
     code.push_str(")> {\n");
     code.push_str("    match (model_id, kernel_id) {\n");
 
-    for (model_id, mod_id, assembly_bindings, update_bindings) in &generic_coupled_models {
+    for (model_id, kernel_id, module_name, bindings) in &per_model_entries {
         code.push_str(&format!(
-            "        (\"{model_id}\", \"generic_coupled_assembly\") => {{\n"
-        ));
-        code.push_str("            use crate::solver::gpu::bindings::generated::");
-        code.push_str(&format!("generic_coupled_assembly_{mod_id} as kernel;\n"));
-        code.push_str("            Some((\n");
-        code.push_str("                kernel::SHADER_STRING,\n");
-        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
-        code.push_str("                &[\n");
-        for (group, binding, name) in assembly_bindings {
-            code.push_str(&format!(
-                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
-            ));
-        }
-        code.push_str("                ],\n");
-        code.push_str("            ))\n");
-        code.push_str("        }\n");
-
-        code.push_str(&format!(
-            "        (\"{model_id}\", \"generic_coupled_update\") => {{\n"
-        ));
-        code.push_str("            use crate::solver::gpu::bindings::generated::");
-        code.push_str(&format!("generic_coupled_update_{mod_id} as kernel;\n"));
-        code.push_str("            Some((\n");
-        code.push_str("                kernel::SHADER_STRING,\n");
-        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
-        code.push_str("                &[\n");
-        for (group, binding, name) in update_bindings {
-            code.push_str(&format!(
-                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
-            ));
-        }
-        code.push_str("                ],\n");
-        code.push_str("            ))\n");
-        code.push_str("        }\n");
-    }
-
-    for (model_id, mod_id, bindings) in &flux_module_models {
-        let module_name = format!("flux_module_{mod_id}");
-        code.push_str(&format!(
-            "        (\"{model_id}\", \"flux_module\") => {{\n"
+            "        (\"{model_id}\", \"{kernel_id}\") => {{\n"
         ));
         code.push_str("            use crate::solver::gpu::bindings::generated::");
         code.push_str(&format!("{module_name} as kernel;\n"));
@@ -813,11 +727,8 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         code.push_str("        }\n");
     }
 
-    for (model_id, mod_id, bindings) in &flux_module_gradients_models {
-        let module_name = format!("flux_module_gradients_{mod_id}");
-        code.push_str(&format!(
-            "        (\"{model_id}\", \"flux_module_gradients\") => {{\n"
-        ));
+    for (kernel_id, module_name, bindings) in &shared_entries {
+        code.push_str(&format!("        (_, \"{kernel_id}\") => {{\n"));
         code.push_str("            use crate::solver::gpu::bindings::generated::");
         code.push_str(&format!("{module_name} as kernel;\n"));
         code.push_str("            Some((\n");
@@ -832,80 +743,6 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
         code.push_str("                ],\n");
         code.push_str("            ))\n");
         code.push_str("        }\n");
-    }
-
-    for (model_id, mod_id, bindings) in &dp_init_models {
-        let module_name = format!("dp_init_{mod_id}");
-        code.push_str(&format!("        (\"{model_id}\", \"dp_init\") => {{\n"));
-        code.push_str("            use crate::solver::gpu::bindings::generated::");
-        code.push_str(&format!("{module_name} as kernel;\n"));
-        code.push_str("            Some((\n");
-        code.push_str("                kernel::SHADER_STRING,\n");
-        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
-        code.push_str("                &[\n");
-        for (group, binding, name) in bindings {
-            code.push_str(&format!(
-                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
-            ));
-        }
-        code.push_str("                ],\n");
-        code.push_str("            ))\n");
-        code.push_str("        }\n");
-    }
-
-    for (model_id, mod_id, bindings) in &dp_update_from_diag_models {
-        let module_name = format!("dp_update_from_diag_{mod_id}");
-        code.push_str(&format!(
-            "        (\"{model_id}\", \"dp_update_from_diag\") => {{\n"
-        ));
-        code.push_str("            use crate::solver::gpu::bindings::generated::");
-        code.push_str(&format!("{module_name} as kernel;\n"));
-        code.push_str("            Some((\n");
-        code.push_str("                kernel::SHADER_STRING,\n");
-        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
-        code.push_str("                &[\n");
-        for (group, binding, name) in bindings {
-            code.push_str(&format!(
-                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
-            ));
-        }
-        code.push_str("                ],\n");
-        code.push_str("            ))\n");
-        code.push_str("        }\n");
-    }
-
-    for (model_id, mod_id, bindings) in &rhie_chow_correct_velocity_models {
-        let module_name = format!("rhie_chow_correct_velocity_{mod_id}");
-        code.push_str(&format!(
-            "        (\"{model_id}\", \"rhie_chow/correct_velocity\") => {{\n"
-        ));
-        code.push_str("            use crate::solver::gpu::bindings::generated::");
-        code.push_str(&format!("{module_name} as kernel;\n"));
-        code.push_str("            Some((\n");
-        code.push_str("                kernel::SHADER_STRING,\n");
-        code.push_str("                kernel::compute::create_main_pipeline_embed_source,\n");
-        code.push_str("                &[\n");
-        for (group, binding, name) in bindings {
-            code.push_str(&format!(
-                "                    crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
-            ));
-        }
-        code.push_str("                ],\n");
-        code.push_str("            ))\n");
-        code.push_str("        }\n");
-    }
-
-    for (_variant, module, kernel_id) in entries {
-        let bindings_const = format!("{}_BINDINGS", module.to_ascii_uppercase());
-        code.push_str(&format!("        (_, \"{kernel_id}\") => Some((\n"));
-        code.push_str(&format!(
-            "            bindings::generated::{module}::SHADER_STRING,\n"
-        ));
-        code.push_str(&format!(
-            "            bindings::generated::{module}::compute::create_main_pipeline_embed_source,\n"
-        ));
-        code.push_str(&format!("            wgsl_meta::{bindings_const},\n"));
-        code.push_str("        )),\n");
     }
 
     for (kernel_id, module, ctor) in id_only_entries {

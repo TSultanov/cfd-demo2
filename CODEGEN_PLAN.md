@@ -50,6 +50,34 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
+### 0) Factor per-model “kernels” into pluggable model-defined modules
+We recently added additional **per-model generated kernels** (e.g. `dp_update_from_diag_*`, `rhie_chow_correct_velocity_*`) as first steps towards better Rhie–Chow behavior.
+
+Those kernels *should not* become permanent solver-core concepts. In the target architecture:
+- The solver core is **model-agnostic** and does not grow new kernel kinds/IDs whenever a numerical method needs an extra pass.
+- Models/methods provide **pluggable modules** (small kernel bundles) that can be composed into a recipe.
+- `build.rs` does **not** need per-prefix/per-kernel glue to discover “special” per-model WGSL files.
+
+Target:
+- Replace the ad-hoc “KernelKind grows forever” pattern with a **module interface**:
+  - A module declares a set of `ModelKernelSpec { id, phase, dispatch }` entries.
+  - A module declares (or can emit) its WGSL kernels + binding metadata.
+  - The unified solver runs *modules*; it does not interpret “Rhie–Chow” or “d_p” directly.
+- Models select and configure modules (or a method selects modules) via `ModelSpec` (or a derived recipe), e.g.:
+  - `flux_module` (KT, Rhie–Chow, …)
+  - `aux_field_updates` (e.g. `d_p <- momentum_diag`)
+  - `corrections` (e.g. `U <- U - d_p * grad(p)`), if still needed
+- Eliminate `build.rs` per-kernel discovery by generating a **kernel manifest** at build time:
+  - A single generated table of `(model_id, kernel_id) -> { wgsl, bindings, pipeline_ctor }`
+  - Populated from the *model-derived module list*, not from hardcoded filename prefixes.
+
+Done when:
+- Adding a new numerical “module” does **not** require editing:
+  - `src/solver/model/kernel.rs` (no new `KernelKind` variants),
+  - `build.rs` (no new per-prefix discovery code),
+  - central kernel registries/matches in runtime.
+- Module composition (order/phase/dispatch) is emitted by `(ModelSpec + method selection + runtime config)` and validated by contract tests.
+
 ### 1) Flux Modules (boundary + reconstruction + method knobs)
 - Flux kernels are now IR-driven, but boundary handling is still incomplete: flux modules need to consume the same boundary condition tables (`bc_kind`/`bc_value`) that assembly uses so Dirichlet/Neumann boundaries affect fluxes (not just zero-gradient extrapolation).
 - Add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
@@ -86,6 +114,7 @@ Target:
   - `cargo test openfoam_ -- --nocapture`
 - If a change intentionally alters the reference target, regenerate the datasets and re-run:
   - `bash scripts/regenerate_openfoam_reference_data.sh`
+ - Treat these tests as a **validation gate** during solver unification work (especially when reshaping kernel/module orchestration).
 
 ## Recommended Sequence (high leverage)
 1) Make `UnifiedSolver` surface model-agnostic (remove solver-core physics assumptions; push helpers into model-side code).

@@ -3,7 +3,6 @@ use super::backend::ast::{
     FieldRef, FluxRef,
 };
 use super::backend::state_layout::StateLayout;
-use super::kernel::KernelPlan;
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::gpu_spec::{FluxSpec, GradientStorage, ModelGpuSpec};
 use crate::solver::units::{si, UnitDim};
@@ -74,10 +73,6 @@ impl ModelSpec {
             gradient_storage,
             required_gradient_fields,
         }
-    }
-
-    pub fn kernel_plan(&self) -> KernelPlan {
-        super::kernel::derive_kernel_plan_for_model(self)
     }
 }
 
@@ -1031,7 +1026,8 @@ pub fn all_models() -> Vec<ModelSpec> {
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::TermOp;
-    use crate::solver::model::KernelKind;
+    use crate::solver::model::kernel::derive_kernel_specs_for_model;
+    use crate::solver::model::KernelId;
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {
@@ -1070,13 +1066,15 @@ mod tests {
         assert_eq!(model.state_layout.offset_for("p"), Some(2));
         assert_eq!(model.state_layout.stride(), 8);
         assert_eq!(model.system.equations().len(), 2);
-        assert!(model.kernel_plan().contains(KernelKind::FluxModule));
-        assert!(model
-            .kernel_plan()
-            .contains(KernelKind::GenericCoupledAssembly));
-        assert!(model
-            .kernel_plan()
-            .contains(KernelKind::GenericCoupledUpdate));
+
+        let kernel_ids: Vec<_> = derive_kernel_specs_for_model(&model)
+            .expect("kernel specs")
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert!(kernel_ids.contains(&KernelId::FLUX_MODULE));
+        assert!(kernel_ids.contains(&KernelId::GENERIC_COUPLED_ASSEMBLY));
+        assert!(kernel_ids.contains(&KernelId::GENERIC_COUPLED_UPDATE));
     }
 
     #[test]
@@ -1087,13 +1085,14 @@ mod tests {
         assert_eq!(model.system.equations()[2].terms().len(), 2);
 
         // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.
-        assert!(model.kernel_plan().contains(KernelKind::FluxModule));
-        assert!(model
-            .kernel_plan()
-            .contains(KernelKind::GenericCoupledAssembly));
-        assert!(model
-            .kernel_plan()
-            .contains(KernelKind::GenericCoupledUpdate));
+        let kernel_ids: Vec<_> = derive_kernel_specs_for_model(&model)
+            .expect("kernel specs")
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        assert!(kernel_ids.contains(&KernelId::FLUX_MODULE));
+        assert!(kernel_ids.contains(&KernelId::GENERIC_COUPLED_ASSEMBLY));
+        assert!(kernel_ids.contains(&KernelId::GENERIC_COUPLED_UPDATE));
     }
 
     #[test]

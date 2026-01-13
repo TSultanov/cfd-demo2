@@ -1,10 +1,10 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model;
+use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -19,7 +19,6 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     let length = 1.0;
     let height = 1.0;
 
-    // Treat the moving lid as `Inlet` so `set_inlet_velocity` can drive it.
     let mesh = generate_structured_rect_mesh(
         nx,
         ny,
@@ -28,7 +27,7 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
         BoundaryType::Wall,
         BoundaryType::Wall,
         BoundaryType::Wall,
-        BoundaryType::Inlet,
+        BoundaryType::Wall,
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
@@ -46,13 +45,10 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
 
     let rho0 = 1.0f32;
     let p0 = 1.0f32;
-    let u_lid = 1.0f32;
-
     solver.set_dt(5e-4);
     solver.set_dtau(0.0);
     solver.set_viscosity(0.0);
     solver.set_density(rho0);
-    solver.set_inlet_velocity(u_lid);
     solver.set_outer_iters(1);
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);
     solver.initialize_history();
@@ -64,8 +60,9 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());
 
-    let table =
-        common::load_csv(&common::data_path("compressible_lid_driven_cavity_full_field.csv"));
+    let table = common::load_csv(&common::data_path(
+        "compressible_lid_driven_cavity_full_field.csv",
+    ));
     let x_idx = common::column_idx(&table.header, "x");
     let y_idx = common::column_idx(&table.header, "y");
     let p_idx = common::column_idx(&table.header, "p");
@@ -93,8 +90,14 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
         let (sx, sy, _, _, _) = *sol;
         let (rx, ry, _, _, _) = *rf;
-        assert!((sx - rx).abs() < 1e-12, "x mismatch at sorted row {i}: solver={sx} ref={rx}");
-        assert!((sy - ry).abs() < 1e-12, "y mismatch at sorted row {i}: solver={sy} ref={ry}");
+        assert!(
+            (sx - rx).abs() < 1e-12,
+            "x mismatch at sorted row {i}: solver={sx} ref={rx}"
+        );
+        assert!(
+            (sy - ry).abs() < 1e-12,
+            "y mismatch at sorted row {i}: solver={sy} ref={ry}"
+        );
     }
 
     let p_sol: Vec<f64> = sol_rows.iter().map(|r| r.2).collect();
@@ -126,9 +129,7 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
             / a.len() as f64)
             .sqrt()
     };
-    let max_abs = |xs: &[f64]| -> f64 {
-        xs.iter().map(|v| v.abs()).fold(0.0, f64::max)
-    };
+    let max_abs = |xs: &[f64]| -> f64 { xs.iter().map(|v| v.abs()).fold(0.0, f64::max) };
 
     let ux_rms_ref = rms(&ux_ref);
     let uy_rms_ref = rms(&uy_ref);

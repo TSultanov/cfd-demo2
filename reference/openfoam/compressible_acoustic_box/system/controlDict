@@ -19,9 +19,9 @@ startFrom       startTime;
 startTime       0;
 
 stopAt          endTime;
-endTime         0.05;
+endTime         1.7e-4;
 
-deltaT          5e-4;
+deltaT          1.7e-6;
 
 writeControl    timeStep;
 writeInterval   100;

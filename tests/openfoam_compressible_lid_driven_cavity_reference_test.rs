@@ -2,7 +2,8 @@
 mod common;
 
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
-use cfd2::solver::model::compressible_model;
+use cfd2::solver::model::compressible_model_with_eos;
+use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
@@ -33,7 +34,11 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model_with_eos(EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        }),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
@@ -44,11 +49,19 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     ))
     .expect("solver init");
 
-    let rho0 = 1.0f32;
-    let p0 = 1.0f32;
-    solver.set_dt(5e-4);
+    let eos = EosSpec::IdealGas {
+        gamma: 1.4,
+        gas_constant: 287.0,
+        temperature: 300.0,
+    };
+    solver.set_eos(&eos).unwrap();
+
+    let p0 = 101325.0f32;
+    let rho0 = (p0 as f64 / (287.0 * 300.0)) as f32;
+
+    solver.set_dt(1e-6);
     solver.set_dtau(0.0).unwrap();
-    solver.set_viscosity(0.0).unwrap();
+    solver.set_viscosity(1.81e-5).unwrap();
     solver.set_density(rho0).unwrap();
     solver.set_outer_iters(1).unwrap();
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);

@@ -29,19 +29,19 @@ mixture
 {
     specie
     {
-        // Choose molWeight so that R_specific = RR/molWeight ≈ 1.
-        molWeight       8314.462618;
+        // Air: molar mass ~28.97 kg/kmol -> R_specific = RR/molWeight ≈ 287 J/(kg K).
+        molWeight       28.97;
     }
     thermodynamics
     {
-        // Cp such that gamma = Cp/(Cp - R) = 1.4 when R ≈ 1.
-        Cp              3.5;
+        // Air (ideal gas): Cp ≈ 1004.5 J/(kg K) for gamma=1.4 at ~300K.
+        Cp              1004.5;
         Hf              0;
     }
     transport
     {
-        mu              0;
-        Pr              1;
+        // Dynamic viscosity mu [kg/(m s)].
+        mu              1.81e-5;
+        Pr              0.71;
     }
 }
-

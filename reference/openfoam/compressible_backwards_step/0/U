@@ -16,14 +16,15 @@ FoamFile
 
 dimensions      [0 1 -1 0 0 0 0];
 
-internalField   uniform (1 0 0);
+// Use a moderate Mach number so rhoCentralFoam remains well-conditioned.
+internalField   uniform (300 0 0);
 
 boundaryField
 {
     inlet
     {
         type            fixedValue;
-        value           uniform (1 0 0);
+        value           uniform (300 0 0);
     }
     outlet
     {
@@ -39,4 +40,3 @@ boundaryField
         type            empty;
     }
 }
-

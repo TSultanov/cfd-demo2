@@ -38,11 +38,10 @@ boundaryField
     lid
     {
         type            fixedValue;
-        value           uniform (1 0 0);
+        value           uniform (300 0 0);
     }
     frontAndBack
     {
         type            empty;
     }
 }
-

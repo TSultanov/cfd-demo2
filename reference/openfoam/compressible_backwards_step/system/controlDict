@@ -19,9 +19,9 @@ startFrom       startTime;
 startTime       0;
 
 stopAt          endTime;
-endTime         0.1;
+endTime         4e-4;
 
-deltaT          5e-4;
+deltaT          2e-6;
 
 writeControl    timeStep;
 writeInterval   200;
@@ -45,4 +45,3 @@ functions
         #include "probes_all.cfg"
     }
 }
-

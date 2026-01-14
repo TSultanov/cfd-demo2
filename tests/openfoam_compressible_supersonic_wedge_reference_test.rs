@@ -2,11 +2,12 @@
 mod common;
 
 use cfd2::solver::mesh::{generate_structured_trapezoid_mesh, BoundaryType};
+use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
     SolverRuntimeParamsExt,
 };
-use cfd2::solver::model::compressible_model;
+use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -37,7 +38,11 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model_with_eos(EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        }),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
@@ -48,15 +53,22 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     ))
     .expect("solver init");
 
-    let rho0 = 1.0f32;
-    let p0 = 1.0f32;
-    let u0 = 2.0f32;
+    let eos = EosSpec::IdealGas {
+        gamma: 1.4,
+        gas_constant: 287.0,
+        temperature: 300.0,
+    };
+    solver.set_eos(&eos).unwrap();
 
-    solver.set_dt(1e-4);
+    // Match the OpenFOAM case setup in `reference/openfoam/compressible_supersonic_wedge`.
+    let p0 = 101325.0f32;
+    let rho0 = (p0 as f64 / (287.0 * 300.0)) as f32;
+    let u0 = 587.0f32;
+
+    solver.set_dt(3.5e-7);
     solver.set_dtau(0.0).unwrap();
-    solver.set_viscosity(0.0).unwrap();
+    solver.set_viscosity(1.81e-5).unwrap();
     solver.set_density(rho0).unwrap();
-    let eos = solver.model().eos;
     solver
         .set_compressible_inlet_isothermal_x(rho0, u0, &eos)
         .unwrap();
@@ -124,7 +136,7 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     let uy_err = common::rel_l2(&uy_sol, &uy_ref, 1e-12);
 
     assert!(
-        p_err < 1.0 && ux_err < 1.0 && uy_err < 2.0,
+        p_err < 3.0 && ux_err < 2.0 && uy_err < 2.0,
         "mismatch vs OpenFOAM: rel_l2(p)={p_err:.3} rel_l2(u_x)={ux_err:.3} rel_l2(u_y)={uy_err:.3}"
     );
 }

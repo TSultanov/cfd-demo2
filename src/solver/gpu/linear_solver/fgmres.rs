@@ -1655,14 +1655,17 @@ pub fn read_scalar(core: &FgmresCore<'_>) -> f32 {
             label: Some("FGMRES read scalar"),
         });
     encoder.copy_buffer_to_buffer(core.b_scalars, 0, core.b_staging_scalar, 0, 4);
-    core.queue.submit(Some(encoder.finish()));
+    let submission_index = core.queue.submit(Some(encoder.finish()));
 
     let slice = core.b_staging_scalar.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |v| {
         let _ = tx.send(v);
     });
-    let _ = core.device.poll(wgpu::PollType::wait_indefinitely());
+    let _ = core.device.poll(wgpu::PollType::Wait {
+        submission_index: Some(submission_index),
+        timeout: None,
+    });
     rx.recv().ok().and_then(|v| v.ok()).unwrap();
 
     let data = slice.get_mapped_range();

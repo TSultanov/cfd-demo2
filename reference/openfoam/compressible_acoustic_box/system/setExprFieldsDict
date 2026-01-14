@@ -18,9 +18,9 @@ readFields      ( p );
 _p_init
 {
     // p(x) = p0 * (1 + eps * cos(pi * x / L))
-    // For this case p0=1 and L=1.
+    // For this case p0=101325 Pa and L=1 m.
     variables   ( "eps=1e-3" );
-    expression  #{ 1.0*(1.0 + eps*cos(3.141592653589793*pos().x()/1.0)) #};
+    expression  #{ 101325.0*(1.0 + eps*cos(3.141592653589793*pos().x()/1.0)) #};
     dimensions  [1 -1 -2 0 0 0 0];
 }
 

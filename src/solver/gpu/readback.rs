@@ -57,7 +57,7 @@ pub async fn read_buffer_cached(
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
-    context.queue.submit(Some(encoder.finish()));
+    let submission_index = context.queue.submit(Some(encoder.finish()));
     profiling.record_location(
         "read_buffer:submit_copy",
         ProfileCategory::GpuDispatch,
@@ -77,7 +77,10 @@ pub async fn read_buffer_cached(
     );
 
     let t3 = Instant::now();
-    let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
+    let _ = context.device.poll(wgpu::PollType::Wait {
+        submission_index: Some(submission_index),
+        timeout: None,
+    });
     profiling.record_location(
         "read_buffer:device_poll_wait",
         ProfileCategory::GpuSync,

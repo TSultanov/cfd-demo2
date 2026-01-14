@@ -380,12 +380,15 @@ impl ScalarCgModule {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_buffer_to_buffer(&self.b_scalars, 0, &self.b_staging_scalar, 0, 64);
-        context.queue.submit(Some(encoder.finish()));
+        let submission_index = context.queue.submit(Some(encoder.finish()));
 
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-        let _ = context.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = context.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission_index),
+            timeout: None,
+        });
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
         let values: &[f32] = bytemuck::cast_slice(&data);

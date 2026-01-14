@@ -106,7 +106,8 @@ Target:
 Progress (transitional):
 - Added a string-keyed “named parameter” path (`GpuProgramPlan::set_named_param`) so new runtime knobs can be introduced without growing global enums.
 - Removed the `PlanParam` enum and the `set_param` path; all runtime knobs now route through named parameters.
-- Next step: replace the universal string-key match with module-declared parameter tables (no global “known keys” list).
+- Removed the universal string-key match; lowering registers named-parameter handlers in the plan spec.
+- Next step: move this registration into module-declared parameter tables (no global “known keys” list).
 
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).

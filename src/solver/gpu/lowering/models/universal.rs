@@ -3,11 +3,12 @@ use crate::solver::gpu::lowering::models::generic_coupled as generic_coupled_mod
 use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::plans::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats,
+    PlanFuture, PlanLinearSystemDebug, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry, ProgramParamHandler};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::LinearSolverStats;
+use std::collections::HashMap;
 
 // --- Single universal program resource ---
 
@@ -138,6 +139,41 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
     registry.merge(built)
 }
 
+pub(in crate::solver::gpu::lowering) fn named_params_for_recipe(
+    _recipe: &SolverRecipe,
+) -> HashMap<&'static str, ProgramParamHandler> {
+    let mut params: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
+    params.insert("dt", generic_coupled_model::param_dt);
+    params.insert("dtau", generic_coupled_model::param_dtau);
+    params.insert("advection_scheme", generic_coupled_model::param_advection_scheme);
+    params.insert("time_scheme", generic_coupled_model::param_time_scheme);
+    params.insert("preconditioner", generic_coupled_model::param_preconditioner);
+    params.insert("viscosity", generic_coupled_model::param_viscosity);
+    params.insert("density", generic_coupled_model::param_density);
+    params.insert("eos.gamma", generic_coupled_model::param_eos_gamma);
+    params.insert("eos.gm1", generic_coupled_model::param_eos_gm1);
+    params.insert("eos.r", generic_coupled_model::param_eos_r);
+    params.insert("eos.dp_drho", generic_coupled_model::param_eos_dp_drho);
+    params.insert("eos.p_offset", generic_coupled_model::param_eos_p_offset);
+    params.insert("eos.theta_ref", generic_coupled_model::param_eos_theta_ref);
+    params.insert("alpha_u", generic_coupled_model::param_alpha_u);
+    params.insert("alpha_p", generic_coupled_model::param_alpha_p);
+    params.insert("inlet_velocity", generic_coupled_model::param_inlet_velocity);
+    params.insert("ramp_time", generic_coupled_model::param_ramp_time);
+    params.insert("low_mach.model", generic_coupled_model::param_low_mach_model);
+    params.insert(
+        "low_mach.theta_floor",
+        generic_coupled_model::param_low_mach_theta_floor,
+    );
+    params.insert("nonconverged_relax", generic_coupled_model::param_nonconverged_relax);
+    params.insert("outer_iters", generic_coupled_model::param_outer_iters);
+    params.insert(
+        "detailed_profiling_enabled",
+        generic_coupled_model::param_detailed_profiling,
+    );
+    params
+}
+
 // --- Universal program spec callbacks ---
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
@@ -169,40 +205,6 @@ pub(in crate::solver::gpu::lowering) fn init_history(_plan: &GpuProgramPlan) {
 
 pub(in crate::solver::gpu::lowering) fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {
     PlanStepStats::default()
-}
-
-pub(in crate::solver::gpu::lowering) fn set_named_param_fallback(
-    plan: &mut GpuProgramPlan,
-    name: &str,
-    value: PlanParamValue,
-) -> Result<(), String> {
-    match name {
-        "dt" => generic_coupled_model::param_dt(plan, value),
-        "dtau" => generic_coupled_model::param_dtau(plan, value),
-        "advection_scheme" => generic_coupled_model::param_advection_scheme(plan, value),
-        "time_scheme" => generic_coupled_model::param_time_scheme(plan, value),
-        "preconditioner" => generic_coupled_model::param_preconditioner(plan, value),
-        "viscosity" => generic_coupled_model::param_viscosity(plan, value),
-        "density" => generic_coupled_model::param_density(plan, value),
-        "eos.gamma" => generic_coupled_model::param_eos_gamma(plan, value),
-        "eos.gm1" => generic_coupled_model::param_eos_gm1(plan, value),
-        "eos.r" => generic_coupled_model::param_eos_r(plan, value),
-        "eos.dp_drho" => generic_coupled_model::param_eos_dp_drho(plan, value),
-        "eos.p_offset" => generic_coupled_model::param_eos_p_offset(plan, value),
-        "eos.theta_ref" => generic_coupled_model::param_eos_theta_ref(plan, value),
-        "alpha_u" => generic_coupled_model::param_alpha_u(plan, value),
-        "alpha_p" => generic_coupled_model::param_alpha_p(plan, value),
-        "inlet_velocity" => generic_coupled_model::param_inlet_velocity(plan, value),
-        "ramp_time" => generic_coupled_model::param_ramp_time(plan, value),
-        "low_mach.model" => generic_coupled_model::param_low_mach_model(plan, value),
-        "low_mach.theta_floor" => generic_coupled_model::param_low_mach_theta_floor(plan, value),
-        "nonconverged_relax" => generic_coupled_model::param_nonconverged_relax(plan, value),
-        "outer_iters" => generic_coupled_model::param_outer_iters(plan, value),
-        "detailed_profiling_enabled" => generic_coupled_model::param_detailed_profiling(plan, value),
-        _ => Err(format!(
-            "unknown named parameter '{name}'; known: dt, dtau, advection_scheme, time_scheme, preconditioner, viscosity, density, eos.gamma, eos.gm1, eos.r, eos.dp_drho, eos.p_offset, eos.theta_ref, alpha_u, alpha_p, inlet_velocity, ramp_time, low_mach.model, low_mach.theta_floor, nonconverged_relax, outer_iters, detailed_profiling_enabled"
-        )),
-    }
 }
 
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(

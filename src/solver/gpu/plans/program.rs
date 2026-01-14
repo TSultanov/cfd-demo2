@@ -465,14 +465,24 @@ impl GpuProgramPlan {
         }
     }
 
-    pub fn set_supported_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {
+    pub fn set_supported_named_param(
+        &mut self,
+        name: &str,
+        value: PlanParamValue,
+    ) -> Result<(), String> {
         if let Some(handler) = self.spec.named_params.get(name).copied() {
             return handler(self, value);
         }
         if let Some(fallback) = self.spec.set_named_param_fallback {
             return fallback(self, name, value);
         }
-        Err("named parameter is not supported by this plan".into())
+        let mut known: Vec<&str> = self.spec.named_params.keys().copied().collect();
+        known.sort_unstable();
+        Err(if known.is_empty() {
+            format!("unknown named parameter '{name}'")
+        } else {
+            format!("unknown named parameter '{name}'; known: {}", known.join(", "))
+        })
     }
 
     pub fn num_cells(&self) -> u32 {

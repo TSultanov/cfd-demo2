@@ -3,7 +3,6 @@ use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
-use std::collections::HashMap;
 
 use super::models;
 use super::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
@@ -152,8 +151,8 @@ async fn lower_parts_for_model(
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     initialize_history: None,
-                    named_params: HashMap::new(),
-                    set_named_param_fallback: Some(models::universal::set_named_param_fallback),
+                    named_params: models::universal::named_params_for_recipe(&recipe),
+                    set_named_param_fallback: None,
                     step_stats: Some(models::universal::step_stats),
                     step_with_stats: None,
                     linear_debug: Some(models::universal::linear_debug_provider),
@@ -191,8 +190,8 @@ async fn lower_parts_for_model(
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     initialize_history: None,
-                    named_params: HashMap::new(),
-                    set_named_param_fallback: Some(models::universal::set_named_param_fallback),
+                    named_params: models::universal::named_params_for_recipe(&recipe),
+                    set_named_param_fallback: None,
                     step_stats: Some(models::universal::step_stats),
                     step_with_stats: None,
                     linear_debug: Some(models::universal::linear_debug_provider),
@@ -230,8 +229,8 @@ async fn lower_parts_for_model(
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     initialize_history: None,
-                    named_params: HashMap::new(),
-                    set_named_param_fallback: Some(models::universal::set_named_param_fallback),
+                    named_params: models::universal::named_params_for_recipe(&recipe),
+                    set_named_param_fallback: None,
                     step_stats: Some(models::universal::step_stats),
                     step_with_stats: None,
                     linear_debug: Some(models::universal::linear_debug_provider),

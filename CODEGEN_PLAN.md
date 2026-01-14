@@ -92,7 +92,7 @@ Progress (partial):
 Current `GpuUnifiedSolver` (`src/solver/gpu/unified_solver.rs`) still contains model-specific assumptions:
 - Field-name heuristics (`U/u`, `rho`, etc.) and convenience accessors (`get_u/get_p/get_rho`) baked into the core type.
 - Hard-coded thermodynamics (`gamma=1.4`) in `set_uniform_state` / `set_state_fields`.
-- Family/model-specific controls and naming (`set_incompressible_outer_correctors`, `set_inlet_velocity`, etc.) wired through global `PlanParam`.
+- Family/model-specific controls and naming (`set_incompressible_outer_correctors`, `set_inlet_velocity`, etc.) wired through global named-parameter keys (stringly-typed).
 
 Target:
 - Core solver exposes only generic operations: `set_param(id, value)`, `set_field(name, values)`, `step()`, `read_state()`, etc.
@@ -100,12 +100,13 @@ Target:
 - Boundary driving (e.g. inlet velocity) is described declaratively by the model (or recipe), not by ad-hoc host-side special-casing.
 
 ### 3) Retire `PlanParam` as global plumbing
-- Replace `PlanParam` with typed, module-owned uniforms/config deltas routed through the recipe (or a model-declared parameter table).
-- Done when: new configuration does not add `PlanParam` enum cases, and common runtime controls are described by model/method metadata instead of a global enum.
+- Replace global param plumbing with typed, module-owned uniforms/config deltas routed through the recipe (or a model-declared parameter table).
+- Done when: new configuration does not add new “known key” entries to a universal string match, and runtime controls are described by model/method metadata instead of global plumbing.
 
 Progress (transitional):
-- Added a string-keyed “named parameter” path (`GpuProgramPlan::set_named_param`) so new runtime knobs can be introduced without growing the global `PlanParam` enum.
-- Current universal fallback maps a small set of names onto existing `PlanParam` handlers; next step is to move these knobs into module-owned parameter tables and delete the global enum plumbing.
+- Added a string-keyed “named parameter” path (`GpuProgramPlan::set_named_param`) so new runtime knobs can be introduced without growing global enums.
+- Removed the `PlanParam` enum and the `set_param` path; all runtime knobs now route through named parameters.
+- Next step: replace the universal string-key match with module-declared parameter tables (no global “known keys” list).
 
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).

@@ -1,4 +1,4 @@
-use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParam, PlanParamValue};
+use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
@@ -39,19 +39,16 @@ pub(crate) async fn lower_program_model_driven(
         spec,
     );
 
-    plan.set_param(
-        PlanParam::AdvectionScheme,
+    plan.set_named_param(
+        "advection_scheme",
         PlanParamValue::Scheme(config.advection_scheme),
     )?;
-    plan.set_param(
-        PlanParam::TimeScheme,
-        PlanParamValue::TimeScheme(config.time_scheme),
-    )?;
+    plan.set_named_param("time_scheme", PlanParamValue::TimeScheme(config.time_scheme))?;
 
     // If the model owns the preconditioner choice, do not allow runtime/config overrides.
     if should_set_preconditioner_param(model) {
-        plan.set_param(
-            PlanParam::Preconditioner,
+        plan.set_named_param(
+            "preconditioner",
             PlanParamValue::Preconditioner(config.preconditioner),
         )?;
     }
@@ -155,8 +152,6 @@ async fn lower_parts_for_model(
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     initialize_history: None,
-                    params: HashMap::new(),
-                    set_param_fallback: Some(models::universal::set_param_fallback),
                     named_params: HashMap::new(),
                     set_named_param_fallback: Some(models::universal::set_named_param_fallback),
                     step_stats: Some(models::universal::step_stats),
@@ -196,8 +191,6 @@ async fn lower_parts_for_model(
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     initialize_history: None,
-                    params: HashMap::new(),
-                    set_param_fallback: Some(models::universal::set_param_fallback),
                     named_params: HashMap::new(),
                     set_named_param_fallback: Some(models::universal::set_named_param_fallback),
                     step_stats: Some(models::universal::step_stats),
@@ -237,8 +230,6 @@ async fn lower_parts_for_model(
                     state_buffer: models::universal::spec_state_buffer,
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     initialize_history: None,
-                    params: HashMap::new(),
-                    set_param_fallback: Some(models::universal::set_param_fallback),
                     named_params: HashMap::new(),
                     set_named_param_fallback: Some(models::universal::set_named_param_fallback),
                     step_stats: Some(models::universal::step_stats),

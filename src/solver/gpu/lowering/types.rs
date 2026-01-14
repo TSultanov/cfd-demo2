@@ -1,9 +1,8 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::plans::plan_instance::PlanParam;
 use crate::solver::gpu::plans::program::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
     ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources,
-    ProgramSetNamedParamFallback, ProgramSetParamFallback, ProgramSpec, ProgramStateBufferFn,
+    ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn,
     ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
 };
 use crate::solver::gpu::profiling::ProfilingStats;
@@ -19,8 +18,6 @@ pub(crate) struct ModelGpuProgramSpecParts {
     pub state_buffer: ProgramStateBufferFn,
     pub write_state_bytes: ProgramWriteStateFn,
     pub initialize_history: Option<ProgramInitRun>,
-    pub params: HashMap<PlanParam, ProgramParamHandler>,
-    pub set_param_fallback: Option<ProgramSetParamFallback>,
     pub named_params: HashMap<&'static str, ProgramParamHandler>,
     pub set_named_param_fallback: Option<ProgramSetNamedParamFallback>,
     pub step_stats: Option<ProgramStepStatsFn>,
@@ -41,8 +38,6 @@ impl ModelGpuProgramSpecParts {
             write_state_bytes: self.write_state_bytes,
             program,
             initialize_history: self.initialize_history,
-            params: self.params,
-            set_param_fallback: self.set_param_fallback,
             named_params: self.named_params,
             set_named_param_fallback: self.set_named_param_fallback,
             step_stats: self.step_stats,

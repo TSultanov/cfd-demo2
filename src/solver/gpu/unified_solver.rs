@@ -1,7 +1,7 @@
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::plans::build_plan_instance;
 use crate::solver::gpu::plans::plan_instance::{
-    PlanAction, PlanInitConfig, PlanParam, PlanParamValue, PlanStepStats,
+    PlanAction, PlanInitConfig, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::GpuProgramPlan;
 use crate::solver::gpu::profiling::ProfilingStats;
@@ -97,14 +97,6 @@ impl GpuUnifiedSolver {
 
     pub fn state_buffer(&self) -> &wgpu::Buffer {
         self.plan.state_buffer()
-    }
-
-    pub(crate) fn set_plan_param(
-        &mut self,
-        param: PlanParam,
-        value: PlanParamValue,
-    ) -> Result<(), String> {
-        self.plan.set_param(param, value)
     }
 
     pub(crate) fn set_plan_named_param(

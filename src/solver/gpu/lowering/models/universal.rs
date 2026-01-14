@@ -3,7 +3,7 @@ use crate::solver::gpu::lowering::models::generic_coupled as generic_coupled_mod
 use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::plans::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug, PlanParam, PlanParamValue, PlanStepStats,
+    PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
@@ -169,14 +169,6 @@ pub(in crate::solver::gpu::lowering) fn init_history(_plan: &GpuProgramPlan) {
 
 pub(in crate::solver::gpu::lowering) fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {
     PlanStepStats::default()
-}
-
-pub(in crate::solver::gpu::lowering) fn set_param_fallback(
-    plan: &mut GpuProgramPlan,
-    param: PlanParam,
-    value: PlanParamValue,
-) -> Result<(), String> {
-    set_param_fallback_generic_coupled(plan, param, value)
 }
 
 pub(in crate::solver::gpu::lowering) fn set_named_param_fallback(
@@ -351,36 +343,4 @@ fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
     generic_coupled_model::host_finalize_step(plan);
-}
-
-fn set_param_fallback_generic_coupled(
-    plan: &mut GpuProgramPlan,
-    param: PlanParam,
-    value: PlanParamValue,
-) -> Result<(), String> {
-    match param {
-        PlanParam::Dt => generic_coupled_model::param_dt(plan, value),
-        PlanParam::Dtau => generic_coupled_model::param_dtau(plan, value),
-        PlanParam::AdvectionScheme => generic_coupled_model::param_advection_scheme(plan, value),
-        PlanParam::TimeScheme => generic_coupled_model::param_time_scheme(plan, value),
-        PlanParam::Preconditioner => generic_coupled_model::param_preconditioner(plan, value),
-        PlanParam::Viscosity => generic_coupled_model::param_viscosity(plan, value),
-        PlanParam::Density => generic_coupled_model::param_density(plan, value),
-        PlanParam::AlphaU => generic_coupled_model::param_alpha_u(plan, value),
-        PlanParam::AlphaP => generic_coupled_model::param_alpha_p(plan, value),
-        PlanParam::InletVelocity => generic_coupled_model::param_inlet_velocity(plan, value),
-        PlanParam::RampTime => generic_coupled_model::param_ramp_time(plan, value),
-        PlanParam::LowMachModel => generic_coupled_model::param_low_mach_model(plan, value),
-        PlanParam::LowMachThetaFloor => {
-            generic_coupled_model::param_low_mach_theta_floor(plan, value)
-        }
-        PlanParam::NonconvergedRelax => {
-            generic_coupled_model::param_nonconverged_relax(plan, value)
-        }
-        PlanParam::OuterIters => generic_coupled_model::param_outer_iters(plan, value),
-        PlanParam::DetailedProfilingEnabled => {
-            generic_coupled_model::param_detailed_profiling(plan, value)
-        }
-        _ => Err("parameter is not supported by this plan".into()),
-    }
 }

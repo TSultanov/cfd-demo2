@@ -29,28 +29,6 @@ pub struct PlanInitConfig {
     pub preconditioner: PreconditionerType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlanParam {
-    Dt,
-    AdvectionScheme,
-    TimeScheme,
-    Preconditioner,
-    Viscosity,
-    Density,
-    AlphaU,
-    AlphaP,
-    InletVelocity,
-    RampTime,
-    Dtau,
-    OuterIters,
-    IncompressibleOuterCorrectors,
-    IncompressibleShouldStop,
-    LowMachModel,
-    LowMachThetaFloor,
-    NonconvergedRelax,
-    DetailedProfilingEnabled,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlanParamValue {
     F32(f32),

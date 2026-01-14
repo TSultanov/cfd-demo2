@@ -355,16 +355,8 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
 
         let mut seen = std::collections::HashSet::new();
         for spec in specs {
-            let is_builtin_model_generated = matches!(
-                spec.id.as_str(),
-                "dp_init"
-                    | "dp_update_from_diag"
-                    | "rhie_chow/correct_velocity"
-                    | "flux_module_gradients"
-                    | "flux_module"
-                    | "generic_coupled_assembly"
-                    | "generic_coupled_update"
-            );
+            let is_builtin_model_generated =
+                solver::model::kernel::is_builtin_model_generated_kernel_id(spec.id);
             let is_model_generated_override = model.generated_kernels.iter().any(|s| s.id == spec.id);
             if !is_builtin_model_generated && !is_model_generated_override {
                 continue;

@@ -1,6 +1,6 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, EquationSystem,
+    fvc, fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
     FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
@@ -41,8 +41,19 @@ impl CompressibleFields {
 fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     let rho_eqn =
         (fvm::ddt(fields.rho) + fvm::div_flux(fields.phi_rho, fields.rho)).eqn(fields.rho);
-    let rho_u_eqn =
-        (fvm::ddt(fields.rho_u) + fvm::div_flux(fields.phi_rho_u, fields.rho_u)).eqn(fields.rho_u);
+    let rho_u_eqn = (fvm::ddt(fields.rho_u)
+        + fvm::div_flux(fields.phi_rho_u, fields.rho_u)
+        // Viscous momentum term (Newtonian stress, simplified):
+        //   ∇·τ ≈ μ ∇²u  (i.e., -∇·(μ∇u) moved to the LHS as `laplacian(mu, u)`).
+        //
+        // This is intentionally explicit because `u` is a derived primitive, not a coupled unknown.
+        // The key point is that viscosity is part of the model/system, not injected ad-hoc inside
+        // the inviscid flux scheme.
+        + fvc::laplacian(
+            Coefficient::field(fields.mu).expect("mu must be scalar"),
+            fields.u,
+        ))
+    .eqn(fields.rho_u);
     let rho_e_eqn =
         (fvm::ddt(fields.rho_e) + fvm::div_flux(fields.phi_rho_e, fields.rho_e)).eqn(fields.rho_e);
 
@@ -219,77 +230,24 @@ fn compressible_euler_central_upwind_flux_module_kernel(
     let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
     let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
 
-    // Viscous terms (simple Laplacian-style model):
-    // - Momentum: add `-mu * (u_N - u_O) / dist` to the face-normal momentum flux.
-    // - Energy: add `-(tau·n)·u_avg - k * (T_N - T_O) / dist`,
-    //   with `tau·n ≈ mu * (u_N - u_O) / dist`, `T = p / rho` (R=1), and `k = mu * Cp / Pr`.
-    //
-    // This is intentionally a low-Mach-friendly stabilizer; it is not a full Newtonian stress
-    // tensor discretization on skewed meshes.
-    let mu = S::constant("viscosity");
-    let dist = S::dist();
-
-    let u_o = u_vec(FaceSide::Owner);
-    let u_nbr = u_vec(FaceSide::Neighbor);
-    let du = V::Sub(Box::new(u_nbr.clone()), Box::new(u_o.clone()));
-    let inv_dist = S::Div(Box::new(S::lit(1.0)), Box::new(dist.clone()));
-
-    let du_x = S::Dot(Box::new(du.clone()), Box::new(ex.clone()));
-    let du_y = S::Dot(Box::new(du.clone()), Box::new(ey.clone()));
-    let grad_n_u_x = S::Mul(Box::new(du_x), Box::new(inv_dist.clone()));
-    let grad_n_u_y = S::Mul(Box::new(du_y), Box::new(inv_dist.clone()));
-    let visc_mom_x = S::Neg(Box::new(S::Mul(Box::new(mu.clone()), Box::new(grad_n_u_x))));
-    let visc_mom_y = S::Neg(Box::new(S::Mul(Box::new(mu.clone()), Box::new(grad_n_u_y))));
-
-    let u_avg = V::MulScalar(
-        Box::new(V::Add(Box::new(u_o), Box::new(u_nbr))),
-        Box::new(S::lit(0.5)),
-    );
-    let grad_n_u_vec = V::MulScalar(Box::new(du), Box::new(inv_dist.clone()));
-    let tau_dot_n_dot_u = S::Mul(
-        Box::new(mu.clone()),
-        Box::new(S::Dot(Box::new(grad_n_u_vec), Box::new(u_avg))),
-    );
-    let visc_work = S::Neg(Box::new(tau_dot_n_dot_u));
-
-    let t = |side: FaceSide| S::Div(Box::new(p(side)), Box::new(rho(side)));
-    let d_t = S::Sub(
-        Box::new(t(FaceSide::Neighbor)),
-        Box::new(t(FaceSide::Owner)),
-    );
-    let cp_over_pr = gamma / (gamma - 1.0); // Cp for R=1, with Pr=1 (matches OpenFOAM reference cases)
-    let kappa = S::Mul(Box::new(mu), Box::new(S::lit(cp_over_pr)));
-    let heat_flux = S::Neg(Box::new(S::Mul(
-        Box::new(S::Mul(Box::new(kappa), Box::new(d_t))),
-        Box::new(inv_dist),
-    )));
-    let visc_energy = S::Add(Box::new(visc_work), Box::new(heat_flux));
-
     let flux_mass = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_n(side)));
     let flux_mom_x = |side: FaceSide| {
         S::Add(
             Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
-            Box::new(S::Add(
-                Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
-                Box::new(visc_mom_x.clone()),
-            )),
+            Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
         )
     };
     let flux_mom_y = |side: FaceSide| {
         S::Add(
             Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
-            Box::new(S::Add(
-                Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
-                Box::new(visc_mom_y.clone()),
-            )),
+            Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
         )
     };
     let flux_energy = |side: FaceSide| {
-        let inviscid = S::Mul(
+        S::Mul(
             Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
             Box::new(u_n(side)),
-        );
-        S::Add(Box::new(inviscid), Box::new(visc_energy.clone()))
+        )
     };
 
     let mut u_left = Vec::new();

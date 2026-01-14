@@ -333,7 +333,7 @@ mod tests {
     fn compressible_model_routes_through_generic_coupled_pipeline() {
         let model = compressible_model();
         assert_eq!(model.system.equations().len(), 3);
-        assert_eq!(model.system.equations()[1].terms().len(), 2);
+        assert_eq!(model.system.equations()[1].terms().len(), 3);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
 
         // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.

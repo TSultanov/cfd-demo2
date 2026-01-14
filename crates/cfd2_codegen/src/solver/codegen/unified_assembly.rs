@@ -743,6 +743,133 @@ fn main_assembly_fn(
                 }
             }
 
+            // Explicit diffusion (RHS-only), supporting `laplacian(k, field)` where `field` may
+            // differ from the equation target (e.g., viscous term for conserved momentum using
+            // the derived velocity `u`).
+            if let Some(diff_op) = equation.ops.iter().find(|op| {
+                op.kind == DiscreteOpKind::Diffusion
+                    && op.discretization == Discretization::Explicit
+            }) {
+                if diff_op.field.kind() != equation.target.kind() {
+                    panic!(
+                        "explicit diffusion currently requires field.kind == target.kind (target={}, field={})",
+                        equation.target.name(),
+                        diff_op.field.name()
+                    );
+                }
+
+                let field_name = diff_op.field.name();
+
+                let kappa_own =
+                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "idx", 1.0.into());
+                let kappa_other =
+                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
+                let kappa_face = dsl::select(
+                    kappa_own.clone(),
+                    (kappa_own.clone() + kappa_other) * 0.5,
+                    !Expr::ident("is_boundary"),
+                );
+
+                let diff_coeff_name = format!("diff_coeff_exp_{}_{}", equation.target.name(), field_name);
+                body.push(dsl::let_expr(
+                    &diff_coeff_name,
+                    kappa_face * Expr::ident("area") / Expr::ident("dist"),
+                ));
+
+                let field_offset_opt = offsets.get(field_name).copied();
+                let is_derived_u = matches!(field_name, "u" | "U")
+                    && offsets.get("rho").is_some()
+                    && offsets.get("rho_u").is_some();
+
+                for component in 0..equation.target.kind().component_count() as u32 {
+                    let u_idx = base_offset + component;
+                    let phi_own = state_component(layout, "state", "idx", field_name, component);
+                    let phi_neigh =
+                        state_component(layout, "state", "other_idx", field_name, component);
+
+                    let interior_contrib = dsl::block(vec![dsl::assign_op_expr(
+                        AssignOp::Add,
+                        Expr::ident(format!("rhs_{u_idx}")),
+                        Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own.clone()),
+                    )]);
+
+                    let boundary_contrib = if let Some(field_base_offset) = field_offset_opt {
+                        let field_u_idx = field_base_offset + component;
+                        let bc_table_idx =
+                            Expr::ident("boundary_type") * coupled_stride + field_u_idx;
+                        let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(
+                            dsl::array_access("bc_kind", bc_table_idx),
+                        );
+                        let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+
+                        let neumann_rhs =
+                            -(kappa_own.clone() * Expr::ident("area") * bc_value_expr.clone());
+
+                        dsl::block(vec![dsl::if_block_expr(
+                            bc_kind_expr.eq(GpuBcKind::Dirichlet),
+                            dsl::block(vec![dsl::assign_op_expr(
+                                AssignOp::Add,
+                                Expr::ident(format!("rhs_{u_idx}")),
+                                Expr::ident(&diff_coeff_name)
+                                    * (bc_value_expr.clone() - phi_own.clone()),
+                            )]),
+                            Some(dsl::block(vec![dsl::if_block_expr(
+                                bc_kind_expr.eq(GpuBcKind::Neumann),
+                                dsl::block(vec![dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    Expr::ident(format!("rhs_{u_idx}")),
+                                    neumann_rhs,
+                                )]),
+                                None,
+                            )])),
+                        )])
+                    } else if is_derived_u {
+                        // Derive a velocity boundary value from conserved BCs: u = rho_u / rho.
+                        let rho_idx = *offsets.get("rho").expect("missing rho offset");
+                        let rho_u_base = *offsets.get("rho_u").expect("missing rho_u offset");
+                        let rho_u_idx = rho_u_base + component;
+
+                        let bc_rho_idx =
+                            Expr::ident("boundary_type") * coupled_stride + rho_idx;
+                        let bc_rho_u_idx =
+                            Expr::ident("boundary_type") * coupled_stride + rho_u_idx;
+
+                        let bc_rho_kind = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
+                            "bc_kind",
+                            bc_rho_idx,
+                        ));
+                        let bc_rho_u_kind =
+                            typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
+                                "bc_kind",
+                                bc_rho_u_idx,
+                            ));
+                        let bc_rho_val = dsl::array_access("bc_value", bc_rho_idx);
+                        let bc_rho_u_val = dsl::array_access("bc_value", bc_rho_u_idx);
+
+                        let rho_own = state_component(layout, "state", "idx", "rho", 0);
+                        let rho_bc = dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
+                        let rho_bc_safe = dsl::max(rho_bc, 1e-12);
+                        let u_bc = bc_rho_u_val / rho_bc_safe;
+                        let u_other = dsl::select(phi_own.clone(), u_bc, bc_rho_u_kind.eq(GpuBcKind::Dirichlet));
+
+                        dsl::block(vec![dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident(format!("rhs_{u_idx}")),
+                            Expr::ident(&diff_coeff_name) * (u_other - phi_own.clone()),
+                        )])
+                    } else {
+                        // No BC information for this derived field; default to zero-gradient.
+                        dsl::block(vec![])
+                    };
+
+                    body.push(dsl::if_block_expr(
+                        !Expr::ident("is_boundary"),
+                        interior_contrib,
+                        Some(boundary_contrib),
+                    ));
+                }
+            }
+
             // 2. Convection
             if let Some(conv_op) = equation.ops.iter().find(|op| {
                 op.kind == DiscreteOpKind::Convection

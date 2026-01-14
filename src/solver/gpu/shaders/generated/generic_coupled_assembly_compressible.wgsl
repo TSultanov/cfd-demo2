@@ -224,6 +224,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_0 -= phi_0 * 2.0;
         }
         rhs_0 -= phi_0;
+        let diff_coeff_exp_rho_u_u = select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area / dist;
+        if (!is_boundary) {
+            rhs_1 += diff_coeff_exp_rho_u_u * (state[other_idx * 7u + 5u] - state[idx * 7u + 5u]);
+        } else {
+            rhs_1 += diff_coeff_exp_rho_u_u * (select(state[idx * 7u + 5u], bc_value[boundary_type * 4u + 1u] / max(select(state[idx * 7u + 0u], bc_value[boundary_type * 4u + 0u], bc_kind[boundary_type * 4u + 0u] == 1u), 0.000000000001), bc_kind[boundary_type * 4u + 1u] == 1u) - state[idx * 7u + 5u]);
+        }
+        if (!is_boundary) {
+            rhs_2 += diff_coeff_exp_rho_u_u * (state[other_idx * 7u + 6u] - state[idx * 7u + 6u]);
+        } else {
+            rhs_2 += diff_coeff_exp_rho_u_u * (select(state[idx * 7u + 6u], bc_value[boundary_type * 4u + 2u] / max(select(state[idx * 7u + 0u], bc_value[boundary_type * 4u + 0u], bc_kind[boundary_type * 4u + 0u] == 1u), 0.000000000001), bc_kind[boundary_type * 4u + 2u] == 1u) - state[idx * 7u + 6u]);
+        }
         var phi_1: f32 = fluxes[face_idx * 4u + 1u];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;

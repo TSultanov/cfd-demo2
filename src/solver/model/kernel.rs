@@ -684,7 +684,7 @@ pub fn emit_shared_kernels_wgsl(
     Ok(outputs)
 }
 
-fn is_builtin_model_generated_kernel_id(kernel_id: KernelId) -> bool {
+pub fn is_builtin_model_generated_kernel_id(kernel_id: KernelId) -> bool {
     matches!(
         kernel_id.as_str(),
         "dp_init"

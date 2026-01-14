@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 237be67639a1f9f107fed694b2dc19b23ccdd2d783005479af0ab41273aee0a6
+// SourceHash: 58e7e8cd4232633f01a2b7db5b48811ddfd40b386678759a471ff98646fdbac4
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -179,19 +179,7 @@ pub mod layout_asserts {
                 time_scheme
             ) == 44
         );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum::Constants,
-                inlet_velocity
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum::Constants,
-                ramp_time
-            ) == 52
-        );
-        assert!(std::mem::size_of::<generated::dp_init_incompressible_momentum::Constants>() == 56);
+        assert!(std::mem::size_of::<generated::dp_init_incompressible_momentum::Constants>() == 48);
     };
     const GENERATED_DP_INIT_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
         assert!(
@@ -267,20 +255,8 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                inlet_velocity
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                ramp_time
-            ) == 52
-        );
-        assert!(
             std::mem::size_of::<generated::dp_init_incompressible_momentum_generic::Constants>()
-                == 56
+                == 48
         );
     };
     const GENERATED_FLUX_MODULE_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -316,35 +292,26 @@ pub mod layout_asserts {
             std::mem::offset_of!(generated::flux_module_compressible::Constants, time_scheme) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::flux_module_compressible::Constants,
-                inlet_velocity
-            ) == 48
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_gamma) == 48
         );
         assert!(
-            std::mem::offset_of!(generated::flux_module_compressible::Constants, ramp_time) == 52
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_gm1) == 52
         );
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_r) == 56);
         assert!(
-            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_gamma) == 56
-        );
-        assert!(
-            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_gm1) == 60
-        );
-        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_r) == 64);
-        assert!(
-            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_dp_drho) == 68
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_dp_drho) == 60
         );
         assert!(
             std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_p_offset)
-                == 72
+                == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_compressible::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
-        assert!(std::mem::size_of::<generated::flux_module_compressible::Constants>() == 80);
+        assert!(std::mem::size_of::<generated::flux_module_compressible::Constants>() == 72);
     };
     const GENERATED_FLUX_MODULE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
@@ -470,53 +437,41 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum::Constants,
-                eos_dp_drho
+                eos_theta_ref
             ) == 68
         );
         assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum::Constants,
-                eos_theta_ref
-            ) == 76
-        );
-        assert!(
-            std::mem::size_of::<generated::flux_module_incompressible_momentum::Constants>() == 80
+            std::mem::size_of::<generated::flux_module_incompressible_momentum::Constants>() == 72
         );
     };
     const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
@@ -613,54 +568,42 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum_generic::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum_generic::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_dp_drho
+                eos_theta_ref
             ) == 68
         );
         assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_theta_ref
-            ) == 76
-        );
-        assert!(
             std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Constants>(
-            ) == 80
+            ) == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -750,54 +693,42 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_compressible::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_compressible::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_compressible::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_compressible::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_compressible::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_compressible::Constants,
-                eos_dp_drho
+                eos_theta_ref
             ) == 68
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_compressible::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_compressible::Constants,
-                eos_theta_ref
-            ) == 76
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_assembly_compressible::Constants>()
-                == 80
+                == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_VECTOR2_ASSERTS: () = {
@@ -894,55 +825,43 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_dp_drho
-            ) == 68
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-            >() == 80
+            >() == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_NEUMANN_VECTOR2_ASSERTS: () = {
@@ -1040,55 +959,43 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_dp_drho
-            ) == 68
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-            >() == 80
+            >() == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
@@ -1185,55 +1092,43 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_dp_drho
-            ) == 68
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-            >() == 80
+            >() == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
@@ -1331,55 +1226,43 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_dp_drho
-            ) == 68
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-            >() == 80
+            >() == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
@@ -1458,53 +1341,41 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_compressible::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_compressible::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_compressible::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_compressible::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_compressible::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_compressible::Constants,
-                eos_dp_drho
+                eos_theta_ref
             ) == 68
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_theta_ref
-            ) == 76
-        );
-        assert!(
-            std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 80
+            std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_CONSTANTS_ASSERTS: () = {
@@ -1583,54 +1454,42 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_dp_drho
+                eos_theta_ref
             ) == 68
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_theta_ref
-            ) == 76
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_update_generic_diffusion_demo::Constants>(
-            ) == 80
+            ) == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_NEUMANN_CONSTANTS_ASSERTS: () = {
@@ -1709,55 +1568,43 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_dp_drho
-            ) == 68
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-            >() == 80
+            >() == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
@@ -1836,54 +1683,42 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_dp_drho
+                eos_theta_ref
             ) == 68
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_theta_ref
-            ) == 76
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_update_incompressible_momentum::Constants>(
-            ) == 80
+            ) == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
@@ -1962,55 +1797,43 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                inlet_velocity
+                eos_gamma
             ) == 48
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                ramp_time
+                eos_gm1
             ) == 52
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_gamma
+                eos_r
             ) == 56
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_gm1
+                eos_dp_drho
             ) == 60
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_r
+                eos_p_offset
             ) == 64
         );
         assert!(
             std::mem::offset_of!(
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_dp_drho
-            ) == 68
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 72
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
                 eos_theta_ref
-            ) == 76
+            ) == 68
         );
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-            >() == 80
+            >() == 72
         );
     };
     const GENERIC_COUPLED_SCHUR_SETUP_SETUP_PARAMS_ASSERTS: () = {
@@ -4964,10 +4787,6 @@ pub mod generated {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
         }
         impl Constants {
             pub const fn new(
@@ -4983,8 +4802,6 @@ pub mod generated {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -4999,8 +4816,6 @@ pub mod generated {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                 }
             }
         }
@@ -5178,8 +4993,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
 }
 
 const STATE_STRIDE: u32 = 8u;
@@ -5240,10 +5053,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
         }
         impl Constants {
             pub const fn new(
@@ -5259,8 +5068,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -5275,8 +5082,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                 }
             }
         }
@@ -5410,8 +5215,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
 }
 
 const STATE_STRIDE: u32 = 8u;
@@ -5878,20 +5681,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -5908,8 +5707,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -5930,8 +5727,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -6413,8 +6208,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -7750,20 +7543,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -7780,8 +7569,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -7802,8 +7589,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -8225,8 +8010,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -8408,20 +8191,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -8438,8 +8217,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -8460,8 +8237,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -8770,8 +8545,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -9241,20 +9014,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -9271,8 +9040,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -9293,8 +9060,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -9906,8 +9671,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -10544,20 +10307,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -10574,8 +10333,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -10596,8 +10353,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -10994,8 +10749,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -11252,20 +11005,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -11282,8 +11031,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -11304,8 +11051,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -11712,8 +11457,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -11970,20 +11713,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -12000,8 +11739,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -12022,8 +11759,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -12437,8 +12172,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -12966,20 +12699,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -12996,8 +12725,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -13018,8 +12745,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -13433,8 +13158,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -13949,20 +13672,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -13979,8 +13698,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -14001,8 +13718,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -14207,8 +13922,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -14441,20 +14154,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -14471,8 +14180,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -14493,8 +14200,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -14681,8 +14386,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -14761,20 +14464,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -14791,8 +14490,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -14813,8 +14510,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -15007,8 +14702,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -15087,20 +14780,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -15117,8 +14806,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -15139,8 +14826,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -15327,8 +15012,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,
@@ -15457,20 +15140,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
             #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub inlet_velocity: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub ramp_time: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_gamma: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
+            #[doc = "offset: 52, size: 4, type: `f32`"]
             pub eos_gm1: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
+            #[doc = "offset: 56, size: 4, type: `f32`"]
             pub eos_r: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
+            #[doc = "offset: 60, size: 4, type: `f32`"]
             pub eos_dp_drho: f32,
-            #[doc = "offset: 72, size: 4, type: `f32`"]
+            #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 76, size: 4, type: `f32`"]
+            #[doc = "offset: 68, size: 4, type: `f32`"]
             pub eos_theta_ref: f32,
         }
         impl Constants {
@@ -15487,8 +15166,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                inlet_velocity: f32,
-                ramp_time: f32,
                 eos_gamma: f32,
                 eos_gm1: f32,
                 eos_r: f32,
@@ -15509,8 +15186,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    inlet_velocity,
-                    ramp_time,
                     eos_gamma,
                     eos_gm1,
                     eos_r,
@@ -15703,8 +15378,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    inlet_velocity: f32,
-    ramp_time: f32,
     eos_gamma: f32,
     eos_gm1_: f32,
     eos_r: f32,

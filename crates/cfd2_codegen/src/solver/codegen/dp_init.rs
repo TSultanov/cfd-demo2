@@ -23,8 +23,6 @@ pub fn generate_dp_init_wgsl(state_stride: u32, d_p_offset: u32) -> String {
     alpha_u: f32,\n\
     stride_x: u32,\n\
     time_scheme: u32,\n\
-    inlet_velocity: f32,\n\
-    ramp_time: f32,\n\
 }\n\n",
     );
 

@@ -18,8 +18,6 @@ scheme: u32,
 alpha_u: f32,
 stride_x: u32,
 time_scheme: u32,
-inlet_velocity: f32,
-ramp_time: f32,
 }
 
 @group(0) @binding(0)

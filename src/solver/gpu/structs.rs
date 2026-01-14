@@ -51,8 +51,6 @@ pub struct GpuConstants {
     pub alpha_u: f32,   // Velocity under-relaxation
     pub stride_x: u32,
     pub time_scheme: u32, // 0: Euler, 1: BDF2
-    pub inlet_velocity: f32,
-    pub ramp_time: f32,
 
     // --- Equation of state (runtime) ---
     pub eos_gamma: f32,
@@ -78,8 +76,6 @@ impl Default for GpuConstants {
             alpha_u: 0.7,
             stride_x: 65535 * 64,
             time_scheme: 0,
-            inlet_velocity: 1.0,
-            ramp_time: 0.1,
             eos_gamma: 1.4,
             eos_gm1: 0.4,
             eos_r: 1.0,

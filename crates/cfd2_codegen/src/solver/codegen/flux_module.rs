@@ -87,8 +87,6 @@ fn constants_struct() -> StructDef {
             StructField::new("alpha_u", Type::F32),
             StructField::new("stride_x", Type::U32),
             StructField::new("time_scheme", Type::U32),
-            StructField::new("inlet_velocity", Type::F32),
-            StructField::new("ramp_time", Type::F32),
             StructField::new("eos_gamma", Type::F32),
             StructField::new("eos_gm1", Type::F32),
             StructField::new("eos_r", Type::F32),

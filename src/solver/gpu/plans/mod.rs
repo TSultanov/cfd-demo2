@@ -1,4 +1,3 @@
-pub(crate) mod explicit_implicit;
 pub(crate) mod generic_coupled;
 pub(crate) mod plan_instance;
 pub(crate) mod program;

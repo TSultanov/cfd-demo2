@@ -119,6 +119,9 @@ Progress (transitional):
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
 - Done when: runtime consumes only registry-provided WGSL (no ad-hoc `include_str!` modules).
 
+Progress (partial):
+- `build.rs` derives handwritten kernel registry entries by scanning `src/solver/gpu/shaders/*.wgsl` for `@compute` entrypoints (removes the manual `id_only_entries` list and reduces per-kernel glue).
+
 ### 5) Contract Tests
 - Add regression tests that fail if:
   - `kernel_registry` has special-case lookup paths

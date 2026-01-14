@@ -4,6 +4,10 @@ use crate::solver::model::backend::ast::{
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::gpu_spec::ModelGpuSpec;
+use crate::solver::model::kernel::{
+    DispatchKindId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
+};
+use crate::solver::model::KernelId;
 use crate::solver::units::{si, UnitDim};
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -163,7 +167,23 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         state_layout: layout,
         boundaries,
 
-        extra_kernels: Vec::new(),
+        extra_kernels: vec![
+            ModelKernelSpec {
+                id: KernelId::DP_INIT,
+                phase: KernelPhaseId::Preparation,
+                dispatch: DispatchKindId::Cells,
+            },
+            ModelKernelSpec {
+                id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
+                phase: KernelPhaseId::Gradients,
+                dispatch: DispatchKindId::Cells,
+            },
+            ModelKernelSpec {
+                id: KernelId::DP_UPDATE_FROM_DIAG,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+            },
+        ],
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
@@ -177,7 +197,21 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             kernel: flux_kernel,
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
-        generated_kernels: Vec::new(),
+        generated_kernels: vec![
+            ModelKernelGeneratorSpec {
+                id: KernelId::DP_INIT,
+                generator: crate::solver::model::kernel::generate_dp_init_kernel_wgsl,
+            },
+            ModelKernelGeneratorSpec {
+                id: KernelId::DP_UPDATE_FROM_DIAG,
+                generator: crate::solver::model::kernel::generate_dp_update_from_diag_kernel_wgsl,
+            },
+            ModelKernelGeneratorSpec {
+                id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
+                generator:
+                    crate::solver::model::kernel::generate_rhie_chow_correct_velocity_kernel_wgsl,
+            },
+        ],
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()

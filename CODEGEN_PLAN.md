@@ -48,7 +48,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Flux-module scheduling/lookup is unified behind stable `KernelId`s (`flux_module_gradients`, `flux_module`) rather than per-method kernel ids.
 - Retired handwritten flux WGSL generators (`flux_kt`, `flux_rhie_chow`) in favor of a PDE-agnostic IR-driven `flux_module` codegen path; flux math is declared in `src/solver/model/definitions.rs` and compiled generically.
 - Added initial contract tests to prevent regressions toward kernel-id/model-id special-casing (`tests/contract_codegen_invariants_test.rs`).
-- Moved low-Mach/preconditioning knobs off the core solver type and into helper traits (`src/solver/gpu/helpers/plan_params_ext.rs`) to keep `GpuUnifiedSolver` closer to model-agnostic.
+- Moved low-Mach/preconditioning knobs off the core solver type and into helper traits (`src/solver/model/helpers/solver_ext.rs`) to keep `GpuUnifiedSolver` closer to model-agnostic.
 
 ## Remaining Gaps (what blocks “fully model-agnostic”)
 
@@ -82,6 +82,7 @@ Done when:
 
 Progress (partial):
 - `ModelSpec` can now inject additional kernel passes (`extra_kernels`) and provide build-time WGSL generators for them (`generated_kernels`), so new module kernels can be added from model definitions without extending central kernel-template matches.
+- Moved the Rhie–Chow helper kernels (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) out of `model/kernel.rs` special-casing and into model-owned `extra_kernels` + `generated_kernels` (so the core kernel derivation no longer grows new “builtins” for these passes).
 
 ### 1) Flux Modules (boundary + reconstruction + method knobs)
 - Flux kernels are now IR-driven, but boundary handling is still incomplete: flux modules need to consume the same boundary condition tables (`bc_kind`/`bc_value`) that assembly uses so Dirichlet/Neumann boundaries affect fluxes (not just zero-gradient extrapolation).

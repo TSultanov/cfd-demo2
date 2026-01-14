@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::coeff_expr::coeff_cell_expr;
 use super::dsl as typed;
 use super::state_access::state_component;
 use super::wgsl_ast::{
@@ -278,26 +279,7 @@ fn coefficient_value_expr(
     idx_ident: &str,
     default: Expr,
 ) -> Expr {
-    match coeff {
-        None => default,
-        Some(Coefficient::Constant { value, .. }) => (*value as f32).into(),
-        Some(Coefficient::Field(field)) => {
-            let name = field.name();
-            if name == "rho" {
-                Expr::ident("constants").field("density")
-            } else if name == "mu" {
-                Expr::ident("constants").field("viscosity")
-            } else if layout.offset_for(name).is_some() {
-                state_component(layout, "state", idx_ident, name, 0)
-            } else {
-                default
-            }
-        }
-        Some(Coefficient::Product(lhs, rhs)) => {
-            coefficient_value_expr(layout, Some(lhs), idx_ident, default.clone())
-                * coefficient_value_expr(layout, Some(rhs), idx_ident, default)
-        }
-    }
+    coeff_cell_expr(layout, coeff, idx_ident, default)
 }
 
 fn main_assembly_fn(
@@ -499,22 +481,55 @@ fn main_assembly_fn(
             let base_offset = *offsets
                 .get(equation.target.name())
                 .expect("missing target offset");
+
             let val = coefficient_value_expr(layout, source_op.coeff.as_ref(), "idx", 0.0.into());
             let term = val * Expr::ident("vol");
 
-            for component in 0..equation.target.kind().component_count() as u32 {
-                let u_idx = base_offset + component;
-                if source_op.discretization == Discretization::Implicit {
-                    // LHS -= term * phi.
-                    // Assuming term is the coefficient S_p where S = S_p * phi.
-                    // Contribution to diagonal is -S_p * V.
-                    stmts.push(dsl::assign_op_expr(
-                        AssignOp::Sub,
-                        Expr::ident(format!("diag_{u_idx}")),
-                        term.clone(),
-                    ));
-                } else {
-                    // RHS += term.
+            let field_name = source_op.field.name();
+            let field_offset_opt = offsets.get(field_name).copied();
+            if source_op.discretization == Discretization::Implicit {
+                if source_op.field.kind() != equation.target.kind() {
+                    panic!(
+                        "implicit source currently requires field.kind == target.kind (target={}, field={})",
+                        equation.target.name(),
+                        field_name
+                    );
+                }
+                let field_offset = field_offset_opt.unwrap_or_else(|| {
+                    panic!(
+                        "implicit source requires '{}' to be a coupled unknown field",
+                        field_name
+                    )
+                });
+                let diag_block = block_matrix.row_entry(&Expr::ident("diag_rank"));
+
+                for component in 0..equation.target.kind().component_count() as u32 {
+                    let row_u_idx = base_offset + component;
+                    let col_u_idx = field_offset + component;
+                    if row_u_idx == col_u_idx {
+                        // LHS -= term * phi.
+                        // Assuming term is the coefficient S_p where S = S_p * phi.
+                        // Contribution to diagonal is -S_p * V.
+                        stmts.push(dsl::assign_op_expr(
+                            AssignOp::Sub,
+                            Expr::ident(format!("diag_{row_u_idx}")),
+                            term.clone(),
+                        ));
+                    } else {
+                        // Cross-coupled source term: contribute to the (row, col) block entry.
+                        stmts.push(dsl::assign_op_expr(
+                            AssignOp::Sub,
+                            diag_block
+                                .entry(row_u_idx as u8, col_u_idx as u8)
+                                .expr,
+                            term.clone(),
+                        ));
+                    }
+                }
+            } else {
+                // RHS += term.
+                for component in 0..equation.target.kind().component_count() as u32 {
+                    let u_idx = base_offset + component;
                     stmts.push(dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("rhs_{u_idx}")),
@@ -675,6 +690,21 @@ fn main_assembly_fn(
                 op.kind == DiscreteOpKind::Diffusion
                     && op.discretization == Discretization::Implicit
             }) {
+                if diff_op.field.kind() != equation.target.kind() {
+                    panic!(
+                        "implicit diffusion currently requires field.kind == target.kind (target={}, field={})",
+                        equation.target.name(),
+                        diff_op.field.name()
+                    );
+                }
+
+                let field_name = diff_op.field.name();
+                let field_base_offset = offsets.get(field_name).copied().unwrap_or_else(|| {
+                    panic!(
+                        "implicit diffusion currently requires '{}' to be a coupled unknown field",
+                        field_name
+                    )
+                });
                 let kappa =
                     coefficient_value_expr(layout, diff_op.coeff.as_ref(), "idx", 1.0.into());
 
@@ -685,24 +715,44 @@ fn main_assembly_fn(
                 ));
 
                 for component in 0..equation.target.kind().component_count() as u32 {
-                    let u_idx = base_offset + component;
-                    let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
+                    let row_u_idx = base_offset + component;
+                    let col_u_idx = field_base_offset + component;
+
+                    // Boundary values are taken from the field being diffused (the "column"
+                    // variable), not from the equation target.
+                    let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + col_u_idx;
                     let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
                         "bc_kind",
                         bc_table_idx,
                     ));
                     let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
 
+                    let diag_block = block_matrix.row_entry(&Expr::ident("diag_rank"));
+
                     let interior_contrib = dsl::block(vec![
-                        dsl::assign_op_expr(
-                            AssignOp::Add,
-                            Expr::ident(format!("diag_{u_idx}")),
-                            Expr::ident(&diff_coeff_name),
-                        ),
+                        // Diagonal contribution.
+                        if row_u_idx == col_u_idx {
+                            dsl::assign_op_expr(
+                                AssignOp::Add,
+                                Expr::ident(format!("diag_{row_u_idx}")),
+                                Expr::ident(&diff_coeff_name),
+                            )
+                        } else {
+                            dsl::assign_op_expr(
+                                AssignOp::Add,
+                                diag_block.entry(row_u_idx as u8, col_u_idx as u8).expr,
+                                Expr::ident(&diff_coeff_name),
+                            )
+                        },
+                        // Neighbor contribution.
                         dsl::assign_op_expr(
                             AssignOp::Sub,
                             block_matrix
-                                .entry(&Expr::ident("neighbor_rank"), u_idx as u8, u_idx as u8)
+                                .entry(
+                                    &Expr::ident("neighbor_rank"),
+                                    row_u_idx as u8,
+                                    col_u_idx as u8,
+                                )
                                 .expr,
                             Expr::ident(&diff_coeff_name),
                         ),
@@ -713,14 +763,22 @@ fn main_assembly_fn(
                     let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
                         bc_kind_expr.eq(GpuBcKind::Dirichlet),
                         dsl::block(vec![
+                            if row_u_idx == col_u_idx {
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    Expr::ident(format!("diag_{row_u_idx}")),
+                                    Expr::ident(&diff_coeff_name),
+                                )
+                            } else {
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    diag_block.entry(row_u_idx as u8, col_u_idx as u8).expr,
+                                    Expr::ident(&diff_coeff_name),
+                                )
+                            },
                             dsl::assign_op_expr(
                                 AssignOp::Add,
-                                Expr::ident(format!("diag_{u_idx}")),
-                                Expr::ident(&diff_coeff_name),
-                            ),
-                            dsl::assign_op_expr(
-                                AssignOp::Add,
-                                Expr::ident(format!("rhs_{u_idx}")),
+                                Expr::ident(format!("rhs_{row_u_idx}")),
                                 Expr::ident(&diff_coeff_name) * bc_value_expr.clone(),
                             ),
                         ]),
@@ -728,7 +786,7 @@ fn main_assembly_fn(
                             bc_kind_expr.eq(GpuBcKind::Neumann),
                             dsl::block(vec![dsl::assign_op_expr(
                                 AssignOp::Add,
-                                Expr::ident(format!("rhs_{u_idx}")),
+                                Expr::ident(format!("rhs_{row_u_idx}")),
                                 neumann_rhs,
                             )]),
                             None,

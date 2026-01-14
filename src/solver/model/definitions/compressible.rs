@@ -1,6 +1,6 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    fvc, fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
+    fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
     FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
@@ -15,6 +15,7 @@ pub struct CompressibleFields {
     pub rho_u: FieldRef,
     pub rho_e: FieldRef,
     pub p: FieldRef,
+    pub t: FieldRef,
     pub u: FieldRef,
     pub mu: FieldRef,
     pub phi_rho: FluxRef,
@@ -29,6 +30,7 @@ impl CompressibleFields {
             rho_u: vol_vector("rho_u", si::MOMENTUM_DENSITY),
             rho_e: vol_scalar("rho_e", si::ENERGY_DENSITY),
             p: vol_scalar("p", si::PRESSURE),
+            t: vol_scalar("T", si::PRESSURE / si::DENSITY),
             u: vol_vector("u", si::VELOCITY),
             mu: vol_scalar("mu", si::DYNAMIC_VISCOSITY),
             phi_rho: surface_scalar("phi_rho", si::MASS_FLUX),
@@ -38,18 +40,14 @@ impl CompressibleFields {
     }
 }
 
-fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
+fn build_compressible_system(fields: &CompressibleFields, gamma: f32) -> EquationSystem {
     let rho_eqn =
         (fvm::ddt(fields.rho) + fvm::div_flux(fields.phi_rho, fields.rho)).eqn(fields.rho);
     let rho_u_eqn = (fvm::ddt(fields.rho_u)
         + fvm::div_flux(fields.phi_rho_u, fields.rho_u)
         // Viscous momentum term (Newtonian stress, simplified):
         //   ∇·τ ≈ μ ∇²u  (i.e., -∇·(μ∇u) moved to the LHS as `laplacian(mu, u)`).
-        //
-        // This is intentionally explicit because `u` is a derived primitive, not a coupled unknown.
-        // The key point is that viscosity is part of the model/system, not injected ad-hoc inside
-        // the inviscid flux scheme.
-        + fvc::laplacian(
+        + fvm::laplacian(
             Coefficient::field(fields.mu).expect("mu must be scalar"),
             fields.u,
         ))
@@ -57,32 +55,100 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     let rho_e_eqn =
         (fvm::ddt(fields.rho_e) + fvm::div_flux(fields.phi_rho_e, fields.rho_e)).eqn(fields.rho_e);
 
+    // Primitive velocity recovery as an algebraic constraint:
+    //   rho_u = rho * u
+    //
+    // This makes `u` part of the coupled unknown set so viscous terms can be treated implicitly.
+    let u_eqn = {
+        let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
+        // Scale the algebraic constraint by `1/dt` to improve conditioning in implicit time
+        // schemes (BDF2 in particular).
+        let inv_dt = Coefficient::field(vol_scalar("inv_dt", si::INV_TIME))
+            .expect("inv_dt must be scalar");
+
+        let rho_over_dt =
+            Coefficient::product(rho, inv_dt.clone()).expect("rho/dt coefficient must be scalar");
+        let minus_rho_over_dt = Coefficient::product(Coefficient::constant(-1.0), rho_over_dt)
+            .expect("rho/dt coefficient must be scalar");
+
+        (fvm::source_coeff(minus_rho_over_dt, fields.u)
+            + fvm::source_coeff(inv_dt, fields.rho_u))
+        .eqn(fields.u)
+    };
+
+    // Primitive pressure recovery as an algebraic constraint (ideal gas EOS with total energy):
+    //
+    //   p = (gamma - 1) * (rho_e - 0.5 * rho * |u|^2)
+    //
+    // We treat |u|^2 as a coefficient evaluated from the current state (outer-iteration
+    // linearization) and scale the constraint by `1/dt` for conditioning.
+    let p_eqn = {
+        let gm1 = gamma - 1.0;
+        let inv_dt = Coefficient::field(vol_scalar("inv_dt", si::INV_TIME))
+            .expect("inv_dt must be scalar");
+        let u2 = Coefficient::mag_sqr(fields.u);
+
+        let minus_gm1_over_dt = Coefficient::product(Coefficient::constant(-(gm1 as f64)), inv_dt.clone())
+            .expect("(gamma-1)/dt coefficient must be scalar");
+        let rho_coeff = Coefficient::product(
+            Coefficient::product(Coefficient::constant(0.5 * gm1 as f64), inv_dt.clone())
+                .expect("0.5*(gamma-1)/dt coefficient must be scalar"),
+            u2,
+        )
+        .expect("rho*u^2/dt coefficient must be scalar");
+
+        (fvm::source_coeff(inv_dt, fields.p)
+            + fvm::source_coeff(minus_gm1_over_dt, fields.rho_e)
+            + fvm::source_coeff(rho_coeff, fields.rho))
+        .eqn(fields.p)
+    };
+
+    // Temperature recovery as an algebraic constraint (ideal gas, R=1):
+    //
+    //   p = rho * T  <=>  rho*T - p = 0
+    //
+    // Scale by `1/dt` for conditioning.
+    let t_eqn = {
+        let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
+        let inv_dt = Coefficient::field(vol_scalar("inv_dt", si::INV_TIME))
+            .expect("inv_dt must be scalar");
+        let rho_over_dt =
+            Coefficient::product(rho, inv_dt.clone()).expect("rho/dt coefficient must be scalar");
+        let minus_inv_dt =
+            Coefficient::product(Coefficient::constant(-1.0), inv_dt).expect("inv_dt must be scalar");
+
+        (fvm::source_coeff(rho_over_dt, fields.t) + fvm::source_coeff(minus_inv_dt, fields.p))
+            .eqn(fields.t)
+    };
+
     let mut system = EquationSystem::new();
     system.add_equation(rho_eqn);
     system.add_equation(rho_u_eqn);
     system.add_equation(rho_e_eqn);
+    system.add_equation(u_eqn);
+    system.add_equation(p_eqn);
+    system.add_equation(t_eqn);
     system
 }
 
 pub fn compressible_system() -> EquationSystem {
     let fields = CompressibleFields::new();
-    build_compressible_system(&fields)
+    let gamma = 1.4;
+    build_compressible_system(&fields, gamma)
 }
 
 pub fn compressible_model() -> ModelSpec {
     let fields = CompressibleFields::new();
-    let system = build_compressible_system(&fields);
+    let gamma = 1.4;
+    let system = build_compressible_system(&fields, gamma);
     let layout = StateLayout::new(vec![
         fields.rho,
         fields.rho_u,
         fields.rho_e,
         fields.p,
+        fields.t,
         fields.u,
     ]);
-
-    let gamma = 1.4;
-    let flux_kernel = compressible_euler_central_upwind_flux_module_kernel(&system, &fields, gamma)
-        .expect("failed to build compressible flux kernel spec");
 
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
@@ -138,6 +204,33 @@ pub fn compressible_model() -> ModelSpec {
             ),
     );
     boundaries.set_field(
+        "u",
+        FieldBoundarySpec::new()
+            // Inlet velocity is driven via the runtime `InletVelocity` plan param
+            // (see `param_inlet_velocity`); initial value is a placeholder.
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                2,
+                BoundaryCondition::zero_gradient(si::INV_TIME),
+            )
+            // Walls: no-slip (matches `rho_u` Dirichlet=0).
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
+                2,
+                BoundaryCondition::zero_gradient(si::INV_TIME),
+            ),
+    );
+    boundaries.set_field(
         "rho_e",
         FieldBoundarySpec::new()
             // Inlet energy is updated alongside rho/rho_u when inlet parameters change.
@@ -165,8 +258,7 @@ pub fn compressible_model() -> ModelSpec {
 
     ModelSpec {
         id: "compressible",
-        // Route compressible through the generic coupled pipeline; KT flux + primitive recovery
-        // remain transitional kernels behind model-driven IDs.
+        // Route compressible through the generic coupled pipeline.
         method: crate::solver::model::method::MethodSpec::GenericCoupledImplicit { outer_iters: 1 },
         eos: crate::solver::model::eos::EosSpec::IdealGas { gamma },
         system,
@@ -175,148 +267,15 @@ pub fn compressible_model() -> ModelSpec {
 
         extra_kernels: Vec::new(),
         linear_solver: None,
-        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
+        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Scheme {
             gradients: None,
-            kernel: flux_kernel,
+            scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerIdealGasCentralUpwind {
+                gamma,
+            },
         }),
-        primitives: crate::solver::model::primitives::PrimitiveDerivations::euler_ideal_gas(gamma),
+        primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
         generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
     }
     .with_derived_gpu()
-}
-
-fn compressible_euler_central_upwind_flux_module_kernel(
-    system: &EquationSystem,
-    fields: &CompressibleFields,
-    gamma: f32,
-) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
-    use crate::solver::ir::{
-        FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
-    };
-
-    let flux_layout = FluxLayout::from_system(system);
-    let components: Vec<String> = flux_layout
-        .components
-        .iter()
-        .map(|c| c.name.clone())
-        .collect();
-
-    let ex = V::vec2(S::lit(1.0), S::lit(0.0));
-    let ey = V::vec2(S::lit(0.0), S::lit(1.0));
-
-    let rho_name = fields.rho.name();
-    let rho_u_name = fields.rho_u.name();
-    let rho_e_name = fields.rho_e.name();
-
-    let rho = |side: FaceSide| S::state(side, rho_name);
-    let rho_e = |side: FaceSide| S::state(side, rho_e_name);
-    let rho_u = |side: FaceSide| V::state_vec2(side, rho_u_name);
-    let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
-    let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
-
-    let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
-    let u_vec = |side: FaceSide| V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho(side)));
-    let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
-
-    let p = |side: FaceSide| S::primitive(side, "p");
-    let c = |side: FaceSide| {
-        S::Sqrt(Box::new(S::Div(
-            Box::new(S::Mul(Box::new(S::lit(gamma)), Box::new(p(side)))),
-            Box::new(rho(side)),
-        )))
-    };
-
-    let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
-    let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
-
-    let flux_mass = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_n(side)));
-    let flux_mom_x = |side: FaceSide| {
-        S::Add(
-            Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
-            Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
-        )
-    };
-    let flux_mom_y = |side: FaceSide| {
-        S::Add(
-            Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
-            Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
-        )
-    };
-    let flux_energy = |side: FaceSide| {
-        S::Mul(
-            Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
-            Box::new(u_n(side)),
-        )
-    };
-
-    let mut u_left = Vec::new();
-    let mut u_right = Vec::new();
-    let mut flux_left = Vec::new();
-    let mut flux_right = Vec::new();
-
-    for name in &components {
-        if name == rho_name {
-            u_left.push(rho(FaceSide::Owner));
-            u_right.push(rho(FaceSide::Neighbor));
-            flux_left.push(flux_mass(FaceSide::Owner));
-            flux_right.push(flux_mass(FaceSide::Neighbor));
-        } else if name == &format!("{rho_u_name}_x") {
-            u_left.push(rho_u_x(FaceSide::Owner));
-            u_right.push(rho_u_x(FaceSide::Neighbor));
-            flux_left.push(flux_mom_x(FaceSide::Owner));
-            flux_right.push(flux_mom_x(FaceSide::Neighbor));
-        } else if name == &format!("{rho_u_name}_y") {
-            u_left.push(rho_u_y(FaceSide::Owner));
-            u_right.push(rho_u_y(FaceSide::Neighbor));
-            flux_left.push(flux_mom_y(FaceSide::Owner));
-            flux_right.push(flux_mom_y(FaceSide::Neighbor));
-        } else if name == rho_e_name {
-            u_left.push(rho_e(FaceSide::Owner));
-            u_right.push(rho_e(FaceSide::Neighbor));
-            flux_left.push(flux_energy(FaceSide::Owner));
-            flux_right.push(flux_energy(FaceSide::Neighbor));
-        } else {
-            return Err(format!(
-                "compressible central-upwind kernel builder does not know how to flux component '{name}'"
-            ));
-        }
-    }
-
-    let a_plus = S::Max(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Max(
-            Box::new(S::Add(
-                Box::new(u_n(FaceSide::Owner)),
-                Box::new(c(FaceSide::Owner)),
-            )),
-            Box::new(S::Add(
-                Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c(FaceSide::Neighbor)),
-            )),
-        )),
-    );
-    let a_minus = S::Min(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Min(
-            Box::new(S::Sub(
-                Box::new(u_n(FaceSide::Owner)),
-                Box::new(c(FaceSide::Owner)),
-            )),
-            Box::new(S::Sub(
-                Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c(FaceSide::Neighbor)),
-            )),
-        )),
-    );
-
-    Ok(FluxModuleKernelSpec::CentralUpwind {
-        components,
-        u_left,
-        u_right,
-        flux_left,
-        flux_right,
-        a_plus,
-        a_minus,
-    })
 }

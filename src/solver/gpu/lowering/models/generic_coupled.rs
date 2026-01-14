@@ -1071,7 +1071,7 @@ pub(crate) fn param_inlet_velocity(
         for eqn in plan.model.system.equations() {
             let field = eqn.target();
             let comps = field.kind().component_count() as u32;
-            if field.name() == "U" {
+            if matches!(field.name(), "U" | "u") {
                 if comps > 0 {
                     u0_idx = Some(idx + 0);
                 }

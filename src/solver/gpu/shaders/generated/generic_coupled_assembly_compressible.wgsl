@@ -112,27 +112,79 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let scalar_offset = scalar_row_offsets[idx];
     let diag_rank = diagonal_indices[idx] - scalar_offset;
     let num_neighbors = scalar_row_offsets[idx + 1u] - scalar_offset;
-    let start_row_0 = scalar_offset * 16u;
-    let start_row_1 = start_row_0 + num_neighbors * 4u * 1u;
-    let start_row_2 = start_row_0 + num_neighbors * 4u * 2u;
-    let start_row_3 = start_row_0 + num_neighbors * 4u * 3u;
+    let start_row_0 = scalar_offset * 64u;
+    let start_row_1 = start_row_0 + num_neighbors * 8u * 1u;
+    let start_row_2 = start_row_0 + num_neighbors * 8u * 2u;
+    let start_row_3 = start_row_0 + num_neighbors * 8u * 3u;
+    let start_row_4 = start_row_0 + num_neighbors * 8u * 4u;
+    let start_row_5 = start_row_0 + num_neighbors * 8u * 5u;
+    let start_row_6 = start_row_0 + num_neighbors * 8u * 6u;
+    let start_row_7 = start_row_0 + num_neighbors * 8u * 7u;
     for (var rank = 0u; rank < num_neighbors; rank++) {
-        matrix_values[start_row_0 + rank * 4u + 0u] = 0.0;
-        matrix_values[start_row_0 + rank * 4u + 1u] = 0.0;
-        matrix_values[start_row_0 + rank * 4u + 2u] = 0.0;
-        matrix_values[start_row_0 + rank * 4u + 3u] = 0.0;
-        matrix_values[start_row_1 + rank * 4u + 0u] = 0.0;
-        matrix_values[start_row_1 + rank * 4u + 1u] = 0.0;
-        matrix_values[start_row_1 + rank * 4u + 2u] = 0.0;
-        matrix_values[start_row_1 + rank * 4u + 3u] = 0.0;
-        matrix_values[start_row_2 + rank * 4u + 0u] = 0.0;
-        matrix_values[start_row_2 + rank * 4u + 1u] = 0.0;
-        matrix_values[start_row_2 + rank * 4u + 2u] = 0.0;
-        matrix_values[start_row_2 + rank * 4u + 3u] = 0.0;
-        matrix_values[start_row_3 + rank * 4u + 0u] = 0.0;
-        matrix_values[start_row_3 + rank * 4u + 1u] = 0.0;
-        matrix_values[start_row_3 + rank * 4u + 2u] = 0.0;
-        matrix_values[start_row_3 + rank * 4u + 3u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_0 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_1 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_2 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_3 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_4 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_5 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_6 + rank * 8u + 7u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 0u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 1u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 2u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 3u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 4u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 5u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 6u] = 0.0;
+        matrix_values[start_row_7 + rank * 8u + 7u] = 0.0;
     }
     var diag_0: f32 = 0.0;
     var rhs_0: f32 = 0.0;
@@ -142,46 +194,63 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_2: f32 = 0.0;
     var diag_3: f32 = 0.0;
     var rhs_3: f32 = 0.0;
+    var diag_4: f32 = 0.0;
+    var rhs_4: f32 = 0.0;
+    var diag_5: f32 = 0.0;
+    var rhs_5: f32 = 0.0;
+    var diag_6: f32 = 0.0;
+    var rhs_6: f32 = 0.0;
+    var diag_7: f32 = 0.0;
+    var rhs_7: f32 = 0.0;
     diag_0 += vol * 1.0 / constants.dt;
-    rhs_0 += vol * 1.0 / constants.dt * state_old[idx * 7u + 0u];
+    rhs_0 += vol * 1.0 / constants.dt * state_old[idx * 8u + 0u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * 1.0 / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
         diag_0 = diag_0 - vol * 1.0 / constants.dt + diag_bdf2;
-        rhs_0 = rhs_0 - vol * 1.0 / constants.dt * state_old[idx * 7u + 0u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 7u + 0u] - factor_nm1 * state_old_old[idx * 7u + 0u]);
+        rhs_0 = rhs_0 - vol * 1.0 / constants.dt * state_old[idx * 8u + 0u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 0u] - factor_nm1 * state_old_old[idx * 8u + 0u]);
     }
     diag_1 += vol * 1.0 / constants.dt;
-    rhs_1 += vol * 1.0 / constants.dt * state_old[idx * 7u + 1u];
+    rhs_1 += vol * 1.0 / constants.dt * state_old[idx * 8u + 1u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * 1.0 / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
         diag_1 = diag_1 - vol * 1.0 / constants.dt + diag_bdf2;
-        rhs_1 = rhs_1 - vol * 1.0 / constants.dt * state_old[idx * 7u + 1u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 7u + 1u] - factor_nm1 * state_old_old[idx * 7u + 1u]);
+        rhs_1 = rhs_1 - vol * 1.0 / constants.dt * state_old[idx * 8u + 1u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 1u] - factor_nm1 * state_old_old[idx * 8u + 1u]);
     }
     diag_2 += vol * 1.0 / constants.dt;
-    rhs_2 += vol * 1.0 / constants.dt * state_old[idx * 7u + 2u];
+    rhs_2 += vol * 1.0 / constants.dt * state_old[idx * 8u + 2u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * 1.0 / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
         diag_2 = diag_2 - vol * 1.0 / constants.dt + diag_bdf2;
-        rhs_2 = rhs_2 - vol * 1.0 / constants.dt * state_old[idx * 7u + 2u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 7u + 2u] - factor_nm1 * state_old_old[idx * 7u + 2u]);
+        rhs_2 = rhs_2 - vol * 1.0 / constants.dt * state_old[idx * 8u + 2u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 2u] - factor_nm1 * state_old_old[idx * 8u + 2u]);
     }
     diag_3 += vol * 1.0 / constants.dt;
-    rhs_3 += vol * 1.0 / constants.dt * state_old[idx * 7u + 3u];
+    rhs_3 += vol * 1.0 / constants.dt * state_old[idx * 8u + 3u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * 1.0 / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
         diag_3 = diag_3 - vol * 1.0 / constants.dt + diag_bdf2;
-        rhs_3 = rhs_3 - vol * 1.0 / constants.dt * state_old[idx * 7u + 3u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 7u + 3u] - factor_nm1 * state_old_old[idx * 7u + 3u]);
+        rhs_3 = rhs_3 - vol * 1.0 / constants.dt * state_old[idx * 8u + 3u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 3u] - factor_nm1 * state_old_old[idx * 8u + 3u]);
     }
+    diag_4 -= -1.0 * state[idx * 8u + 0u] * 1.0 / constants.dt * vol;
+    diag_5 -= -1.0 * state[idx * 8u + 0u] * 1.0 / constants.dt * vol;
+    matrix_values[start_row_4 + diag_rank * 8u + 1u] -= 1.0 / constants.dt * vol;
+    matrix_values[start_row_5 + diag_rank * 8u + 2u] -= 1.0 / constants.dt * vol;
+    diag_6 -= 1.0 / constants.dt * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 3u] -= -0.39999998 * 1.0 / constants.dt * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.19999999 * 1.0 / constants.dt * (state[idx * 8u + 6u] * state[idx * 8u + 6u] + state[idx * 8u + 7u] * state[idx * 8u + 7u]) * vol;
+    diag_7 -= state[idx * 8u + 0u] * 1.0 / constants.dt * vol;
+    matrix_values[start_row_7 + diag_rank * 8u + 6u] -= -1.0 * 1.0 / constants.dt * vol;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -219,44 +288,68 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
-        var phi_0: f32 = fluxes[face_idx * 4u + 0u];
+        var phi_0: f32 = fluxes[face_idx * 8u + 0u];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
         rhs_0 -= phi_0;
-        let diff_coeff_exp_rho_u_u = select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area / dist;
+        let diff_coeff_rho_u = constants.viscosity * area / dist;
         if (!is_boundary) {
-            rhs_1 += diff_coeff_exp_rho_u_u * (state[other_idx * 7u + 5u] - state[idx * 7u + 5u]);
+            matrix_values[start_row_1 + diag_rank * 8u + 4u] += diff_coeff_rho_u;
+            matrix_values[start_row_1 + neighbor_rank * 8u + 4u] -= diff_coeff_rho_u;
         } else {
-            rhs_1 += diff_coeff_exp_rho_u_u * (select(state[idx * 7u + 5u], bc_value[boundary_type * 4u + 1u] / max(select(state[idx * 7u + 0u], bc_value[boundary_type * 4u + 0u], bc_kind[boundary_type * 4u + 0u] == 1u), 0.000000000001), bc_kind[boundary_type * 4u + 1u] == 1u) - state[idx * 7u + 5u]);
+            if (bc_kind[boundary_type * 8u + 4u] == 1u) {
+                matrix_values[start_row_1 + diag_rank * 8u + 4u] += diff_coeff_rho_u;
+                rhs_1 += diff_coeff_rho_u * bc_value[boundary_type * 8u + 4u];
+            } else {
+                if (bc_kind[boundary_type * 8u + 4u] == 2u) {
+                    rhs_1 += -(constants.viscosity * area * bc_value[boundary_type * 8u + 4u]);
+                }
+            }
         }
         if (!is_boundary) {
-            rhs_2 += diff_coeff_exp_rho_u_u * (state[other_idx * 7u + 6u] - state[idx * 7u + 6u]);
+            matrix_values[start_row_2 + diag_rank * 8u + 5u] += diff_coeff_rho_u;
+            matrix_values[start_row_2 + neighbor_rank * 8u + 5u] -= diff_coeff_rho_u;
         } else {
-            rhs_2 += diff_coeff_exp_rho_u_u * (select(state[idx * 7u + 6u], bc_value[boundary_type * 4u + 2u] / max(select(state[idx * 7u + 0u], bc_value[boundary_type * 4u + 0u], bc_kind[boundary_type * 4u + 0u] == 1u), 0.000000000001), bc_kind[boundary_type * 4u + 2u] == 1u) - state[idx * 7u + 6u]);
+            if (bc_kind[boundary_type * 8u + 5u] == 1u) {
+                matrix_values[start_row_2 + diag_rank * 8u + 5u] += diff_coeff_rho_u;
+                rhs_2 += diff_coeff_rho_u * bc_value[boundary_type * 8u + 5u];
+            } else {
+                if (bc_kind[boundary_type * 8u + 5u] == 2u) {
+                    rhs_2 += -(constants.viscosity * area * bc_value[boundary_type * 8u + 5u]);
+                }
+            }
         }
-        var phi_1: f32 = fluxes[face_idx * 4u + 1u];
+        var phi_1: f32 = fluxes[face_idx * 8u + 1u];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }
         rhs_1 -= phi_1;
-        var phi_2: f32 = fluxes[face_idx * 4u + 2u];
+        var phi_2: f32 = fluxes[face_idx * 8u + 2u];
         if (owner != idx) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
-        var phi_3: f32 = fluxes[face_idx * 4u + 3u];
+        var phi_3: f32 = fluxes[face_idx * 8u + 3u];
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }
         rhs_3 -= phi_3;
     }
-    matrix_values[start_row_0 + diag_rank * 4u + 0u] += diag_0;
-    rhs[idx * 4u + 0u] = rhs_0;
-    matrix_values[start_row_1 + diag_rank * 4u + 1u] += diag_1;
-    rhs[idx * 4u + 1u] = rhs_1;
-    matrix_values[start_row_2 + diag_rank * 4u + 2u] += diag_2;
-    rhs[idx * 4u + 2u] = rhs_2;
-    matrix_values[start_row_3 + diag_rank * 4u + 3u] += diag_3;
-    rhs[idx * 4u + 3u] = rhs_3;
+    matrix_values[start_row_0 + diag_rank * 8u + 0u] += diag_0;
+    rhs[idx * 8u + 0u] = rhs_0;
+    matrix_values[start_row_1 + diag_rank * 8u + 1u] += diag_1;
+    rhs[idx * 8u + 1u] = rhs_1;
+    matrix_values[start_row_2 + diag_rank * 8u + 2u] += diag_2;
+    rhs[idx * 8u + 2u] = rhs_2;
+    matrix_values[start_row_3 + diag_rank * 8u + 3u] += diag_3;
+    rhs[idx * 8u + 3u] = rhs_3;
+    matrix_values[start_row_4 + diag_rank * 8u + 4u] += diag_4;
+    rhs[idx * 8u + 4u] = rhs_4;
+    matrix_values[start_row_5 + diag_rank * 8u + 5u] += diag_5;
+    rhs[idx * 8u + 5u] = rhs_5;
+    matrix_values[start_row_6 + diag_rank * 8u + 6u] += diag_6;
+    rhs[idx * 8u + 6u] = rhs_6;
+    matrix_values[start_row_7 + diag_rank * 8u + 7u] += diag_7;
+    rhs[idx * 8u + 7u] = rhs_7;
 }

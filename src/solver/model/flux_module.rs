@@ -20,6 +20,24 @@ pub enum FluxModuleSpec {
         /// Face flux computation kernel.
         kernel: crate::solver::ir::FluxModuleKernelSpec,
     },
+
+    /// A named flux scheme that is lowered to an IR kernel during model lowering.
+    ///
+    /// This keeps model definitions declarative (choose scheme + params) without embedding
+    /// flux-formula construction logic in every model definition.
+    Scheme {
+        /// Optional gradients stage spec.
+        gradients: Option<FluxModuleGradientsSpec>,
+        /// Scheme selection + parameters.
+        scheme: FluxSchemeSpec,
+    },
+}
+
+/// Named flux schemes (solver-side, model/PDE-aware lowering).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FluxSchemeSpec {
+    /// Central-upwind (KT-style) Euler flux for an ideal gas.
+    EulerIdealGasCentralUpwind { gamma: f32 },
 }
 
 /// Gradients stage spec for flux modules.

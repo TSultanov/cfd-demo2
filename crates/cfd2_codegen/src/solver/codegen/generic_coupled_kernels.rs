@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::coeff_expr::coeff_cell_expr;
 use super::dsl as typed;
 use super::state_access::state_component;
 use super::wgsl_ast::{
@@ -33,6 +34,7 @@ pub fn generate_generic_coupled_update_wgsl(
     system: &DiscreteSystem,
     layout: &StateLayout,
     primitives: &[(String, PrimitiveExpr)],
+    apply_relaxation: bool,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -40,7 +42,12 @@ pub fn generate_generic_coupled_update_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_update_items());
-    module.push(Item::Function(main_update_fn(system, layout, primitives)));
+    module.push(Item::Function(main_update_fn(
+        system,
+        layout,
+        primitives,
+        apply_relaxation,
+    )));
     module.to_wgsl()
 }
 
@@ -337,26 +344,7 @@ fn coefficient_value_expr(
     idx_ident: &str,
     default: Expr,
 ) -> Expr {
-    match coeff {
-        None => default,
-        Some(Coefficient::Constant { value, .. }) => (*value as f32).into(),
-        Some(Coefficient::Field(field)) => {
-            let name = field.name();
-            if name == "rho" {
-                Expr::ident("constants").field("density")
-            } else if name == "mu" {
-                Expr::ident("constants").field("viscosity")
-            } else if layout.offset_for(name).is_some() {
-                state_component(layout, "state", idx_ident, name, 0)
-            } else {
-                default
-            }
-        }
-        Some(Coefficient::Product(lhs, rhs)) => {
-            coefficient_value_expr(layout, Some(lhs), idx_ident, default.clone())
-                * coefficient_value_expr(layout, Some(rhs), idx_ident, default)
-        }
-    }
+    coeff_cell_expr(layout, coeff, idx_ident, default)
 }
 
 fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
@@ -809,7 +797,12 @@ fn resolve_state_offset(layout: &StateLayout, name: &str) -> Option<u32> {
     layout.component_offset(base, component)
 }
 
-fn main_update_fn(system: &DiscreteSystem, layout: &StateLayout, primitives: &[(String, PrimitiveExpr)]) -> Function {
+fn main_update_fn(
+    system: &DiscreteSystem,
+    layout: &StateLayout,
+    primitives: &[(String, PrimitiveExpr)],
+    apply_relaxation: bool,
+) -> Function {
     let stride = layout.stride();
     let unknowns = coupled_unknown_components(system);
     let coupled_stride = unknowns.len() as u32;
@@ -840,13 +833,15 @@ fn main_update_fn(system: &DiscreteSystem, layout: &StateLayout, primitives: &[(
 
         // Under-relaxation for SIMPLE-like coupled solvers.
         //
-        // Only apply when the coupled unknown is a velocity-like field (`U`/`u`) or pressure (`p`).
-        // Other models (e.g. compressible conserved variables) keep alpha=1 to avoid altering
-        // time-accurate updates.
-        let alpha = match field.name() {
-            "p" => Expr::ident("constants").field("alpha_p"),
-            "U" | "u" => Expr::ident("constants").field("alpha_u"),
-            _ => Expr::lit_f32(1.0),
+        // Only apply when enabled by the caller (e.g. incompressible pressure–velocity coupling).
+        let alpha = if apply_relaxation {
+            match field.name() {
+                "p" => Expr::ident("constants").field("alpha_p"),
+                "U" | "u" => Expr::ident("constants").field("alpha_u"),
+                _ => Expr::lit_f32(1.0),
+            }
+        } else {
+            Expr::lit_f32(1.0)
         };
         let prev = target.clone();
         let prev_is_finite =

@@ -162,15 +162,18 @@ fn assemble_scalar_system<F>(
 where
     F: Fn(BoundaryType, f64, f64) -> Option<f64>,
 {
-    fn eval_coeff_scalar(coeff: &Coefficient) -> f64 {
-        match coeff {
-            Coefficient::Constant { value, .. } => *value,
-            Coefficient::Field(field) => {
-                panic!("coefficient field not supported: {}", field.name())
+        fn eval_coeff_scalar(coeff: &Coefficient) -> f64 {
+            match coeff {
+                Coefficient::Constant { value, .. } => *value,
+                Coefficient::Field(field) => {
+                    panic!("coefficient field not supported: {}", field.name())
+                }
+                Coefficient::MagSqr(field) => {
+                    panic!("coefficient mag_sqr not supported: {}", field.name())
+                }
+                Coefficient::Product(lhs, rhs) => eval_coeff_scalar(lhs) * eval_coeff_scalar(rhs),
             }
-            Coefficient::Product(lhs, rhs) => eval_coeff_scalar(lhs) * eval_coeff_scalar(rhs),
         }
-    }
 
     let num_cells = mesh.num_cells();
     let (row_offsets, col_indices) = build_csr(mesh);

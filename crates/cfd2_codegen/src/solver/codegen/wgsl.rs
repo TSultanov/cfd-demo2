@@ -784,6 +784,7 @@ fn format_coeff(coeff: &Coefficient) -> String {
     match coeff {
         Coefficient::Constant { value, .. } => format!("const({})", value),
         Coefficient::Field(field) => format!("field({})", field.name()),
+        Coefficient::MagSqr(field) => format!("mag_sqr({})", field.name()),
         Coefficient::Product(lhs, rhs) => {
             format!("product({}, {})", format_coeff(lhs), format_coeff(rhs))
         }

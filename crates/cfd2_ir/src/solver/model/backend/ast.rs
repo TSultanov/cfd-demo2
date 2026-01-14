@@ -86,6 +86,10 @@ impl FluxRef {
 pub enum Coefficient {
     Constant { value: f64, unit: UnitDim },
     Field(FieldRef),
+    /// Magnitude-squared of a field (scalar: φ²; vector: |u|²).
+    ///
+    /// This is treated as a scalar coefficient evaluated from the current state.
+    MagSqr(FieldRef),
     Product(Box<Coefficient>, Box<Coefficient>),
 }
 
@@ -112,6 +116,10 @@ impl Coefficient {
         }
     }
 
+    pub fn mag_sqr(field: FieldRef) -> Self {
+        Self::MagSqr(field)
+    }
+
     pub fn product(lhs: Coefficient, rhs: Coefficient) -> Result<Self, CodegenError> {
         lhs.ensure_scalar()?;
         rhs.ensure_scalar()?;
@@ -131,6 +139,7 @@ impl Coefficient {
                     })
                 }
             }
+            Coefficient::MagSqr(_) => Ok(()),
             Coefficient::Product(lhs, rhs) => {
                 lhs.ensure_scalar()?;
                 rhs.ensure_scalar()
@@ -142,6 +151,7 @@ impl Coefficient {
         match self {
             Coefficient::Constant { unit, .. } => *unit,
             Coefficient::Field(field) => field.unit(),
+            Coefficient::MagSqr(field) => field.unit() * field.unit(),
             Coefficient::Product(lhs, rhs) => lhs.unit() * rhs.unit(),
         }
     }
@@ -255,7 +265,14 @@ impl Term {
                     .unwrap_or(si::DIMENSIONLESS);
                 Ok(coeff_unit * self.field.unit() * si::AREA / si::LENGTH)
             }
-            TermOp::Source => Ok(self.field.unit() * si::VOLUME),
+            TermOp::Source => {
+                let coeff_unit = self
+                    .coeff
+                    .as_ref()
+                    .map(|value| value.unit())
+                    .unwrap_or(si::DIMENSIONLESS);
+                Ok(coeff_unit * self.field.unit() * si::VOLUME)
+            }
         }
     }
 }
@@ -550,6 +567,16 @@ pub mod fvm {
     pub fn source(field: FieldRef) -> Term {
         Term::new(TermOp::Source, Discretization::Implicit, field, None, None)
     }
+
+    pub fn source_coeff(coeff: Coefficient, field: FieldRef) -> Term {
+        Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            field,
+            None,
+            Some(coeff),
+        )
+    }
 }
 
 pub mod fvc {
@@ -605,6 +632,16 @@ pub mod fvc {
 
     pub fn source(field: FieldRef) -> Term {
         Term::new(TermOp::Source, Discretization::Explicit, field, None, None)
+    }
+
+    pub fn source_coeff(coeff: Coefficient, field: FieldRef) -> Term {
+        Term::new(
+            TermOp::Source,
+            Discretization::Explicit,
+            field,
+            None,
+            Some(coeff),
+        )
     }
 }
 

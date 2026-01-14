@@ -176,7 +176,11 @@ pub fn derive_kernel_specs_for_model(
                     dispatch: DispatchKindId::Cells,
                 });
             }
-            if let Some(FluxModuleSpec::Kernel { gradients, .. }) = &model.flux_module {
+            if let Some(flux) = &model.flux_module {
+                let gradients = match flux {
+                    FluxModuleSpec::Kernel { gradients, .. } => gradients.as_ref(),
+                    FluxModuleSpec::Scheme { gradients, .. } => gradients.as_ref(),
+                };
                 if gradients.is_some() {
                     kernels.push(ModelKernelSpec {
                         id: KernelId::FLUX_MODULE_GRADIENTS,
@@ -221,7 +225,8 @@ pub fn derive_kernel_specs_for_model(
             let mut kernels = Vec::new();
 
             match &model.flux_module {
-                Some(FluxModuleSpec::Kernel { gradients, .. }) => {
+                Some(FluxModuleSpec::Kernel { gradients, .. })
+                | Some(FluxModuleSpec::Scheme { gradients, .. }) => {
                     if gradients.is_some() {
                         kernels.push(ModelKernelSpec {
                             id: KernelId::FLUX_MODULE_GRADIENTS,
@@ -262,7 +267,8 @@ pub fn derive_kernel_specs_for_model(
             let mut kernels = Vec::new();
 
             match &model.flux_module {
-                Some(FluxModuleSpec::Kernel { gradients, .. }) => {
+                Some(FluxModuleSpec::Kernel { gradients, .. })
+                | Some(FluxModuleSpec::Scheme { gradients, .. }) => {
                     if gradients.is_some() {
                         kernels.push(ModelKernelSpec {
                             id: KernelId::FLUX_MODULE_GRADIENTS,
@@ -359,6 +365,7 @@ pub fn generate_kernel_wgsl_for_model_by_id(
                 match coeff {
                     BackendCoeff::Constant { .. } => {}
                     BackendCoeff::Field(field) => out.push(*field),
+                    BackendCoeff::MagSqr(field) => out.push(*field),
                     BackendCoeff::Product(lhs, rhs) => {
                         collect_coeff_fields(lhs, out);
                         collect_coeff_fields(rhs, out);
@@ -461,6 +468,7 @@ pub fn generate_kernel_wgsl_for_model_by_id(
                 match coeff {
                     BackendCoeff::Constant { .. } => {}
                     BackendCoeff::Field(field) => out.push(*field),
+                    BackendCoeff::MagSqr(field) => out.push(*field),
                     BackendCoeff::Product(lhs, rhs) => {
                         collect_coeff_fields(lhs, out);
                         collect_coeff_fields(rhs, out);
@@ -579,6 +587,10 @@ pub fn generate_kernel_wgsl_for_model_by_id(
             Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel {
                 gradients: Some(_),
                 ..
+            })
+            | Some(crate::solver::model::flux_module::FluxModuleSpec::Scheme {
+                gradients: Some(_),
+                ..
             }) => {
                 let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
                 cfd2_codegen::solver::codegen::generate_flux_module_gradients_wgsl(
@@ -592,26 +604,41 @@ pub fn generate_kernel_wgsl_for_model_by_id(
                 );
             }
         },
-        "flux_module" => match &model.flux_module {
-            Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. }) => {
-                let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-                let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
-                let prims = model
-                    .primitives
-                    .ordered()
-                    .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
-                cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl(
-                    &model.state_layout,
-                    &flux_layout,
-                    flux_stride,
-                    &prims,
-                    kernel,
-                )
+        "flux_module" => {
+            let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+            let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+            let prims = model
+                .primitives
+                .ordered()
+                .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
+
+            match &model.flux_module {
+                Some(crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. }) => {
+                    cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl(
+                        &model.state_layout,
+                        &flux_layout,
+                        flux_stride,
+                        &prims,
+                        kernel,
+                    )
+                }
+                Some(crate::solver::model::flux_module::FluxModuleSpec::Scheme { scheme, .. }) => {
+                    let kernel =
+                        crate::solver::model::flux_schemes::lower_flux_scheme(scheme, &model.system)
+                            .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
+                    cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl(
+                        &model.state_layout,
+                        &flux_layout,
+                        flux_stride,
+                        &prims,
+                        &kernel,
+                    )
+                }
+                None => {
+                    return Err("flux_module requested but model has no flux module".to_string());
+                }
             }
-            None => {
-                return Err("flux_module requested but model has no flux module".to_string());
-            }
-        },
+        }
 
         "generic_coupled_assembly" => {
             let Some(discrete) = discrete.as_ref() else {
@@ -636,10 +663,15 @@ pub fn generate_kernel_wgsl_for_model_by_id(
                 .primitives
                 .ordered()
                 .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
+            let apply_relaxation = matches!(
+                model.method,
+                crate::solver::model::method::MethodSpec::CoupledIncompressible
+            );
             cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
                 discrete,
                 &model.state_layout,
                 &prims,
+                apply_relaxation,
             )
         }
         _ => {

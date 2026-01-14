@@ -1,4 +1,4 @@
-use crate::solver::codegen::state_access::state_scalar;
+use crate::solver::codegen::state_access::{state_component, state_scalar};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::{Coefficient, FieldKind, StateLayout};
 
@@ -21,6 +21,7 @@ fn f32_literal(value: f64) -> Expr {
 fn coeff_named_expr(name: &str) -> Option<Expr> {
     match name {
         "rho" => Some(Expr::ident("constants").field("density")),
+        "inv_dt" => Some(Expr::from(1.0) / Expr::ident("constants").field("dt")),
         // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
         // but `nu` is conventionally kinematic viscosity; accept both for now.
         "mu" | "nu" => Some(Expr::ident("constants").field("viscosity")),
@@ -55,6 +56,42 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
                         field.name()
                     )
                 })
+            }
+        }
+        Coefficient::MagSqr(field) => {
+            let Some(state_field) = layout.field(field.name()) else {
+                panic!("missing coefficient field '{}' in state layout", field.name());
+            };
+
+            let mag_sqr_at = |idx: &str| match state_field.kind() {
+                FieldKind::Scalar => {
+                    let v = state_scalar(layout, "state", idx, field.name());
+                    v.clone() * v
+                }
+                FieldKind::Vector2 => {
+                    let x = state_component(layout, "state", idx, field.name(), 0);
+                    let y = state_component(layout, "state", idx, field.name(), 1);
+                    x.clone() * x + y.clone() * y
+                }
+                FieldKind::Vector3 => {
+                    let x = state_component(layout, "state", idx, field.name(), 0);
+                    let y = state_component(layout, "state", idx, field.name(), 1);
+                    let z = state_component(layout, "state", idx, field.name(), 2);
+                    x.clone() * x + y.clone() * y + z.clone() * z
+                }
+            };
+
+            match sample {
+                CoeffSample::Cell { idx } => mag_sqr_at(idx),
+                CoeffSample::Face {
+                    owner_idx,
+                    neighbor_idx,
+                    interp,
+                } => {
+                    let own = mag_sqr_at(owner_idx);
+                    let neigh = mag_sqr_at(neighbor_idx);
+                    interp * own + (Expr::from(1.0) - interp) * neigh
+                }
             }
         }
         Coefficient::Product(lhs, rhs) => {

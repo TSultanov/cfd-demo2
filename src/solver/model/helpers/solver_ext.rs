@@ -80,6 +80,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let off_rho_u = off_rho_u as usize;
         let off_rho_e = off_rho_e as usize;
         let off_p = self.model().state_layout.offset_for("p").map(|v| v as usize);
+        let off_t = self.model().state_layout.offset_for("T").map(|v| v as usize);
         let off_u = self
             .model()
             .state_layout
@@ -99,6 +100,9 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             state[base + off_rho_e] = rho_e;
             if let Some(off_p) = off_p {
                 state[base + off_p] = p;
+            }
+            if let Some(off_t) = off_t {
+                state[base + off_t] = p / rho.max(1e-12);
             }
             if let Some(off_u) = off_u {
                 state[base + off_u] = u[0];
@@ -134,6 +138,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let off_rho_u = off_rho_u as usize;
         let off_rho_e = off_rho_e as usize;
         let off_p = self.model().state_layout.offset_for("p").map(|v| v as usize);
+        let off_t = self.model().state_layout.offset_for("T").map(|v| v as usize);
         let off_u = self
             .model()
             .state_layout
@@ -156,6 +161,9 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             state[base + off_rho_e] = rho_e;
             if let Some(off_p) = off_p {
                 state[base + off_p] = p_val;
+            }
+            if let Some(off_t) = off_t {
+                state[base + off_t] = p_val / rho_val.max(1e-12);
             }
             if let Some(off_u) = off_u {
                 state[base + off_u] = u_val[0];

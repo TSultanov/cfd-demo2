@@ -332,9 +332,20 @@ mod tests {
     #[test]
     fn compressible_model_routes_through_generic_coupled_pipeline() {
         let model = compressible_model();
-        assert_eq!(model.system.equations().len(), 3);
+        assert_eq!(model.system.equations().len(), 6);
+        assert_eq!(model.system.equations()[0].target().name(), "rho");
+        assert_eq!(model.system.equations()[1].target().name(), "rho_u");
+        assert_eq!(model.system.equations()[2].target().name(), "rho_e");
+        assert_eq!(model.system.equations()[3].target().name(), "u");
+        assert_eq!(model.system.equations()[4].target().name(), "p");
+        assert_eq!(model.system.equations()[5].target().name(), "T");
+
+        assert_eq!(model.system.equations()[0].terms().len(), 2);
         assert_eq!(model.system.equations()[1].terms().len(), 3);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
+        assert_eq!(model.system.equations()[3].terms().len(), 2);
+        assert_eq!(model.system.equations()[4].terms().len(), 3);
+        assert_eq!(model.system.equations()[5].terms().len(), 2);
 
         // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.
         let kernel_ids: Vec<_> = derive_kernel_specs_for_model(&model)

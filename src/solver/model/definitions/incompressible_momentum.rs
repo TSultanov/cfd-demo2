@@ -211,6 +211,7 @@ fn rhie_chow_flux_module_kernel(
         match coeff {
             BackendCoeff::Constant { .. } => {}
             BackendCoeff::Field(field) => out.push(*field),
+            BackendCoeff::MagSqr(field) => out.push(*field),
             BackendCoeff::Product(lhs, rhs) => {
                 collect_coeff_fields(lhs, out);
                 collect_coeff_fields(rhs, out);

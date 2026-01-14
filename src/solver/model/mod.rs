@@ -4,6 +4,7 @@ mod definitions;
 pub mod eos;
 pub mod flux_layout;
 pub mod flux_module;
+pub mod flux_schemes;
 pub mod gpu_spec;
 pub mod helpers;
 pub mod kernel;

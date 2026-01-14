@@ -101,6 +101,59 @@ impl PrimitiveDerivations {
         Self { derivations }
     }
 
+    /// Euler ideal gas derived pressure + temperature, assuming velocity is already present in
+    /// the state as a coupled unknown (i.e. no `u_x/u_y` recovery).
+    ///
+    /// Conserved: rho, rho_u, rho_e
+    /// Primitives: rho (identity), p, T
+    ///
+    /// Relations:
+    /// - p = (gamma - 1) * (rho_e - 0.5 * (rho_u_x^2 + rho_u_y^2) / rho)
+    /// - T = p / rho  (solver nondimensional units; equivalent to p / (rho * R) with R=1)
+    pub fn euler_ideal_gas_pressure_t(gamma: f32) -> Self {
+        use PrimitiveExpr as E;
+        let mut derivations = HashMap::new();
+
+        // rho is conserved (identity mapping)
+        derivations.insert("rho".into(), E::field("rho"));
+
+        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / rho
+        let rho_u_sq = E::Add(
+            Box::new(E::Mul(
+                Box::new(E::field("rho_u_x")),
+                Box::new(E::field("rho_u_x")),
+            )),
+            Box::new(E::Mul(
+                Box::new(E::field("rho_u_y")),
+                Box::new(E::field("rho_u_y")),
+            )),
+        );
+        let ke = E::Mul(
+            Box::new(E::lit(0.5)),
+            Box::new(E::Div(Box::new(rho_u_sq), Box::new(E::field("rho")))),
+        );
+
+        // p = (gamma - 1) * (rho_e - ke)
+        derivations.insert(
+            "p".into(),
+            E::Mul(
+                Box::new(E::lit(gamma - 1.0)),
+                Box::new(E::Sub(
+                    Box::new(E::field("rho_e")),
+                    Box::new(ke),
+                )),
+            ),
+        );
+
+        // T = p / rho
+        derivations.insert(
+            "T".into(),
+            E::Div(Box::new(E::field("p")), Box::new(E::field("rho"))),
+        );
+
+        Self { derivations }
+    }
+
     /// Get the primitive expression for a given field name.
     pub fn get(&self, name: &str) -> Option<&PrimitiveExpr> {
         self.derivations.get(name)

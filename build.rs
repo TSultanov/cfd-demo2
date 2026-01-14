@@ -59,6 +59,12 @@ mod solver {
                 "/src/solver/model/flux_module.rs"
             ));
         }
+        pub mod flux_schemes {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/flux_schemes.rs"
+            ));
+        }
         pub mod primitives {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

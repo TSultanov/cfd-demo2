@@ -668,6 +668,15 @@ pub fn generate_shared_kernel_wgsl_by_id(kernel_id: KernelId) -> Result<String, 
 pub fn emit_shared_kernels_wgsl(
     base_dir: impl AsRef<std::path::Path>,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
+    Ok(emit_shared_kernels_wgsl_with_ids(base_dir)?
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect())
+}
+
+pub fn emit_shared_kernels_wgsl_with_ids(
+    base_dir: impl AsRef<std::path::Path>,
+) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
     let base_dir = base_dir.as_ref();
     let mut outputs = Vec::new();
 
@@ -677,9 +686,10 @@ pub fn emit_shared_kernels_wgsl(
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
     let wgsl = generate_shared_kernel_wgsl_by_id(kernel_id)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-    outputs.push(cfd2_codegen::compiler::write_generated_wgsl(
+    let path = cfd2_codegen::compiler::write_generated_wgsl(
         base_dir, filename, &wgsl,
-    )?);
+    )?;
+    outputs.push((kernel_id, path));
 
     Ok(outputs)
 }
@@ -704,6 +714,17 @@ pub fn emit_model_kernels_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> std::io::Result<Vec<std::path::PathBuf>> {
+    Ok(emit_model_kernels_wgsl_with_ids(base_dir, model, schemes)?
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect())
+}
+
+pub fn emit_model_kernels_wgsl_with_ids(
+    base_dir: impl AsRef<std::path::Path>,
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
     let mut outputs = Vec::new();
 
     let specs = derive_kernel_specs_for_model(model)
@@ -717,9 +738,8 @@ pub fn emit_model_kernels_wgsl(
         if !seen.insert(spec.id) {
             continue;
         }
-        outputs.push(emit_model_kernel_wgsl_by_id(
-            &base_dir, model, schemes, spec.id,
-        )?);
+        let path = emit_model_kernel_wgsl_by_id(&base_dir, model, schemes, spec.id)?;
+        outputs.push((spec.id, path));
     }
 
     Ok(outputs)

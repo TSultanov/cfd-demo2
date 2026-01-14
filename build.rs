@@ -1,4 +1,3 @@
-use cfd2_codegen::compiler as codegen_compiler;
 use glob::glob;
 use std::fs;
 use std::path::PathBuf;
@@ -187,16 +186,24 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    solver::model::kernel::emit_shared_kernels_wgsl(&manifest_dir)
+    let shared_kernels = solver::model::kernel::emit_shared_kernels_wgsl_with_ids(&manifest_dir)
         .unwrap_or_else(|err| panic!("codegen failed for shared kernels: {err}"));
 
+    let mut per_model_kernels: Vec<(String, solver::model::KernelId, PathBuf)> = Vec::new();
     for model in solver::model::all_models() {
-        solver::model::kernel::emit_model_kernels_wgsl(&manifest_dir, &model, &schemes)
-            .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
+        let emitted = solver::model::kernel::emit_model_kernels_wgsl_with_ids(
+            &manifest_dir,
+            &model,
+            &schemes,
+        )
+        .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
+        for (kernel_id, path) in emitted {
+            per_model_kernels.push((model.id.to_string(), kernel_id, path));
+        }
     }
 
     generate_wgsl_binding_meta(&manifest_dir);
-    generate_kernel_registry_map(&manifest_dir);
+    generate_kernel_registry_map(&manifest_dir, &shared_kernels, &per_model_kernels);
 
     for entry in glob("src/solver/gpu/shaders/**/*.wgsl").expect("Failed to read glob pattern") {
         match entry {
@@ -315,63 +322,30 @@ fn generate_wgsl_binding_meta(manifest_dir: &str) {
     write_if_changed(&out_path, &code);
 }
 
-fn generate_kernel_registry_map(manifest_dir: &str) {
+fn generate_kernel_registry_map(
+    manifest_dir: &str,
+    shared_kernels: &[(solver::model::KernelId, PathBuf)],
+    per_model_kernels: &[(String, solver::model::KernelId, PathBuf)],
+) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("kernel_registry_map.rs");
 
-    let gen_dir = codegen_compiler::generated_dir_for(manifest_dir);
-
-    // Model-driven generated kernels (per-model).
-    //
-    // The authoritative list is derived from each model's kernel specs; build.rs does not scan
-    // for prefix patterns (avoids adding per-kernel glue here when new modules appear).
     let mut per_model_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> = Vec::new();
-    for model in solver::model::all_models() {
-        let specs =
-            solver::model::kernel::derive_kernel_specs_for_model(&model).unwrap_or_else(|err| {
-                panic!(
-                    "kernel spec derivation failed for model '{}': {err}",
-                    model.id
-                )
-            });
-
-        let mut seen = std::collections::HashSet::new();
-        for spec in specs {
-            let is_builtin_model_generated =
-                solver::model::kernel::is_builtin_model_generated_kernel_id(spec.id);
-            let is_model_generated_override = model.generated_kernels.iter().any(|s| s.id == spec.id);
-            if !is_builtin_model_generated && !is_model_generated_override {
-                continue;
-            }
-            if !seen.insert(spec.id) {
-                continue;
-            }
-
-            let filename = solver::model::kernel::kernel_output_name_for_model(model.id, spec.id)
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "failed to compute output filename for model '{}' kernel '{}': {err}",
-                        model.id,
-                        spec.id.as_str()
-                    )
-                });
-            let path = gen_dir.join(filename);
-            let src = fs::read_to_string(&path).unwrap_or_else(|err| {
-                panic!("failed to read generated WGSL '{}': {err}", path.display())
-            });
-            let bindings = parse_wgsl_bindings(&src);
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
-            let module_name = sanitize_rust_ident(stem);
-            per_model_entries.push((
-                model.id.to_string(),
-                spec.id.as_str().to_string(),
-                module_name,
-                bindings,
-            ));
-        }
+    for (model_id, kernel_id, path) in per_model_kernels {
+        let src = fs::read_to_string(path)
+            .unwrap_or_else(|err| panic!("failed to read generated WGSL '{}': {err}", path.display()));
+        let bindings = parse_wgsl_bindings(&src);
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
+        let module_name = sanitize_rust_ident(stem);
+        per_model_entries.push((
+            model_id.to_string(),
+            kernel_id.as_str().to_string(),
+            module_name,
+            bindings,
+        ));
     }
 
     per_model_entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -379,18 +353,9 @@ fn generate_kernel_registry_map(manifest_dir: &str) {
 
     // Shared generated kernels (global, no model id suffix).
     let mut shared_entries: Vec<(String, String, Vec<(u32, u32, String)>)> = Vec::new();
-    for &kernel_id in &[solver::model::KernelId::GENERIC_COUPLED_APPLY] {
-        let filename = solver::model::kernel::kernel_output_name_for_model("", kernel_id)
-            .unwrap_or_else(|err| {
-                panic!(
-                    "failed to compute output filename for shared kernel '{}': {err}",
-                    kernel_id.as_str()
-                )
-            });
-        let path = gen_dir.join(filename);
-        let src = fs::read_to_string(&path).unwrap_or_else(|err| {
-            panic!("failed to read generated WGSL '{}': {err}", path.display())
-        });
+    for (kernel_id, path) in shared_kernels {
+        let src = fs::read_to_string(path)
+            .unwrap_or_else(|err| panic!("failed to read generated WGSL '{}': {err}", path.display()));
         let bindings = parse_wgsl_bindings(&src);
         let stem = path
             .file_stem()

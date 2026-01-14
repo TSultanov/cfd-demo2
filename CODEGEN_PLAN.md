@@ -111,7 +111,8 @@ Progress (transitional):
 - Added a string-keyed “named parameter” path (`GpuProgramPlan::set_named_param`) so new runtime knobs can be introduced without growing global enums.
 - Removed the `PlanParam` enum and the `set_param` path; all runtime knobs now route through named parameters.
 - Removed the universal string-key match; lowering registers named-parameter handlers in the plan spec.
-- Next step: move this registration into module-declared parameter tables (no global “known keys” list).
+- Moved named-parameter registration into the backend module (`lowering/models/generic_coupled.rs`) so universal lowering no longer owns a “known keys” list.
+- Next step: make modules contribute their own parameter tables (time integration, low-mach, etc.) and merge them via the recipe/model metadata.
 
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).

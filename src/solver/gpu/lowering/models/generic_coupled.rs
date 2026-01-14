@@ -18,12 +18,13 @@ use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry, ProgramParamHandler};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::{KernelId, ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) struct GenericCoupledProgramResources {
@@ -667,6 +668,33 @@ pub(crate) fn register_ops_from_recipe(
     registry.merge(built)?;
 
     Ok(())
+}
+
+pub(crate) fn named_params_for_recipe(
+    _recipe: &SolverRecipe,
+) -> HashMap<&'static str, ProgramParamHandler> {
+    let mut params: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
+    params.insert("dt", param_dt);
+    params.insert("dtau", param_dtau);
+    params.insert("advection_scheme", param_advection_scheme);
+    params.insert("time_scheme", param_time_scheme);
+    params.insert("preconditioner", param_preconditioner);
+    params.insert("viscosity", param_viscosity);
+    params.insert("density", param_density);
+    params.insert("eos.gamma", param_eos_gamma);
+    params.insert("eos.gm1", param_eos_gm1);
+    params.insert("eos.r", param_eos_r);
+    params.insert("eos.dp_drho", param_eos_dp_drho);
+    params.insert("eos.p_offset", param_eos_p_offset);
+    params.insert("eos.theta_ref", param_eos_theta_ref);
+    params.insert("alpha_u", param_alpha_u);
+    params.insert("alpha_p", param_alpha_p);
+    params.insert("low_mach.model", param_low_mach_model);
+    params.insert("low_mach.theta_floor", param_low_mach_theta_floor);
+    params.insert("nonconverged_relax", param_nonconverged_relax);
+    params.insert("outer_iters", param_outer_iters);
+    params.insert("detailed_profiling_enabled", param_detailed_profiling);
+    params
 }
 
 pub(crate) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

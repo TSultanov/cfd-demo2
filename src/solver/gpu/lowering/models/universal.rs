@@ -5,10 +5,9 @@ use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::plans::plan_instance::{
     PlanFuture, PlanLinearSystemDebug, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry, ProgramParamHandler};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::LinearSolverStats;
-use std::collections::HashMap;
 
 // --- Single universal program resource ---
 
@@ -137,39 +136,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
     let built =
         crate::solver::gpu::lowering::unified_registry::build_unified_registry(recipe, config)?;
     registry.merge(built)
-}
-
-pub(in crate::solver::gpu::lowering) fn named_params_for_recipe(
-    _recipe: &SolverRecipe,
-) -> HashMap<&'static str, ProgramParamHandler> {
-    let mut params: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
-    params.insert("dt", generic_coupled_model::param_dt);
-    params.insert("dtau", generic_coupled_model::param_dtau);
-    params.insert("advection_scheme", generic_coupled_model::param_advection_scheme);
-    params.insert("time_scheme", generic_coupled_model::param_time_scheme);
-    params.insert("preconditioner", generic_coupled_model::param_preconditioner);
-    params.insert("viscosity", generic_coupled_model::param_viscosity);
-    params.insert("density", generic_coupled_model::param_density);
-    params.insert("eos.gamma", generic_coupled_model::param_eos_gamma);
-    params.insert("eos.gm1", generic_coupled_model::param_eos_gm1);
-    params.insert("eos.r", generic_coupled_model::param_eos_r);
-    params.insert("eos.dp_drho", generic_coupled_model::param_eos_dp_drho);
-    params.insert("eos.p_offset", generic_coupled_model::param_eos_p_offset);
-    params.insert("eos.theta_ref", generic_coupled_model::param_eos_theta_ref);
-    params.insert("alpha_u", generic_coupled_model::param_alpha_u);
-    params.insert("alpha_p", generic_coupled_model::param_alpha_p);
-    params.insert("low_mach.model", generic_coupled_model::param_low_mach_model);
-    params.insert(
-        "low_mach.theta_floor",
-        generic_coupled_model::param_low_mach_theta_floor,
-    );
-    params.insert("nonconverged_relax", generic_coupled_model::param_nonconverged_relax);
-    params.insert("outer_iters", generic_coupled_model::param_outer_iters);
-    params.insert(
-        "detailed_profiling_enabled",
-        generic_coupled_model::param_detailed_profiling,
-    );
-    params
 }
 
 // --- Universal program spec callbacks ---

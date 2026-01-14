@@ -1,9 +1,10 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{
+    SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -44,14 +45,13 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
 
     // Match the OpenFOAM case setup in `reference/openfoam/incompressible_channel`.
     solver.set_dt(0.02);
-    solver.set_dtau(0.0);
-    solver.set_density(1.0);
-    solver.set_viscosity(0.01);
-    solver.set_inlet_velocity(1.0);
-    solver.set_ramp_time(0.0);
-    solver.set_alpha_u(0.7);
-    solver.set_alpha_p(0.3);
-    solver.set_outer_iters(6);
+    solver.set_dtau(0.0).unwrap();
+    solver.set_density(1.0).unwrap();
+    solver.set_viscosity(0.01).unwrap();
+    solver.set_inlet_velocity(1.0).unwrap();
+    solver.set_alpha_u(0.7).unwrap();
+    solver.set_alpha_p(0.3).unwrap();
+    solver.set_outer_iters(6).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();

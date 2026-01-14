@@ -1,6 +1,7 @@
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{
+    SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::{incompressible_momentum_generic_model, ModelPreconditionerSpec};
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -42,13 +43,13 @@ fn gpu_generic_incompressible_schur_smoke() {
 
     // Ensure all user-tunable params are set to benign values.
     solver.set_dt(1e-2);
-    solver.set_dtau(0.0);
-    solver.set_density(1.0);
-    solver.set_viscosity(1.0);
-    solver.set_inlet_velocity(0.0);
-    solver.set_alpha_u(0.7);
-    solver.set_alpha_p(0.3);
-    solver.set_outer_iters(1);
+    solver.set_dtau(0.0).unwrap();
+    solver.set_density(1.0).unwrap();
+    solver.set_viscosity(1.0).unwrap();
+    solver.set_inlet_velocity(0.0).unwrap();
+    solver.set_alpha_u(0.7).unwrap();
+    solver.set_alpha_p(0.3).unwrap();
+    solver.set_outer_iters(1).unwrap();
 
     let u0 = vec![(0.0f64, 0.0f64); mesh.num_cells()];
     let p0 = vec![0.0f64; mesh.num_cells()];

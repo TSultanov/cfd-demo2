@@ -1,6 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{
+    SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -52,14 +53,13 @@ fn test_gpu_divergence_channel_obstacle() {
     ))
     .expect("solver init");
     gpu_solver.set_dt(timestep as f32);
-    gpu_solver.set_dtau(0.0);
-    gpu_solver.set_viscosity(viscosity as f32);
-    gpu_solver.set_density(density as f32);
-    gpu_solver.set_alpha_u(0.7);
-    gpu_solver.set_alpha_p(0.3);
-    gpu_solver.set_inlet_velocity(1.0);
-    gpu_solver.set_ramp_time(0.1);
-    gpu_solver.set_outer_iters(2);
+    gpu_solver.set_dtau(0.0).unwrap();
+    gpu_solver.set_viscosity(viscosity as f32).unwrap();
+    gpu_solver.set_density(density as f32).unwrap();
+    gpu_solver.set_alpha_u(0.7).unwrap();
+    gpu_solver.set_alpha_p(0.3).unwrap();
+    gpu_solver.set_inlet_velocity(1.0).unwrap();
+    gpu_solver.set_outer_iters(2).unwrap();
 
     // Initial Conditions
     let mut u_init = Vec::new();

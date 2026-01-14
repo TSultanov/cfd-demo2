@@ -1,6 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -37,8 +38,8 @@ fn test_amg_preconditioner() {
         .await
         .expect("solver init");
         solver.set_dt(0.001);
-        solver.set_dtau(5e-5);
-        solver.set_viscosity(0.001);
+        solver.set_dtau(5e-5).unwrap();
+        solver.set_viscosity(0.001).unwrap();
         solver.set_advection_scheme(Scheme::Upwind);
 
         let rho_init = vec![1.0f32; mesh.num_cells()];
@@ -68,8 +69,8 @@ fn test_amg_preconditioner() {
         .await
         .expect("solver init");
         solver_amg.set_dt(0.001);
-        solver_amg.set_dtau(5e-5);
-        solver_amg.set_viscosity(0.001);
+        solver_amg.set_dtau(5e-5).unwrap();
+        solver_amg.set_viscosity(0.001).unwrap();
         solver_amg.set_advection_scheme(Scheme::Upwind);
         solver_amg.set_state_fields(&rho_init, &u_init, &p_init);
         solver_amg.initialize_history();

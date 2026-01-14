@@ -1,7 +1,7 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::plans::program::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
-    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources,
+    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources, ProgramSetBcValueFn,
     ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn,
     ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
 };
@@ -17,6 +17,7 @@ pub(crate) struct ModelGpuProgramSpecParts {
     pub dt: ProgramF32Fn,
     pub state_buffer: ProgramStateBufferFn,
     pub write_state_bytes: ProgramWriteStateFn,
+    pub set_bc_value: Option<ProgramSetBcValueFn>,
     pub initialize_history: Option<ProgramInitRun>,
     pub named_params: HashMap<&'static str, ProgramParamHandler>,
     pub set_named_param_fallback: Option<ProgramSetNamedParamFallback>,
@@ -36,6 +37,7 @@ impl ModelGpuProgramSpecParts {
             dt: self.dt,
             state_buffer: self.state_buffer,
             write_state_bytes: self.write_state_bytes,
+            set_bc_value: self.set_bc_value,
             program,
             initialize_history: self.initialize_history,
             named_params: self.named_params,

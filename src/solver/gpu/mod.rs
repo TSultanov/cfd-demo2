@@ -5,7 +5,6 @@ pub mod context;
 pub mod csr;
 pub mod enums;
 pub mod execution_plan;
-pub mod helpers;
 pub(crate) mod explicit_implicit;
 pub mod init;
 pub mod linear_solver;

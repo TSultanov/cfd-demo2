@@ -1,4 +1,4 @@
-use crate::solver::gpu::enums::TimeScheme;
+use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::gpu::plans::build_plan_instance;
 use crate::solver::gpu::plans::plan_instance::{
     PlanAction, PlanInitConfig, PlanParamValue, PlanStepStats,
@@ -109,6 +109,63 @@ impl GpuUnifiedSolver {
 
     pub fn set_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {
         self.plan.set_named_param(name, value)
+    }
+
+    fn coupled_unknown_base_for_field(&self, field: &str) -> Option<(u32, u32)> {
+        let mut idx: u32 = 0;
+        for eqn in self.model.system.equations() {
+            let target = eqn.target();
+            let comps = target.kind().component_count() as u32;
+            if target.name() == field {
+                return Some((idx, comps));
+            }
+            idx += comps;
+        }
+        None
+    }
+
+    pub fn set_boundary_values(
+        &mut self,
+        boundary: GpuBoundaryType,
+        field: &str,
+        values: &[f32],
+    ) -> Result<(), String> {
+        let coupled_stride = self.model.system.unknowns_per_cell() as u32;
+        if coupled_stride == 0 {
+            return Err("model has no coupled unknowns".into());
+        }
+        let Some((base, comps)) = self.coupled_unknown_base_for_field(field) else {
+            return Err(format!("field '{field}' is not a coupled unknown"));
+        };
+        if values.len() != comps as usize {
+            return Err(format!(
+                "field '{field}' expects {comps} component(s), got {}",
+                values.len()
+            ));
+        }
+        for (c, &v) in values.iter().enumerate() {
+            self.plan
+                .set_bc_value(boundary, base + c as u32, v)?;
+        }
+        Ok(())
+    }
+
+    pub fn set_boundary_scalar(
+        &mut self,
+        boundary: GpuBoundaryType,
+        field: &str,
+        value: f32,
+    ) -> Result<(), String> {
+        self.set_boundary_values(boundary, field, &[value])
+    }
+
+    pub fn set_boundary_vec2(
+        &mut self,
+        boundary: GpuBoundaryType,
+        field: &str,
+        value: [f32; 2],
+    ) -> Result<(), String> {
+        self.set_boundary_values(boundary, field, &value)
     }
 
     pub fn set_dt(&mut self, dt: f32) {

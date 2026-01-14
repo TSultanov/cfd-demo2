@@ -196,8 +196,8 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     boundaries.set_field(
         "rho",
         FieldBoundarySpec::new()
-            // Inlet density is driven via the runtime `Density` plan param, which updates the
-            // GPU `bc_value` table for `GpuBoundaryType::Inlet` (see `param_density`).
+            // Inlet density is Dirichlet (placeholder value); update via the solver's boundary
+            // table API (and keep `rho_u`/`rho_e` consistent with the chosen inlet state).
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
@@ -222,8 +222,8 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     boundaries.set_field(
         "rho_u",
         FieldBoundarySpec::new()
-            // Inlet momentum density is driven via the runtime `InletVelocity` plan param
-            // (see `param_inlet_velocity`); initial value is a placeholder.
+            // Inlet momentum density is Dirichlet (placeholder value); update via the solver's
+            // boundary table API (typically derived from `rho` and inlet `u`).
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,
@@ -248,8 +248,8 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     boundaries.set_field(
         "u",
         FieldBoundarySpec::new()
-            // Inlet velocity is driven via the runtime `InletVelocity` plan param
-            // (see `param_inlet_velocity`); initial value is a placeholder.
+            // Inlet velocity is Dirichlet (placeholder value); update via the solver's boundary
+            // table API.
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,
@@ -275,7 +275,8 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     boundaries.set_field(
         "rho_e",
         FieldBoundarySpec::new()
-            // Inlet energy is updated alongside rho/rho_u when inlet parameters change.
+            // Inlet energy is Dirichlet (placeholder value); update via the solver's boundary
+            // table API, typically derived from inlet `rho`, `u`, and EOS params.
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,

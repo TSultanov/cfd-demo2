@@ -1,6 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -39,7 +40,10 @@ fn gpu_compressible_solver_preserves_uniform_state() {
     .expect("solver init");
 
     solver.set_dt(0.01);
-    solver.set_inlet_velocity(0.0);
+    let eos = solver.model().eos;
+    solver
+        .set_compressible_inlet_isothermal_x(1.0, 0.0, &eos)
+        .unwrap();
     solver.set_uniform_state(1.0f32, [0.0f32, 0.0f32], 1.0f32);
     solver.initialize_history();
 

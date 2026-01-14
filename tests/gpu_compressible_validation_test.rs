@@ -1,7 +1,9 @@
 use cfd2::solver::mesh::geometry::RectangularChannel;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -58,10 +60,13 @@ fn compressible_shock_tube_relaxes_discontinuity() {
         None,
     ))
     .expect("solver init");
-    solver.set_outer_iters(3);
+    solver.set_outer_iters(3).unwrap();
     solver.set_dt(0.002);
-    solver.set_viscosity(0.0);
-    solver.set_inlet_velocity(0.0);
+    solver.set_viscosity(0.0).unwrap();
+    let eos = solver.model().eos;
+    solver
+        .set_compressible_inlet_isothermal_x(1.0, 0.0, &eos)
+        .unwrap();
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 
@@ -141,10 +146,13 @@ fn compressible_acoustic_pulse_propagates() {
         None,
     ))
     .expect("solver init");
-    solver.set_outer_iters(3);
+    solver.set_outer_iters(3).unwrap();
     solver.set_dt(0.005);
-    solver.set_viscosity(0.0);
-    solver.set_inlet_velocity(0.0);
+    solver.set_viscosity(0.0).unwrap();
+    let eos = solver.model().eos;
+    solver
+        .set_compressible_inlet_isothermal_x(1.0, 0.0, &eos)
+        .unwrap();
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 

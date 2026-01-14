@@ -19,6 +19,12 @@ pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
 pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
 pub(crate) type ProgramWriteStateFn = fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
+pub(crate) type ProgramSetBcValueFn = fn(
+    &GpuProgramPlan,
+    crate::solver::gpu::enums::GpuBoundaryType,
+    u32,
+    f32,
+) -> Result<(), String>;
 pub(crate) type ProgramStepStatsFn = fn(&GpuProgramPlan) -> PlanStepStats;
 pub(crate) type ProgramStepWithStatsFn =
     fn(&mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String>;
@@ -427,6 +433,7 @@ pub(crate) struct ModelGpuProgramSpec {
     pub dt: ProgramF32Fn,
     pub state_buffer: ProgramStateBufferFn,
     pub write_state_bytes: ProgramWriteStateFn,
+    pub set_bc_value: Option<ProgramSetBcValueFn>,
     pub program: ProgramSpec,
     pub initialize_history: Option<ProgramInitRun>,
     pub named_params: HashMap<&'static str, ProgramParamHandler>,
@@ -511,6 +518,18 @@ impl GpuProgramPlan {
 
     pub fn write_state_bytes(&self, bytes: &[u8]) -> Result<(), String> {
         (self.spec.write_state_bytes)(self, bytes)
+    }
+
+    pub fn set_bc_value(
+        &self,
+        boundary: crate::solver::gpu::enums::GpuBoundaryType,
+        unknown_component: u32,
+        value: f32,
+    ) -> Result<(), String> {
+        let Some(set_bc_value) = self.spec.set_bc_value else {
+            return Err("plan does not support bc_value updates".into());
+        };
+        set_bc_value(self, boundary, unknown_component, value)
     }
 
     pub fn step_stats(&self) -> PlanStepStats {

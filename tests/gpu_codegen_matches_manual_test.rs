@@ -1,6 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{
+    SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -35,10 +36,9 @@ fn run_solver(mesh: &Mesh, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
     ))
     .expect("solver init");
     solver.set_dt(0.01);
-    solver.set_viscosity(0.01);
-    solver.set_density(1.0);
-    solver.set_inlet_velocity(1.0);
-    solver.set_ramp_time(0.001);
+    solver.set_viscosity(0.01).unwrap();
+    solver.set_density(1.0).unwrap();
+    solver.set_inlet_velocity(1.0).unwrap();
 
     // Seed a non-trivial flow so this stays a codegen/dispatch smoke test even when
     // inlet boundary forcing is expressed via model-defined BCs (not global params).

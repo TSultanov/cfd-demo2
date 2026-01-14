@@ -1,9 +1,11 @@
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
 use cfd2::solver::mesh::{
     generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, Mesh,
 };
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverInletVelocityExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
 use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -476,14 +478,13 @@ fn incompressible_structured_mesh_preserves_rest_state() {
     ))
     .unwrap();
     solver.set_dt(0.02);
-    solver.set_density(1.0);
-    solver.set_viscosity(0.05);
+    solver.set_density(1.0).unwrap();
+    solver.set_viscosity(0.05).unwrap();
     solver.set_advection_scheme(Scheme::Upwind);
-    solver.set_alpha_u(0.7);
-    solver.set_alpha_p(0.3);
+    solver.set_alpha_u(0.7).unwrap();
+    solver.set_alpha_p(0.3).unwrap();
     solver.set_time_scheme(TimeScheme::BDF2);
-    solver.set_inlet_velocity(0.0);
-    solver.set_ramp_time(0.0);
+    solver.set_inlet_velocity(0.0).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
@@ -585,10 +586,12 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
             .unwrap();
             solver.set_dt(dt);
             solver.set_time_scheme(TimeScheme::Euler);
-            solver.set_viscosity(0.0);
-            solver.set_inlet_velocity(0.0);
+            solver.set_viscosity(0.0).unwrap();
+            solver.set_inlet_velocity(0.0).unwrap();
             solver.set_advection_scheme(scheme_enum);
-            solver.set_outer_iters(if time_scheme == 1 { 2 } else { 1 });
+            solver
+                .set_outer_iters(if time_scheme == 1 { 2 } else { 1 })
+                .unwrap();
             solver.set_state_fields(&rho, &u, &p);
             solver.initialize_history();
 
@@ -788,12 +791,11 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     ))
     .expect("solver init");
     incomp.set_dt(dt);
-    incomp.set_viscosity(nu);
-    incomp.set_density(density);
-    incomp.set_alpha_u(0.7);
-    incomp.set_alpha_p(0.3);
-    incomp.set_inlet_velocity(u_in);
-    incomp.set_ramp_time(0.2);
+    incomp.set_viscosity(nu).unwrap();
+    incomp.set_density(density).unwrap();
+    incomp.set_alpha_u(0.7).unwrap();
+    incomp.set_alpha_p(0.3).unwrap();
+    incomp.set_inlet_velocity(u_in).unwrap();
     incomp.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     incomp.set_p(&vec![0.0; mesh.num_cells()]);
     incomp.initialize_history();
@@ -812,14 +814,16 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     ))
     .expect("solver init");
     comp.set_dt(dt);
-    comp.set_dtau(5e-5);
-    comp.set_viscosity(nu);
-    comp.set_inlet_velocity(u_in);
-    comp.set_alpha_u(0.3);
+    comp.set_dtau(5e-5).unwrap();
+    comp.set_viscosity(nu).unwrap();
+    let eos = comp.model().eos;
+    comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
+        .unwrap();
+    comp.set_alpha_u(0.3).unwrap();
     comp.set_precond_model(GpuLowMachPrecondModel::WeissSmith)
         .expect("precond model");
     comp.set_precond_theta_floor(1e-6).expect("theta floor");
-    comp.set_outer_iters(6);
+    comp.set_outer_iters(6).unwrap();
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure; mesh.num_cells()];
     let u_init = vec![[0.0f32, 0.0f32]; mesh.num_cells()];
@@ -1050,10 +1054,12 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
             .unwrap();
             solver.set_dt(dt);
             solver.set_time_scheme(TimeScheme::Euler);
-            solver.set_viscosity(0.0);
-            solver.set_inlet_velocity(0.0);
+            solver.set_viscosity(0.0).unwrap();
+            solver.set_inlet_velocity(0.0).unwrap();
             solver.set_advection_scheme(scheme_enum);
-            solver.set_outer_iters(if time_scheme == 1 { 3 } else { 1 });
+            solver
+                .set_outer_iters(if time_scheme == 1 { 3 } else { 1 })
+                .unwrap();
             solver.set_state_fields(&rho, &u, &p);
             solver.initialize_history();
 

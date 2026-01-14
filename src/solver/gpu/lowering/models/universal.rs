@@ -158,8 +158,6 @@ pub(in crate::solver::gpu::lowering) fn named_params_for_recipe(
     params.insert("eos.theta_ref", generic_coupled_model::param_eos_theta_ref);
     params.insert("alpha_u", generic_coupled_model::param_alpha_u);
     params.insert("alpha_p", generic_coupled_model::param_alpha_p);
-    params.insert("inlet_velocity", generic_coupled_model::param_inlet_velocity);
-    params.insert("ramp_time", generic_coupled_model::param_ramp_time);
     params.insert("low_mach.model", generic_coupled_model::param_low_mach_model);
     params.insert(
         "low_mach.theta_floor",
@@ -197,6 +195,15 @@ pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     bytes: &[u8],
 ) -> Result<(), String> {
     generic_coupled_model::spec_write_state_bytes(plan, bytes)
+}
+
+pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
+    plan: &GpuProgramPlan,
+    boundary: crate::solver::gpu::enums::GpuBoundaryType,
+    unknown_component: u32,
+    value: f32,
+) -> Result<(), String> {
+    generic_coupled_model::spec_set_bc_value(plan, boundary, unknown_component, value)
 }
 
 pub(in crate::solver::gpu::lowering) fn init_history(_plan: &GpuProgramPlan) {

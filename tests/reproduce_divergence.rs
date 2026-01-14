@@ -1,6 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverIncompressibleStatsExt};
+use cfd2::solver::model::helpers::{
+    SolverFieldAliasesExt, SolverIncompressibleStatsExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -43,15 +44,15 @@ fn test_reproduce_divergence() {
     .expect("solver init");
 
     // Fluid: Water
-    solver.set_density(1000.0);
-    solver.set_viscosity(0.001);
+    solver.set_density(1000.0).unwrap();
+    solver.set_viscosity(0.001).unwrap();
 
     // Scheme: Upwind (ID 0)
     solver.set_advection_scheme(Scheme::Upwind);
 
     // Under-relaxation
-    solver.set_alpha_u(0.7);
-    solver.set_alpha_p(0.3);
+    solver.set_alpha_u(0.7).unwrap();
+    solver.set_alpha_p(0.3).unwrap();
 
     // Initial Conditions
     let n_cells = mesh.num_cells();

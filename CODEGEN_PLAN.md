@@ -99,6 +99,10 @@ Target:
 - Any “physics-aware” helpers live alongside models (e.g. `model::helpers::euler::pack_conservative_state(...)`), not in the solver core.
 - Boundary driving (e.g. inlet velocity) is described declaratively by the model (or recipe), not by ad-hoc host-side special-casing.
 
+Progress (partial):
+- Added a generic boundary table update API (`GpuUnifiedSolver::set_boundary_scalar/set_boundary_vec2/set_boundary_values`).
+- Removed the `inlet_velocity`/`ramp_time` named params and host-side inlet special-casing; tests/UI now drive inlet BCs via model helpers that use the generic boundary API.
+
 ### 3) Retire `PlanParam` as global plumbing
 - Replace global param plumbing with typed, module-owned uniforms/config deltas routed through the recipe (or a model-declared parameter table).
 - Done when: new configuration does not add new “known key” entries to a universal string match, and runtime controls are described by model/method metadata instead of global plumbing.

@@ -1,6 +1,5 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -52,10 +51,10 @@ async fn run_coupled_solver(
 
     // Constants
     solver.set_dt(0.001);
-    solver.set_density(1.0);
-    solver.set_viscosity(0.01);
-    solver.set_alpha_u(0.9);
-    solver.set_alpha_p(0.9);
+    solver.set_density(1.0).unwrap();
+    solver.set_viscosity(0.01).unwrap();
+    solver.set_alpha_u(0.9).unwrap();
+    solver.set_alpha_p(0.9).unwrap();
     solver.set_advection_scheme(scheme);
     solver.set_time_scheme(time_scheme);
 

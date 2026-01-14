@@ -1,6 +1,5 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
 /// Comprehensive GPU-CPU Communication Profiling Test
 ///
@@ -61,10 +60,10 @@ fn test_gpu_transfer_profile() {
         .await
         .expect("solver init");
         solver.set_dt(0.001);
-        solver.set_viscosity(0.001);
-        solver.set_density(1.0);
-        solver.set_alpha_p(0.3);
-        solver.set_alpha_u(0.7);
+        solver.set_viscosity(0.001).unwrap();
+        solver.set_density(1.0).unwrap();
+        solver.set_alpha_p(0.3).unwrap();
+        solver.set_alpha_u(0.7).unwrap();
 
         // Set initial conditions - inlet velocity
         let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
@@ -322,10 +321,10 @@ fn test_gpu_transfer_profile_scaling() {
             .await
             .expect("solver init");
             solver.set_dt(0.001);
-            solver.set_viscosity(0.001);
-            solver.set_density(1.0);
-            solver.set_alpha_p(0.3);
-            solver.set_alpha_u(0.7);
+            solver.set_viscosity(0.001).unwrap();
+            solver.set_density(1.0).unwrap();
+            solver.set_alpha_p(0.3).unwrap();
+            solver.set_alpha_u(0.7).unwrap();
 
             let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
             for i in 0..mesh.num_cells() {

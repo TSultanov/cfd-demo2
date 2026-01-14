@@ -1,7 +1,9 @@
 use cfd2::solver::mesh::generate_cut_cell_mesh;
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -34,11 +36,14 @@ fn gpu_compressible_amg_smoke() {
     ))
     .expect("solver init");
     solver.set_dt(0.01);
-    solver.set_dtau(0.0);
-    solver.set_viscosity(0.01);
-    solver.set_inlet_velocity(0.5);
-    solver.set_alpha_u(0.5);
-    solver.set_outer_iters(2);
+    solver.set_dtau(0.0).unwrap();
+    solver.set_viscosity(0.01).unwrap();
+    let eos = solver.model().eos;
+    solver
+        .set_compressible_inlet_isothermal_x(1.0, 0.5, &eos)
+        .unwrap();
+    solver.set_alpha_u(0.5).unwrap();
+    solver.set_outer_iters(2).unwrap();
 
     let rho_init = vec![1.0f32; mesh.num_cells()];
     let p_init = vec![1.0f32; mesh.num_cells()];

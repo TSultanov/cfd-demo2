@@ -1,7 +1,9 @@
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverInletVelocityExt, SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
 use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -346,11 +348,10 @@ fn low_mach_equivalence_vortex_street() {
     ))
     .expect("solver init");
     incomp.set_dt(dt as f32);
-    incomp.set_viscosity(nu);
-    incomp.set_density(density);
+    incomp.set_viscosity(nu).unwrap();
+    incomp.set_density(density).unwrap();
     incomp.set_advection_scheme(Scheme::QUICK);
-    incomp.set_inlet_velocity(u_in);
-    incomp.set_ramp_time(0.1);
+    incomp.set_inlet_velocity(u_in).unwrap();
     let mut u_seed = vec![(0.0f64, 0.0f64); mesh.num_cells()];
     let length = 3.0;
     for i in 0..mesh.num_cells() {
@@ -403,17 +404,19 @@ fn low_mach_equivalence_vortex_street() {
     ))
     .expect("solver init");
     comp.set_dt(dt as f32);
-    comp.set_dtau(dtau as f32);
-    comp.set_viscosity(nu);
-    comp.set_inlet_velocity(u_in);
-    comp.set_alpha_u(alpha_u as f32);
+    comp.set_dtau(dtau as f32).unwrap();
+    comp.set_viscosity(nu).unwrap();
+    let eos = comp.model().eos;
+    comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
+        .unwrap();
+    comp.set_alpha_u(alpha_u as f32).unwrap();
     comp.set_precond_model(precond_model)
         .expect("precond model");
     comp.set_precond_theta_floor(precond_theta_floor as f32)
         .expect("theta floor");
     comp.set_nonconverged_relax(nonconv_relax as f32)
         .expect("nonconverged relax");
-    comp.set_outer_iters(comp_iters);
+    comp.set_outer_iters(comp_iters).unwrap();
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure as f32; mesh.num_cells()];
     let mut u_init = vec![[0.0f32, 0.0f32]; mesh.num_cells()];

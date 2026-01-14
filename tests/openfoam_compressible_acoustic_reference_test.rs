@@ -1,10 +1,12 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverInletVelocityExt,
+    SolverRuntimeParamsExt,
+};
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -62,10 +64,10 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     }
 
     solver.set_dt(5e-4);
-    solver.set_dtau(0.0);
-    solver.set_viscosity(0.0);
-    solver.set_inlet_velocity(0.0);
-    solver.set_outer_iters(1);
+    solver.set_dtau(0.0).unwrap();
+    solver.set_viscosity(0.0).unwrap();
+    solver.set_inlet_velocity(0.0).unwrap();
+    solver.set_outer_iters(1).unwrap();
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 

@@ -1,6 +1,5 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -50,8 +49,8 @@ fn test_gpu_fine_mesh_obstacle() {
         let viscosity = 0.001;
 
         solver.set_dt(dt);
-        solver.set_density(density);
-        solver.set_viscosity(viscosity);
+        solver.set_density(density).unwrap();
+        solver.set_viscosity(viscosity).unwrap();
 
         // Init BC
         println!("Initializing BCs...");

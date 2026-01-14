@@ -1,7 +1,9 @@
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
-use cfd2::solver::gpu::helpers::SolverPlanParamsExt;
-use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverFieldAliasesExt};
+use cfd2::solver::model::helpers::{
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverRuntimeParamsExt,
+};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
@@ -119,17 +121,19 @@ fn compressible_low_mach_convergence_smoke() {
     ))
     .expect("solver init");
     comp.set_dt(dt as f32);
-    comp.set_dtau(dtau as f32);
-    comp.set_viscosity(nu);
-    comp.set_inlet_velocity(u_in);
-    comp.set_alpha_u(alpha_u as f32);
+    comp.set_dtau(dtau as f32).unwrap();
+    comp.set_viscosity(nu).unwrap();
+    let eos = comp.model().eos;
+    comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
+        .unwrap();
+    comp.set_alpha_u(alpha_u as f32).unwrap();
     comp.set_precond_model(precond_model)
         .expect("precond model");
     comp.set_precond_theta_floor(precond_theta_floor as f32)
         .expect("theta floor");
     comp.set_nonconverged_relax(nonconv_relax as f32)
         .expect("nonconverged relax");
-    comp.set_outer_iters(comp_iters);
+    comp.set_outer_iters(comp_iters).unwrap();
 
     let rho_init = vec![density; mesh.num_cells()];
     let p_init = vec![base_pressure as f32; mesh.num_cells()];

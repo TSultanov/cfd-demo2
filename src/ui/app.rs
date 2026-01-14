@@ -1,11 +1,11 @@
-use crate::solver::gpu::helpers::SolverPlanParamsExt;
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
 };
 use crate::solver::model::helpers::{
-    SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverIncompressibleControlsExt,
-    SolverIncompressibleStatsExt,
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverIncompressibleControlsExt, SolverIncompressibleStatsExt, SolverInletVelocityExt,
+    SolverRuntimeParamsExt,
 };
 use crate::solver::model::{
     compressible_model, compressible_model_with_eos, incompressible_momentum_model, Fluid,
@@ -110,7 +110,6 @@ pub struct CFDApp {
     alpha_p: f64,
     time_scheme: GpuTimeScheme,
     inlet_velocity: f32,
-    ramp_time: f32,
     selected_preconditioner: PreconditionerType,
     solver_kind: SolverKind,
     wgpu_device: Option<wgpu::Device>,
@@ -224,7 +223,6 @@ impl CFDApp {
             alpha_p: 1.0,
             time_scheme: GpuTimeScheme::Euler,
             inlet_velocity: 1.0,
-            ramp_time: 0.001,
             selected_preconditioner: PreconditionerType::Jacobi,
             solver_kind: SolverKind::Incompressible,
             wgpu_device,
@@ -334,21 +332,20 @@ impl CFDApp {
         ))
         .expect("failed to initialize unified GPU solver");
         gpu_solver.set_dt(self.timestep as f32);
-        gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
-        gpu_solver.set_inlet_velocity(self.inlet_velocity);
+        let _ = gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
         gpu_solver.set_advection_scheme(self.selected_scheme);
         gpu_solver.set_time_scheme(self.time_scheme);
-        gpu_solver.set_eos(&self.current_fluid.eos);
+        let _ = gpu_solver.set_eos(&self.current_fluid.eos);
         if !model_owns_preconditioner {
             gpu_solver.set_preconditioner(self.selected_preconditioner);
         }
 
         match self.solver_kind {
             SolverKind::Incompressible => {
-                gpu_solver.set_density(self.current_fluid.density as f32);
-                gpu_solver.set_alpha_u(self.alpha_u as f32);
-                gpu_solver.set_alpha_p(self.alpha_p as f32);
-                gpu_solver.set_ramp_time(self.ramp_time);
+                let _ = gpu_solver.set_density(self.current_fluid.density as f32);
+                let _ = gpu_solver.set_alpha_u(self.alpha_u as f32);
+                let _ = gpu_solver.set_alpha_p(self.alpha_p as f32);
+                let _ = gpu_solver.set_inlet_velocity(self.inlet_velocity);
                 gpu_solver.set_u(initial_u.as_ref().unwrap());
                 gpu_solver.set_p(initial_p.as_ref().unwrap());
                 self.cached_u = initial_u.unwrap();
@@ -356,7 +353,12 @@ impl CFDApp {
             }
             SolverKind::Compressible => {
                 let p_ref = cached_p.unwrap();
-                gpu_solver.set_density(self.current_fluid.density as f32);
+                let _ = gpu_solver.set_density(self.current_fluid.density as f32);
+                let _ = gpu_solver.set_compressible_inlet_isothermal_x(
+                    self.current_fluid.density as f32,
+                    self.inlet_velocity,
+                    &self.current_fluid.eos,
+                );
                 gpu_solver.set_uniform_state(
                     self.current_fluid.density as f32,
                     [0.0, 0.0],
@@ -595,22 +597,19 @@ impl CFDApp {
     }
 
     fn update_gpu_fluid(&self) {
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                self.with_unified_solver(|solver| {
-                    solver.set_density(self.current_fluid.density as f32);
-                    solver.set_viscosity(self.current_fluid.viscosity as f32);
-                    solver.set_eos(&self.current_fluid.eos);
-                });
+        self.with_unified_solver(|solver| {
+            let _ = solver.set_density(self.current_fluid.density as f32);
+            let _ = solver.set_viscosity(self.current_fluid.viscosity as f32);
+            let _ = solver.set_eos(&self.current_fluid.eos);
+
+            if matches!(self.solver_kind, SolverKind::Compressible) {
+                let _ = solver.set_compressible_inlet_isothermal_x(
+                    self.current_fluid.density as f32,
+                    self.inlet_velocity,
+                    &self.current_fluid.eos,
+                );
             }
-            SolverKind::Compressible => {
-                self.with_unified_solver(|solver| {
-                    solver.set_density(self.current_fluid.density as f32);
-                    solver.set_viscosity(self.current_fluid.viscosity as f32);
-                    solver.set_eos(&self.current_fluid.eos);
-                });
-            }
-        }
+        });
     }
 
     fn update_gpu_dt(&self) {
@@ -622,12 +621,16 @@ impl CFDApp {
     }
 
     fn update_gpu_alpha_u(&self) {
-        self.with_unified_solver(|solver| solver.set_alpha_u(self.alpha_u as f32));
+        self.with_unified_solver(|solver| {
+            let _ = solver.set_alpha_u(self.alpha_u as f32);
+        });
     }
 
     fn update_gpu_alpha_p(&self) {
         if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_unified_solver(|solver| solver.set_alpha_p(self.alpha_p as f32));
+            self.with_unified_solver(|solver| {
+                let _ = solver.set_alpha_p(self.alpha_p as f32);
+            });
         }
     }
 
@@ -636,13 +639,17 @@ impl CFDApp {
     }
 
     fn update_gpu_inlet_velocity(&self) {
-        self.with_unified_solver(|solver| solver.set_inlet_velocity(self.inlet_velocity));
-    }
-
-    fn update_gpu_ramp_time(&self) {
-        if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_unified_solver(|solver| solver.set_ramp_time(self.ramp_time));
-        }
+        self.with_unified_solver(|solver| {
+            if matches!(self.solver_kind, SolverKind::Compressible) {
+                let _ = solver.set_compressible_inlet_isothermal_x(
+                    self.current_fluid.density as f32,
+                    self.inlet_velocity,
+                    &self.current_fluid.eos,
+                );
+            } else {
+                let _ = solver.set_inlet_velocity(self.inlet_velocity);
+            }
+        });
     }
 
     fn update_gpu_preconditioner(&self) {
@@ -765,16 +772,6 @@ impl eframe::App for CFDApp {
                             .changed()
                         {
                             self.update_gpu_inlet_velocity();
-                        }
-
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut self.ramp_time, 0.0..=5.0)
-                                    .text("Ramp Time (s)"),
-                            )
-                            .changed()
-                        {
-                            self.update_gpu_ramp_time();
                         }
 
                         // Reynolds Number Estimation

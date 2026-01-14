@@ -103,8 +103,8 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     boundaries.set_field(
         "U",
         FieldBoundarySpec::new()
-            // Inlet velocity is applied via the runtime `InletVelocity` plan param, which updates
-            // the GPU `bc_value` table for `GpuBoundaryType::Inlet` (see `param_inlet_velocity`).
+            // Inlet velocity is Dirichlet; the value can be updated at runtime via the solver's
+            // boundary table API (e.g. `set_boundary_vec2(GpuBoundaryType::Inlet, "U", ...)`).
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,

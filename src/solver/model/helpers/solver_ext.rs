@@ -1,6 +1,8 @@
 use crate::solver::gpu::plans::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
+use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
+use crate::solver::model::eos::EosSpec;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -51,6 +53,124 @@ impl SolverFieldAliasesExt for GpuUnifiedSolver {
                 .await
                 .unwrap_or_else(|_| vec![0.0; self.num_cells() as usize])
         })
+    }
+}
+
+pub trait SolverRuntimeParamsExt {
+    fn set_dtau(&mut self, dtau: f32) -> Result<(), String>;
+    fn set_viscosity(&mut self, mu: f32) -> Result<(), String>;
+    fn set_density(&mut self, rho: f32) -> Result<(), String>;
+    fn set_alpha_u(&mut self, alpha_u: f32) -> Result<(), String>;
+    fn set_alpha_p(&mut self, alpha_p: f32) -> Result<(), String>;
+    fn set_outer_iters(&mut self, iters: usize) -> Result<(), String>;
+    fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String>;
+    fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
+    fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
+    fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String>;
+}
+
+impl SolverRuntimeParamsExt for GpuUnifiedSolver {
+    fn set_dtau(&mut self, dtau: f32) -> Result<(), String> {
+        self.set_named_param("dtau", PlanParamValue::F32(dtau))
+    }
+
+    fn set_viscosity(&mut self, mu: f32) -> Result<(), String> {
+        self.set_named_param("viscosity", PlanParamValue::F32(mu))
+    }
+
+    fn set_density(&mut self, rho: f32) -> Result<(), String> {
+        self.set_named_param("density", PlanParamValue::F32(rho))
+    }
+
+    fn set_alpha_u(&mut self, alpha_u: f32) -> Result<(), String> {
+        self.set_named_param("alpha_u", PlanParamValue::F32(alpha_u))
+    }
+
+    fn set_alpha_p(&mut self, alpha_p: f32) -> Result<(), String> {
+        self.set_named_param("alpha_p", PlanParamValue::F32(alpha_p))
+    }
+
+    fn set_outer_iters(&mut self, iters: usize) -> Result<(), String> {
+        self.set_named_param("outer_iters", PlanParamValue::Usize(iters))
+    }
+
+    fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {
+        self.set_named_param("low_mach.model", PlanParamValue::LowMachModel(model))
+    }
+
+    fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
+        self.set_named_param("low_mach.theta_floor", PlanParamValue::F32(theta))
+    }
+
+    fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
+        self.set_named_param("nonconverged_relax", PlanParamValue::F32(alpha))
+    }
+
+    fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String> {
+        let params = eos.runtime_params();
+        self.set_named_param("eos.gamma", PlanParamValue::F32(params.gamma))?;
+        self.set_named_param("eos.gm1", PlanParamValue::F32(params.gm1))?;
+        self.set_named_param("eos.r", PlanParamValue::F32(params.r))?;
+        self.set_named_param("eos.dp_drho", PlanParamValue::F32(params.dp_drho))?;
+        self.set_named_param("eos.p_offset", PlanParamValue::F32(params.p_offset))?;
+        self.set_named_param("eos.theta_ref", PlanParamValue::F32(params.theta_ref))?;
+        Ok(())
+    }
+}
+
+pub trait SolverInletVelocityExt {
+    fn set_inlet_velocity(&mut self, velocity: f32) -> Result<(), String>;
+}
+
+impl SolverInletVelocityExt for GpuUnifiedSolver {
+    fn set_inlet_velocity(&mut self, velocity: f32) -> Result<(), String> {
+        let value = [velocity, 0.0f32];
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, "U", value)
+            .or_else(|_| self.set_boundary_vec2(GpuBoundaryType::Inlet, "u", value))
+    }
+}
+
+pub trait SolverCompressibleInletExt {
+    /// Update inlet Dirichlet BCs for a compressible model that solves for conserved Euler fields,
+    /// assuming an x-directed velocity and an EOS that provides runtime params (ideal gas or
+    /// barotropic).
+    fn set_compressible_inlet_isothermal_x(
+        &mut self,
+        rho: f32,
+        u_x: f32,
+        eos: &EosSpec,
+    ) -> Result<(), String>;
+}
+
+impl SolverCompressibleInletExt for GpuUnifiedSolver {
+    fn set_compressible_inlet_isothermal_x(
+        &mut self,
+        rho: f32,
+        u_x: f32,
+        eos: &EosSpec,
+    ) -> Result<(), String> {
+        let eos_params = eos.runtime_params();
+        let gm1 = eos_params.gm1;
+        let dp_drho = eos_params.dp_drho;
+        let p_offset = eos_params.p_offset;
+        let theta_ref = eos_params.theta_ref;
+
+        let p0 = if gm1 > 0.0 {
+            rho * theta_ref
+        } else {
+            dp_drho * rho - p_offset
+        };
+
+        let u = [u_x, 0.0f32];
+        let rho_u = [rho * u_x, 0.0f32];
+        let ke = 0.5 * rho * (u_x * u_x);
+        let rho_e = if gm1 > 0.0 { p0 / gm1 + ke } else { ke };
+
+        self.set_boundary_scalar(GpuBoundaryType::Inlet, "rho", rho)?;
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, "u", u)?;
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, "rho_u", rho_u)?;
+        self.set_boundary_scalar(GpuBoundaryType::Inlet, "rho_e", rho_e)?;
+        Ok(())
     }
 }
 

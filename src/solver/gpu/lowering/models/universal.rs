@@ -184,36 +184,33 @@ pub(in crate::solver::gpu::lowering) fn set_named_param_fallback(
     name: &str,
     value: PlanParamValue,
 ) -> Result<(), String> {
-    let param = match name {
-        "dt" => PlanParam::Dt,
-        "dtau" => PlanParam::Dtau,
-        "advection_scheme" => PlanParam::AdvectionScheme,
-        "time_scheme" => PlanParam::TimeScheme,
-        "preconditioner" => PlanParam::Preconditioner,
-        "viscosity" => PlanParam::Viscosity,
-        "density" => PlanParam::Density,
-        "eos.gamma" => PlanParam::EosGamma,
-        "eos.gm1" => PlanParam::EosGm1,
-        "eos.r" => PlanParam::EosR,
-        "eos.dp_drho" => PlanParam::EosDpDrho,
-        "eos.p_offset" => PlanParam::EosPOffset,
-        "eos.theta_ref" => PlanParam::EosThetaRef,
-        "alpha_u" => PlanParam::AlphaU,
-        "alpha_p" => PlanParam::AlphaP,
-        "inlet_velocity" => PlanParam::InletVelocity,
-        "ramp_time" => PlanParam::RampTime,
-        "low_mach.model" => PlanParam::LowMachModel,
-        "low_mach.theta_floor" => PlanParam::LowMachThetaFloor,
-        "nonconverged_relax" => PlanParam::NonconvergedRelax,
-        "outer_iters" => PlanParam::OuterIters,
-        "detailed_profiling_enabled" => PlanParam::DetailedProfilingEnabled,
-        _ => {
-            return Err(format!(
-                "unknown named parameter '{name}'; known: dt, dtau, advection_scheme, time_scheme, preconditioner, viscosity, density, eos.gamma, eos.gm1, eos.r, eos.dp_drho, eos.p_offset, eos.theta_ref, alpha_u, alpha_p, inlet_velocity, ramp_time, low_mach.model, low_mach.theta_floor, nonconverged_relax, outer_iters, detailed_profiling_enabled"
-            ));
-        }
-    };
-    set_param_fallback_generic_coupled(plan, param, value)
+    match name {
+        "dt" => generic_coupled_model::param_dt(plan, value),
+        "dtau" => generic_coupled_model::param_dtau(plan, value),
+        "advection_scheme" => generic_coupled_model::param_advection_scheme(plan, value),
+        "time_scheme" => generic_coupled_model::param_time_scheme(plan, value),
+        "preconditioner" => generic_coupled_model::param_preconditioner(plan, value),
+        "viscosity" => generic_coupled_model::param_viscosity(plan, value),
+        "density" => generic_coupled_model::param_density(plan, value),
+        "eos.gamma" => generic_coupled_model::param_eos_gamma(plan, value),
+        "eos.gm1" => generic_coupled_model::param_eos_gm1(plan, value),
+        "eos.r" => generic_coupled_model::param_eos_r(plan, value),
+        "eos.dp_drho" => generic_coupled_model::param_eos_dp_drho(plan, value),
+        "eos.p_offset" => generic_coupled_model::param_eos_p_offset(plan, value),
+        "eos.theta_ref" => generic_coupled_model::param_eos_theta_ref(plan, value),
+        "alpha_u" => generic_coupled_model::param_alpha_u(plan, value),
+        "alpha_p" => generic_coupled_model::param_alpha_p(plan, value),
+        "inlet_velocity" => generic_coupled_model::param_inlet_velocity(plan, value),
+        "ramp_time" => generic_coupled_model::param_ramp_time(plan, value),
+        "low_mach.model" => generic_coupled_model::param_low_mach_model(plan, value),
+        "low_mach.theta_floor" => generic_coupled_model::param_low_mach_theta_floor(plan, value),
+        "nonconverged_relax" => generic_coupled_model::param_nonconverged_relax(plan, value),
+        "outer_iters" => generic_coupled_model::param_outer_iters(plan, value),
+        "detailed_profiling_enabled" => generic_coupled_model::param_detailed_profiling(plan, value),
+        _ => Err(format!(
+            "unknown named parameter '{name}'; known: dt, dtau, advection_scheme, time_scheme, preconditioner, viscosity, density, eos.gamma, eos.gm1, eos.r, eos.dp_drho, eos.p_offset, eos.theta_ref, alpha_u, alpha_p, inlet_velocity, ramp_time, low_mach.model, low_mach.theta_floor, nonconverged_relax, outer_iters, detailed_profiling_enabled"
+        )),
+    }
 }
 
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
@@ -369,12 +366,6 @@ fn set_param_fallback_generic_coupled(
         PlanParam::Preconditioner => generic_coupled_model::param_preconditioner(plan, value),
         PlanParam::Viscosity => generic_coupled_model::param_viscosity(plan, value),
         PlanParam::Density => generic_coupled_model::param_density(plan, value),
-        PlanParam::EosGamma => generic_coupled_model::param_eos_gamma(plan, value),
-        PlanParam::EosGm1 => generic_coupled_model::param_eos_gm1(plan, value),
-        PlanParam::EosR => generic_coupled_model::param_eos_r(plan, value),
-        PlanParam::EosDpDrho => generic_coupled_model::param_eos_dp_drho(plan, value),
-        PlanParam::EosPOffset => generic_coupled_model::param_eos_p_offset(plan, value),
-        PlanParam::EosThetaRef => generic_coupled_model::param_eos_theta_ref(plan, value),
         PlanParam::AlphaU => generic_coupled_model::param_alpha_u(plan, value),
         PlanParam::AlphaP => generic_coupled_model::param_alpha_p(plan, value),
         PlanParam::InletVelocity => generic_coupled_model::param_inlet_velocity(plan, value),

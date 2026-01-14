@@ -22,6 +22,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 // Group 0: Mesh
@@ -247,9 +253,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     matrix_values[start_row_4 + diag_rank * 8u + 1u] -= 1.0 / constants.dt * vol;
     matrix_values[start_row_5 + diag_rank * 8u + 2u] -= 1.0 / constants.dt * vol;
     diag_6 -= 1.0 / constants.dt * vol;
-    matrix_values[start_row_6 + diag_rank * 8u + 3u] -= -0.39999998 * 1.0 / constants.dt * vol;
-    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.19999999 * 1.0 / constants.dt * (state[idx * 8u + 6u] * state[idx * 8u + 6u] + state[idx * 8u + 7u] * state[idx * 8u + 7u]) * vol;
-    diag_7 -= state[idx * 8u + 0u] * 1.0 / constants.dt * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 3u] -= -1.0 * constants.eos_gm1 * 1.0 / constants.dt * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / constants.dt * (state[idx * 8u + 6u] * state[idx * 8u + 6u] + state[idx * 8u + 7u] * state[idx * 8u + 7u]) * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= -1.0 * constants.eos_dp_drho * 1.0 / constants.dt * vol;
+    rhs_6 += -1.0 * constants.eos_p_offset * 1.0 / constants.dt * vol;
+    diag_7 -= state[idx * 8u + 0u] * constants.eos_r * 1.0 / constants.dt * vol;
     matrix_values[start_row_7 + diag_rank * 8u + 6u] -= -1.0 * 1.0 / constants.dt * vol;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];

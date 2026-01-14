@@ -37,7 +37,7 @@ pub enum FluxModuleSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FluxSchemeSpec {
     /// Central-upwind (KT-style) Euler flux for an ideal gas.
-    EulerIdealGasCentralUpwind { gamma: f32 },
+    EulerCentralUpwind,
 }
 
 /// Gradients stage spec for flux modules.

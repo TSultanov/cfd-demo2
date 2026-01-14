@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use super::dsl as typed;
 use super::primitive_expr::lower_primitive_expr;
 use super::wgsl_ast::{
-    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt, StorageClass,
-    StructDef, StructField, Type,
+    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
+    StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::{
@@ -89,6 +89,12 @@ fn constants_struct() -> StructDef {
             StructField::new("time_scheme", Type::U32),
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
+            StructField::new("eos_gamma", Type::F32),
+            StructField::new("eos_gm1", Type::F32),
+            StructField::new("eos_r", Type::F32),
+            StructField::new("eos_dp_drho", Type::F32),
+            StructField::new("eos_p_offset", Type::F32),
+            StructField::new("eos_theta_ref", Type::F32),
         ],
     )
 }
@@ -237,10 +243,7 @@ fn main_body(
         "neighbor",
         dsl::array_access("face_neighbor", Expr::ident("idx")),
     ));
-    stmts.push(dsl::let_expr(
-        "is_boundary",
-        Expr::ident("neighbor").eq(-1),
-    ));
+    stmts.push(dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)));
     // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
     // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
     stmts.push(dsl::var_typed_expr(
@@ -311,7 +314,13 @@ fn main_body(
         None,
     ));
 
-    stmts.extend(face_stmts(layout, flux_layout, flux_stride, primitives, spec));
+    stmts.extend(face_stmts(
+        layout,
+        flux_layout,
+        flux_stride,
+        primitives,
+        spec,
+    ));
 
     Block::new(stmts)
 }
@@ -375,9 +384,10 @@ fn face_stmts(
     body.push(dsl::let_typed_expr("d_vec", Type::vec2_f32(), d_vec));
     body.push(dsl::let_expr(
         "dist_proj",
-        dsl::abs(typed::VecExpr::<2>::from_expr(Expr::ident("d_vec")).dot(
-            &typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")),
-        )),
+        dsl::abs(
+            typed::VecExpr::<2>::from_expr(Expr::ident("d_vec"))
+                .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+        ),
     ));
     body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
 
@@ -431,8 +441,7 @@ fn face_stmts(
                 let f_l = lower_scalar(&flux_left[i], layout, primitives, flux_layout);
                 let f_r = lower_scalar(&flux_right[i], layout, primitives, flux_layout);
 
-                let num = Expr::ident("a_plus") * f_l
-                    - Expr::ident("a_minus") * f_r
+                let num = Expr::ident("a_plus") * f_l - Expr::ident("a_minus") * f_r
                     + (Expr::ident("a_plus") * Expr::ident("a_minus")) * (u_r - u_l);
                 let flux = num / Expr::ident("denom");
 
@@ -461,12 +470,10 @@ fn lower_vec2(
             lower_scalar(x, layout, primitives, flux_layout),
             lower_scalar(y, layout, primitives, flux_layout),
         ]),
-        FaceVec2Expr::StateVec2 { side, field } => {
-            typed::VecExpr::<2>::from_components([
-                state_component_at_side(layout, "state", *side, field, 0, flux_layout),
-                state_component_at_side(layout, "state", *side, field, 1, flux_layout),
-            ])
-        }
+        FaceVec2Expr::StateVec2 { side, field } => typed::VecExpr::<2>::from_components([
+            state_component_at_side(layout, "state", *side, field, 0, flux_layout),
+            state_component_at_side(layout, "state", *side, field, 1, flux_layout),
+        ]),
         FaceVec2Expr::Add(a, b) => {
             let a = lower_vec2(a, layout, primitives, flux_layout);
             let b = lower_vec2(b, layout, primitives, flux_layout);
@@ -478,14 +485,8 @@ fn lower_vec2(
             a.sub(&b)
         }
         FaceVec2Expr::Neg(a) => lower_vec2(a, layout, primitives, flux_layout).neg(),
-        FaceVec2Expr::MulScalar(v, s) => {
-            lower_vec2(v, layout, primitives, flux_layout).mul_scalar(lower_scalar(
-                s,
-                layout,
-                primitives,
-                flux_layout,
-            ))
-        }
+        FaceVec2Expr::MulScalar(v, s) => lower_vec2(v, layout, primitives, flux_layout)
+            .mul_scalar(lower_scalar(s, layout, primitives, flux_layout)),
         FaceVec2Expr::Lerp(a, b) => {
             let a = lower_vec2(a, layout, primitives, flux_layout);
             let b = lower_vec2(b, layout, primitives, flux_layout);
@@ -505,7 +506,12 @@ fn state_component_at(
 ) -> Expr {
     let offset = layout
         .component_offset(field, component)
-        .unwrap_or_else(|| panic!("missing field '{}' component {} in state layout", field, component));
+        .unwrap_or_else(|| {
+            panic!(
+                "missing field '{}' component {} in state layout",
+                field, component
+            )
+        });
     let stride = layout.stride();
     Expr::ident(buffer).index(idx * stride + offset)
 }
@@ -607,7 +613,11 @@ fn lower_scalar(
             let idx = if *side == FaceSide::Owner {
                 Expr::ident("owner")
             } else {
-                dsl::select(Expr::ident("neigh_idx"), Expr::ident("owner"), Expr::ident("is_boundary"))
+                dsl::select(
+                    Expr::ident("neigh_idx"),
+                    Expr::ident("owner"),
+                    Expr::ident("is_boundary"),
+                )
             };
             lower_primitive_expr(prim, layout, idx, "state")
         }

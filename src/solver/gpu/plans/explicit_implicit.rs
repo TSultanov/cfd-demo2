@@ -8,8 +8,8 @@ use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::explicit_implicit::fgmres::{CompressibleLinearSolver, LinearTopology};
 use crate::solver::gpu::explicit_implicit::graphs::CompressibleGraphs;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
-use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::ports::{BufU32, Port, PortSpace};
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug};
@@ -22,7 +22,6 @@ use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
-
 
 #[derive(Clone, Copy, Debug)]
 struct ExplicitImplicitOffsets {
@@ -241,6 +240,7 @@ impl ExplicitImplicitPlanResources {
         let num_faces = common.num_faces;
         let num_unknowns = num_cells * unknowns_per_cell;
 
+        let eos_params = model.eos.runtime_params();
         let initial_constants = GpuConstants {
             dt: 0.0001,
             dt_old: 0.0001,
@@ -256,6 +256,12 @@ impl ExplicitImplicitPlanResources {
             time_scheme: 0,
             inlet_velocity: 0.0,
             ramp_time: 0.0,
+            eos_gamma: eos_params.gamma,
+            eos_gm1: eos_params.gm1,
+            eos_r: eos_params.r,
+            eos_dp_drho: eos_params.dp_drho,
+            eos_p_offset: eos_params.p_offset,
+            eos_theta_ref: eos_params.theta_ref,
         };
 
         // Allocate all required fields directly from the recipe.
@@ -272,22 +278,24 @@ impl ExplicitImplicitPlanResources {
             .boundaries
             .to_gpu_tables(&model.system)
             .map_err(|e| format!("explicit_implicit: boundary table error: {e}"))?;
-        let b_bc_kind = common
-            .context
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("ExplicitImplicit bc_kind"),
-                contents: cast_slice(&bc_kind),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let b_bc_value = common
-            .context
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("ExplicitImplicit bc_value"),
-                contents: cast_slice(&bc_value),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+        let b_bc_kind =
+            common
+                .context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("ExplicitImplicit bc_kind"),
+                    contents: cast_slice(&bc_kind),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+        let b_bc_value =
+            common
+                .context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("ExplicitImplicit bc_value"),
+                    contents: cast_slice(&bc_value),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
 
         let registry = ResourceRegistry::new()
             .with_mesh(&common.mesh)
@@ -308,7 +316,10 @@ impl ExplicitImplicitPlanResources {
                 "row_offsets",
                 lowered.ports.buffer(lowered.system_ports.row_offsets),
             )
-            .with_buffer("col_indices", lowered.ports.buffer(lowered.system_ports.col_indices))
+            .with_buffer(
+                "col_indices",
+                lowered.ports.buffer(lowered.system_ports.col_indices),
+            )
             .with_buffer("y", lowered.ports.buffer(lowered.system_ports.rhs));
 
         let kernels = GeneratedKernelsModule::new_from_recipe(

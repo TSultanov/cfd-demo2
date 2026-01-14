@@ -101,14 +101,16 @@ mod tests {
         let rho = vol_scalar("rho", si::DENSITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
         let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
-        let source_u = vol_vector("Su", si::PRESSURE_GRADIENT);
 
         let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()));
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
         eqn.add_term(fvc::grad(p.clone()));
         eqn.add_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
-        eqn.add_term(fvc::source(source_u));
+        eqn.add_term(fvc::source_coeff(
+            Coefficient::constant_unit(1.0, si::PRESSURE_GRADIENT),
+            u.clone(),
+        ));
 
         let mut system = EquationSystem::new();
         system.add_equation(eqn);

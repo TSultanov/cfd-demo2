@@ -1,7 +1,6 @@
-use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::plans::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::model::EosSpec;
+use crate::solver::gpu::GpuUnifiedSolver;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -62,10 +61,10 @@ pub trait SolverCompressibleIdealGasExt {
 
 impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
     fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        let gamma = match self.model().eos {
-            EosSpec::IdealGas { gamma } => gamma as f32,
-            _ => return,
-        };
+        let eos = self.model().eos;
+        let eos_params = eos.runtime_params();
+        let gm1 = eos_params.gm1;
+        let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
         let (Some(off_rho), Some(off_rho_u), Some(off_rho_e)) = (
@@ -79,8 +78,16 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let off_rho = off_rho as usize;
         let off_rho_u = off_rho_u as usize;
         let off_rho_e = off_rho_e as usize;
-        let off_p = self.model().state_layout.offset_for("p").map(|v| v as usize);
-        let off_t = self.model().state_layout.offset_for("T").map(|v| v as usize);
+        let off_p = self
+            .model()
+            .state_layout
+            .offset_for("p")
+            .map(|v| v as usize);
+        let off_t = self
+            .model()
+            .state_layout
+            .offset_for("T")
+            .map(|v| v as usize);
         let off_u = self
             .model()
             .state_layout
@@ -89,7 +96,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             .map(|v| v as usize);
 
         let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
-        let rho_e = p / (gamma - 1.0) + ke;
+        let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
 
         let mut state = vec![0.0f32; self.num_cells() as usize * stride];
         for cell in 0..self.num_cells() as usize {
@@ -102,7 +109,11 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
                 state[base + off_p] = p;
             }
             if let Some(off_t) = off_t {
-                state[base + off_t] = p / rho.max(1e-12);
+                state[base + off_t] = if r_gas > 0.0 {
+                    p / (rho.max(1e-12) * r_gas)
+                } else {
+                    0.0
+                };
             }
             if let Some(off_u) = off_u {
                 state[base + off_u] = u[0];
@@ -120,10 +131,10 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             return;
         }
 
-        let gamma = match self.model().eos {
-            EosSpec::IdealGas { gamma } => gamma as f32,
-            _ => return,
-        };
+        let eos = self.model().eos;
+        let eos_params = eos.runtime_params();
+        let gm1 = eos_params.gm1;
+        let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
         let (Some(off_rho), Some(off_rho_u), Some(off_rho_e)) = (
@@ -137,8 +148,16 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let off_rho = off_rho as usize;
         let off_rho_u = off_rho_u as usize;
         let off_rho_e = off_rho_e as usize;
-        let off_p = self.model().state_layout.offset_for("p").map(|v| v as usize);
-        let off_t = self.model().state_layout.offset_for("T").map(|v| v as usize);
+        let off_p = self
+            .model()
+            .state_layout
+            .offset_for("p")
+            .map(|v| v as usize);
+        let off_t = self
+            .model()
+            .state_layout
+            .offset_for("T")
+            .map(|v| v as usize);
         let off_u = self
             .model()
             .state_layout
@@ -153,7 +172,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             let u_val = u[cell];
             let p_val = p[cell];
             let ke = 0.5 * rho_val * (u_val[0] * u_val[0] + u_val[1] * u_val[1]);
-            let rho_e = p_val / (gamma - 1.0) + ke;
+            let rho_e = if gm1 > 0.0 { p_val / gm1 + ke } else { ke };
 
             state[base + off_rho] = rho_val;
             state[base + off_rho_u] = rho_val * u_val[0];
@@ -163,7 +182,11 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
                 state[base + off_p] = p_val;
             }
             if let Some(off_t) = off_t {
-                state[base + off_t] = p_val / rho_val.max(1e-12);
+                state[base + off_t] = if r_gas > 0.0 {
+                    p_val / (rho_val.max(1e-12) * r_gas)
+                } else {
+                    0.0
+                };
             }
             if let Some(off_u) = off_u {
                 state[base + off_u] = u_val[0];
@@ -190,7 +213,11 @@ impl SolverIncompressibleStatsExt for GpuUnifiedSolver {
 
     fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)> {
         let stats = self.step_stats();
-        Some((stats.outer_iterations?, stats.outer_residual_u?, stats.outer_residual_p?))
+        Some((
+            stats.outer_iterations?,
+            stats.outer_residual_u?,
+            stats.outer_residual_p?,
+        ))
     }
 
     fn incompressible_linear_stats(

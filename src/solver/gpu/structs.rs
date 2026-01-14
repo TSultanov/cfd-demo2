@@ -53,6 +53,14 @@ pub struct GpuConstants {
     pub time_scheme: u32, // 0: Euler, 1: BDF2
     pub inlet_velocity: f32,
     pub ramp_time: f32,
+
+    // --- Equation of state (runtime) ---
+    pub eos_gamma: f32,
+    pub eos_gm1: f32,
+    pub eos_r: f32,
+    pub eos_dp_drho: f32,
+    pub eos_p_offset: f32,
+    pub eos_theta_ref: f32,
 }
 
 impl Default for GpuConstants {
@@ -72,6 +80,12 @@ impl Default for GpuConstants {
             time_scheme: 0,
             inlet_velocity: 1.0,
             ramp_time: 0.1,
+            eos_gamma: 1.4,
+            eos_gm1: 0.4,
+            eos_r: 1.0,
+            eos_dp_drho: 0.0,
+            eos_p_offset: 0.0,
+            eos_theta_ref: 1.0,
         }
     }
 }

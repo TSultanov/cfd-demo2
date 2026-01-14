@@ -1,11 +1,13 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
+use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
+use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
+use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
+use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::graph::{
     ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
 };
-use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
-use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::solve_fgmres;
@@ -15,13 +17,11 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
-use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::model::{KernelId, ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -86,7 +86,10 @@ impl GenericCoupledProgramResources {
             "generic_coupled",
         )?
         .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
-        let dp_init_enabled = recipe.kernels.iter().any(|k| k.phase == KernelPhase::Preparation);
+        let dp_init_enabled = recipe
+            .kernels
+            .iter()
+            .any(|k| k.phase == KernelPhase::Preparation);
 
         let has_gradients = recipe
             .kernels
@@ -255,7 +258,11 @@ fn validate_schur_model(
                         .state_layout
                         .component_offset(target.name(), comp)
                         .ok_or_else(|| {
-                            format!("missing '{}' component {} in state layout", target.name(), comp)
+                            format!(
+                                "missing '{}' component {} in state layout",
+                                target.name(),
+                                comp
+                            )
                         })?;
                     target_indices.insert(idx);
                 }
@@ -341,13 +348,15 @@ fn build_generic_schur(
         mapped_at_creation: false,
     });
 
-    let b_precond_params = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("GenericCoupled Schur precond_params"),
-        size: std::mem::size_of::<crate::solver::gpu::bindings::schur_precond_generic::PrecondParams>()
-            as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let b_precond_params =
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("GenericCoupled Schur precond_params"),
+            size: std::mem::size_of::<
+                crate::solver::gpu::bindings::schur_precond_generic::PrecondParams,
+            >() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
     let params = crate::solver::gpu::bindings::schur_precond_generic::PrecondParams {
         n: num_dofs,
@@ -376,8 +385,9 @@ fn build_generic_schur(
 
     let b_setup_params = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur setup_params"),
-        size: std::mem::size_of::<crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams>()
-            as u64,
+        size: std::mem::size_of::<
+            crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams,
+        >() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -873,7 +883,13 @@ pub(crate) fn explicit_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
-    run_module_graph(&r.explicit_graph, context, &r.kernels, r.runtime_dims(), mode)
+    run_module_graph(
+        &r.explicit_graph,
+        context,
+        &r.kernels,
+        r.runtime_dims(),
+        mode,
+    )
 }
 
 pub(crate) fn apply_graph_run(
@@ -933,7 +949,8 @@ pub(crate) fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Resu
     };
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
-    r.time_integration.set_dt(dt, &mut r.fields.constants, &queue);
+    r.time_integration
+        .set_dt(dt, &mut r.fields.constants, &queue);
     if r.dp_init_enabled {
         r.dp_init_needed.store(true, Ordering::Relaxed);
     }
@@ -1005,7 +1022,10 @@ pub(crate) fn param_viscosity(
     Ok(())
 }
 
-pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+pub(crate) fn param_density(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
     let PlanParamValue::F32(rho) = value else {
         return Err("invalid value type".into());
     };
@@ -1026,7 +1046,129 @@ pub(crate) fn param_density(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
     Ok(())
 }
 
-pub(crate) fn param_alpha_u(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+pub(crate) fn param_eos_gamma(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(gamma) = value else {
+        return Err("invalid value type".into());
+    };
+    let inlet_layout = inlet_conserved_bc_layout(plan);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_gamma = gamma;
+    }
+    r.fields.constants.write(&queue);
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
+    Ok(())
+}
+
+pub(crate) fn param_eos_gm1(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(gm1) = value else {
+        return Err("invalid value type".into());
+    };
+    let inlet_layout = inlet_conserved_bc_layout(plan);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_gm1 = gm1;
+    }
+    r.fields.constants.write(&queue);
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
+    Ok(())
+}
+
+pub(crate) fn param_eos_r(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+    let PlanParamValue::F32(r_gas) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_r = r_gas;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_dp_drho(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(dp_drho) = value else {
+        return Err("invalid value type".into());
+    };
+    let inlet_layout = inlet_conserved_bc_layout(plan);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_dp_drho = dp_drho;
+    }
+    r.fields.constants.write(&queue);
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
+    Ok(())
+}
+
+pub(crate) fn param_eos_p_offset(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(p_offset) = value else {
+        return Err("invalid value type".into());
+    };
+    let inlet_layout = inlet_conserved_bc_layout(plan);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_p_offset = p_offset;
+    }
+    r.fields.constants.write(&queue);
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
+    Ok(())
+}
+
+pub(crate) fn param_eos_theta_ref(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(theta) = value else {
+        return Err("invalid value type".into());
+    };
+    let inlet_layout = inlet_conserved_bc_layout(plan);
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_theta_ref = theta;
+    }
+    r.fields.constants.write(&queue);
+    if let Some(layout) = inlet_layout {
+        update_inlet_conserved_bc_with_layout(r, &queue, &layout);
+    }
+    Ok(())
+}
+
+pub(crate) fn param_alpha_u(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
     let PlanParamValue::F32(alpha) = value else {
         return Err("invalid value type".into());
     };
@@ -1040,7 +1182,10 @@ pub(crate) fn param_alpha_u(plan: &mut GpuProgramPlan, value: PlanParamValue) ->
     Ok(())
 }
 
-pub(crate) fn param_alpha_p(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Result<(), String> {
+pub(crate) fn param_alpha_p(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
     let PlanParamValue::F32(alpha) = value else {
         return Err("invalid value type".into());
     };
@@ -1122,7 +1267,6 @@ struct InletConservedBcLayout {
     rho_u_x_idx: u32,
     rho_u_y_idx: Option<u32>,
     rho_e_idx: Option<u32>,
-    gamma: f32,
 }
 
 fn inlet_conserved_bc_layout(plan: &GpuProgramPlan) -> Option<InletConservedBcLayout> {
@@ -1167,18 +1311,12 @@ fn inlet_conserved_bc_layout(plan: &GpuProgramPlan) -> Option<InletConservedBcLa
     let rho_idx = rho_idx?;
     let rho_u_x_idx = rho_u_x_idx?;
 
-    let gamma = match plan.model.eos {
-        crate::solver::model::eos::EosSpec::IdealGas { gamma } => gamma as f32,
-        _ => 1.4,
-    };
-
     Some(InletConservedBcLayout {
         coupled_stride,
         rho_idx,
         rho_u_x_idx,
         rho_u_y_idx,
         rho_e_idx,
-        gamma,
     })
 }
 
@@ -1189,10 +1327,21 @@ fn update_inlet_conserved_bc_with_layout(
 ) {
     let inlet = crate::solver::gpu::enums::GpuBoundaryType::Inlet as u32;
 
-    let p0 = 1.0f32;
     let values = r.fields.constants.values();
     let rho0 = values.density;
     let u0 = values.inlet_velocity;
+    let gm1 = values.eos_gm1;
+    let dp_drho = values.eos_dp_drho;
+    let p_offset = values.eos_p_offset;
+    let theta_ref = values.eos_theta_ref;
+
+    // For ideal gas: impose isothermal inlet via p = rho * theta_ref.
+    // For barotropic EOS: p is implied by p = dp_drho * rho - p_offset.
+    let p0 = if gm1 > 0.0 {
+        rho0 * theta_ref
+    } else {
+        dp_drho * rho0 - p_offset
+    };
 
     let offset_bytes = ((inlet * layout.coupled_stride + layout.rho_idx) * 4) as u64;
     queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&rho0));
@@ -1208,7 +1357,11 @@ fn update_inlet_conserved_bc_with_layout(
     }
 
     if let Some(re_i) = layout.rho_e_idx {
-        let rho_e = p0 / (layout.gamma - 1.0) + 0.5 * rho0 * (u0 * u0);
+        let rho_e = if gm1 > 0.0 {
+            p0 / gm1 + 0.5 * rho0 * (u0 * u0)
+        } else {
+            0.5 * rho0 * (u0 * u0)
+        };
         let offset_bytes = ((inlet * layout.coupled_stride + re_i) * 4) as u64;
         queue.write_buffer(&r._b_bc_value, offset_bytes, bytes_of(&rho_e));
     }
@@ -1329,12 +1482,12 @@ fn build_update_graph_fallback() -> ModuleGraph<GeneratedKernelsModule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
+    use crate::solver::model::{eos, primitives};
     use crate::solver::model::{
         incompressible_momentum_generic_model, BoundarySpec, ModelGpuSpec, ModelLinearSolverSpec,
         ModelPreconditionerSpec, SchurBlockLayout,
     };
-    use crate::solver::model::{eos, primitives};
-    use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
     use crate::solver::units::si;
 
     #[test]
@@ -1378,8 +1531,7 @@ mod tests {
             linear_solver: Some(ModelLinearSolverSpec {
                 preconditioner: ModelPreconditionerSpec::Schur {
                     omega: 1.0,
-                    layout: SchurBlockLayout::from_u_p(&[0, 1, 2], 3)
-                        .expect("layout build failed"),
+                    layout: SchurBlockLayout::from_u_p(&[0, 1, 2], 3).expect("layout build failed"),
                 },
             }),
             flux_module: None,

@@ -1,24 +1,19 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
 };
-use crate::solver::model::flux_module::FluxSchemeSpec;
 use crate::solver::model::backend::ast::EquationSystem;
+use crate::solver::model::flux_module::FluxSchemeSpec;
 
 pub fn lower_flux_scheme(
     scheme: &FluxSchemeSpec,
     system: &EquationSystem,
 ) -> Result<FluxModuleKernelSpec, String> {
     match *scheme {
-        FluxSchemeSpec::EulerIdealGasCentralUpwind { gamma } => {
-            euler_ideal_gas_central_upwind(system, gamma)
-        }
+        FluxSchemeSpec::EulerCentralUpwind => euler_central_upwind(system),
     }
 }
 
-fn euler_ideal_gas_central_upwind(
-    system: &EquationSystem,
-    gamma: f32,
-) -> Result<FluxModuleKernelSpec, String> {
+fn euler_central_upwind(system: &EquationSystem) -> Result<FluxModuleKernelSpec, String> {
     let flux_layout = FluxLayout::from_system(system);
     let components: Vec<String> = flux_layout
         .components
@@ -46,9 +41,18 @@ fn euler_ideal_gas_central_upwind(
 
     let p = |side: FaceSide| S::state(side, "p");
     let c = |side: FaceSide| {
-        S::Sqrt(Box::new(S::Div(
-            Box::new(S::Mul(Box::new(S::lit(gamma)), Box::new(p(side)))),
-            Box::new(rho(side)),
+        // Generalized wave speed:
+        //   c^2 = gamma * p / rho + dp_drho
+        // where dp_drho is nonzero for barotropic closures (e.g. linear compressibility).
+        S::Sqrt(Box::new(S::Add(
+            Box::new(S::Div(
+                Box::new(S::Mul(
+                    Box::new(S::constant("eos_gamma")),
+                    Box::new(p(side)),
+                )),
+                Box::new(rho(side)),
+            )),
+            Box::new(S::constant("eos_dp_drho")),
         )))
     };
 

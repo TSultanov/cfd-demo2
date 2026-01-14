@@ -25,6 +25,12 @@ fn coeff_named_expr(name: &str) -> Option<Expr> {
         // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
         // but `nu` is conventionally kinematic viscosity; accept both for now.
         "mu" | "nu" => Some(Expr::ident("constants").field("viscosity")),
+        "eos_gamma" => Some(Expr::ident("constants").field("eos_gamma")),
+        "eos_gm1" => Some(Expr::ident("constants").field("eos_gm1")),
+        "eos_r" => Some(Expr::ident("constants").field("eos_r")),
+        "eos_dp_drho" => Some(Expr::ident("constants").field("eos_dp_drho")),
+        "eos_p_offset" => Some(Expr::ident("constants").field("eos_p_offset")),
+        "eos_theta_ref" => Some(Expr::ident("constants").field("eos_theta_ref")),
         _ => None,
     }
 }
@@ -60,7 +66,10 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
         }
         Coefficient::MagSqr(field) => {
             let Some(state_field) = layout.field(field.name()) else {
-                panic!("missing coefficient field '{}' in state layout", field.name());
+                panic!(
+                    "missing coefficient field '{}' in state layout",
+                    field.name()
+                );
             };
 
             let mag_sqr_at = |idx: &str| match state_field.kind() {

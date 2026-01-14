@@ -1,5 +1,4 @@
 /// Model registry + model specs + boundary specs.
-
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
@@ -66,6 +65,7 @@ impl ModelSpec {
         let requires_low_mach_params = matches!(
             self.eos,
             crate::solver::model::eos::EosSpec::IdealGas { .. }
+                | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
         );
 
         let gradient_storage = match self.method {
@@ -253,8 +253,13 @@ mod generic_diffusion_demo;
 #[path = "definitions/incompressible_momentum.rs"]
 mod incompressible_momentum;
 
-pub use compressible::{compressible_model, compressible_system, CompressibleFields};
-pub use generic_diffusion_demo::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};
+#[allow(unused_imports)]
+pub use compressible::{
+    compressible_model, compressible_model_with_eos, compressible_system, CompressibleFields,
+};
+pub use generic_diffusion_demo::{
+    generic_diffusion_demo_model, generic_diffusion_demo_neumann_model,
+};
 pub use incompressible_momentum::{
     incompressible_momentum_generic_model, incompressible_momentum_model,
     incompressible_momentum_system, IncompressibleMomentumFields,
@@ -344,7 +349,7 @@ mod tests {
         assert_eq!(model.system.equations()[1].terms().len(), 3);
         assert_eq!(model.system.equations()[2].terms().len(), 2);
         assert_eq!(model.system.equations()[3].terms().len(), 2);
-        assert_eq!(model.system.equations()[4].terms().len(), 3);
+        assert_eq!(model.system.equations()[4].terms().len(), 5);
         assert_eq!(model.system.equations()[5].terms().len(), 2);
 
         // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.

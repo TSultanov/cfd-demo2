@@ -75,6 +75,12 @@ fn constants_struct() -> StructDef {
             StructField::new("time_scheme", Type::U32),
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
+            StructField::new("eos_gamma", Type::F32),
+            StructField::new("eos_gm1", Type::F32),
+            StructField::new("eos_r", Type::F32),
+            StructField::new("eos_dp_drho", Type::F32),
+            StructField::new("eos_p_offset", Type::F32),
+            StructField::new("eos_theta_ref", Type::F32),
         ],
     )
 }
@@ -250,9 +256,7 @@ fn base_assembly_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
     items
 }
 
-fn coupled_unknown_components(
-    system: &DiscreteSystem,
-) -> Vec<(crate::solver::ir::FieldRef, u32)> {
+fn coupled_unknown_components(system: &DiscreteSystem) -> Vec<(crate::solver::ir::FieldRef, u32)> {
     let mut out = Vec::new();
     for equation in &system.equations {
         let count = equation.target.kind().component_count() as u32;
@@ -519,9 +523,7 @@ fn main_assembly_fn(
                         // Cross-coupled source term: contribute to the (row, col) block entry.
                         stmts.push(dsl::assign_op_expr(
                             AssignOp::Sub,
-                            diag_block
-                                .entry(row_u_idx as u8, col_u_idx as u8)
-                                .expr,
+                            diag_block.entry(row_u_idx as u8, col_u_idx as u8).expr,
                             term.clone(),
                         ));
                     }
@@ -828,7 +830,8 @@ fn main_assembly_fn(
                     !Expr::ident("is_boundary"),
                 );
 
-                let diff_coeff_name = format!("diff_coeff_exp_{}_{}", equation.target.name(), field_name);
+                let diff_coeff_name =
+                    format!("diff_coeff_exp_{}_{}", equation.target.name(), field_name);
                 body.push(dsl::let_expr(
                     &diff_coeff_name,
                     kappa_face * Expr::ident("area") / Expr::ident("dist"),
@@ -887,28 +890,29 @@ fn main_assembly_fn(
                         let rho_u_base = *offsets.get("rho_u").expect("missing rho_u offset");
                         let rho_u_idx = rho_u_base + component;
 
-                        let bc_rho_idx =
-                            Expr::ident("boundary_type") * coupled_stride + rho_idx;
+                        let bc_rho_idx = Expr::ident("boundary_type") * coupled_stride + rho_idx;
                         let bc_rho_u_idx =
                             Expr::ident("boundary_type") * coupled_stride + rho_u_idx;
 
-                        let bc_rho_kind = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
-                            "bc_kind",
-                            bc_rho_idx,
-                        ));
-                        let bc_rho_u_kind =
-                            typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
-                                "bc_kind",
-                                bc_rho_u_idx,
-                            ));
+                        let bc_rho_kind = typed::EnumExpr::<GpuBcKind>::from_expr(
+                            dsl::array_access("bc_kind", bc_rho_idx),
+                        );
+                        let bc_rho_u_kind = typed::EnumExpr::<GpuBcKind>::from_expr(
+                            dsl::array_access("bc_kind", bc_rho_u_idx),
+                        );
                         let bc_rho_val = dsl::array_access("bc_value", bc_rho_idx);
                         let bc_rho_u_val = dsl::array_access("bc_value", bc_rho_u_idx);
 
                         let rho_own = state_component(layout, "state", "idx", "rho", 0);
-                        let rho_bc = dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
+                        let rho_bc =
+                            dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
                         let u_bc = bc_rho_u_val / rho_bc_safe;
-                        let u_other = dsl::select(phi_own.clone(), u_bc, bc_rho_u_kind.eq(GpuBcKind::Dirichlet));
+                        let u_other = dsl::select(
+                            phi_own.clone(),
+                            u_bc,
+                            bc_rho_u_kind.eq(GpuBcKind::Dirichlet),
+                        );
 
                         dsl::block(vec![dsl::assign_op_expr(
                             AssignOp::Add,
@@ -1004,7 +1008,8 @@ fn main_assembly_fn(
                             None,
                         ));
 
-                        let phi_own = state_component(layout, "state", "idx", field_name, component);
+                        let phi_own =
+                            state_component(layout, "state", "idx", field_name, component);
                         let phi_neigh =
                             state_component(layout, "state", "other_idx", field_name, component);
 
@@ -1067,10 +1072,9 @@ fn main_assembly_fn(
                         ]);
 
                         let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
-                        let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
-                            "bc_kind",
-                            bc_table_idx,
-                        ));
+                        let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(
+                            dsl::array_access("bc_kind", bc_table_idx),
+                        );
                         let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
 
                         let boundary_contrib = dsl::block(vec![dsl::if_block_expr(

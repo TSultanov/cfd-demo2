@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: e025f840dbb3caa78a0590f83ff382cd0217a93631045ec3984014a5baebe525
+// SourceHash: 237be67639a1f9f107fed694b2dc19b23ccdd2d783005479af0ab41273aee0a6
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -324,7 +324,27 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(generated::flux_module_compressible::Constants, ramp_time) == 52
         );
-        assert!(std::mem::size_of::<generated::flux_module_compressible::Constants>() == 56);
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_gamma) == 56
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_gm1) == 60
+        );
+        assert!(std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_r) == 64);
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_dp_drho) == 68
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::Constants, eos_p_offset)
+                == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_compressible::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(std::mem::size_of::<generated::flux_module_compressible::Constants>() == 80);
     };
     const GENERATED_FLUX_MODULE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
@@ -460,7 +480,43 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::flux_module_incompressible_momentum::Constants>() == 56
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum::Constants>() == 80
         );
     };
     const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
@@ -567,8 +623,44 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Constants>(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                eos_gamma
             ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_generic::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Constants>(
+            ) == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -668,8 +760,44 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_compressible::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_compressible::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_compressible::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_compressible::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_compressible::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_compressible::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<generated::generic_coupled_assembly_compressible::Constants>()
-                == 56
+                == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_VECTOR2_ASSERTS: () = {
@@ -776,9 +904,45 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-            >() == 56
+            >() == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_NEUMANN_VECTOR2_ASSERTS: () = {
@@ -886,9 +1050,45 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-            >() == 56
+            >() == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
@@ -995,9 +1195,45 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-            >() == 56
+            >() == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
@@ -1105,9 +1341,45 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-            >() == 56
+            >() == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
@@ -1196,7 +1468,43 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 56
+            std::mem::offset_of!(
+                generated::generic_coupled_update_compressible::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_compressible::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_compressible::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_compressible::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_compressible::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_compressible::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
+            std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_CONSTANTS_ASSERTS: () = {
@@ -1285,8 +1593,44 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::generic_coupled_update_generic_diffusion_demo::Constants>(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo::Constants,
+                eos_gamma
             ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
+            std::mem::size_of::<generated::generic_coupled_update_generic_diffusion_demo::Constants>(
+            ) == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_NEUMANN_CONSTANTS_ASSERTS: () = {
@@ -1375,9 +1719,45 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-            >() == 56
+            >() == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
@@ -1466,8 +1846,44 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
-            std::mem::size_of::<generated::generic_coupled_update_incompressible_momentum::Constants>(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum::Constants,
+                eos_gamma
             ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
+            std::mem::size_of::<generated::generic_coupled_update_incompressible_momentum::Constants>(
+            ) == 80
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
@@ -1556,9 +1972,45 @@ pub mod layout_asserts {
             ) == 52
         );
         assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
+                eos_gamma
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
+                eos_gm1
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
+                eos_r
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
+                eos_dp_drho
+            ) == 68
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
+                eos_p_offset
+            ) == 72
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
+                eos_theta_ref
+            ) == 76
+        );
+        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-            >() == 56
+            >() == 80
         );
     };
     const GENERIC_COUPLED_SCHUR_SETUP_SETUP_PARAMS_ASSERTS: () = {
@@ -5429,6 +5881,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -5446,6 +5910,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -5462,6 +5932,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -5939,6 +6415,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -6027,358 +6509,366 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e98 = state[((owner * 8u) + 2u)];
     let _e108 = state[((owner * 8u) + 0u)];
     let _e111 = normal_vec;
-    let _e119 = state[((owner * 8u) + 4u)];
-    let _e128 = state[((owner * 8u) + 0u)];
-    let _e132 = neigh_idx;
-    let _e139 = state[((_e132 * 8u) + 1u)];
-    let _e146 = state[((owner * 8u) + 1u)];
-    let _e153 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e160 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e170 = state[((owner * 8u) + 1u)];
-    let _e177 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e186 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e191 = neigh_idx;
-    let _e198 = state[((_e191 * 8u) + 2u)];
-    let _e205 = state[((owner * 8u) + 2u)];
-    let _e212 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e219 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e229 = state[((owner * 8u) + 2u)];
-    let _e236 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e245 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e253 = neigh_idx;
-    let _e260 = state[((_e253 * 8u) + 0u)];
-    let _e267 = state[((owner * 8u) + 0u)];
-    let _e274 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e281 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e291 = state[((owner * 8u) + 0u)];
-    let _e298 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e307 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e314 = normal_vec;
-    let _e316 = neigh_idx;
-    let _e323 = state[((_e316 * 8u) + 4u)];
-    let _e330 = state[((owner * 8u) + 4u)];
-    let _e337 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e344 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e354 = state[((owner * 8u) + 4u)];
-    let _e361 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e370 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e377 = neigh_idx;
-    let _e384 = state[((_e377 * 8u) + 0u)];
-    let _e391 = state[((owner * 8u) + 0u)];
-    let _e398 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e405 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e415 = state[((owner * 8u) + 0u)];
-    let _e422 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e431 = bc_kind[((boundary_type * 8u) + 0u)];
-    let a_plus = max(0f, max((dot(((vec2<f32>(_e91, _e98) * 1f) / vec2(_e108)), _e111) + sqrt(((1.4f * _e119) / _e128))), (dot(((vec2<f32>(select(_e139, select(select(_e146, _e153, (_e160 == 1u)), (_e170 + (_e177 * d_own)), (_e186 == 2u)), is_boundary), select(_e198, select(select(_e205, _e212, (_e219 == 1u)), (_e229 + (_e236 * d_own)), (_e245 == 2u)), is_boundary)) * 1f) / vec2(select(_e260, select(select(_e267, _e274, (_e281 == 1u)), (_e291 + (_e298 * d_own)), (_e307 == 2u)), is_boundary))), _e314) + sqrt(((1.4f * select(_e323, select(select(_e330, _e337, (_e344 == 1u)), (_e354 + (_e361 * d_own)), (_e370 == 2u)), is_boundary)) / select(_e384, select(select(_e391, _e398, (_e405 == 1u)), (_e415 + (_e422 * d_own)), (_e431 == 2u)), is_boundary))))));
-    let _e448 = state[((owner * 8u) + 1u)];
-    let _e455 = state[((owner * 8u) + 2u)];
-    let _e465 = state[((owner * 8u) + 0u)];
-    let _e468 = normal_vec;
-    let _e476 = state[((owner * 8u) + 4u)];
-    let _e485 = state[((owner * 8u) + 0u)];
-    let _e489 = neigh_idx;
-    let _e496 = state[((_e489 * 8u) + 1u)];
-    let _e503 = state[((owner * 8u) + 1u)];
-    let _e510 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e517 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e527 = state[((owner * 8u) + 1u)];
-    let _e534 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e543 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e548 = neigh_idx;
-    let _e555 = state[((_e548 * 8u) + 2u)];
-    let _e562 = state[((owner * 8u) + 2u)];
-    let _e569 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e576 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e586 = state[((owner * 8u) + 2u)];
-    let _e593 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e602 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e610 = neigh_idx;
-    let _e617 = state[((_e610 * 8u) + 0u)];
-    let _e624 = state[((owner * 8u) + 0u)];
-    let _e631 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e638 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e648 = state[((owner * 8u) + 0u)];
-    let _e655 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e664 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e671 = normal_vec;
-    let _e673 = neigh_idx;
-    let _e680 = state[((_e673 * 8u) + 4u)];
-    let _e687 = state[((owner * 8u) + 4u)];
-    let _e694 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e701 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e711 = state[((owner * 8u) + 4u)];
-    let _e718 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e727 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e734 = neigh_idx;
-    let _e741 = state[((_e734 * 8u) + 0u)];
-    let _e748 = state[((owner * 8u) + 0u)];
-    let _e755 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e762 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e772 = state[((owner * 8u) + 0u)];
-    let _e779 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e788 = bc_kind[((boundary_type * 8u) + 0u)];
-    let a_minus = min(0f, min((dot(((vec2<f32>(_e448, _e455) * 1f) / vec2(_e465)), _e468) - sqrt(((1.4f * _e476) / _e485))), (dot(((vec2<f32>(select(_e496, select(select(_e503, _e510, (_e517 == 1u)), (_e527 + (_e534 * d_own)), (_e543 == 2u)), is_boundary), select(_e555, select(select(_e562, _e569, (_e576 == 1u)), (_e586 + (_e593 * d_own)), (_e602 == 2u)), is_boundary)) * 1f) / vec2(select(_e617, select(select(_e624, _e631, (_e638 == 1u)), (_e648 + (_e655 * d_own)), (_e664 == 2u)), is_boundary))), _e671) - sqrt(((1.4f * select(_e680, select(select(_e687, _e694, (_e701 == 1u)), (_e711 + (_e718 * d_own)), (_e727 == 2u)), is_boundary)) / select(_e741, select(select(_e748, _e755, (_e762 == 1u)), (_e772 + (_e779 * d_own)), (_e788 == 2u)), is_boundary))))));
+    let _e115 = constants.eos_gamma;
+    let _e122 = state[((owner * 8u) + 4u)];
+    let _e130 = state[((owner * 8u) + 0u)];
+    let _e134 = constants.eos_dp_drho;
+    let _e138 = neigh_idx;
+    let _e145 = state[((_e138 * 8u) + 1u)];
+    let _e152 = state[((owner * 8u) + 1u)];
+    let _e159 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e166 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e176 = state[((owner * 8u) + 1u)];
+    let _e183 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e192 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e197 = neigh_idx;
+    let _e204 = state[((_e197 * 8u) + 2u)];
+    let _e211 = state[((owner * 8u) + 2u)];
+    let _e218 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e225 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e235 = state[((owner * 8u) + 2u)];
+    let _e242 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e251 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e259 = neigh_idx;
+    let _e266 = state[((_e259 * 8u) + 0u)];
+    let _e273 = state[((owner * 8u) + 0u)];
+    let _e280 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e287 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e297 = state[((owner * 8u) + 0u)];
+    let _e304 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e313 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e320 = normal_vec;
+    let _e324 = constants.eos_gamma;
+    let _e325 = neigh_idx;
+    let _e332 = state[((_e325 * 8u) + 4u)];
+    let _e339 = state[((owner * 8u) + 4u)];
+    let _e346 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e353 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e363 = state[((owner * 8u) + 4u)];
+    let _e370 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e379 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e385 = neigh_idx;
+    let _e392 = state[((_e385 * 8u) + 0u)];
+    let _e399 = state[((owner * 8u) + 0u)];
+    let _e406 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e413 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e423 = state[((owner * 8u) + 0u)];
+    let _e430 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e439 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e447 = constants.eos_dp_drho;
+    let a_plus = max(0f, max((dot(((vec2<f32>(_e91, _e98) * 1f) / vec2(_e108)), _e111) + sqrt((((_e115 * _e122) / _e130) + _e134))), (dot(((vec2<f32>(select(_e145, select(select(_e152, _e159, (_e166 == 1u)), (_e176 + (_e183 * d_own)), (_e192 == 2u)), is_boundary), select(_e204, select(select(_e211, _e218, (_e225 == 1u)), (_e235 + (_e242 * d_own)), (_e251 == 2u)), is_boundary)) * 1f) / vec2(select(_e266, select(select(_e273, _e280, (_e287 == 1u)), (_e297 + (_e304 * d_own)), (_e313 == 2u)), is_boundary))), _e320) + sqrt((((_e324 * select(_e332, select(select(_e339, _e346, (_e353 == 1u)), (_e363 + (_e370 * d_own)), (_e379 == 2u)), is_boundary)) / select(_e392, select(select(_e399, _e406, (_e413 == 1u)), (_e423 + (_e430 * d_own)), (_e439 == 2u)), is_boundary)) + _e447)))));
+    let _e460 = state[((owner * 8u) + 1u)];
+    let _e467 = state[((owner * 8u) + 2u)];
+    let _e477 = state[((owner * 8u) + 0u)];
+    let _e480 = normal_vec;
+    let _e484 = constants.eos_gamma;
+    let _e491 = state[((owner * 8u) + 4u)];
+    let _e499 = state[((owner * 8u) + 0u)];
+    let _e503 = constants.eos_dp_drho;
+    let _e507 = neigh_idx;
+    let _e514 = state[((_e507 * 8u) + 1u)];
+    let _e521 = state[((owner * 8u) + 1u)];
+    let _e528 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e535 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e545 = state[((owner * 8u) + 1u)];
+    let _e552 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e561 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e566 = neigh_idx;
+    let _e573 = state[((_e566 * 8u) + 2u)];
+    let _e580 = state[((owner * 8u) + 2u)];
+    let _e587 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e594 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e604 = state[((owner * 8u) + 2u)];
+    let _e611 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e620 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e628 = neigh_idx;
+    let _e635 = state[((_e628 * 8u) + 0u)];
+    let _e642 = state[((owner * 8u) + 0u)];
+    let _e649 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e656 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e666 = state[((owner * 8u) + 0u)];
+    let _e673 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e682 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e689 = normal_vec;
+    let _e693 = constants.eos_gamma;
+    let _e694 = neigh_idx;
+    let _e701 = state[((_e694 * 8u) + 4u)];
+    let _e708 = state[((owner * 8u) + 4u)];
+    let _e715 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e722 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e732 = state[((owner * 8u) + 4u)];
+    let _e739 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e748 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e754 = neigh_idx;
+    let _e761 = state[((_e754 * 8u) + 0u)];
+    let _e768 = state[((owner * 8u) + 0u)];
+    let _e775 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e782 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e792 = state[((owner * 8u) + 0u)];
+    let _e799 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e808 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e816 = constants.eos_dp_drho;
+    let a_minus = min(0f, min((dot(((vec2<f32>(_e460, _e467) * 1f) / vec2(_e477)), _e480) - sqrt((((_e484 * _e491) / _e499) + _e503))), (dot(((vec2<f32>(select(_e514, select(select(_e521, _e528, (_e535 == 1u)), (_e545 + (_e552 * d_own)), (_e561 == 2u)), is_boundary), select(_e573, select(select(_e580, _e587, (_e594 == 1u)), (_e604 + (_e611 * d_own)), (_e620 == 2u)), is_boundary)) * 1f) / vec2(select(_e635, select(select(_e642, _e649, (_e656 == 1u)), (_e666 + (_e673 * d_own)), (_e682 == 2u)), is_boundary))), _e689) - sqrt((((_e693 * select(_e701, select(select(_e708, _e715, (_e722 == 1u)), (_e732 + (_e739 * d_own)), (_e748 == 2u)), is_boundary)) / select(_e761, select(select(_e768, _e775, (_e782 == 1u)), (_e792 + (_e799 * d_own)), (_e808 == 2u)), is_boundary)) + _e816)))));
     let denom = max((a_plus - a_minus), 0.000001f);
-    let _e814 = state[((owner * 8u) + 0u)];
-    let _e822 = state[((owner * 8u) + 1u)];
-    let _e829 = state[((owner * 8u) + 2u)];
-    let _e839 = state[((owner * 8u) + 0u)];
-    let _e842 = normal_vec;
-    let _e845 = neigh_idx;
-    let _e852 = state[((_e845 * 8u) + 0u)];
-    let _e859 = state[((owner * 8u) + 0u)];
-    let _e866 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e873 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e838 = state[((owner * 8u) + 0u)];
+    let _e846 = state[((owner * 8u) + 1u)];
+    let _e853 = state[((owner * 8u) + 2u)];
+    let _e863 = state[((owner * 8u) + 0u)];
+    let _e866 = normal_vec;
+    let _e869 = neigh_idx;
+    let _e876 = state[((_e869 * 8u) + 0u)];
     let _e883 = state[((owner * 8u) + 0u)];
     let _e890 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e899 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e905 = neigh_idx;
-    let _e912 = state[((_e905 * 8u) + 1u)];
-    let _e919 = state[((owner * 8u) + 1u)];
-    let _e926 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e933 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e897 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e907 = state[((owner * 8u) + 0u)];
+    let _e914 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e923 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e929 = neigh_idx;
+    let _e936 = state[((_e929 * 8u) + 1u)];
     let _e943 = state[((owner * 8u) + 1u)];
     let _e950 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e959 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e964 = neigh_idx;
-    let _e971 = state[((_e964 * 8u) + 2u)];
-    let _e978 = state[((owner * 8u) + 2u)];
-    let _e985 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e992 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e957 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e967 = state[((owner * 8u) + 1u)];
+    let _e974 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e983 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e988 = neigh_idx;
+    let _e995 = state[((_e988 * 8u) + 2u)];
     let _e1002 = state[((owner * 8u) + 2u)];
     let _e1009 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1018 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e1026 = neigh_idx;
-    let _e1033 = state[((_e1026 * 8u) + 0u)];
-    let _e1040 = state[((owner * 8u) + 0u)];
-    let _e1047 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1054 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1016 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1026 = state[((owner * 8u) + 2u)];
+    let _e1033 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e1042 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1050 = neigh_idx;
+    let _e1057 = state[((_e1050 * 8u) + 0u)];
     let _e1064 = state[((owner * 8u) + 0u)];
     let _e1071 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1080 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e1087 = normal_vec;
-    let _e1092 = neigh_idx;
-    let _e1099 = state[((_e1092 * 8u) + 0u)];
-    let _e1106 = state[((owner * 8u) + 0u)];
-    let _e1113 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1120 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1078 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1088 = state[((owner * 8u) + 0u)];
+    let _e1095 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e1104 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1111 = normal_vec;
+    let _e1116 = neigh_idx;
+    let _e1123 = state[((_e1116 * 8u) + 0u)];
     let _e1130 = state[((owner * 8u) + 0u)];
     let _e1137 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1146 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e1157 = state[((owner * 8u) + 0u)];
-    fluxes[((idx * 8u) + 0u)] = ((((((a_plus * _e814) * dot(((vec2<f32>(_e822, _e829) * 1f) / vec2(_e839)), _e842)) - ((a_minus * select(_e852, select(select(_e859, _e866, (_e873 == 1u)), (_e883 + (_e890 * d_own)), (_e899 == 2u)), is_boundary)) * dot(((vec2<f32>(select(_e912, select(select(_e919, _e926, (_e933 == 1u)), (_e943 + (_e950 * d_own)), (_e959 == 2u)), is_boundary), select(_e971, select(select(_e978, _e985, (_e992 == 1u)), (_e1002 + (_e1009 * d_own)), (_e1018 == 2u)), is_boundary)) * 1f) / vec2(select(_e1033, select(select(_e1040, _e1047, (_e1054 == 1u)), (_e1064 + (_e1071 * d_own)), (_e1080 == 2u)), is_boundary))), _e1087))) + ((a_plus * a_minus) * (select(_e1099, select(select(_e1106, _e1113, (_e1120 == 1u)), (_e1130 + (_e1137 * d_own)), (_e1146 == 2u)), is_boundary) - _e1157))) / denom) * area);
-    let _e1175 = state[((owner * 8u) + 1u)];
-    let _e1182 = state[((owner * 8u) + 2u)];
-    let _e1194 = state[((owner * 8u) + 1u)];
-    let _e1201 = state[((owner * 8u) + 2u)];
-    let _e1211 = state[((owner * 8u) + 0u)];
-    let _e1214 = normal_vec;
-    let _e1223 = state[((owner * 8u) + 4u)];
-    let _e1224 = normal_vec;
-    let _e1232 = neigh_idx;
-    let _e1239 = state[((_e1232 * 8u) + 1u)];
-    let _e1246 = state[((owner * 8u) + 1u)];
-    let _e1253 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1260 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1144 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1154 = state[((owner * 8u) + 0u)];
+    let _e1161 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e1170 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1181 = state[((owner * 8u) + 0u)];
+    fluxes[((idx * 8u) + 0u)] = ((((((a_plus * _e838) * dot(((vec2<f32>(_e846, _e853) * 1f) / vec2(_e863)), _e866)) - ((a_minus * select(_e876, select(select(_e883, _e890, (_e897 == 1u)), (_e907 + (_e914 * d_own)), (_e923 == 2u)), is_boundary)) * dot(((vec2<f32>(select(_e936, select(select(_e943, _e950, (_e957 == 1u)), (_e967 + (_e974 * d_own)), (_e983 == 2u)), is_boundary), select(_e995, select(select(_e1002, _e1009, (_e1016 == 1u)), (_e1026 + (_e1033 * d_own)), (_e1042 == 2u)), is_boundary)) * 1f) / vec2(select(_e1057, select(select(_e1064, _e1071, (_e1078 == 1u)), (_e1088 + (_e1095 * d_own)), (_e1104 == 2u)), is_boundary))), _e1111))) + ((a_plus * a_minus) * (select(_e1123, select(select(_e1130, _e1137, (_e1144 == 1u)), (_e1154 + (_e1161 * d_own)), (_e1170 == 2u)), is_boundary) - _e1181))) / denom) * area);
+    let _e1199 = state[((owner * 8u) + 1u)];
+    let _e1206 = state[((owner * 8u) + 2u)];
+    let _e1218 = state[((owner * 8u) + 1u)];
+    let _e1225 = state[((owner * 8u) + 2u)];
+    let _e1235 = state[((owner * 8u) + 0u)];
+    let _e1238 = normal_vec;
+    let _e1247 = state[((owner * 8u) + 4u)];
+    let _e1248 = normal_vec;
+    let _e1256 = neigh_idx;
+    let _e1263 = state[((_e1256 * 8u) + 1u)];
     let _e1270 = state[((owner * 8u) + 1u)];
     let _e1277 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1286 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e1291 = neigh_idx;
-    let _e1298 = state[((_e1291 * 8u) + 2u)];
-    let _e1305 = state[((owner * 8u) + 2u)];
-    let _e1312 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1319 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1284 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1294 = state[((owner * 8u) + 1u)];
+    let _e1301 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e1310 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1315 = neigh_idx;
+    let _e1322 = state[((_e1315 * 8u) + 2u)];
     let _e1329 = state[((owner * 8u) + 2u)];
     let _e1336 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1345 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e1355 = neigh_idx;
-    let _e1362 = state[((_e1355 * 8u) + 1u)];
-    let _e1369 = state[((owner * 8u) + 1u)];
-    let _e1376 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1383 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1343 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1353 = state[((owner * 8u) + 2u)];
+    let _e1360 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e1369 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1379 = neigh_idx;
+    let _e1386 = state[((_e1379 * 8u) + 1u)];
     let _e1393 = state[((owner * 8u) + 1u)];
     let _e1400 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1409 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e1414 = neigh_idx;
-    let _e1421 = state[((_e1414 * 8u) + 2u)];
-    let _e1428 = state[((owner * 8u) + 2u)];
-    let _e1435 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1442 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1407 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1417 = state[((owner * 8u) + 1u)];
+    let _e1424 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e1433 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1438 = neigh_idx;
+    let _e1445 = state[((_e1438 * 8u) + 2u)];
     let _e1452 = state[((owner * 8u) + 2u)];
     let _e1459 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1468 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e1476 = neigh_idx;
-    let _e1483 = state[((_e1476 * 8u) + 0u)];
-    let _e1490 = state[((owner * 8u) + 0u)];
-    let _e1497 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1504 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1466 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1476 = state[((owner * 8u) + 2u)];
+    let _e1483 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e1492 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1500 = neigh_idx;
+    let _e1507 = state[((_e1500 * 8u) + 0u)];
     let _e1514 = state[((owner * 8u) + 0u)];
     let _e1521 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1530 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e1537 = normal_vec;
-    let _e1540 = neigh_idx;
-    let _e1547 = state[((_e1540 * 8u) + 4u)];
-    let _e1554 = state[((owner * 8u) + 4u)];
-    let _e1561 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e1568 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e1528 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1538 = state[((owner * 8u) + 0u)];
+    let _e1545 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e1554 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1561 = normal_vec;
+    let _e1564 = neigh_idx;
+    let _e1571 = state[((_e1564 * 8u) + 4u)];
     let _e1578 = state[((owner * 8u) + 4u)];
     let _e1585 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e1594 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e1599 = normal_vec;
-    let _e1609 = neigh_idx;
-    let _e1616 = state[((_e1609 * 8u) + 1u)];
-    let _e1623 = state[((owner * 8u) + 1u)];
-    let _e1630 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1637 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1592 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e1602 = state[((owner * 8u) + 4u)];
+    let _e1609 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e1618 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e1623 = normal_vec;
+    let _e1633 = neigh_idx;
+    let _e1640 = state[((_e1633 * 8u) + 1u)];
     let _e1647 = state[((owner * 8u) + 1u)];
     let _e1654 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1663 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e1668 = neigh_idx;
-    let _e1675 = state[((_e1668 * 8u) + 2u)];
-    let _e1682 = state[((owner * 8u) + 2u)];
-    let _e1689 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1696 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1661 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1671 = state[((owner * 8u) + 1u)];
+    let _e1678 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e1687 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1692 = neigh_idx;
+    let _e1699 = state[((_e1692 * 8u) + 2u)];
     let _e1706 = state[((owner * 8u) + 2u)];
     let _e1713 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1722 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e1738 = state[((owner * 8u) + 1u)];
-    let _e1745 = state[((owner * 8u) + 2u)];
-    fluxes[((idx * 8u) + 1u)] = (((((a_plus * ((dot(vec2<f32>(_e1175, _e1182), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(_e1194, _e1201) * 1f) / vec2(_e1211)), _e1214)) + (_e1223 * dot(_e1224, vec2<f32>(1f, 0f))))) - (a_minus * ((dot(vec2<f32>(select(_e1239, select(select(_e1246, _e1253, (_e1260 == 1u)), (_e1270 + (_e1277 * d_own)), (_e1286 == 2u)), is_boundary), select(_e1298, select(select(_e1305, _e1312, (_e1319 == 1u)), (_e1329 + (_e1336 * d_own)), (_e1345 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(select(_e1362, select(select(_e1369, _e1376, (_e1383 == 1u)), (_e1393 + (_e1400 * d_own)), (_e1409 == 2u)), is_boundary), select(_e1421, select(select(_e1428, _e1435, (_e1442 == 1u)), (_e1452 + (_e1459 * d_own)), (_e1468 == 2u)), is_boundary)) * 1f) / vec2(select(_e1483, select(select(_e1490, _e1497, (_e1504 == 1u)), (_e1514 + (_e1521 * d_own)), (_e1530 == 2u)), is_boundary))), _e1537)) + (select(_e1547, select(select(_e1554, _e1561, (_e1568 == 1u)), (_e1578 + (_e1585 * d_own)), (_e1594 == 2u)), is_boundary) * dot(_e1599, vec2<f32>(1f, 0f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e1616, select(select(_e1623, _e1630, (_e1637 == 1u)), (_e1647 + (_e1654 * d_own)), (_e1663 == 2u)), is_boundary), select(_e1675, select(select(_e1682, _e1689, (_e1696 == 1u)), (_e1706 + (_e1713 * d_own)), (_e1722 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) - dot(vec2<f32>(_e1738, _e1745), vec2<f32>(1f, 0f))))) / denom) * area);
-    let _e1768 = state[((owner * 8u) + 1u)];
-    let _e1775 = state[((owner * 8u) + 2u)];
-    let _e1787 = state[((owner * 8u) + 1u)];
-    let _e1794 = state[((owner * 8u) + 2u)];
-    let _e1804 = state[((owner * 8u) + 0u)];
-    let _e1807 = normal_vec;
-    let _e1816 = state[((owner * 8u) + 4u)];
-    let _e1817 = normal_vec;
-    let _e1825 = neigh_idx;
-    let _e1832 = state[((_e1825 * 8u) + 1u)];
-    let _e1839 = state[((owner * 8u) + 1u)];
-    let _e1846 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1853 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1720 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1730 = state[((owner * 8u) + 2u)];
+    let _e1737 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e1746 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1762 = state[((owner * 8u) + 1u)];
+    let _e1769 = state[((owner * 8u) + 2u)];
+    fluxes[((idx * 8u) + 1u)] = (((((a_plus * ((dot(vec2<f32>(_e1199, _e1206), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(_e1218, _e1225) * 1f) / vec2(_e1235)), _e1238)) + (_e1247 * dot(_e1248, vec2<f32>(1f, 0f))))) - (a_minus * ((dot(vec2<f32>(select(_e1263, select(select(_e1270, _e1277, (_e1284 == 1u)), (_e1294 + (_e1301 * d_own)), (_e1310 == 2u)), is_boundary), select(_e1322, select(select(_e1329, _e1336, (_e1343 == 1u)), (_e1353 + (_e1360 * d_own)), (_e1369 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(select(_e1386, select(select(_e1393, _e1400, (_e1407 == 1u)), (_e1417 + (_e1424 * d_own)), (_e1433 == 2u)), is_boundary), select(_e1445, select(select(_e1452, _e1459, (_e1466 == 1u)), (_e1476 + (_e1483 * d_own)), (_e1492 == 2u)), is_boundary)) * 1f) / vec2(select(_e1507, select(select(_e1514, _e1521, (_e1528 == 1u)), (_e1538 + (_e1545 * d_own)), (_e1554 == 2u)), is_boundary))), _e1561)) + (select(_e1571, select(select(_e1578, _e1585, (_e1592 == 1u)), (_e1602 + (_e1609 * d_own)), (_e1618 == 2u)), is_boundary) * dot(_e1623, vec2<f32>(1f, 0f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e1640, select(select(_e1647, _e1654, (_e1661 == 1u)), (_e1671 + (_e1678 * d_own)), (_e1687 == 2u)), is_boundary), select(_e1699, select(select(_e1706, _e1713, (_e1720 == 1u)), (_e1730 + (_e1737 * d_own)), (_e1746 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) - dot(vec2<f32>(_e1762, _e1769), vec2<f32>(1f, 0f))))) / denom) * area);
+    let _e1792 = state[((owner * 8u) + 1u)];
+    let _e1799 = state[((owner * 8u) + 2u)];
+    let _e1811 = state[((owner * 8u) + 1u)];
+    let _e1818 = state[((owner * 8u) + 2u)];
+    let _e1828 = state[((owner * 8u) + 0u)];
+    let _e1831 = normal_vec;
+    let _e1840 = state[((owner * 8u) + 4u)];
+    let _e1841 = normal_vec;
+    let _e1849 = neigh_idx;
+    let _e1856 = state[((_e1849 * 8u) + 1u)];
     let _e1863 = state[((owner * 8u) + 1u)];
     let _e1870 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1879 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e1884 = neigh_idx;
-    let _e1891 = state[((_e1884 * 8u) + 2u)];
-    let _e1898 = state[((owner * 8u) + 2u)];
-    let _e1905 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1912 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1877 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1887 = state[((owner * 8u) + 1u)];
+    let _e1894 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e1903 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1908 = neigh_idx;
+    let _e1915 = state[((_e1908 * 8u) + 2u)];
     let _e1922 = state[((owner * 8u) + 2u)];
     let _e1929 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1938 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e1948 = neigh_idx;
-    let _e1955 = state[((_e1948 * 8u) + 1u)];
-    let _e1962 = state[((owner * 8u) + 1u)];
-    let _e1969 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1976 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1936 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1946 = state[((owner * 8u) + 2u)];
+    let _e1953 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e1962 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1972 = neigh_idx;
+    let _e1979 = state[((_e1972 * 8u) + 1u)];
     let _e1986 = state[((owner * 8u) + 1u)];
     let _e1993 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2002 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e2007 = neigh_idx;
-    let _e2014 = state[((_e2007 * 8u) + 2u)];
-    let _e2021 = state[((owner * 8u) + 2u)];
-    let _e2028 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2035 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2000 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2010 = state[((owner * 8u) + 1u)];
+    let _e2017 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e2026 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2031 = neigh_idx;
+    let _e2038 = state[((_e2031 * 8u) + 2u)];
     let _e2045 = state[((owner * 8u) + 2u)];
     let _e2052 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2061 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e2069 = neigh_idx;
-    let _e2076 = state[((_e2069 * 8u) + 0u)];
-    let _e2083 = state[((owner * 8u) + 0u)];
-    let _e2090 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2097 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2059 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2069 = state[((owner * 8u) + 2u)];
+    let _e2076 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e2085 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2093 = neigh_idx;
+    let _e2100 = state[((_e2093 * 8u) + 0u)];
     let _e2107 = state[((owner * 8u) + 0u)];
     let _e2114 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2123 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e2130 = normal_vec;
-    let _e2133 = neigh_idx;
-    let _e2140 = state[((_e2133 * 8u) + 4u)];
-    let _e2147 = state[((owner * 8u) + 4u)];
-    let _e2154 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2161 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2121 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2131 = state[((owner * 8u) + 0u)];
+    let _e2138 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e2147 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2154 = normal_vec;
+    let _e2157 = neigh_idx;
+    let _e2164 = state[((_e2157 * 8u) + 4u)];
     let _e2171 = state[((owner * 8u) + 4u)];
     let _e2178 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2187 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e2192 = normal_vec;
-    let _e2202 = neigh_idx;
-    let _e2209 = state[((_e2202 * 8u) + 1u)];
-    let _e2216 = state[((owner * 8u) + 1u)];
-    let _e2223 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2230 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2185 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2195 = state[((owner * 8u) + 4u)];
+    let _e2202 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e2211 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2216 = normal_vec;
+    let _e2226 = neigh_idx;
+    let _e2233 = state[((_e2226 * 8u) + 1u)];
     let _e2240 = state[((owner * 8u) + 1u)];
     let _e2247 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2256 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e2261 = neigh_idx;
-    let _e2268 = state[((_e2261 * 8u) + 2u)];
-    let _e2275 = state[((owner * 8u) + 2u)];
-    let _e2282 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2289 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2254 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2264 = state[((owner * 8u) + 1u)];
+    let _e2271 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e2280 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2285 = neigh_idx;
+    let _e2292 = state[((_e2285 * 8u) + 2u)];
     let _e2299 = state[((owner * 8u) + 2u)];
     let _e2306 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2315 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e2331 = state[((owner * 8u) + 1u)];
-    let _e2338 = state[((owner * 8u) + 2u)];
-    fluxes[((idx * 8u) + 2u)] = (((((a_plus * ((dot(vec2<f32>(_e1768, _e1775), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(_e1787, _e1794) * 1f) / vec2(_e1804)), _e1807)) + (_e1816 * dot(_e1817, vec2<f32>(0f, 1f))))) - (a_minus * ((dot(vec2<f32>(select(_e1832, select(select(_e1839, _e1846, (_e1853 == 1u)), (_e1863 + (_e1870 * d_own)), (_e1879 == 2u)), is_boundary), select(_e1891, select(select(_e1898, _e1905, (_e1912 == 1u)), (_e1922 + (_e1929 * d_own)), (_e1938 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(select(_e1955, select(select(_e1962, _e1969, (_e1976 == 1u)), (_e1986 + (_e1993 * d_own)), (_e2002 == 2u)), is_boundary), select(_e2014, select(select(_e2021, _e2028, (_e2035 == 1u)), (_e2045 + (_e2052 * d_own)), (_e2061 == 2u)), is_boundary)) * 1f) / vec2(select(_e2076, select(select(_e2083, _e2090, (_e2097 == 1u)), (_e2107 + (_e2114 * d_own)), (_e2123 == 2u)), is_boundary))), _e2130)) + (select(_e2140, select(select(_e2147, _e2154, (_e2161 == 1u)), (_e2171 + (_e2178 * d_own)), (_e2187 == 2u)), is_boundary) * dot(_e2192, vec2<f32>(0f, 1f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e2209, select(select(_e2216, _e2223, (_e2230 == 1u)), (_e2240 + (_e2247 * d_own)), (_e2256 == 2u)), is_boundary), select(_e2268, select(select(_e2275, _e2282, (_e2289 == 1u)), (_e2299 + (_e2306 * d_own)), (_e2315 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) - dot(vec2<f32>(_e2331, _e2338), vec2<f32>(0f, 1f))))) / denom) * area);
-    let _e2361 = state[((owner * 8u) + 3u)];
-    let _e2368 = state[((owner * 8u) + 4u)];
-    let _e2377 = state[((owner * 8u) + 1u)];
-    let _e2384 = state[((owner * 8u) + 2u)];
-    let _e2394 = state[((owner * 8u) + 0u)];
-    let _e2397 = normal_vec;
-    let _e2400 = neigh_idx;
-    let _e2407 = state[((_e2400 * 8u) + 3u)];
-    let _e2414 = state[((owner * 8u) + 3u)];
-    let _e2421 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2428 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2313 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2323 = state[((owner * 8u) + 2u)];
+    let _e2330 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e2339 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2355 = state[((owner * 8u) + 1u)];
+    let _e2362 = state[((owner * 8u) + 2u)];
+    fluxes[((idx * 8u) + 2u)] = (((((a_plus * ((dot(vec2<f32>(_e1792, _e1799), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(_e1811, _e1818) * 1f) / vec2(_e1828)), _e1831)) + (_e1840 * dot(_e1841, vec2<f32>(0f, 1f))))) - (a_minus * ((dot(vec2<f32>(select(_e1856, select(select(_e1863, _e1870, (_e1877 == 1u)), (_e1887 + (_e1894 * d_own)), (_e1903 == 2u)), is_boundary), select(_e1915, select(select(_e1922, _e1929, (_e1936 == 1u)), (_e1946 + (_e1953 * d_own)), (_e1962 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(select(_e1979, select(select(_e1986, _e1993, (_e2000 == 1u)), (_e2010 + (_e2017 * d_own)), (_e2026 == 2u)), is_boundary), select(_e2038, select(select(_e2045, _e2052, (_e2059 == 1u)), (_e2069 + (_e2076 * d_own)), (_e2085 == 2u)), is_boundary)) * 1f) / vec2(select(_e2100, select(select(_e2107, _e2114, (_e2121 == 1u)), (_e2131 + (_e2138 * d_own)), (_e2147 == 2u)), is_boundary))), _e2154)) + (select(_e2164, select(select(_e2171, _e2178, (_e2185 == 1u)), (_e2195 + (_e2202 * d_own)), (_e2211 == 2u)), is_boundary) * dot(_e2216, vec2<f32>(0f, 1f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e2233, select(select(_e2240, _e2247, (_e2254 == 1u)), (_e2264 + (_e2271 * d_own)), (_e2280 == 2u)), is_boundary), select(_e2292, select(select(_e2299, _e2306, (_e2313 == 1u)), (_e2323 + (_e2330 * d_own)), (_e2339 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) - dot(vec2<f32>(_e2355, _e2362), vec2<f32>(0f, 1f))))) / denom) * area);
+    let _e2385 = state[((owner * 8u) + 3u)];
+    let _e2392 = state[((owner * 8u) + 4u)];
+    let _e2401 = state[((owner * 8u) + 1u)];
+    let _e2408 = state[((owner * 8u) + 2u)];
+    let _e2418 = state[((owner * 8u) + 0u)];
+    let _e2421 = normal_vec;
+    let _e2424 = neigh_idx;
+    let _e2431 = state[((_e2424 * 8u) + 3u)];
     let _e2438 = state[((owner * 8u) + 3u)];
     let _e2445 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2454 = bc_kind[((boundary_type * 8u) + 3u)];
-    let _e2459 = neigh_idx;
-    let _e2466 = state[((_e2459 * 8u) + 4u)];
-    let _e2473 = state[((owner * 8u) + 4u)];
-    let _e2480 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2487 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2452 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2462 = state[((owner * 8u) + 3u)];
+    let _e2469 = bc_value[((boundary_type * 8u) + 3u)];
+    let _e2478 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2483 = neigh_idx;
+    let _e2490 = state[((_e2483 * 8u) + 4u)];
     let _e2497 = state[((owner * 8u) + 4u)];
     let _e2504 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2513 = bc_kind[((boundary_type * 8u) + 6u)];
-    let _e2520 = neigh_idx;
-    let _e2527 = state[((_e2520 * 8u) + 1u)];
-    let _e2534 = state[((owner * 8u) + 1u)];
-    let _e2541 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2548 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2511 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2521 = state[((owner * 8u) + 4u)];
+    let _e2528 = bc_value[((boundary_type * 8u) + 6u)];
+    let _e2537 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2544 = neigh_idx;
+    let _e2551 = state[((_e2544 * 8u) + 1u)];
     let _e2558 = state[((owner * 8u) + 1u)];
     let _e2565 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2574 = bc_kind[((boundary_type * 8u) + 1u)];
-    let _e2579 = neigh_idx;
-    let _e2586 = state[((_e2579 * 8u) + 2u)];
-    let _e2593 = state[((owner * 8u) + 2u)];
-    let _e2600 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2607 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2572 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2582 = state[((owner * 8u) + 1u)];
+    let _e2589 = bc_value[((boundary_type * 8u) + 1u)];
+    let _e2598 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2603 = neigh_idx;
+    let _e2610 = state[((_e2603 * 8u) + 2u)];
     let _e2617 = state[((owner * 8u) + 2u)];
     let _e2624 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2633 = bc_kind[((boundary_type * 8u) + 2u)];
-    let _e2641 = neigh_idx;
-    let _e2648 = state[((_e2641 * 8u) + 0u)];
-    let _e2655 = state[((owner * 8u) + 0u)];
-    let _e2662 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2669 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2631 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2641 = state[((owner * 8u) + 2u)];
+    let _e2648 = bc_value[((boundary_type * 8u) + 2u)];
+    let _e2657 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2665 = neigh_idx;
+    let _e2672 = state[((_e2665 * 8u) + 0u)];
     let _e2679 = state[((owner * 8u) + 0u)];
     let _e2686 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2695 = bc_kind[((boundary_type * 8u) + 0u)];
-    let _e2702 = normal_vec;
-    let _e2707 = neigh_idx;
-    let _e2714 = state[((_e2707 * 8u) + 3u)];
-    let _e2721 = state[((owner * 8u) + 3u)];
-    let _e2728 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2735 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2693 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2703 = state[((owner * 8u) + 0u)];
+    let _e2710 = bc_value[((boundary_type * 8u) + 0u)];
+    let _e2719 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2726 = normal_vec;
+    let _e2731 = neigh_idx;
+    let _e2738 = state[((_e2731 * 8u) + 3u)];
     let _e2745 = state[((owner * 8u) + 3u)];
     let _e2752 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2761 = bc_kind[((boundary_type * 8u) + 3u)];
-    let _e2772 = state[((owner * 8u) + 3u)];
-    fluxes[((idx * 8u) + 3u)] = ((((((a_plus * (_e2361 + _e2368)) * dot(((vec2<f32>(_e2377, _e2384) * 1f) / vec2(_e2394)), _e2397)) - ((a_minus * (select(_e2407, select(select(_e2414, _e2421, (_e2428 == 1u)), (_e2438 + (_e2445 * d_own)), (_e2454 == 2u)), is_boundary) + select(_e2466, select(select(_e2473, _e2480, (_e2487 == 1u)), (_e2497 + (_e2504 * d_own)), (_e2513 == 2u)), is_boundary))) * dot(((vec2<f32>(select(_e2527, select(select(_e2534, _e2541, (_e2548 == 1u)), (_e2558 + (_e2565 * d_own)), (_e2574 == 2u)), is_boundary), select(_e2586, select(select(_e2593, _e2600, (_e2607 == 1u)), (_e2617 + (_e2624 * d_own)), (_e2633 == 2u)), is_boundary)) * 1f) / vec2(select(_e2648, select(select(_e2655, _e2662, (_e2669 == 1u)), (_e2679 + (_e2686 * d_own)), (_e2695 == 2u)), is_boundary))), _e2702))) + ((a_plus * a_minus) * (select(_e2714, select(select(_e2721, _e2728, (_e2735 == 1u)), (_e2745 + (_e2752 * d_own)), (_e2761 == 2u)), is_boundary) - _e2772))) / denom) * area);
+    let _e2759 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2769 = state[((owner * 8u) + 3u)];
+    let _e2776 = bc_value[((boundary_type * 8u) + 3u)];
+    let _e2785 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2796 = state[((owner * 8u) + 3u)];
+    fluxes[((idx * 8u) + 3u)] = ((((((a_plus * (_e2385 + _e2392)) * dot(((vec2<f32>(_e2401, _e2408) * 1f) / vec2(_e2418)), _e2421)) - ((a_minus * (select(_e2431, select(select(_e2438, _e2445, (_e2452 == 1u)), (_e2462 + (_e2469 * d_own)), (_e2478 == 2u)), is_boundary) + select(_e2490, select(select(_e2497, _e2504, (_e2511 == 1u)), (_e2521 + (_e2528 * d_own)), (_e2537 == 2u)), is_boundary))) * dot(((vec2<f32>(select(_e2551, select(select(_e2558, _e2565, (_e2572 == 1u)), (_e2582 + (_e2589 * d_own)), (_e2598 == 2u)), is_boundary), select(_e2610, select(select(_e2617, _e2624, (_e2631 == 1u)), (_e2641 + (_e2648 * d_own)), (_e2657 == 2u)), is_boundary)) * 1f) / vec2(select(_e2672, select(select(_e2679, _e2686, (_e2693 == 1u)), (_e2703 + (_e2710 * d_own)), (_e2719 == 2u)), is_boundary))), _e2726))) + ((a_plus * a_minus) * (select(_e2738, select(select(_e2745, _e2752, (_e2759 == 1u)), (_e2769 + (_e2776 * d_own)), (_e2785 == 2u)), is_boundary) - _e2796))) / denom) * area);
     fluxes[((idx * 8u) + 4u)] = (((((a_plus * 0f) - (a_minus * 0f)) + ((a_plus * a_minus) * 0f)) / denom) * area);
     fluxes[((idx * 8u) + 5u)] = (((((a_plus * 0f) - (a_minus * 0f)) + ((a_plus * a_minus) * 0f)) / denom) * area);
     fluxes[((idx * 8u) + 6u)] = (((((a_plus * 0f) - (a_minus * 0f)) + ((a_plus * a_minus) * 0f)) / denom) * area);
@@ -7263,6 +7753,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -7280,6 +7782,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -7296,6 +7804,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -7713,6 +8227,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -7891,6 +8411,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -7908,6 +8440,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -7924,6 +8462,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -8228,6 +8772,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -8694,6 +9244,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -8711,6 +9273,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -8727,6 +9295,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -9334,6 +9908,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -9698,47 +10278,58 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e1155 = constants.dt;
     let _e1160 = diag_6_;
     diag_6_ = (_e1160 - ((1f / _e1155) * vol));
-    let _e1171 = constants.dt;
-    let _e1175 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 3u)];
-    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 3u)] = (_e1175 - ((-0.39999998f / _e1171) * vol));
-    let _e1186 = constants.dt;
-    let _e1195 = state[((idx * 8u) + 6u)];
-    let _e1202 = state[((idx * 8u) + 6u)];
-    let _e1210 = state[((idx * 8u) + 7u)];
-    let _e1217 = state[((idx * 8u) + 7u)];
-    let _e1222 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)];
-    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1222 - (((0.19999999f / _e1186) * ((_e1195 * _e1202) + (_e1210 * _e1217))) * vol));
-    let _e1230 = state[((idx * 8u) + 0u)];
-    let _e1236 = constants.dt;
-    let _e1239 = diag_7_;
-    diag_7_ = (_e1239 - (((_e1230 * 1f) / _e1236) * vol));
-    let _e1250 = constants.dt;
-    let _e1254 = matrix_values[((start_row_7_ + (diag_rank * 8u)) + 6u)];
-    matrix_values[((start_row_7_ + (diag_rank * 8u)) + 6u)] = (_e1254 - ((-1f / _e1250) * vol));
+    let _e1171 = constants.eos_gm1_;
+    let _e1178 = constants.dt;
+    let _e1181 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 3u)];
+    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 3u)] = (_e1181 - ((((-1f * _e1171) * 1f) / _e1178) * vol));
+    let _e1192 = constants.eos_gm1_;
+    let _e1199 = constants.dt;
+    let _e1207 = state[((idx * 8u) + 6u)];
+    let _e1214 = state[((idx * 8u) + 6u)];
+    let _e1222 = state[((idx * 8u) + 7u)];
+    let _e1229 = state[((idx * 8u) + 7u)];
+    let _e1234 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)];
+    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1234 - (((((0.5f * _e1192) * 1f) / _e1199) * ((_e1207 * _e1214) + (_e1222 * _e1229))) * vol));
+    let _e1245 = constants.eos_dp_drho;
+    let _e1252 = constants.dt;
+    let _e1255 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)];
+    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1255 - ((((-1f * _e1245) * 1f) / _e1252) * vol));
+    let _e1259 = constants.eos_p_offset;
+    let _e1267 = constants.dt;
+    let _e1270 = rhs_6_;
+    rhs_6_ = (_e1270 + ((((-1f * _e1259) * 1f) / _e1267) * vol));
+    let _e1278 = state[((idx * 8u) + 0u)];
+    let _e1281 = constants.eos_r;
+    let _e1288 = constants.dt;
+    let _e1291 = diag_7_;
+    diag_7_ = (_e1291 - ((((_e1278 * _e1281) * 1f) / _e1288) * vol));
+    let _e1302 = constants.dt;
+    let _e1306 = matrix_values[((start_row_7_ + (diag_rank * 8u)) + 6u)];
+    matrix_values[((start_row_7_ + (diag_rank * 8u)) + 6u)] = (_e1306 - ((-1f / _e1302) * vol));
     k = start;
     loop {
-        let _e1257 = k;
-        if (_e1257 < end) {
+        let _e1309 = k;
+        if (_e1309 < end) {
         } else {
             break;
         }
         {
-            let _e1260 = k;
-            let face_idx = cell_faces[_e1260];
+            let _e1312 = k;
+            let face_idx = cell_faces[_e1312];
             let owner = face_owner[face_idx];
             let neighbor_raw = face_neighbor[face_idx];
             let boundary_type = face_boundary[face_idx];
             let area = face_areas[face_idx];
             let f_center = face_centers[face_idx];
-            let _e1280 = face_normals[face_idx];
-            normal = _e1280;
+            let _e1332 = face_normals[face_idx];
+            normal = _e1332;
             is_boundary = false;
             other_idx = idx;
             if (owner != idx) {
-                let _e1288 = normal.x;
-                normal.x = -(_e1288);
-                let _e1292 = normal.y;
-                normal.y = -(_e1292);
+                let _e1340 = normal.x;
+                normal.x = -(_e1340);
+                let _e1344 = normal.y;
+                normal.y = -(_e1344);
             }
             if (neighbor_raw != -1i) {
                 let neighbor = u32(neighbor_raw);
@@ -9746,166 +10337,166 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (owner != idx) {
                     other_idx = owner;
                 }
-                let _e1299 = other_idx;
-                let _e1301 = cell_centers[_e1299];
-                other_center = _e1301;
+                let _e1351 = other_idx;
+                let _e1353 = cell_centers[_e1351];
+                other_center = _e1353;
             } else {
                 is_boundary = true;
                 other_idx = idx;
                 other_center = f_center;
             }
-            let _e1305 = other_center.x;
-            let dx = (_e1305 - center.x);
-            let _e1309 = other_center.y;
-            let dy = (_e1309 - center.y);
-            let _e1313 = normal.x;
-            let _e1316 = normal.y;
-            let dist_proj = abs(((dx * _e1313) + (dy * _e1316)));
+            let _e1357 = other_center.x;
+            let dx = (_e1357 - center.x);
+            let _e1361 = other_center.y;
+            let dy = (_e1361 - center.y);
+            let _e1365 = normal.x;
+            let _e1368 = normal.y;
+            let dist_proj = abs(((dx * _e1365) + (dy * _e1368)));
             let dist_euc = sqrt(((dx * dx) + (dy * dy)));
             dist = max(dist_euc, 0.000001f);
             if (dist_proj > 0.000001f) {
                 dist = dist_proj;
             }
-            let _e1330 = k;
-            let scalar_mat_idx = cell_face_matrix_indices[_e1330];
+            let _e1382 = k;
+            let scalar_mat_idx = cell_face_matrix_indices[_e1382];
             let neighbor_rank = (scalar_mat_idx - scalar_offset);
-            let _e1340 = fluxes[((face_idx * 8u) + 0u)];
-            phi_0_ = _e1340;
+            let _e1392 = fluxes[((face_idx * 8u) + 0u)];
+            phi_0_ = _e1392;
             if (owner != idx) {
-                let _e1343 = phi_0_;
-                let _e1346 = phi_0_;
-                phi_0_ = (_e1346 - (_e1343 * 2f));
+                let _e1395 = phi_0_;
+                let _e1398 = phi_0_;
+                phi_0_ = (_e1398 - (_e1395 * 2f));
             }
-            let _e1348 = phi_0_;
-            let _e1349 = rhs_0_;
-            rhs_0_ = (_e1349 - _e1348);
-            let _e1353 = constants.viscosity;
-            let _e1355 = dist;
-            let diff_coeff_rho_u = ((_e1353 * area) / _e1355);
-            let _e1357 = is_boundary;
-            if !(_e1357) {
-                let _e1366 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)];
-                matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)] = (_e1366 + diff_coeff_rho_u);
-                let _e1375 = matrix_values[((start_row_1_ + (neighbor_rank * 8u)) + 4u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 8u)) + 4u)] = (_e1375 - diff_coeff_rho_u);
+            let _e1400 = phi_0_;
+            let _e1401 = rhs_0_;
+            rhs_0_ = (_e1401 - _e1400);
+            let _e1405 = constants.viscosity;
+            let _e1407 = dist;
+            let diff_coeff_rho_u = ((_e1405 * area) / _e1407);
+            let _e1409 = is_boundary;
+            if !(_e1409) {
+                let _e1418 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)];
+                matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)] = (_e1418 + diff_coeff_rho_u);
+                let _e1427 = matrix_values[((start_row_1_ + (neighbor_rank * 8u)) + 4u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 8u)) + 4u)] = (_e1427 - diff_coeff_rho_u);
             } else {
-                let _e1383 = bc_kind[((boundary_type * 8u) + 4u)];
-                if (_e1383 == 1u) {
-                    let _e1393 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)];
-                    matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)] = (_e1393 + diff_coeff_rho_u);
-                    let _e1401 = bc_value[((boundary_type * 8u) + 4u)];
-                    let _e1403 = rhs_1_;
-                    rhs_1_ = (_e1403 + (diff_coeff_rho_u * _e1401));
+                let _e1435 = bc_kind[((boundary_type * 8u) + 4u)];
+                if (_e1435 == 1u) {
+                    let _e1445 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)];
+                    matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)] = (_e1445 + diff_coeff_rho_u);
+                    let _e1453 = bc_value[((boundary_type * 8u) + 4u)];
+                    let _e1455 = rhs_1_;
+                    rhs_1_ = (_e1455 + (diff_coeff_rho_u * _e1453));
                 } else {
-                    let _e1411 = bc_kind[((boundary_type * 8u) + 4u)];
-                    if (_e1411 == 2u) {
-                        let _e1416 = constants.viscosity;
-                        let _e1424 = bc_value[((boundary_type * 8u) + 4u)];
-                        let _e1427 = rhs_1_;
-                        rhs_1_ = (_e1427 + -(((_e1416 * area) * _e1424)));
+                    let _e1463 = bc_kind[((boundary_type * 8u) + 4u)];
+                    if (_e1463 == 2u) {
+                        let _e1468 = constants.viscosity;
+                        let _e1476 = bc_value[((boundary_type * 8u) + 4u)];
+                        let _e1479 = rhs_1_;
+                        rhs_1_ = (_e1479 + -(((_e1468 * area) * _e1476)));
                     }
                 }
             }
-            let _e1429 = is_boundary;
-            if !(_e1429) {
-                let _e1438 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)];
-                matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)] = (_e1438 + diff_coeff_rho_u);
-                let _e1447 = matrix_values[((start_row_2_ + (neighbor_rank * 8u)) + 5u)];
-                matrix_values[((start_row_2_ + (neighbor_rank * 8u)) + 5u)] = (_e1447 - diff_coeff_rho_u);
+            let _e1481 = is_boundary;
+            if !(_e1481) {
+                let _e1490 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)];
+                matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)] = (_e1490 + diff_coeff_rho_u);
+                let _e1499 = matrix_values[((start_row_2_ + (neighbor_rank * 8u)) + 5u)];
+                matrix_values[((start_row_2_ + (neighbor_rank * 8u)) + 5u)] = (_e1499 - diff_coeff_rho_u);
             } else {
-                let _e1455 = bc_kind[((boundary_type * 8u) + 5u)];
-                if (_e1455 == 1u) {
-                    let _e1465 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)];
-                    matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)] = (_e1465 + diff_coeff_rho_u);
-                    let _e1473 = bc_value[((boundary_type * 8u) + 5u)];
-                    let _e1475 = rhs_2_;
-                    rhs_2_ = (_e1475 + (diff_coeff_rho_u * _e1473));
+                let _e1507 = bc_kind[((boundary_type * 8u) + 5u)];
+                if (_e1507 == 1u) {
+                    let _e1517 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)];
+                    matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)] = (_e1517 + diff_coeff_rho_u);
+                    let _e1525 = bc_value[((boundary_type * 8u) + 5u)];
+                    let _e1527 = rhs_2_;
+                    rhs_2_ = (_e1527 + (diff_coeff_rho_u * _e1525));
                 } else {
-                    let _e1483 = bc_kind[((boundary_type * 8u) + 5u)];
-                    if (_e1483 == 2u) {
-                        let _e1488 = constants.viscosity;
-                        let _e1496 = bc_value[((boundary_type * 8u) + 5u)];
-                        let _e1499 = rhs_2_;
-                        rhs_2_ = (_e1499 + -(((_e1488 * area) * _e1496)));
+                    let _e1535 = bc_kind[((boundary_type * 8u) + 5u)];
+                    if (_e1535 == 2u) {
+                        let _e1540 = constants.viscosity;
+                        let _e1548 = bc_value[((boundary_type * 8u) + 5u)];
+                        let _e1551 = rhs_2_;
+                        rhs_2_ = (_e1551 + -(((_e1540 * area) * _e1548)));
                     }
                 }
             }
-            let _e1507 = fluxes[((face_idx * 8u) + 1u)];
-            phi_1_ = _e1507;
+            let _e1559 = fluxes[((face_idx * 8u) + 1u)];
+            phi_1_ = _e1559;
             if (owner != idx) {
-                let _e1510 = phi_1_;
-                let _e1513 = phi_1_;
-                phi_1_ = (_e1513 - (_e1510 * 2f));
+                let _e1562 = phi_1_;
+                let _e1565 = phi_1_;
+                phi_1_ = (_e1565 - (_e1562 * 2f));
             }
-            let _e1515 = phi_1_;
-            let _e1516 = rhs_1_;
-            rhs_1_ = (_e1516 - _e1515);
-            let _e1524 = fluxes[((face_idx * 8u) + 2u)];
-            phi_2_ = _e1524;
+            let _e1567 = phi_1_;
+            let _e1568 = rhs_1_;
+            rhs_1_ = (_e1568 - _e1567);
+            let _e1576 = fluxes[((face_idx * 8u) + 2u)];
+            phi_2_ = _e1576;
             if (owner != idx) {
-                let _e1527 = phi_2_;
-                let _e1530 = phi_2_;
-                phi_2_ = (_e1530 - (_e1527 * 2f));
+                let _e1579 = phi_2_;
+                let _e1582 = phi_2_;
+                phi_2_ = (_e1582 - (_e1579 * 2f));
             }
-            let _e1532 = phi_2_;
-            let _e1533 = rhs_2_;
-            rhs_2_ = (_e1533 - _e1532);
-            let _e1541 = fluxes[((face_idx * 8u) + 3u)];
-            phi_3_ = _e1541;
+            let _e1584 = phi_2_;
+            let _e1585 = rhs_2_;
+            rhs_2_ = (_e1585 - _e1584);
+            let _e1593 = fluxes[((face_idx * 8u) + 3u)];
+            phi_3_ = _e1593;
             if (owner != idx) {
-                let _e1544 = phi_3_;
-                let _e1547 = phi_3_;
-                phi_3_ = (_e1547 - (_e1544 * 2f));
+                let _e1596 = phi_3_;
+                let _e1599 = phi_3_;
+                phi_3_ = (_e1599 - (_e1596 * 2f));
             }
-            let _e1549 = phi_3_;
-            let _e1550 = rhs_3_;
-            rhs_3_ = (_e1550 - _e1549);
+            let _e1601 = phi_3_;
+            let _e1602 = rhs_3_;
+            rhs_3_ = (_e1602 - _e1601);
         }
         continuing {
-            let _e1553 = k;
-            k = (_e1553 + 1u);
+            let _e1605 = k;
+            k = (_e1605 + 1u);
         }
     }
-    let _e1562 = diag_0_;
-    let _e1563 = matrix_values[((start_row_0_ + (diag_rank * 8u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 8u)) + 0u)] = (_e1563 + _e1562);
-    let _e1571 = rhs_0_;
-    rhs[((idx * 8u) + 0u)] = _e1571;
-    let _e1579 = diag_1_;
-    let _e1580 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 8u)) + 1u)] = (_e1580 + _e1579);
-    let _e1588 = rhs_1_;
-    rhs[((idx * 8u) + 1u)] = _e1588;
-    let _e1596 = diag_2_;
-    let _e1597 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 8u)) + 2u)] = (_e1597 + _e1596);
-    let _e1605 = rhs_2_;
-    rhs[((idx * 8u) + 2u)] = _e1605;
-    let _e1613 = diag_3_;
-    let _e1614 = matrix_values[((start_row_3_ + (diag_rank * 8u)) + 3u)];
-    matrix_values[((start_row_3_ + (diag_rank * 8u)) + 3u)] = (_e1614 + _e1613);
-    let _e1622 = rhs_3_;
-    rhs[((idx * 8u) + 3u)] = _e1622;
-    let _e1630 = diag_4_;
-    let _e1631 = matrix_values[((start_row_4_ + (diag_rank * 8u)) + 4u)];
-    matrix_values[((start_row_4_ + (diag_rank * 8u)) + 4u)] = (_e1631 + _e1630);
-    let _e1640 = rhs_4_;
-    rhs[((idx * 8u) + 4u)] = _e1640;
-    let _e1648 = diag_5_;
-    let _e1649 = matrix_values[((start_row_5_ + (diag_rank * 8u)) + 5u)];
-    matrix_values[((start_row_5_ + (diag_rank * 8u)) + 5u)] = (_e1649 + _e1648);
-    let _e1658 = rhs_5_;
-    rhs[((idx * 8u) + 5u)] = _e1658;
-    let _e1666 = diag_6_;
-    let _e1667 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 6u)];
-    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 6u)] = (_e1667 + _e1666);
-    let _e1676 = rhs_6_;
-    rhs[((idx * 8u) + 6u)] = _e1676;
-    let _e1684 = diag_7_;
-    let _e1685 = matrix_values[((start_row_7_ + (diag_rank * 8u)) + 7u)];
-    matrix_values[((start_row_7_ + (diag_rank * 8u)) + 7u)] = (_e1685 + _e1684);
-    let _e1694 = rhs_7_;
-    rhs[((idx * 8u) + 7u)] = _e1694;
+    let _e1614 = diag_0_;
+    let _e1615 = matrix_values[((start_row_0_ + (diag_rank * 8u)) + 0u)];
+    matrix_values[((start_row_0_ + (diag_rank * 8u)) + 0u)] = (_e1615 + _e1614);
+    let _e1623 = rhs_0_;
+    rhs[((idx * 8u) + 0u)] = _e1623;
+    let _e1631 = diag_1_;
+    let _e1632 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 1u)];
+    matrix_values[((start_row_1_ + (diag_rank * 8u)) + 1u)] = (_e1632 + _e1631);
+    let _e1640 = rhs_1_;
+    rhs[((idx * 8u) + 1u)] = _e1640;
+    let _e1648 = diag_2_;
+    let _e1649 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 2u)];
+    matrix_values[((start_row_2_ + (diag_rank * 8u)) + 2u)] = (_e1649 + _e1648);
+    let _e1657 = rhs_2_;
+    rhs[((idx * 8u) + 2u)] = _e1657;
+    let _e1665 = diag_3_;
+    let _e1666 = matrix_values[((start_row_3_ + (diag_rank * 8u)) + 3u)];
+    matrix_values[((start_row_3_ + (diag_rank * 8u)) + 3u)] = (_e1666 + _e1665);
+    let _e1674 = rhs_3_;
+    rhs[((idx * 8u) + 3u)] = _e1674;
+    let _e1682 = diag_4_;
+    let _e1683 = matrix_values[((start_row_4_ + (diag_rank * 8u)) + 4u)];
+    matrix_values[((start_row_4_ + (diag_rank * 8u)) + 4u)] = (_e1683 + _e1682);
+    let _e1692 = rhs_4_;
+    rhs[((idx * 8u) + 4u)] = _e1692;
+    let _e1700 = diag_5_;
+    let _e1701 = matrix_values[((start_row_5_ + (diag_rank * 8u)) + 5u)];
+    matrix_values[((start_row_5_ + (diag_rank * 8u)) + 5u)] = (_e1701 + _e1700);
+    let _e1710 = rhs_5_;
+    rhs[((idx * 8u) + 5u)] = _e1710;
+    let _e1718 = diag_6_;
+    let _e1719 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 6u)];
+    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 6u)] = (_e1719 + _e1718);
+    let _e1727 = rhs_6_;
+    rhs[((idx * 8u) + 6u)] = _e1727;
+    let _e1735 = diag_7_;
+    let _e1736 = matrix_values[((start_row_7_ + (diag_rank * 8u)) + 7u)];
+    matrix_values[((start_row_7_ + (diag_rank * 8u)) + 7u)] = (_e1736 + _e1735);
+    let _e1745 = rhs_7_;
+    rhs[((idx * 8u) + 7u)] = _e1745;
     return;
 }
 "#;
@@ -9956,6 +10547,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -9973,6 +10576,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -9989,6 +10598,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -10381,6 +10996,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -10634,6 +11255,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -10651,6 +11284,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -10667,6 +11306,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -11069,6 +11714,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -11322,6 +11973,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -11339,6 +12002,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -11355,6 +12024,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -11764,6 +12439,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -12288,6 +12969,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -12305,6 +12998,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -12321,6 +13020,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -12730,6 +13435,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -13241,6 +13952,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -13258,6 +13981,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -13274,6 +14003,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -13474,6 +14209,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -13703,6 +14444,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -13720,6 +14473,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -13736,6 +14495,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -13918,6 +14683,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -13993,6 +14764,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -14010,6 +14793,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -14026,6 +14815,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -14214,6 +15009,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -14289,6 +15090,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -14306,6 +15119,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -14322,6 +15141,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -14504,6 +15329,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -14629,6 +15460,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub inlet_velocity: f32,
             #[doc = "offset: 52, size: 4, type: `f32`"]
             pub ramp_time: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 72, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 76, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -14646,6 +15489,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 time_scheme: u32,
                 inlet_velocity: f32,
                 ramp_time: f32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -14662,6 +15511,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     time_scheme,
                     inlet_velocity,
                     ramp_time,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
                 }
             }
         }
@@ -14850,6 +15705,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 

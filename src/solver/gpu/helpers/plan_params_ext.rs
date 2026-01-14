@@ -1,6 +1,7 @@
+use crate::solver::gpu::enums::GpuLowMachPrecondModel;
 use crate::solver::gpu::plans::plan_instance::PlanParamValue;
 use crate::solver::gpu::GpuUnifiedSolver;
-use crate::solver::gpu::enums::GpuLowMachPrecondModel;
+use crate::solver::model::eos::EosSpec;
 
 pub trait SolverPlanParamsExt {
     fn set_dtau(&mut self, dtau: f32);
@@ -16,6 +17,15 @@ pub trait SolverPlanParamsExt {
     fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String>;
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
+
+    // EOS helpers (runtime constants).
+    fn set_eos(&mut self, eos: &EosSpec);
+    fn set_eos_gamma(&mut self, gamma: f32);
+    fn set_eos_gm1(&mut self, gm1: f32);
+    fn set_eos_r(&mut self, r_gas: f32);
+    fn set_eos_dp_drho(&mut self, dp_drho: f32);
+    fn set_eos_p_offset(&mut self, p_offset: f32);
+    fn set_eos_theta_ref(&mut self, theta: f32);
 }
 
 impl SolverPlanParamsExt for GpuUnifiedSolver {
@@ -61,5 +71,39 @@ impl SolverPlanParamsExt for GpuUnifiedSolver {
 
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
         self.set_plan_named_param("nonconverged_relax", PlanParamValue::F32(alpha))
+    }
+
+    fn set_eos(&mut self, eos: &EosSpec) {
+        let params = eos.runtime_params();
+        let _ = self.set_plan_named_param("eos.gamma", PlanParamValue::F32(params.gamma));
+        let _ = self.set_plan_named_param("eos.gm1", PlanParamValue::F32(params.gm1));
+        let _ = self.set_plan_named_param("eos.r", PlanParamValue::F32(params.r));
+        let _ = self.set_plan_named_param("eos.dp_drho", PlanParamValue::F32(params.dp_drho));
+        let _ = self.set_plan_named_param("eos.p_offset", PlanParamValue::F32(params.p_offset));
+        let _ = self.set_plan_named_param("eos.theta_ref", PlanParamValue::F32(params.theta_ref));
+    }
+
+    fn set_eos_gamma(&mut self, gamma: f32) {
+        let _ = self.set_plan_named_param("eos.gamma", PlanParamValue::F32(gamma));
+    }
+
+    fn set_eos_gm1(&mut self, gm1: f32) {
+        let _ = self.set_plan_named_param("eos.gm1", PlanParamValue::F32(gm1));
+    }
+
+    fn set_eos_r(&mut self, r_gas: f32) {
+        let _ = self.set_plan_named_param("eos.r", PlanParamValue::F32(r_gas));
+    }
+
+    fn set_eos_dp_drho(&mut self, dp_drho: f32) {
+        let _ = self.set_plan_named_param("eos.dp_drho", PlanParamValue::F32(dp_drho));
+    }
+
+    fn set_eos_p_offset(&mut self, p_offset: f32) {
+        let _ = self.set_plan_named_param("eos.p_offset", PlanParamValue::F32(p_offset));
+    }
+
+    fn set_eos_theta_ref(&mut self, theta: f32) {
+        let _ = self.set_plan_named_param("eos.theta_ref", PlanParamValue::F32(theta));
     }
 }

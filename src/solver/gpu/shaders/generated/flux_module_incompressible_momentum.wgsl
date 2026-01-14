@@ -22,6 +22,12 @@ struct Constants {
     time_scheme: u32,
     inlet_velocity: f32,
     ramp_time: f32,
+    eos_gamma: f32,
+    eos_gm1: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 // Group 0: Mesh

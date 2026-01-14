@@ -2,9 +2,7 @@ use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::lowering::models::generic_coupled::{
-    GenericCoupledProgramResources,
-};
+use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
@@ -37,13 +35,21 @@ pub(crate) async fn build_generic_coupled_backend(
     let num_cells = runtime.common.num_cells;
 
     // Create unified field resources from recipe.
+    let eos_params = model.eos.runtime_params();
+    let mut initial_constants = GpuConstants::default();
+    initial_constants.eos_gamma = eos_params.gamma;
+    initial_constants.eos_gm1 = eos_params.gm1;
+    initial_constants.eos_r = eos_params.r;
+    initial_constants.eos_dp_drho = eos_params.dp_drho;
+    initial_constants.eos_p_offset = eos_params.p_offset;
+    initial_constants.eos_theta_ref = eos_params.theta_ref;
     let fields = UnifiedFieldResources::from_recipe(
         device,
         &recipe,
         num_cells,
         runtime.common.num_faces,
         stride,
-        GpuConstants::default(),
+        initial_constants,
     );
 
     let (bc_kind, bc_value) = model
@@ -67,13 +73,18 @@ pub(crate) async fn build_generic_coupled_backend(
         .with_unified_fields(&fields)
         .with_buffer(
             "matrix_values",
-            runtime.linear_port_space.buffer(runtime.linear_ports.values),
+            runtime
+                .linear_port_space
+                .buffer(runtime.linear_ports.values),
         )
         .with_buffer(
             "rhs",
             runtime.linear_port_space.buffer(runtime.linear_ports.rhs),
         )
-        .with_buffer("x", runtime.linear_port_space.buffer(runtime.linear_ports.x))
+        .with_buffer(
+            "x",
+            runtime.linear_port_space.buffer(runtime.linear_ports.x),
+        )
         .with_buffer(
             "row_offsets",
             runtime
@@ -88,7 +99,10 @@ pub(crate) async fn build_generic_coupled_backend(
         )
         .with_buffer("bc_kind", &b_bc_kind)
         .with_buffer("bc_value", &b_bc_value)
-        .with_buffer("y", runtime.linear_port_space.buffer(runtime.linear_ports.rhs));
+        .with_buffer(
+            "y",
+            runtime.linear_port_space.buffer(runtime.linear_ports.rhs),
+        );
 
     let kernels = GeneratedKernelsModule::new_from_recipe(
         device,
@@ -105,13 +119,7 @@ pub(crate) async fn build_generic_coupled_backend(
     let profiling_stats = std::sync::Arc::clone(&runtime.common.profiling_stats);
 
     let backend = GenericCoupledProgramResources::new(
-        runtime,
-        fields,
-        kernels,
-        &model,
-        &recipe,
-        b_bc_kind,
-        b_bc_value,
+        runtime, fields, kernels, &model, &recipe, b_bc_kind, b_bc_value,
     )?;
 
     Ok(GenericCoupledBuilt {

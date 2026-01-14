@@ -84,7 +84,10 @@ impl FluxRef {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Coefficient {
-    Constant { value: f64, unit: UnitDim },
+    Constant {
+        value: f64,
+        unit: UnitDim,
+    },
     Field(FieldRef),
     /// Magnitude-squared of a field (scalar: φ²; vector: |u|²).
     ///
@@ -271,7 +274,12 @@ impl Term {
                     .as_ref()
                     .map(|value| value.unit())
                     .unwrap_or(si::DIMENSIONLESS);
-                Ok(coeff_unit * self.field.unit() * si::VOLUME)
+                match self.discretization {
+                    // Implicit "source coefficient": S_p * phi.
+                    Discretization::Implicit => Ok(coeff_unit * self.field.unit() * si::VOLUME),
+                    // Explicit "source term": S_u (independent of unknown state).
+                    Discretization::Explicit => Ok(coeff_unit * si::VOLUME),
+                }
             }
         }
     }

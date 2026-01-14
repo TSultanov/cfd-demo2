@@ -1,15 +1,16 @@
+use crate::solver::gpu::helpers::SolverPlanParamsExt;
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
-};
-use crate::solver::model::{
-    compressible_model, incompressible_momentum_model, ModelPreconditionerSpec,
 };
 use crate::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverIncompressibleControlsExt,
     SolverIncompressibleStatsExt,
 };
-use crate::solver::gpu::helpers::SolverPlanParamsExt;
+use crate::solver::model::{
+    compressible_model, compressible_model_with_eos, incompressible_momentum_model, Fluid,
+    ModelPreconditionerSpec,
+};
 use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
 use crate::solver::scheme::Scheme;
 use crate::solver::{SolverConfig, UnifiedSolver};
@@ -62,108 +63,7 @@ enum SolverKind {
     Compressible,
 }
 
-#[derive(Clone, PartialEq)]
-enum CompressibilityModel {
-    IdealGas {
-        gas_constant: f64,
-        temperature: f64,
-    },
-    LinearCompressibility {
-        bulk_modulus: f64,
-        rho_ref: f64,
-        p_ref: f64,
-    },
-}
-
-#[derive(Clone, PartialEq)]
-struct Fluid {
-    name: String,
-    density: f64,
-    viscosity: f64,
-    compressibility: CompressibilityModel,
-}
-
 type SharedResults = Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>;
-
-impl Fluid {
-    fn presets() -> Vec<Fluid> {
-        vec![
-            Fluid {
-                name: "Water".into(),
-                density: 1000.0,
-                viscosity: 0.001,
-                compressibility: CompressibilityModel::LinearCompressibility {
-                    bulk_modulus: 2.2e9,
-                    rho_ref: 1000.0,
-                    p_ref: 1.0e5,
-                },
-            },
-            Fluid {
-                name: "Air".into(),
-                density: 1.225,
-                viscosity: 1.81e-5,
-                compressibility: CompressibilityModel::IdealGas {
-                    gas_constant: 287.0,
-                    temperature: 300.0,
-                },
-            },
-            Fluid {
-                name: "Alcohol".into(),
-                density: 789.0,
-                viscosity: 0.0012,
-                compressibility: CompressibilityModel::LinearCompressibility {
-                    bulk_modulus: 1.0e9,
-                    rho_ref: 789.0,
-                    p_ref: 1.0e5,
-                },
-            },
-            Fluid {
-                name: "Kerosene".into(),
-                density: 820.0,
-                viscosity: 0.00164,
-                compressibility: CompressibilityModel::LinearCompressibility {
-                    bulk_modulus: 1.3e9,
-                    rho_ref: 820.0,
-                    p_ref: 1.0e5,
-                },
-            },
-            Fluid {
-                name: "Mercury".into(),
-                density: 13546.0,
-                viscosity: 0.001526,
-                compressibility: CompressibilityModel::LinearCompressibility {
-                    bulk_modulus: 2.85e10,
-                    rho_ref: 13546.0,
-                    p_ref: 1.0e5,
-                },
-            },
-            Fluid {
-                name: "Custom".into(),
-                density: 1.0,
-                viscosity: 0.01,
-                compressibility: CompressibilityModel::LinearCompressibility {
-                    bulk_modulus: 2.2e9,
-                    rho_ref: 1.0,
-                    p_ref: 1.0e5,
-                },
-            },
-        ]
-    }
-
-    fn pressure_for_density(&self, rho: f64) -> f64 {
-        match self.compressibility {
-            CompressibilityModel::IdealGas {
-                gas_constant,
-                temperature,
-            } => rho * gas_constant * temperature,
-            CompressibilityModel::LinearCompressibility {
-                bulk_modulus,
-                rho_ref,
-                p_ref,
-            } => p_ref + bulk_modulus * (rho - rho_ref) / rho_ref.max(1.0),
-        }
-    }
-}
 
 // Cached GPU solver stats for UI display (avoids lock contention)
 #[allow(dead_code)]
@@ -355,7 +255,10 @@ impl CFDApp {
         let Some(linear_solver) = solver.model().linear_solver else {
             return false;
         };
-        matches!(linear_solver.preconditioner, ModelPreconditionerSpec::Schur { .. })
+        matches!(
+            linear_solver.preconditioner,
+            ModelPreconditionerSpec::Schur { .. }
+        )
     }
 
     fn update_renderer_field(&self) {
@@ -391,7 +294,12 @@ impl CFDApp {
                 let p_ref = self
                     .current_fluid
                     .pressure_for_density(self.current_fluid.density);
-                (compressible_model(), None, None, Some(p_ref))
+                (
+                    compressible_model_with_eos(self.current_fluid.eos),
+                    None,
+                    None,
+                    Some(p_ref),
+                )
             }
         };
 
@@ -430,6 +338,7 @@ impl CFDApp {
         gpu_solver.set_inlet_velocity(self.inlet_velocity);
         gpu_solver.set_advection_scheme(self.selected_scheme);
         gpu_solver.set_time_scheme(self.time_scheme);
+        gpu_solver.set_eos(&self.current_fluid.eos);
         if !model_owns_preconditioner {
             gpu_solver.set_preconditioner(self.selected_preconditioner);
         }
@@ -447,6 +356,7 @@ impl CFDApp {
             }
             SolverKind::Compressible => {
                 let p_ref = cached_p.unwrap();
+                gpu_solver.set_density(self.current_fluid.density as f32);
                 gpu_solver.set_uniform_state(
                     self.current_fluid.density as f32,
                     [0.0, 0.0],
@@ -690,11 +600,14 @@ impl CFDApp {
                 self.with_unified_solver(|solver| {
                     solver.set_density(self.current_fluid.density as f32);
                     solver.set_viscosity(self.current_fluid.viscosity as f32);
+                    solver.set_eos(&self.current_fluid.eos);
                 });
             }
             SolverKind::Compressible => {
                 self.with_unified_solver(|solver| {
+                    solver.set_density(self.current_fluid.density as f32);
                     solver.set_viscosity(self.current_fluid.viscosity as f32);
+                    solver.set_eos(&self.current_fluid.eos);
                 });
             }
         }
@@ -816,8 +729,10 @@ impl eframe::App for CFDApp {
                         {
                             self.current_fluid.density = density;
                             self.current_fluid.name = "Custom".to_string();
-                            if let CompressibilityModel::LinearCompressibility { rho_ref, .. } =
-                                &mut self.current_fluid.compressibility
+                            if let crate::solver::model::eos::EosSpec::LinearCompressibility {
+                                rho_ref,
+                                ..
+                            } = &mut self.current_fluid.eos
                             {
                                 *rho_ref = density;
                             }
@@ -884,19 +799,10 @@ impl eframe::App for CFDApp {
                             .map(|(vx, vy)| (vx * vx + vy * vy).sqrt())
                             .fold(0.0_f64, f64::max);
                         let adv_speed = max_vel.max(self.inlet_velocity.abs() as f64);
-                        let sound_speed = match (&self.solver_kind, &self.current_fluid.compressibility) {
-                            (
-                                SolverKind::Compressible,
-                                CompressibilityModel::IdealGas {
-                                    gas_constant,
-                                    temperature,
-                                },
-                            ) => (1.4 * gas_constant * temperature).sqrt(),
-                            (
-                                SolverKind::Compressible,
-                                CompressibilityModel::LinearCompressibility { bulk_modulus, .. },
-                            ) => (bulk_modulus / self.current_fluid.density.max(1e-12)).sqrt(),
-                            _ => 0.0,
+                        let sound_speed = if matches!(self.solver_kind, SolverKind::Compressible) {
+                            self.current_fluid.sound_speed()
+                        } else {
+                            0.0
                         };
                         let wave_speed = adv_speed + sound_speed;
                         let (recommended_dt, cfl) = if self.min_cell_size > 0.0 && wave_speed > 1e-12

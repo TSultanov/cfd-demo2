@@ -90,6 +90,12 @@ fn constants_struct() -> StructDef {
             StructField::new("time_scheme", Type::U32),
             StructField::new("inlet_velocity", Type::F32),
             StructField::new("ramp_time", Type::F32),
+            StructField::new("eos_gamma", Type::F32),
+            StructField::new("eos_gm1", Type::F32),
+            StructField::new("eos_r", Type::F32),
+            StructField::new("eos_dp_drho", Type::F32),
+            StructField::new("eos_p_offset", Type::F32),
+            StructField::new("eos_theta_ref", Type::F32),
         ],
     )
 }
@@ -315,9 +321,7 @@ fn base_apply_items() -> Vec<Item> {
     ]
 }
 
-fn coupled_unknown_components(
-    system: &DiscreteSystem,
-) -> Vec<(crate::solver::ir::FieldRef, u32)> {
+fn coupled_unknown_components(system: &DiscreteSystem) -> Vec<(crate::solver::ir::FieldRef, u32)> {
     let mut out = Vec::new();
     for equation in &system.equations {
         let count = equation.target.kind().component_count() as u32;
@@ -851,10 +855,7 @@ fn main_update_fn(
 
         // Avoid propagating NaN/Inf from the linear solver into the state.
         // If the previous iterate is already non-finite, prefer a finite `value`.
-        let relaxed = Expr::call_named(
-            "mix",
-            vec![prev.clone(), value.clone(), alpha],
-        );
+        let relaxed = Expr::call_named("mix", vec![prev.clone(), value.clone(), alpha]);
         let candidate = dsl::select(value.clone(), relaxed, prev_is_finite);
         let out = dsl::select(prev.clone(), candidate, value_is_finite);
 
@@ -862,21 +863,21 @@ fn main_update_fn(
         stmts.push(dsl::assign_expr(x_entry, out));
     }
 
-     // Optional primitive recovery (derived primitives from conserved state).
-     //
-     // This is intentionally emitted inside the model-specific update kernel to avoid
-     // additional per-model registry plumbing.
-     if !primitives.is_empty() {
-         let cell_idx = Expr::ident("idx");
-         for (name, expr) in primitives {
-             let Some(offset) = resolve_state_offset(layout, name) else {
-                 continue;
-             };
+    // Optional primitive recovery (derived primitives from conserved state).
+    //
+    // This is intentionally emitted inside the model-specific update kernel to avoid
+    // additional per-model registry plumbing.
+    if !primitives.is_empty() {
+        let cell_idx = Expr::ident("idx");
+        for (name, expr) in primitives {
+            let Some(offset) = resolve_state_offset(layout, name) else {
+                continue;
+            };
             let value = lower_primitive_expr(expr, layout, cell_idx.clone(), "state");
             let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, offset);
             stmts.push(dsl::assign_expr(target, value));
-         }
-     }
+        }
+    }
 
     Function::new(
         "main",

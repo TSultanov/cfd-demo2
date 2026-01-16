@@ -84,9 +84,12 @@ Progress (partial):
 - `ModelSpec` can now inject additional kernel passes (`extra_kernels`) and provide build-time WGSL generators for them (`generated_kernels`), so new module kernels can be added from model definitions without extending central kernel-template matches.
 - Moved the Rhie–Chow helper kernels (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) out of `model/kernel.rs` special-casing and into model-owned `extra_kernels` + `generated_kernels` (so the core kernel derivation no longer grows new “builtins” for these passes).
 
-### 1) Flux Modules (boundary + reconstruction + method knobs)
-- Flux kernels are now IR-driven, but boundary handling is still incomplete: flux modules need to consume the same boundary condition tables (`bc_kind`/`bc_value`) that assembly uses so Dirichlet/Neumann boundaries affect fluxes (not just zero-gradient extrapolation).
-- Add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
+### 1) Flux Modules (reconstruction + method knobs)
+- Flux kernels are IR-driven and now consume boundary conditions consistently with assembly.
+  - `bc_kind`/`bc_value` are treated as **per-face × unknown-component** buffers (indexed by `face_idx`/`idx`, not by `boundary_type`).
+  - This eliminates the mismatch where boundary conditions affected assembly but not face fluxes.
+  - Validation gate: OpenFOAM reference tests passed (`cargo test openfoam_ -- --nocapture`) on 2026-01-16.
+- Remaining: add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
 - Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 
 ### 2) Make `UnifiedSolver` truly model-agnostic (API + host-side math)

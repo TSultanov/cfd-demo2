@@ -52,9 +52,9 @@ fn base_items() -> Vec<Item> {
     items.extend(mesh_bindings());
     items.push(Item::Comment("Group 1: Fields".to_string()));
     items.extend(state_bindings());
-    items.push(Item::Comment(
-        "Group 2: Boundary conditions (per boundary type x unknown)".to_string(),
-    ));
+        items.push(Item::Comment(
+            "Group 2: Boundary conditions (per face x unknown)".to_string(),
+        ));
     items.extend(boundary_bindings());
     items
 }
@@ -564,9 +564,9 @@ fn state_component_at_side(
         }
     };
 
-    let boundary_neighbor = if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
-        let bc_table_idx = Expr::ident("boundary_type") * Expr::from(flux_layout.stride)
-            + Expr::from(unknown_offset);
+        let boundary_neighbor = if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
+            let bc_table_idx = Expr::ident("idx") * Expr::from(flux_layout.stride)
+                + Expr::from(unknown_offset);
         let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
         let value = dsl::array_access("bc_value", bc_table_idx);
 

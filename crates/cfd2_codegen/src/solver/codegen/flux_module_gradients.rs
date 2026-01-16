@@ -99,7 +99,7 @@ fn base_items() -> Vec<Item> {
     items.push(Item::Comment("Group 1: Fields".to_string()));
     items.extend(state_bindings());
     items.push(Item::Comment(
-        "Group 2: Boundary conditions (per boundary type x unknown)".to_string(),
+        "Group 2: Boundary conditions (per face x unknown)".to_string(),
     ));
     items.extend(boundary_bindings());
     items
@@ -384,7 +384,7 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
             let interior_other = Expr::ident("state").index(Expr::ident("other_idx") * stride + spec.base_offset);
 
             let other_val = if let Some(off) = spec.bc_unknown_offset {
-                let bc_table_idx = Expr::ident("boundary_type") * Expr::from(unknown_stride) + Expr::from(off);
+                let bc_table_idx = Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(off);
                 let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
                 let value = dsl::array_access("bc_value", bc_table_idx);
                 let from_bc = dsl::select(

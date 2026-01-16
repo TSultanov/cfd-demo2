@@ -94,7 +94,7 @@ var<storage, read_write> rhs: array<f32>;
 @group(2) @binding(2) 
 var<storage, read> scalar_row_offsets: array<u32>;
 
-// Group 3: Boundary conditions (per boundary type x unknown)
+// Group 3: Boundary conditions (per face x unknown)
 
 @group(3) @binding(0) 
 var<storage, read> bc_kind: array<u32>;
@@ -198,12 +198,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_0 += diff_coeff_U;
             matrix_values[start_row_0 + neighbor_rank * 3u + 0u] -= diff_coeff_U;
         } else {
-            if (bc_kind[boundary_type * 3u + 0u] == 1u) {
+            if (bc_kind[face_idx * 3u + 0u] == 1u) {
                 diag_0 += diff_coeff_U;
-                rhs_0 += diff_coeff_U * bc_value[boundary_type * 3u + 0u];
+                rhs_0 += diff_coeff_U * bc_value[face_idx * 3u + 0u];
             } else {
-                if (bc_kind[boundary_type * 3u + 0u] == 2u) {
-                    rhs_0 += -(constants.viscosity * area * bc_value[boundary_type * 3u + 0u]);
+                if (bc_kind[face_idx * 3u + 0u] == 2u) {
+                    rhs_0 += -(constants.viscosity * area * bc_value[face_idx * 3u + 0u]);
                 }
             }
         }
@@ -211,12 +211,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_1 += diff_coeff_U;
             matrix_values[start_row_1 + neighbor_rank * 3u + 1u] -= diff_coeff_U;
         } else {
-            if (bc_kind[boundary_type * 3u + 1u] == 1u) {
+            if (bc_kind[face_idx * 3u + 1u] == 1u) {
                 diag_1 += diff_coeff_U;
-                rhs_1 += diff_coeff_U * bc_value[boundary_type * 3u + 1u];
+                rhs_1 += diff_coeff_U * bc_value[face_idx * 3u + 1u];
             } else {
-                if (bc_kind[boundary_type * 3u + 1u] == 2u) {
-                    rhs_1 += -(constants.viscosity * area * bc_value[boundary_type * 3u + 1u]);
+                if (bc_kind[face_idx * 3u + 1u] == 2u) {
+                    rhs_1 += -(constants.viscosity * area * bc_value[face_idx * 3u + 1u]);
                 }
             }
         }
@@ -229,9 +229,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[start_row_0 + neighbor_rank * 3u + 0u] += min(phi_0, 0.0);
             rhs_0 -= phi_0 * (select(select(select(state[idx * 8u + 0u], state[other_idx * 8u + 0u], phi_0 < 0.0), select(state[other_idx * 8u + 0u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 8u + 0u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_0 > 0.0), 0u == 1u), select(state[other_idx * 8u + 0u] * 0.625 + state[idx * 8u + 0u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125, state[idx * 8u + 0u] * 0.625 + state[other_idx * 8u + 0u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125, phi_0 > 0.0), 0u == 2u) - select(state[idx * 8u + 0u], state[other_idx * 8u + 0u], phi_0 < 0.0));
         } else {
-            if (bc_kind[boundary_type * 3u + 0u] == 1u) {
+            if (bc_kind[face_idx * 3u + 0u] == 1u) {
                 diag_0 += max(phi_0, 0.0);
-                rhs_0 -= min(phi_0, 0.0) * bc_value[boundary_type * 3u + 0u];
+                rhs_0 -= min(phi_0, 0.0) * bc_value[face_idx * 3u + 0u];
             } else {
                 diag_0 += phi_0;
             }
@@ -245,9 +245,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[start_row_1 + neighbor_rank * 3u + 1u] += min(phi_1, 0.0);
             rhs_1 -= phi_1 * (select(select(select(state[idx * 8u + 1u], state[other_idx * 8u + 1u], phi_1 < 0.0), select(state[other_idx * 8u + 1u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 8u + 1u] + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_1 > 0.0), 0u == 1u), select(state[other_idx * 8u + 1u] * 0.625 + state[idx * 8u + 1u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125, state[idx * 8u + 1u] * 0.625 + state[other_idx * 8u + 1u] * 0.375 + dot(vec2<f32>(vec2<f32>(0.0, 0.0).x, vec2<f32>(0.0, 0.0).y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125, phi_1 > 0.0), 0u == 2u) - select(state[idx * 8u + 1u], state[other_idx * 8u + 1u], phi_1 < 0.0));
         } else {
-            if (bc_kind[boundary_type * 3u + 1u] == 1u) {
+            if (bc_kind[face_idx * 3u + 1u] == 1u) {
                 diag_1 += max(phi_1, 0.0);
-                rhs_1 -= min(phi_1, 0.0) * bc_value[boundary_type * 3u + 1u];
+                rhs_1 -= min(phi_1, 0.0) * bc_value[face_idx * 3u + 1u];
             } else {
                 diag_1 += phi_1;
             }
@@ -261,12 +261,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_2 += diff_coeff_p;
             matrix_values[start_row_2 + neighbor_rank * 3u + 2u] -= diff_coeff_p;
         } else {
-            if (bc_kind[boundary_type * 3u + 2u] == 1u) {
+            if (bc_kind[face_idx * 3u + 2u] == 1u) {
                 diag_2 += diff_coeff_p;
-                rhs_2 += diff_coeff_p * bc_value[boundary_type * 3u + 2u];
+                rhs_2 += diff_coeff_p * bc_value[face_idx * 3u + 2u];
             } else {
-                if (bc_kind[boundary_type * 3u + 2u] == 2u) {
-                    rhs_2 += -(constants.density * state[idx * 8u + 3u] * area * bc_value[boundary_type * 3u + 2u]);
+                if (bc_kind[face_idx * 3u + 2u] == 2u) {
+                    rhs_2 += -(constants.density * state[idx * 8u + 3u] * area * bc_value[face_idx * 3u + 2u]);
                 }
             }
         }

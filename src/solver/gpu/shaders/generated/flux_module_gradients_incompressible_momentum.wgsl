@@ -44,7 +44,7 @@ var<storage, read> face_boundary: array<u32>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 
-// Group 2: Boundary conditions (per boundary type x unknown)
+// Group 2: Boundary conditions (per face x unknown)
 
 @group(2) @binding(0) 
 var<storage, read> bc_kind: array<u32>;
@@ -97,7 +97,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lambda = d_neigh / total_dist;
         }
         let lambda_other = 1.0 - lambda;
-        grad_acc_p += normal_vec * (state[idx * 8u + 2u] * lambda + select(state[other_idx * 8u + 2u], select(select(state[idx * 8u + 2u], bc_value[boundary_type * 3u + 2u], bc_kind[boundary_type * 3u + 2u] == 1u), state[idx * 8u + 2u] + bc_value[boundary_type * 3u + 2u] * d_own, bc_kind[boundary_type * 3u + 2u] == 2u), is_boundary) * lambda_other) * area;
+        grad_acc_p += normal_vec * (state[idx * 8u + 2u] * lambda + select(state[other_idx * 8u + 2u], select(select(state[idx * 8u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 8u + 2u] + bc_value[face_idx * 3u + 2u] * d_own, bc_kind[face_idx * 3u + 2u] == 2u), is_boundary) * lambda_other) * area;
     }
     let grad_out_p: vec2<f32> = grad_acc_p * 1.0 / max(vol, 0.000000000001);
     state[idx * 8u + 4u] = grad_out_p.x;

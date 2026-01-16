@@ -235,7 +235,7 @@ fn base_assembly_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
         AccessMode::Read,
     ));
     items.push(Item::Comment(
-        "Group 3: Boundary conditions (per boundary type x unknown)".to_string(),
+        "Group 3: Boundary conditions (per face x unknown)".to_string(),
     ));
     items.push(storage_var(
         "bc_kind",
@@ -720,7 +720,7 @@ fn main_assembly_fn(
 
                     // Boundary values are taken from the field being diffused (the "column"
                     // variable), not from the equation target.
-                    let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + col_u_idx;
+                    let bc_table_idx = Expr::ident("face_idx") * coupled_stride + col_u_idx;
                     let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
                         "bc_kind",
                         bc_table_idx,
@@ -854,8 +854,7 @@ fn main_assembly_fn(
 
                     let boundary_contrib = if let Some(field_base_offset) = field_offset_opt {
                         let field_u_idx = field_base_offset + component;
-                        let bc_table_idx =
-                            Expr::ident("boundary_type") * coupled_stride + field_u_idx;
+                        let bc_table_idx = Expr::ident("face_idx") * coupled_stride + field_u_idx;
                         let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(
                             dsl::array_access("bc_kind", bc_table_idx),
                         );
@@ -888,9 +887,8 @@ fn main_assembly_fn(
                         let rho_u_base = *offsets.get("rho_u").expect("missing rho_u offset");
                         let rho_u_idx = rho_u_base + component;
 
-                        let bc_rho_idx = Expr::ident("boundary_type") * coupled_stride + rho_idx;
-                        let bc_rho_u_idx =
-                            Expr::ident("boundary_type") * coupled_stride + rho_u_idx;
+                        let bc_rho_idx = Expr::ident("face_idx") * coupled_stride + rho_idx;
+                        let bc_rho_u_idx = Expr::ident("face_idx") * coupled_stride + rho_u_idx;
 
                         let bc_rho_kind = typed::EnumExpr::<GpuBcKind>::from_expr(
                             dsl::array_access("bc_kind", bc_rho_idx),
@@ -1069,7 +1067,7 @@ fn main_assembly_fn(
                             ),
                         ]);
 
-                        let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
+                        let bc_table_idx = Expr::ident("face_idx") * coupled_stride + u_idx;
                         let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(
                             dsl::array_access("bc_kind", bc_table_idx),
                         );

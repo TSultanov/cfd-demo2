@@ -241,7 +241,7 @@ fn base_assembly_items(needs_gradients: bool) -> Vec<Item> {
         AccessMode::Read,
     ));
     items.push(Item::Comment(
-        "Group 3: Boundary conditions (per boundary type × unknown)".to_string(),
+        "Group 3: Boundary conditions (per face × unknown)".to_string(),
     ));
     items.push(storage_var(
         "bc_kind",
@@ -692,7 +692,7 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
 
             for component in 0..equation.target.kind().component_count() as u32 {
                 let u_idx = base_offset + component;
-                let bc_table_idx = Expr::ident("boundary_type") * coupled_stride + u_idx;
+                let bc_table_idx = Expr::ident("face_idx") * coupled_stride + u_idx;
                 let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
                     "bc_kind",
                     bc_table_idx,

@@ -9,7 +9,7 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::GpuConstants;
-use crate::solver::mesh::Mesh;
+use crate::solver::mesh::{BoundaryType, Mesh};
 use crate::solver::model::ModelSpec;
 
 pub(crate) struct GenericCoupledBuilt {
@@ -52,10 +52,67 @@ pub(crate) async fn build_generic_coupled_backend(
         initial_constants,
     );
 
-    let (bc_kind, bc_value) = model
+    // Boundary-condition buffers are stored per-face x unknown-component so flux modules
+    // and assembly use the same indexing semantics.
+    //
+    // We expand the model-defined boundary-type tables onto boundary faces.
+    let (bc_kind_by_type, bc_value_by_type) = model
         .boundaries
         .to_gpu_tables(&model.system)
         .map_err(|e| format!("failed to build BC tables: {e}"))?;
+
+    let coupled_stride = unknowns_per_cell as usize;
+    let boundary_count = 5usize; // None, Inlet, Outlet, Wall, SlipWall
+
+    let mut boundary_faces: Vec<Vec<u32>> = vec![Vec::new(); boundary_count];
+    for (face_idx, neigh) in mesh.face_neighbor.iter().enumerate() {
+        if neigh.is_some() {
+            continue; // interior face
+        }
+        let boundary_idx = match mesh.face_boundary.get(face_idx).copied().flatten() {
+            None => 0usize,
+            Some(BoundaryType::Inlet) => 1usize,
+            Some(BoundaryType::Outlet) => 2usize,
+            Some(BoundaryType::Wall) => 3usize,
+            Some(BoundaryType::SlipWall) => 4usize,
+        };
+        boundary_faces[boundary_idx].push(face_idx as u32);
+    }
+
+    let num_faces = runtime.common.num_faces as usize;
+    let mut bc_kind = vec![0u32; num_faces * coupled_stride];
+    let mut bc_value = vec![0.0_f32; num_faces * coupled_stride];
+    for face_idx in 0..num_faces {
+        if mesh
+            .face_neighbor
+            .get(face_idx)
+            .copied()
+            .unwrap_or(None)
+            .is_some()
+        {
+            continue; // interior face
+        }
+
+        let boundary_idx = match mesh.face_boundary.get(face_idx).copied().flatten() {
+            None => 0usize,
+            Some(BoundaryType::Inlet) => 1usize,
+            Some(BoundaryType::Outlet) => 2usize,
+            Some(BoundaryType::Wall) => 3usize,
+            Some(BoundaryType::SlipWall) => 4usize,
+        };
+
+        // Only boundary faces use bc_kind/bc_value at runtime; interior entries are ignored.
+        if boundary_idx == 0 {
+            continue;
+        }
+
+        let src_base = boundary_idx * coupled_stride;
+        let dst_base = face_idx * coupled_stride;
+        bc_kind[dst_base..dst_base + coupled_stride]
+            .copy_from_slice(&bc_kind_by_type[src_base..src_base + coupled_stride]);
+        bc_value[dst_base..dst_base + coupled_stride]
+            .copy_from_slice(&bc_value_by_type[src_base..src_base + coupled_stride]);
+    }
 
     let b_bc_kind = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("GenericCoupled bc_kind"),
@@ -119,7 +176,14 @@ pub(crate) async fn build_generic_coupled_backend(
     let profiling_stats = std::sync::Arc::clone(&runtime.common.profiling_stats);
 
     let backend = GenericCoupledProgramResources::new(
-        runtime, fields, kernels, &model, &recipe, b_bc_kind, b_bc_value,
+        runtime,
+        fields,
+        kernels,
+        &model,
+        &recipe,
+        b_bc_kind,
+        b_bc_value,
+        boundary_faces,
     )?;
 
     Ok(GenericCoupledBuilt {

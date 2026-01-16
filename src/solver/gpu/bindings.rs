@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 58e7e8cd4232633f01a2b7db5b48811ddfd40b386678759a471ff98646fdbac4
+// SourceHash: a6d83da5ebda723527d404881f691cac7f73925bb0153dcc0ccb8f1feb36f3e7
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -6309,45 +6309,45 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e138 = neigh_idx;
     let _e145 = state[((_e138 * 8u) + 1u)];
     let _e152 = state[((owner * 8u) + 1u)];
-    let _e159 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e166 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e159 = bc_value[((idx * 8u) + 1u)];
+    let _e166 = bc_kind[((idx * 8u) + 1u)];
     let _e176 = state[((owner * 8u) + 1u)];
-    let _e183 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e192 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e183 = bc_value[((idx * 8u) + 1u)];
+    let _e192 = bc_kind[((idx * 8u) + 1u)];
     let _e197 = neigh_idx;
     let _e204 = state[((_e197 * 8u) + 2u)];
     let _e211 = state[((owner * 8u) + 2u)];
-    let _e218 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e225 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e218 = bc_value[((idx * 8u) + 2u)];
+    let _e225 = bc_kind[((idx * 8u) + 2u)];
     let _e235 = state[((owner * 8u) + 2u)];
-    let _e242 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e251 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e242 = bc_value[((idx * 8u) + 2u)];
+    let _e251 = bc_kind[((idx * 8u) + 2u)];
     let _e259 = neigh_idx;
     let _e266 = state[((_e259 * 8u) + 0u)];
     let _e273 = state[((owner * 8u) + 0u)];
-    let _e280 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e287 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e280 = bc_value[((idx * 8u) + 0u)];
+    let _e287 = bc_kind[((idx * 8u) + 0u)];
     let _e297 = state[((owner * 8u) + 0u)];
-    let _e304 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e313 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e304 = bc_value[((idx * 8u) + 0u)];
+    let _e313 = bc_kind[((idx * 8u) + 0u)];
     let _e320 = normal_vec;
     let _e324 = constants.eos_gamma;
     let _e325 = neigh_idx;
     let _e332 = state[((_e325 * 8u) + 4u)];
     let _e339 = state[((owner * 8u) + 4u)];
-    let _e346 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e353 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e346 = bc_value[((idx * 8u) + 6u)];
+    let _e353 = bc_kind[((idx * 8u) + 6u)];
     let _e363 = state[((owner * 8u) + 4u)];
-    let _e370 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e379 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e370 = bc_value[((idx * 8u) + 6u)];
+    let _e379 = bc_kind[((idx * 8u) + 6u)];
     let _e385 = neigh_idx;
     let _e392 = state[((_e385 * 8u) + 0u)];
     let _e399 = state[((owner * 8u) + 0u)];
-    let _e406 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e413 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e406 = bc_value[((idx * 8u) + 0u)];
+    let _e413 = bc_kind[((idx * 8u) + 0u)];
     let _e423 = state[((owner * 8u) + 0u)];
-    let _e430 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e439 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e430 = bc_value[((idx * 8u) + 0u)];
+    let _e439 = bc_kind[((idx * 8u) + 0u)];
     let _e447 = constants.eos_dp_drho;
     let a_plus = max(0f, max((dot(((vec2<f32>(_e91, _e98) * 1f) / vec2(_e108)), _e111) + sqrt((((_e115 * _e122) / _e130) + _e134))), (dot(((vec2<f32>(select(_e145, select(select(_e152, _e159, (_e166 == 1u)), (_e176 + (_e183 * d_own)), (_e192 == 2u)), is_boundary), select(_e204, select(select(_e211, _e218, (_e225 == 1u)), (_e235 + (_e242 * d_own)), (_e251 == 2u)), is_boundary)) * 1f) / vec2(select(_e266, select(select(_e273, _e280, (_e287 == 1u)), (_e297 + (_e304 * d_own)), (_e313 == 2u)), is_boundary))), _e320) + sqrt((((_e324 * select(_e332, select(select(_e339, _e346, (_e353 == 1u)), (_e363 + (_e370 * d_own)), (_e379 == 2u)), is_boundary)) / select(_e392, select(select(_e399, _e406, (_e413 == 1u)), (_e423 + (_e430 * d_own)), (_e439 == 2u)), is_boundary)) + _e447)))));
     let _e460 = state[((owner * 8u) + 1u)];
@@ -6361,45 +6361,45 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e507 = neigh_idx;
     let _e514 = state[((_e507 * 8u) + 1u)];
     let _e521 = state[((owner * 8u) + 1u)];
-    let _e528 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e535 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e528 = bc_value[((idx * 8u) + 1u)];
+    let _e535 = bc_kind[((idx * 8u) + 1u)];
     let _e545 = state[((owner * 8u) + 1u)];
-    let _e552 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e561 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e552 = bc_value[((idx * 8u) + 1u)];
+    let _e561 = bc_kind[((idx * 8u) + 1u)];
     let _e566 = neigh_idx;
     let _e573 = state[((_e566 * 8u) + 2u)];
     let _e580 = state[((owner * 8u) + 2u)];
-    let _e587 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e594 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e587 = bc_value[((idx * 8u) + 2u)];
+    let _e594 = bc_kind[((idx * 8u) + 2u)];
     let _e604 = state[((owner * 8u) + 2u)];
-    let _e611 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e620 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e611 = bc_value[((idx * 8u) + 2u)];
+    let _e620 = bc_kind[((idx * 8u) + 2u)];
     let _e628 = neigh_idx;
     let _e635 = state[((_e628 * 8u) + 0u)];
     let _e642 = state[((owner * 8u) + 0u)];
-    let _e649 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e656 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e649 = bc_value[((idx * 8u) + 0u)];
+    let _e656 = bc_kind[((idx * 8u) + 0u)];
     let _e666 = state[((owner * 8u) + 0u)];
-    let _e673 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e682 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e673 = bc_value[((idx * 8u) + 0u)];
+    let _e682 = bc_kind[((idx * 8u) + 0u)];
     let _e689 = normal_vec;
     let _e693 = constants.eos_gamma;
     let _e694 = neigh_idx;
     let _e701 = state[((_e694 * 8u) + 4u)];
     let _e708 = state[((owner * 8u) + 4u)];
-    let _e715 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e722 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e715 = bc_value[((idx * 8u) + 6u)];
+    let _e722 = bc_kind[((idx * 8u) + 6u)];
     let _e732 = state[((owner * 8u) + 4u)];
-    let _e739 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e748 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e739 = bc_value[((idx * 8u) + 6u)];
+    let _e748 = bc_kind[((idx * 8u) + 6u)];
     let _e754 = neigh_idx;
     let _e761 = state[((_e754 * 8u) + 0u)];
     let _e768 = state[((owner * 8u) + 0u)];
-    let _e775 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e782 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e775 = bc_value[((idx * 8u) + 0u)];
+    let _e782 = bc_kind[((idx * 8u) + 0u)];
     let _e792 = state[((owner * 8u) + 0u)];
-    let _e799 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e808 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e799 = bc_value[((idx * 8u) + 0u)];
+    let _e808 = bc_kind[((idx * 8u) + 0u)];
     let _e816 = constants.eos_dp_drho;
     let a_minus = min(0f, min((dot(((vec2<f32>(_e460, _e467) * 1f) / vec2(_e477)), _e480) - sqrt((((_e484 * _e491) / _e499) + _e503))), (dot(((vec2<f32>(select(_e514, select(select(_e521, _e528, (_e535 == 1u)), (_e545 + (_e552 * d_own)), (_e561 == 2u)), is_boundary), select(_e573, select(select(_e580, _e587, (_e594 == 1u)), (_e604 + (_e611 * d_own)), (_e620 == 2u)), is_boundary)) * 1f) / vec2(select(_e635, select(select(_e642, _e649, (_e656 == 1u)), (_e666 + (_e673 * d_own)), (_e682 == 2u)), is_boundary))), _e689) - sqrt((((_e693 * select(_e701, select(select(_e708, _e715, (_e722 == 1u)), (_e732 + (_e739 * d_own)), (_e748 == 2u)), is_boundary)) / select(_e761, select(select(_e768, _e775, (_e782 == 1u)), (_e792 + (_e799 * d_own)), (_e808 == 2u)), is_boundary)) + _e816)))));
     let denom = max((a_plus - a_minus), 0.000001f);
@@ -6411,44 +6411,44 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e869 = neigh_idx;
     let _e876 = state[((_e869 * 8u) + 0u)];
     let _e883 = state[((owner * 8u) + 0u)];
-    let _e890 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e897 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e890 = bc_value[((idx * 8u) + 0u)];
+    let _e897 = bc_kind[((idx * 8u) + 0u)];
     let _e907 = state[((owner * 8u) + 0u)];
-    let _e914 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e923 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e914 = bc_value[((idx * 8u) + 0u)];
+    let _e923 = bc_kind[((idx * 8u) + 0u)];
     let _e929 = neigh_idx;
     let _e936 = state[((_e929 * 8u) + 1u)];
     let _e943 = state[((owner * 8u) + 1u)];
-    let _e950 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e957 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e950 = bc_value[((idx * 8u) + 1u)];
+    let _e957 = bc_kind[((idx * 8u) + 1u)];
     let _e967 = state[((owner * 8u) + 1u)];
-    let _e974 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e983 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e974 = bc_value[((idx * 8u) + 1u)];
+    let _e983 = bc_kind[((idx * 8u) + 1u)];
     let _e988 = neigh_idx;
     let _e995 = state[((_e988 * 8u) + 2u)];
     let _e1002 = state[((owner * 8u) + 2u)];
-    let _e1009 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1016 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1009 = bc_value[((idx * 8u) + 2u)];
+    let _e1016 = bc_kind[((idx * 8u) + 2u)];
     let _e1026 = state[((owner * 8u) + 2u)];
-    let _e1033 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1042 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1033 = bc_value[((idx * 8u) + 2u)];
+    let _e1042 = bc_kind[((idx * 8u) + 2u)];
     let _e1050 = neigh_idx;
     let _e1057 = state[((_e1050 * 8u) + 0u)];
     let _e1064 = state[((owner * 8u) + 0u)];
-    let _e1071 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1078 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1071 = bc_value[((idx * 8u) + 0u)];
+    let _e1078 = bc_kind[((idx * 8u) + 0u)];
     let _e1088 = state[((owner * 8u) + 0u)];
-    let _e1095 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1104 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1095 = bc_value[((idx * 8u) + 0u)];
+    let _e1104 = bc_kind[((idx * 8u) + 0u)];
     let _e1111 = normal_vec;
     let _e1116 = neigh_idx;
     let _e1123 = state[((_e1116 * 8u) + 0u)];
     let _e1130 = state[((owner * 8u) + 0u)];
-    let _e1137 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1144 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1137 = bc_value[((idx * 8u) + 0u)];
+    let _e1144 = bc_kind[((idx * 8u) + 0u)];
     let _e1154 = state[((owner * 8u) + 0u)];
-    let _e1161 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1170 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1161 = bc_value[((idx * 8u) + 0u)];
+    let _e1170 = bc_kind[((idx * 8u) + 0u)];
     let _e1181 = state[((owner * 8u) + 0u)];
     fluxes[((idx * 8u) + 0u)] = ((((((a_plus * _e838) * dot(((vec2<f32>(_e846, _e853) * 1f) / vec2(_e863)), _e866)) - ((a_minus * select(_e876, select(select(_e883, _e890, (_e897 == 1u)), (_e907 + (_e914 * d_own)), (_e923 == 2u)), is_boundary)) * dot(((vec2<f32>(select(_e936, select(select(_e943, _e950, (_e957 == 1u)), (_e967 + (_e974 * d_own)), (_e983 == 2u)), is_boundary), select(_e995, select(select(_e1002, _e1009, (_e1016 == 1u)), (_e1026 + (_e1033 * d_own)), (_e1042 == 2u)), is_boundary)) * 1f) / vec2(select(_e1057, select(select(_e1064, _e1071, (_e1078 == 1u)), (_e1088 + (_e1095 * d_own)), (_e1104 == 2u)), is_boundary))), _e1111))) + ((a_plus * a_minus) * (select(_e1123, select(select(_e1130, _e1137, (_e1144 == 1u)), (_e1154 + (_e1161 * d_own)), (_e1170 == 2u)), is_boundary) - _e1181))) / denom) * area);
     let _e1199 = state[((owner * 8u) + 1u)];
@@ -6462,69 +6462,69 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e1256 = neigh_idx;
     let _e1263 = state[((_e1256 * 8u) + 1u)];
     let _e1270 = state[((owner * 8u) + 1u)];
-    let _e1277 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1284 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1277 = bc_value[((idx * 8u) + 1u)];
+    let _e1284 = bc_kind[((idx * 8u) + 1u)];
     let _e1294 = state[((owner * 8u) + 1u)];
-    let _e1301 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1310 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1301 = bc_value[((idx * 8u) + 1u)];
+    let _e1310 = bc_kind[((idx * 8u) + 1u)];
     let _e1315 = neigh_idx;
     let _e1322 = state[((_e1315 * 8u) + 2u)];
     let _e1329 = state[((owner * 8u) + 2u)];
-    let _e1336 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1343 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1336 = bc_value[((idx * 8u) + 2u)];
+    let _e1343 = bc_kind[((idx * 8u) + 2u)];
     let _e1353 = state[((owner * 8u) + 2u)];
-    let _e1360 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1369 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1360 = bc_value[((idx * 8u) + 2u)];
+    let _e1369 = bc_kind[((idx * 8u) + 2u)];
     let _e1379 = neigh_idx;
     let _e1386 = state[((_e1379 * 8u) + 1u)];
     let _e1393 = state[((owner * 8u) + 1u)];
-    let _e1400 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1407 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1400 = bc_value[((idx * 8u) + 1u)];
+    let _e1407 = bc_kind[((idx * 8u) + 1u)];
     let _e1417 = state[((owner * 8u) + 1u)];
-    let _e1424 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1433 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1424 = bc_value[((idx * 8u) + 1u)];
+    let _e1433 = bc_kind[((idx * 8u) + 1u)];
     let _e1438 = neigh_idx;
     let _e1445 = state[((_e1438 * 8u) + 2u)];
     let _e1452 = state[((owner * 8u) + 2u)];
-    let _e1459 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1466 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1459 = bc_value[((idx * 8u) + 2u)];
+    let _e1466 = bc_kind[((idx * 8u) + 2u)];
     let _e1476 = state[((owner * 8u) + 2u)];
-    let _e1483 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1492 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1483 = bc_value[((idx * 8u) + 2u)];
+    let _e1492 = bc_kind[((idx * 8u) + 2u)];
     let _e1500 = neigh_idx;
     let _e1507 = state[((_e1500 * 8u) + 0u)];
     let _e1514 = state[((owner * 8u) + 0u)];
-    let _e1521 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1528 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1521 = bc_value[((idx * 8u) + 0u)];
+    let _e1528 = bc_kind[((idx * 8u) + 0u)];
     let _e1538 = state[((owner * 8u) + 0u)];
-    let _e1545 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e1554 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e1545 = bc_value[((idx * 8u) + 0u)];
+    let _e1554 = bc_kind[((idx * 8u) + 0u)];
     let _e1561 = normal_vec;
     let _e1564 = neigh_idx;
     let _e1571 = state[((_e1564 * 8u) + 4u)];
     let _e1578 = state[((owner * 8u) + 4u)];
-    let _e1585 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e1592 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e1585 = bc_value[((idx * 8u) + 6u)];
+    let _e1592 = bc_kind[((idx * 8u) + 6u)];
     let _e1602 = state[((owner * 8u) + 4u)];
-    let _e1609 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e1618 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e1609 = bc_value[((idx * 8u) + 6u)];
+    let _e1618 = bc_kind[((idx * 8u) + 6u)];
     let _e1623 = normal_vec;
     let _e1633 = neigh_idx;
     let _e1640 = state[((_e1633 * 8u) + 1u)];
     let _e1647 = state[((owner * 8u) + 1u)];
-    let _e1654 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1661 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1654 = bc_value[((idx * 8u) + 1u)];
+    let _e1661 = bc_kind[((idx * 8u) + 1u)];
     let _e1671 = state[((owner * 8u) + 1u)];
-    let _e1678 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1687 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1678 = bc_value[((idx * 8u) + 1u)];
+    let _e1687 = bc_kind[((idx * 8u) + 1u)];
     let _e1692 = neigh_idx;
     let _e1699 = state[((_e1692 * 8u) + 2u)];
     let _e1706 = state[((owner * 8u) + 2u)];
-    let _e1713 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1720 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1713 = bc_value[((idx * 8u) + 2u)];
+    let _e1720 = bc_kind[((idx * 8u) + 2u)];
     let _e1730 = state[((owner * 8u) + 2u)];
-    let _e1737 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1746 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1737 = bc_value[((idx * 8u) + 2u)];
+    let _e1746 = bc_kind[((idx * 8u) + 2u)];
     let _e1762 = state[((owner * 8u) + 1u)];
     let _e1769 = state[((owner * 8u) + 2u)];
     fluxes[((idx * 8u) + 1u)] = (((((a_plus * ((dot(vec2<f32>(_e1199, _e1206), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(_e1218, _e1225) * 1f) / vec2(_e1235)), _e1238)) + (_e1247 * dot(_e1248, vec2<f32>(1f, 0f))))) - (a_minus * ((dot(vec2<f32>(select(_e1263, select(select(_e1270, _e1277, (_e1284 == 1u)), (_e1294 + (_e1301 * d_own)), (_e1310 == 2u)), is_boundary), select(_e1322, select(select(_e1329, _e1336, (_e1343 == 1u)), (_e1353 + (_e1360 * d_own)), (_e1369 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) * dot(((vec2<f32>(select(_e1386, select(select(_e1393, _e1400, (_e1407 == 1u)), (_e1417 + (_e1424 * d_own)), (_e1433 == 2u)), is_boundary), select(_e1445, select(select(_e1452, _e1459, (_e1466 == 1u)), (_e1476 + (_e1483 * d_own)), (_e1492 == 2u)), is_boundary)) * 1f) / vec2(select(_e1507, select(select(_e1514, _e1521, (_e1528 == 1u)), (_e1538 + (_e1545 * d_own)), (_e1554 == 2u)), is_boundary))), _e1561)) + (select(_e1571, select(select(_e1578, _e1585, (_e1592 == 1u)), (_e1602 + (_e1609 * d_own)), (_e1618 == 2u)), is_boundary) * dot(_e1623, vec2<f32>(1f, 0f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e1640, select(select(_e1647, _e1654, (_e1661 == 1u)), (_e1671 + (_e1678 * d_own)), (_e1687 == 2u)), is_boundary), select(_e1699, select(select(_e1706, _e1713, (_e1720 == 1u)), (_e1730 + (_e1737 * d_own)), (_e1746 == 2u)), is_boundary)), vec2<f32>(1f, 0f)) - dot(vec2<f32>(_e1762, _e1769), vec2<f32>(1f, 0f))))) / denom) * area);
@@ -6539,69 +6539,69 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e1849 = neigh_idx;
     let _e1856 = state[((_e1849 * 8u) + 1u)];
     let _e1863 = state[((owner * 8u) + 1u)];
-    let _e1870 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1877 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1870 = bc_value[((idx * 8u) + 1u)];
+    let _e1877 = bc_kind[((idx * 8u) + 1u)];
     let _e1887 = state[((owner * 8u) + 1u)];
-    let _e1894 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e1903 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1894 = bc_value[((idx * 8u) + 1u)];
+    let _e1903 = bc_kind[((idx * 8u) + 1u)];
     let _e1908 = neigh_idx;
     let _e1915 = state[((_e1908 * 8u) + 2u)];
     let _e1922 = state[((owner * 8u) + 2u)];
-    let _e1929 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1936 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1929 = bc_value[((idx * 8u) + 2u)];
+    let _e1936 = bc_kind[((idx * 8u) + 2u)];
     let _e1946 = state[((owner * 8u) + 2u)];
-    let _e1953 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e1962 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e1953 = bc_value[((idx * 8u) + 2u)];
+    let _e1962 = bc_kind[((idx * 8u) + 2u)];
     let _e1972 = neigh_idx;
     let _e1979 = state[((_e1972 * 8u) + 1u)];
     let _e1986 = state[((owner * 8u) + 1u)];
-    let _e1993 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2000 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e1993 = bc_value[((idx * 8u) + 1u)];
+    let _e2000 = bc_kind[((idx * 8u) + 1u)];
     let _e2010 = state[((owner * 8u) + 1u)];
-    let _e2017 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2026 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2017 = bc_value[((idx * 8u) + 1u)];
+    let _e2026 = bc_kind[((idx * 8u) + 1u)];
     let _e2031 = neigh_idx;
     let _e2038 = state[((_e2031 * 8u) + 2u)];
     let _e2045 = state[((owner * 8u) + 2u)];
-    let _e2052 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2059 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2052 = bc_value[((idx * 8u) + 2u)];
+    let _e2059 = bc_kind[((idx * 8u) + 2u)];
     let _e2069 = state[((owner * 8u) + 2u)];
-    let _e2076 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2085 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2076 = bc_value[((idx * 8u) + 2u)];
+    let _e2085 = bc_kind[((idx * 8u) + 2u)];
     let _e2093 = neigh_idx;
     let _e2100 = state[((_e2093 * 8u) + 0u)];
     let _e2107 = state[((owner * 8u) + 0u)];
-    let _e2114 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2121 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2114 = bc_value[((idx * 8u) + 0u)];
+    let _e2121 = bc_kind[((idx * 8u) + 0u)];
     let _e2131 = state[((owner * 8u) + 0u)];
-    let _e2138 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2147 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2138 = bc_value[((idx * 8u) + 0u)];
+    let _e2147 = bc_kind[((idx * 8u) + 0u)];
     let _e2154 = normal_vec;
     let _e2157 = neigh_idx;
     let _e2164 = state[((_e2157 * 8u) + 4u)];
     let _e2171 = state[((owner * 8u) + 4u)];
-    let _e2178 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2185 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2178 = bc_value[((idx * 8u) + 6u)];
+    let _e2185 = bc_kind[((idx * 8u) + 6u)];
     let _e2195 = state[((owner * 8u) + 4u)];
-    let _e2202 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2211 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2202 = bc_value[((idx * 8u) + 6u)];
+    let _e2211 = bc_kind[((idx * 8u) + 6u)];
     let _e2216 = normal_vec;
     let _e2226 = neigh_idx;
     let _e2233 = state[((_e2226 * 8u) + 1u)];
     let _e2240 = state[((owner * 8u) + 1u)];
-    let _e2247 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2254 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2247 = bc_value[((idx * 8u) + 1u)];
+    let _e2254 = bc_kind[((idx * 8u) + 1u)];
     let _e2264 = state[((owner * 8u) + 1u)];
-    let _e2271 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2280 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2271 = bc_value[((idx * 8u) + 1u)];
+    let _e2280 = bc_kind[((idx * 8u) + 1u)];
     let _e2285 = neigh_idx;
     let _e2292 = state[((_e2285 * 8u) + 2u)];
     let _e2299 = state[((owner * 8u) + 2u)];
-    let _e2306 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2313 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2306 = bc_value[((idx * 8u) + 2u)];
+    let _e2313 = bc_kind[((idx * 8u) + 2u)];
     let _e2323 = state[((owner * 8u) + 2u)];
-    let _e2330 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2339 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2330 = bc_value[((idx * 8u) + 2u)];
+    let _e2339 = bc_kind[((idx * 8u) + 2u)];
     let _e2355 = state[((owner * 8u) + 1u)];
     let _e2362 = state[((owner * 8u) + 2u)];
     fluxes[((idx * 8u) + 2u)] = (((((a_plus * ((dot(vec2<f32>(_e1792, _e1799), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(_e1811, _e1818) * 1f) / vec2(_e1828)), _e1831)) + (_e1840 * dot(_e1841, vec2<f32>(0f, 1f))))) - (a_minus * ((dot(vec2<f32>(select(_e1856, select(select(_e1863, _e1870, (_e1877 == 1u)), (_e1887 + (_e1894 * d_own)), (_e1903 == 2u)), is_boundary), select(_e1915, select(select(_e1922, _e1929, (_e1936 == 1u)), (_e1946 + (_e1953 * d_own)), (_e1962 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) * dot(((vec2<f32>(select(_e1979, select(select(_e1986, _e1993, (_e2000 == 1u)), (_e2010 + (_e2017 * d_own)), (_e2026 == 2u)), is_boundary), select(_e2038, select(select(_e2045, _e2052, (_e2059 == 1u)), (_e2069 + (_e2076 * d_own)), (_e2085 == 2u)), is_boundary)) * 1f) / vec2(select(_e2100, select(select(_e2107, _e2114, (_e2121 == 1u)), (_e2131 + (_e2138 * d_own)), (_e2147 == 2u)), is_boundary))), _e2154)) + (select(_e2164, select(select(_e2171, _e2178, (_e2185 == 1u)), (_e2195 + (_e2202 * d_own)), (_e2211 == 2u)), is_boundary) * dot(_e2216, vec2<f32>(0f, 1f)))))) + ((a_plus * a_minus) * (dot(vec2<f32>(select(_e2233, select(select(_e2240, _e2247, (_e2254 == 1u)), (_e2264 + (_e2271 * d_own)), (_e2280 == 2u)), is_boundary), select(_e2292, select(select(_e2299, _e2306, (_e2313 == 1u)), (_e2323 + (_e2330 * d_own)), (_e2339 == 2u)), is_boundary)), vec2<f32>(0f, 1f)) - dot(vec2<f32>(_e2355, _e2362), vec2<f32>(0f, 1f))))) / denom) * area);
@@ -6614,52 +6614,52 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e2424 = neigh_idx;
     let _e2431 = state[((_e2424 * 8u) + 3u)];
     let _e2438 = state[((owner * 8u) + 3u)];
-    let _e2445 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2452 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2445 = bc_value[((idx * 8u) + 3u)];
+    let _e2452 = bc_kind[((idx * 8u) + 3u)];
     let _e2462 = state[((owner * 8u) + 3u)];
-    let _e2469 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2478 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2469 = bc_value[((idx * 8u) + 3u)];
+    let _e2478 = bc_kind[((idx * 8u) + 3u)];
     let _e2483 = neigh_idx;
     let _e2490 = state[((_e2483 * 8u) + 4u)];
     let _e2497 = state[((owner * 8u) + 4u)];
-    let _e2504 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2511 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2504 = bc_value[((idx * 8u) + 6u)];
+    let _e2511 = bc_kind[((idx * 8u) + 6u)];
     let _e2521 = state[((owner * 8u) + 4u)];
-    let _e2528 = bc_value[((boundary_type * 8u) + 6u)];
-    let _e2537 = bc_kind[((boundary_type * 8u) + 6u)];
+    let _e2528 = bc_value[((idx * 8u) + 6u)];
+    let _e2537 = bc_kind[((idx * 8u) + 6u)];
     let _e2544 = neigh_idx;
     let _e2551 = state[((_e2544 * 8u) + 1u)];
     let _e2558 = state[((owner * 8u) + 1u)];
-    let _e2565 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2572 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2565 = bc_value[((idx * 8u) + 1u)];
+    let _e2572 = bc_kind[((idx * 8u) + 1u)];
     let _e2582 = state[((owner * 8u) + 1u)];
-    let _e2589 = bc_value[((boundary_type * 8u) + 1u)];
-    let _e2598 = bc_kind[((boundary_type * 8u) + 1u)];
+    let _e2589 = bc_value[((idx * 8u) + 1u)];
+    let _e2598 = bc_kind[((idx * 8u) + 1u)];
     let _e2603 = neigh_idx;
     let _e2610 = state[((_e2603 * 8u) + 2u)];
     let _e2617 = state[((owner * 8u) + 2u)];
-    let _e2624 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2631 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2624 = bc_value[((idx * 8u) + 2u)];
+    let _e2631 = bc_kind[((idx * 8u) + 2u)];
     let _e2641 = state[((owner * 8u) + 2u)];
-    let _e2648 = bc_value[((boundary_type * 8u) + 2u)];
-    let _e2657 = bc_kind[((boundary_type * 8u) + 2u)];
+    let _e2648 = bc_value[((idx * 8u) + 2u)];
+    let _e2657 = bc_kind[((idx * 8u) + 2u)];
     let _e2665 = neigh_idx;
     let _e2672 = state[((_e2665 * 8u) + 0u)];
     let _e2679 = state[((owner * 8u) + 0u)];
-    let _e2686 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2693 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2686 = bc_value[((idx * 8u) + 0u)];
+    let _e2693 = bc_kind[((idx * 8u) + 0u)];
     let _e2703 = state[((owner * 8u) + 0u)];
-    let _e2710 = bc_value[((boundary_type * 8u) + 0u)];
-    let _e2719 = bc_kind[((boundary_type * 8u) + 0u)];
+    let _e2710 = bc_value[((idx * 8u) + 0u)];
+    let _e2719 = bc_kind[((idx * 8u) + 0u)];
     let _e2726 = normal_vec;
     let _e2731 = neigh_idx;
     let _e2738 = state[((_e2731 * 8u) + 3u)];
     let _e2745 = state[((owner * 8u) + 3u)];
-    let _e2752 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2759 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2752 = bc_value[((idx * 8u) + 3u)];
+    let _e2759 = bc_kind[((idx * 8u) + 3u)];
     let _e2769 = state[((owner * 8u) + 3u)];
-    let _e2776 = bc_value[((boundary_type * 8u) + 3u)];
-    let _e2785 = bc_kind[((boundary_type * 8u) + 3u)];
+    let _e2776 = bc_value[((idx * 8u) + 3u)];
+    let _e2785 = bc_kind[((idx * 8u) + 3u)];
     let _e2796 = state[((owner * 8u) + 3u)];
     fluxes[((idx * 8u) + 3u)] = ((((((a_plus * (_e2385 + _e2392)) * dot(((vec2<f32>(_e2401, _e2408) * 1f) / vec2(_e2418)), _e2421)) - ((a_minus * (select(_e2431, select(select(_e2438, _e2445, (_e2452 == 1u)), (_e2462 + (_e2469 * d_own)), (_e2478 == 2u)), is_boundary) + select(_e2490, select(select(_e2497, _e2504, (_e2511 == 1u)), (_e2521 + (_e2528 * d_own)), (_e2537 == 2u)), is_boundary))) * dot(((vec2<f32>(select(_e2551, select(select(_e2558, _e2565, (_e2572 == 1u)), (_e2582 + (_e2589 * d_own)), (_e2598 == 2u)), is_boundary), select(_e2610, select(select(_e2617, _e2624, (_e2631 == 1u)), (_e2641 + (_e2648 * d_own)), (_e2657 == 2u)), is_boundary)) * 1f) / vec2(select(_e2672, select(select(_e2679, _e2686, (_e2693 == 1u)), (_e2703 + (_e2710 * d_own)), (_e2719 == 2u)), is_boundary))), _e2726))) + ((a_plus * a_minus) * (select(_e2738, select(select(_e2745, _e2752, (_e2759 == 1u)), (_e2769 + (_e2776 * d_own)), (_e2785 == 2u)), is_boundary) - _e2796))) / denom) * area);
     fluxes[((idx * 8u) + 4u)] = (((((a_plus * 0f) - (a_minus * 0f)) + ((a_plus * a_minus) * 0f)) / denom) * area);
@@ -7060,11 +7060,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e103 = other_idx;
             let _e110 = state[((_e103 * 8u) + 2u)];
             let _e117 = state[((idx * 8u) + 2u)];
-            let _e124 = bc_value[((boundary_type * 3u) + 2u)];
-            let _e131 = bc_kind[((boundary_type * 3u) + 2u)];
+            let _e124 = bc_value[((face_idx * 3u) + 2u)];
+            let _e131 = bc_kind[((face_idx * 3u) + 2u)];
             let _e141 = state[((idx * 8u) + 2u)];
-            let _e148 = bc_value[((boundary_type * 3u) + 2u)];
-            let _e157 = bc_kind[((boundary_type * 3u) + 2u)];
+            let _e148 = bc_value[((face_idx * 3u) + 2u)];
+            let _e157 = bc_kind[((face_idx * 3u) + 2u)];
             let _e167 = grad_acc_p;
             grad_acc_p = (_e167 + ((_e93 * ((_e100 * _e101) + (select(_e110, select(select(_e117, _e124, (_e131 == 1u)), (_e141 + (_e148 * d_own)), (_e157 == 2u)), is_boundary) * lambda_other))) * area));
         }
@@ -7479,11 +7479,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e103 = other_idx;
             let _e110 = state[((_e103 * 8u) + 2u)];
             let _e117 = state[((idx * 8u) + 2u)];
-            let _e124 = bc_value[((boundary_type * 3u) + 2u)];
-            let _e131 = bc_kind[((boundary_type * 3u) + 2u)];
+            let _e124 = bc_value[((face_idx * 3u) + 2u)];
+            let _e131 = bc_kind[((face_idx * 3u) + 2u)];
             let _e141 = state[((idx * 8u) + 2u)];
-            let _e148 = bc_value[((boundary_type * 3u) + 2u)];
-            let _e157 = bc_kind[((boundary_type * 3u) + 2u)];
+            let _e148 = bc_value[((face_idx * 3u) + 2u)];
+            let _e157 = bc_kind[((face_idx * 3u) + 2u)];
             let _e167 = grad_acc_p;
             grad_acc_p = (_e167 + ((_e93 * ((_e100 * _e101) + (select(_e110, select(select(_e117, _e124, (_e131 == 1u)), (_e141 + (_e148 * d_own)), (_e157 == 2u)), is_boundary) * lambda_other))) * area));
         }
@@ -8108,19 +8108,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e105 = neigh_idx;
     let _e112 = state[((_e105 * 8u) + 0u)];
     let _e119 = state[((owner * 8u) + 0u)];
-    let _e126 = bc_value[((boundary_type * 3u) + 0u)];
-    let _e133 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e126 = bc_value[((idx * 3u) + 0u)];
+    let _e133 = bc_kind[((idx * 3u) + 0u)];
     let _e143 = state[((owner * 8u) + 0u)];
-    let _e150 = bc_value[((boundary_type * 3u) + 0u)];
-    let _e159 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e150 = bc_value[((idx * 3u) + 0u)];
+    let _e159 = bc_kind[((idx * 3u) + 0u)];
     let _e164 = neigh_idx;
     let _e171 = state[((_e164 * 8u) + 1u)];
     let _e178 = state[((owner * 8u) + 1u)];
-    let _e185 = bc_value[((boundary_type * 3u) + 1u)];
-    let _e192 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e185 = bc_value[((idx * 3u) + 1u)];
+    let _e192 = bc_kind[((idx * 3u) + 1u)];
     let _e202 = state[((owner * 8u) + 1u)];
-    let _e209 = bc_value[((boundary_type * 3u) + 1u)];
-    let _e218 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e209 = bc_value[((idx * 3u) + 1u)];
+    let _e218 = bc_kind[((idx * 3u) + 1u)];
     let _e226 = normal_vec;
     let _e232 = constants.density;
     let _e239 = state[((owner * 8u) + 3u)];
@@ -8131,11 +8131,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e261 = neigh_idx;
     let _e268 = state[((_e261 * 8u) + 2u)];
     let _e275 = state[((owner * 8u) + 2u)];
-    let _e282 = bc_value[((boundary_type * 3u) + 2u)];
-    let _e289 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e282 = bc_value[((idx * 3u) + 2u)];
+    let _e289 = bc_kind[((idx * 3u) + 2u)];
     let _e299 = state[((owner * 8u) + 2u)];
-    let _e306 = bc_value[((boundary_type * 3u) + 2u)];
-    let _e315 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e306 = bc_value[((idx * 3u) + 2u)];
+    let _e315 = bc_kind[((idx * 3u) + 2u)];
     let _e326 = state[((owner * 8u) + 2u)];
     phi = (((_e87 * dot(((vec2<f32>(_e94, _e101) * _e103) + (vec2<f32>(select(_e112, select(select(_e119, _e126, (_e133 == 1u)), (_e143 + (_e150 * d_own)), (_e159 == 2u)), is_boundary), select(_e171, select(select(_e178, _e185, (_e192 == 1u)), (_e202 + (_e209 * d_own)), (_e218 == 2u)), is_boundary)) * lambda_other)), _e226)) * area) - ((((_e232 * ((_e239 * _e240) + (select(_e249, _e256, is_boundary) * lambda_other))) * (select(_e268, select(select(_e275, _e282, (_e289 == 1u)), (_e299 + (_e306 * d_own)), (_e315 == 2u)), is_boundary) - _e326)) / dist) * area));
     let _e339 = phi;
@@ -8643,19 +8643,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e105 = neigh_idx;
     let _e112 = state[((_e105 * 8u) + 0u)];
     let _e119 = state[((owner * 8u) + 0u)];
-    let _e126 = bc_value[((boundary_type * 3u) + 0u)];
-    let _e133 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e126 = bc_value[((idx * 3u) + 0u)];
+    let _e133 = bc_kind[((idx * 3u) + 0u)];
     let _e143 = state[((owner * 8u) + 0u)];
-    let _e150 = bc_value[((boundary_type * 3u) + 0u)];
-    let _e159 = bc_kind[((boundary_type * 3u) + 0u)];
+    let _e150 = bc_value[((idx * 3u) + 0u)];
+    let _e159 = bc_kind[((idx * 3u) + 0u)];
     let _e164 = neigh_idx;
     let _e171 = state[((_e164 * 8u) + 1u)];
     let _e178 = state[((owner * 8u) + 1u)];
-    let _e185 = bc_value[((boundary_type * 3u) + 1u)];
-    let _e192 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e185 = bc_value[((idx * 3u) + 1u)];
+    let _e192 = bc_kind[((idx * 3u) + 1u)];
     let _e202 = state[((owner * 8u) + 1u)];
-    let _e209 = bc_value[((boundary_type * 3u) + 1u)];
-    let _e218 = bc_kind[((boundary_type * 3u) + 1u)];
+    let _e209 = bc_value[((idx * 3u) + 1u)];
+    let _e218 = bc_kind[((idx * 3u) + 1u)];
     let _e226 = normal_vec;
     let _e232 = constants.density;
     let _e239 = state[((owner * 8u) + 3u)];
@@ -8666,11 +8666,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e261 = neigh_idx;
     let _e268 = state[((_e261 * 8u) + 2u)];
     let _e275 = state[((owner * 8u) + 2u)];
-    let _e282 = bc_value[((boundary_type * 3u) + 2u)];
-    let _e289 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e282 = bc_value[((idx * 3u) + 2u)];
+    let _e289 = bc_kind[((idx * 3u) + 2u)];
     let _e299 = state[((owner * 8u) + 2u)];
-    let _e306 = bc_value[((boundary_type * 3u) + 2u)];
-    let _e315 = bc_kind[((boundary_type * 3u) + 2u)];
+    let _e306 = bc_value[((idx * 3u) + 2u)];
+    let _e315 = bc_kind[((idx * 3u) + 2u)];
     let _e326 = state[((owner * 8u) + 2u)];
     phi = (((_e87 * dot(((vec2<f32>(_e94, _e101) * _e103) + (vec2<f32>(select(_e112, select(select(_e119, _e126, (_e133 == 1u)), (_e143 + (_e150 * d_own)), (_e159 == 2u)), is_boundary), select(_e171, select(select(_e178, _e185, (_e192 == 1u)), (_e202 + (_e209 * d_own)), (_e218 == 2u)), is_boundary)) * lambda_other)), _e226)) * area) - ((((_e232 * ((_e239 * _e240) + (select(_e249, _e256, is_boundary) * lambda_other))) * (select(_e268, select(select(_e275, _e282, (_e289 == 1u)), (_e299 + (_e306 * d_own)), (_e315 == 2u)), is_boundary) - _e326)) / dist) * area));
     let _e339 = phi;
@@ -10143,18 +10143,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e1427 = matrix_values[((start_row_1_ + (neighbor_rank * 8u)) + 4u)];
                 matrix_values[((start_row_1_ + (neighbor_rank * 8u)) + 4u)] = (_e1427 - diff_coeff_rho_u);
             } else {
-                let _e1435 = bc_kind[((boundary_type * 8u) + 4u)];
+                let _e1435 = bc_kind[((face_idx * 8u) + 4u)];
                 if (_e1435 == 1u) {
                     let _e1445 = matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)];
                     matrix_values[((start_row_1_ + (diag_rank * 8u)) + 4u)] = (_e1445 + diff_coeff_rho_u);
-                    let _e1453 = bc_value[((boundary_type * 8u) + 4u)];
+                    let _e1453 = bc_value[((face_idx * 8u) + 4u)];
                     let _e1455 = rhs_1_;
                     rhs_1_ = (_e1455 + (diff_coeff_rho_u * _e1453));
                 } else {
-                    let _e1463 = bc_kind[((boundary_type * 8u) + 4u)];
+                    let _e1463 = bc_kind[((face_idx * 8u) + 4u)];
                     if (_e1463 == 2u) {
                         let _e1468 = constants.viscosity;
-                        let _e1476 = bc_value[((boundary_type * 8u) + 4u)];
+                        let _e1476 = bc_value[((face_idx * 8u) + 4u)];
                         let _e1479 = rhs_1_;
                         rhs_1_ = (_e1479 + -(((_e1468 * area) * _e1476)));
                     }
@@ -10167,18 +10167,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e1499 = matrix_values[((start_row_2_ + (neighbor_rank * 8u)) + 5u)];
                 matrix_values[((start_row_2_ + (neighbor_rank * 8u)) + 5u)] = (_e1499 - diff_coeff_rho_u);
             } else {
-                let _e1507 = bc_kind[((boundary_type * 8u) + 5u)];
+                let _e1507 = bc_kind[((face_idx * 8u) + 5u)];
                 if (_e1507 == 1u) {
                     let _e1517 = matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)];
                     matrix_values[((start_row_2_ + (diag_rank * 8u)) + 5u)] = (_e1517 + diff_coeff_rho_u);
-                    let _e1525 = bc_value[((boundary_type * 8u) + 5u)];
+                    let _e1525 = bc_value[((face_idx * 8u) + 5u)];
                     let _e1527 = rhs_2_;
                     rhs_2_ = (_e1527 + (diff_coeff_rho_u * _e1525));
                 } else {
-                    let _e1535 = bc_kind[((boundary_type * 8u) + 5u)];
+                    let _e1535 = bc_kind[((face_idx * 8u) + 5u)];
                     if (_e1535 == 2u) {
                         let _e1540 = constants.viscosity;
-                        let _e1548 = bc_value[((boundary_type * 8u) + 5u)];
+                        let _e1548 = bc_value[((face_idx * 8u) + 5u)];
                         let _e1551 = rhs_2_;
                         rhs_2_ = (_e1551 + -(((_e1540 * area) * _e1548)));
                     }
@@ -10931,17 +10931,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e252 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
                 matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e252 - diff_coeff_phi);
             } else {
-                let _e260 = bc_kind[((boundary_type * 1u) + 0u)];
+                let _e260 = bc_kind[((face_idx * 1u) + 0u)];
                 if (_e260 == 1u) {
                     let _e263 = diag_0_;
                     diag_0_ = (_e263 + diff_coeff_phi);
-                    let _e271 = bc_value[((boundary_type * 1u) + 0u)];
+                    let _e271 = bc_value[((face_idx * 1u) + 0u)];
                     let _e273 = rhs_0_;
                     rhs_0_ = (_e273 + (diff_coeff_phi * _e271));
                 } else {
-                    let _e281 = bc_kind[((boundary_type * 1u) + 0u)];
+                    let _e281 = bc_kind[((face_idx * 1u) + 0u)];
                     if (_e281 == 2u) {
-                        let _e292 = bc_value[((boundary_type * 1u) + 0u)];
+                        let _e292 = bc_value[((face_idx * 1u) + 0u)];
                         let _e295 = rhs_0_;
                         rhs_0_ = (_e295 + -(((1f * area) * _e292)));
                     }
@@ -11639,17 +11639,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e252 = matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)];
                 matrix_values[((start_row_0_ + (neighbor_rank * 1u)) + 0u)] = (_e252 - diff_coeff_phi);
             } else {
-                let _e260 = bc_kind[((boundary_type * 1u) + 0u)];
+                let _e260 = bc_kind[((face_idx * 1u) + 0u)];
                 if (_e260 == 1u) {
                     let _e263 = diag_0_;
                     diag_0_ = (_e263 + diff_coeff_phi);
-                    let _e271 = bc_value[((boundary_type * 1u) + 0u)];
+                    let _e271 = bc_value[((face_idx * 1u) + 0u)];
                     let _e273 = rhs_0_;
                     rhs_0_ = (_e273 + (diff_coeff_phi * _e271));
                 } else {
-                    let _e281 = bc_kind[((boundary_type * 1u) + 0u)];
+                    let _e281 = bc_kind[((face_idx * 1u) + 0u)];
                     if (_e281 == 2u) {
-                        let _e292 = bc_value[((boundary_type * 1u) + 0u)];
+                        let _e292 = bc_value[((face_idx * 1u) + 0u)];
                         let _e295 = rhs_0_;
                         rhs_0_ = (_e295 + -(((1f * area) * _e292)));
                     }
@@ -12421,18 +12421,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e468 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
                 matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e468 - diff_coeff_U);
             } else {
-                let _e476 = bc_kind[((boundary_type * 3u) + 0u)];
+                let _e476 = bc_kind[((face_idx * 3u) + 0u)];
                 if (_e476 == 1u) {
                     let _e479 = diag_0_;
                     diag_0_ = (_e479 + diff_coeff_U);
-                    let _e487 = bc_value[((boundary_type * 3u) + 0u)];
+                    let _e487 = bc_value[((face_idx * 3u) + 0u)];
                     let _e489 = rhs_0_;
                     rhs_0_ = (_e489 + (diff_coeff_U * _e487));
                 } else {
-                    let _e497 = bc_kind[((boundary_type * 3u) + 0u)];
+                    let _e497 = bc_kind[((face_idx * 3u) + 0u)];
                     if (_e497 == 2u) {
                         let _e502 = constants.viscosity;
-                        let _e510 = bc_value[((boundary_type * 3u) + 0u)];
+                        let _e510 = bc_value[((face_idx * 3u) + 0u)];
                         let _e513 = rhs_0_;
                         rhs_0_ = (_e513 + -(((_e502 * area) * _e510)));
                     }
@@ -12445,18 +12445,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e526 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
                 matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e526 - diff_coeff_U);
             } else {
-                let _e534 = bc_kind[((boundary_type * 3u) + 1u)];
+                let _e534 = bc_kind[((face_idx * 3u) + 1u)];
                 if (_e534 == 1u) {
                     let _e537 = diag_1_;
                     diag_1_ = (_e537 + diff_coeff_U);
-                    let _e545 = bc_value[((boundary_type * 3u) + 1u)];
+                    let _e545 = bc_value[((face_idx * 3u) + 1u)];
                     let _e547 = rhs_1_;
                     rhs_1_ = (_e547 + (diff_coeff_U * _e545));
                 } else {
-                    let _e555 = bc_kind[((boundary_type * 3u) + 1u)];
+                    let _e555 = bc_kind[((face_idx * 3u) + 1u)];
                     if (_e555 == 2u) {
                         let _e560 = constants.viscosity;
-                        let _e568 = bc_value[((boundary_type * 3u) + 1u)];
+                        let _e568 = bc_value[((face_idx * 3u) + 1u)];
                         let _e571 = rhs_1_;
                         rhs_1_ = (_e571 + -(((_e560 * area) * _e568)));
                     }
@@ -12506,13 +12506,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e772 = rhs_0_;
                 rhs_0_ = (_e772 - (_e606 * (select(select(select(_e613, _e621, (_e622 < 0f)), select((_e633 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e641, _e643)))), (_e654 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e667 > 0f)), false), select((((_e680 * 0.625f) + (_e689 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e700, _e702))) * 0.125f)), (((_e715 * 0.625f) + (_e725 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e733, _e735) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e745 > 0f)), false) - select(_e757, _e765, (_e766 < 0f)))));
             } else {
-                let _e780 = bc_kind[((boundary_type * 3u) + 0u)];
+                let _e780 = bc_kind[((face_idx * 3u) + 0u)];
                 if (_e780 == 1u) {
                     let _e783 = phi_0_;
                     let _e786 = diag_0_;
                     diag_0_ = (_e786 + max(_e783, 0f));
                     let _e788 = phi_0_;
-                    let _e797 = bc_value[((boundary_type * 3u) + 0u)];
+                    let _e797 = bc_value[((face_idx * 3u) + 0u)];
                     let _e799 = rhs_0_;
                     rhs_0_ = (_e799 - (min(_e788, 0f) * _e797));
                 } else {
@@ -12565,13 +12565,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e1003 = rhs_1_;
                 rhs_1_ = (_e1003 - (_e837 * (select(select(select(_e844, _e852, (_e853 < 0f)), select((_e864 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e872, _e874)))), (_e885 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e898 > 0f)), false), select((((_e911 * 0.625f) + (_e920 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e931, _e933))) * 0.125f)), (((_e946 * 0.625f) + (_e956 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e964, _e966) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e976 > 0f)), false) - select(_e988, _e996, (_e997 < 0f)))));
             } else {
-                let _e1011 = bc_kind[((boundary_type * 3u) + 1u)];
+                let _e1011 = bc_kind[((face_idx * 3u) + 1u)];
                 if (_e1011 == 1u) {
                     let _e1014 = phi_1_;
                     let _e1017 = diag_1_;
                     diag_1_ = (_e1017 + max(_e1014, 0f));
                     let _e1019 = phi_1_;
-                    let _e1028 = bc_value[((boundary_type * 3u) + 1u)];
+                    let _e1028 = bc_value[((face_idx * 3u) + 1u)];
                     let _e1030 = rhs_1_;
                     rhs_1_ = (_e1030 - (min(_e1019, 0f) * _e1028));
                 } else {
@@ -12603,19 +12603,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e1117 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
                 matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e1117 - diff_coeff_p);
             } else {
-                let _e1125 = bc_kind[((boundary_type * 3u) + 2u)];
+                let _e1125 = bc_kind[((face_idx * 3u) + 2u)];
                 if (_e1125 == 1u) {
                     let _e1128 = diag_2_;
                     diag_2_ = (_e1128 + diff_coeff_p);
-                    let _e1137 = bc_value[((boundary_type * 3u) + 2u)];
+                    let _e1137 = bc_value[((face_idx * 3u) + 2u)];
                     let _e1139 = rhs_2_;
                     rhs_2_ = (_e1139 + (diff_coeff_p * _e1137));
                 } else {
-                    let _e1147 = bc_kind[((boundary_type * 3u) + 2u)];
+                    let _e1147 = bc_kind[((face_idx * 3u) + 2u)];
                     if (_e1147 == 2u) {
                         let _e1152 = constants.density;
                         let _e1159 = state[((idx * 8u) + 3u)];
-                        let _e1168 = bc_value[((boundary_type * 3u) + 2u)];
+                        let _e1168 = bc_value[((face_idx * 3u) + 2u)];
                         let _e1171 = rhs_2_;
                         rhs_2_ = (_e1171 + -((((_e1152 * _e1159) * area) * _e1168)));
                     }
@@ -13407,18 +13407,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e468 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
                 matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e468 - diff_coeff_U);
             } else {
-                let _e476 = bc_kind[((boundary_type * 3u) + 0u)];
+                let _e476 = bc_kind[((face_idx * 3u) + 0u)];
                 if (_e476 == 1u) {
                     let _e479 = diag_0_;
                     diag_0_ = (_e479 + diff_coeff_U);
-                    let _e487 = bc_value[((boundary_type * 3u) + 0u)];
+                    let _e487 = bc_value[((face_idx * 3u) + 0u)];
                     let _e489 = rhs_0_;
                     rhs_0_ = (_e489 + (diff_coeff_U * _e487));
                 } else {
-                    let _e497 = bc_kind[((boundary_type * 3u) + 0u)];
+                    let _e497 = bc_kind[((face_idx * 3u) + 0u)];
                     if (_e497 == 2u) {
                         let _e502 = constants.viscosity;
-                        let _e510 = bc_value[((boundary_type * 3u) + 0u)];
+                        let _e510 = bc_value[((face_idx * 3u) + 0u)];
                         let _e513 = rhs_0_;
                         rhs_0_ = (_e513 + -(((_e502 * area) * _e510)));
                     }
@@ -13431,18 +13431,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e526 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
                 matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e526 - diff_coeff_U);
             } else {
-                let _e534 = bc_kind[((boundary_type * 3u) + 1u)];
+                let _e534 = bc_kind[((face_idx * 3u) + 1u)];
                 if (_e534 == 1u) {
                     let _e537 = diag_1_;
                     diag_1_ = (_e537 + diff_coeff_U);
-                    let _e545 = bc_value[((boundary_type * 3u) + 1u)];
+                    let _e545 = bc_value[((face_idx * 3u) + 1u)];
                     let _e547 = rhs_1_;
                     rhs_1_ = (_e547 + (diff_coeff_U * _e545));
                 } else {
-                    let _e555 = bc_kind[((boundary_type * 3u) + 1u)];
+                    let _e555 = bc_kind[((face_idx * 3u) + 1u)];
                     if (_e555 == 2u) {
                         let _e560 = constants.viscosity;
-                        let _e568 = bc_value[((boundary_type * 3u) + 1u)];
+                        let _e568 = bc_value[((face_idx * 3u) + 1u)];
                         let _e571 = rhs_1_;
                         rhs_1_ = (_e571 + -(((_e560 * area) * _e568)));
                     }
@@ -13492,13 +13492,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e772 = rhs_0_;
                 rhs_0_ = (_e772 - (_e606 * (select(select(select(_e613, _e621, (_e622 < 0f)), select((_e633 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e641, _e643)))), (_e654 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e667 > 0f)), false), select((((_e680 * 0.625f) + (_e689 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e700, _e702))) * 0.125f)), (((_e715 * 0.625f) + (_e725 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e733, _e735) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e745 > 0f)), false) - select(_e757, _e765, (_e766 < 0f)))));
             } else {
-                let _e780 = bc_kind[((boundary_type * 3u) + 0u)];
+                let _e780 = bc_kind[((face_idx * 3u) + 0u)];
                 if (_e780 == 1u) {
                     let _e783 = phi_0_;
                     let _e786 = diag_0_;
                     diag_0_ = (_e786 + max(_e783, 0f));
                     let _e788 = phi_0_;
-                    let _e797 = bc_value[((boundary_type * 3u) + 0u)];
+                    let _e797 = bc_value[((face_idx * 3u) + 0u)];
                     let _e799 = rhs_0_;
                     rhs_0_ = (_e799 - (min(_e788, 0f) * _e797));
                 } else {
@@ -13551,13 +13551,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e1003 = rhs_1_;
                 rhs_1_ = (_e1003 - (_e837 * (select(select(select(_e844, _e852, (_e853 < 0f)), select((_e864 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e872, _e874)))), (_e885 + dot(vec2<f32>(0f, 0f), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e898 > 0f)), false), select((((_e911 * 0.625f) + (_e920 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(center.x, center.y) - vec2<f32>(_e931, _e933))) * 0.125f)), (((_e946 * 0.625f) + (_e956 * 0.375f)) + (dot(vec2<f32>(0f, 0f), (vec2<f32>(_e964, _e966) - vec2<f32>(center.x, center.y))) * 0.125f)), (_e976 > 0f)), false) - select(_e988, _e996, (_e997 < 0f)))));
             } else {
-                let _e1011 = bc_kind[((boundary_type * 3u) + 1u)];
+                let _e1011 = bc_kind[((face_idx * 3u) + 1u)];
                 if (_e1011 == 1u) {
                     let _e1014 = phi_1_;
                     let _e1017 = diag_1_;
                     diag_1_ = (_e1017 + max(_e1014, 0f));
                     let _e1019 = phi_1_;
-                    let _e1028 = bc_value[((boundary_type * 3u) + 1u)];
+                    let _e1028 = bc_value[((face_idx * 3u) + 1u)];
                     let _e1030 = rhs_1_;
                     rhs_1_ = (_e1030 - (min(_e1019, 0f) * _e1028));
                 } else {
@@ -13589,19 +13589,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let _e1117 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
                 matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e1117 - diff_coeff_p);
             } else {
-                let _e1125 = bc_kind[((boundary_type * 3u) + 2u)];
+                let _e1125 = bc_kind[((face_idx * 3u) + 2u)];
                 if (_e1125 == 1u) {
                     let _e1128 = diag_2_;
                     diag_2_ = (_e1128 + diff_coeff_p);
-                    let _e1137 = bc_value[((boundary_type * 3u) + 2u)];
+                    let _e1137 = bc_value[((face_idx * 3u) + 2u)];
                     let _e1139 = rhs_2_;
                     rhs_2_ = (_e1139 + (diff_coeff_p * _e1137));
                 } else {
-                    let _e1147 = bc_kind[((boundary_type * 3u) + 2u)];
+                    let _e1147 = bc_kind[((face_idx * 3u) + 2u)];
                     if (_e1147 == 2u) {
                         let _e1152 = constants.density;
                         let _e1159 = state[((idx * 8u) + 3u)];
-                        let _e1168 = bc_value[((boundary_type * 3u) + 2u)];
+                        let _e1168 = bc_value[((face_idx * 3u) + 2u)];
                         let _e1171 = rhs_2_;
                         rhs_2_ = (_e1171 + -((((_e1152 * _e1159) * area) * _e1168)));
                     }

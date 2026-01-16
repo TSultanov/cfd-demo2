@@ -68,7 +68,7 @@ var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
 
-// Group 2: Boundary conditions (per boundary type x unknown)
+// Group 2: Boundary conditions (per face x unknown)
 
 @group(2) @binding(0) 
 var<storage, read> bc_kind: array<u32>;
@@ -116,7 +116,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
     let dist_proj = abs(dot(d_vec, normal_vec));
     let dist = max(dist_proj, 0.000001);
-    var phi: f32 = constants.density * dot(vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]) * lambda + vec2<f32>(select(state[neigh_idx * 8u + 0u], select(select(state[owner * 8u + 0u], bc_value[boundary_type * 3u + 0u], bc_kind[boundary_type * 3u + 0u] == 1u), state[owner * 8u + 0u] + bc_value[boundary_type * 3u + 0u] * d_own, bc_kind[boundary_type * 3u + 0u] == 2u), is_boundary), select(state[neigh_idx * 8u + 1u], select(select(state[owner * 8u + 1u], bc_value[boundary_type * 3u + 1u], bc_kind[boundary_type * 3u + 1u] == 1u), state[owner * 8u + 1u] + bc_value[boundary_type * 3u + 1u] * d_own, bc_kind[boundary_type * 3u + 1u] == 2u), is_boundary)) * lambda_other, normal_vec) * area - constants.density * (state[owner * 8u + 3u] * lambda + select(state[neigh_idx * 8u + 3u], state[owner * 8u + 3u], is_boundary) * lambda_other) * (select(state[neigh_idx * 8u + 2u], select(select(state[owner * 8u + 2u], bc_value[boundary_type * 3u + 2u], bc_kind[boundary_type * 3u + 2u] == 1u), state[owner * 8u + 2u] + bc_value[boundary_type * 3u + 2u] * d_own, bc_kind[boundary_type * 3u + 2u] == 2u), is_boundary) - state[owner * 8u + 2u]) / dist * area;
+    var phi: f32 = constants.density * dot(vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]) * lambda + vec2<f32>(select(state[neigh_idx * 8u + 0u], select(select(state[owner * 8u + 0u], bc_value[idx * 3u + 0u], bc_kind[idx * 3u + 0u] == 1u), state[owner * 8u + 0u] + bc_value[idx * 3u + 0u] * d_own, bc_kind[idx * 3u + 0u] == 2u), is_boundary), select(state[neigh_idx * 8u + 1u], select(select(state[owner * 8u + 1u], bc_value[idx * 3u + 1u], bc_kind[idx * 3u + 1u] == 1u), state[owner * 8u + 1u] + bc_value[idx * 3u + 1u] * d_own, bc_kind[idx * 3u + 1u] == 2u), is_boundary)) * lambda_other, normal_vec) * area - constants.density * (state[owner * 8u + 3u] * lambda + select(state[neigh_idx * 8u + 3u], state[owner * 8u + 3u], is_boundary) * lambda_other) * (select(state[neigh_idx * 8u + 2u], select(select(state[owner * 8u + 2u], bc_value[idx * 3u + 2u], bc_kind[idx * 3u + 2u] == 1u), state[owner * 8u + 2u] + bc_value[idx * 3u + 2u] * d_own, bc_kind[idx * 3u + 2u] == 2u), is_boundary) - state[owner * 8u + 2u]) / dist * area;
     fluxes[idx * 3u + 0u] = phi;
     fluxes[idx * 3u + 1u] = phi;
     fluxes[idx * 3u + 2u] = phi;

@@ -91,7 +91,7 @@ var<storage, read_write> rhs: array<f32>;
 @group(2) @binding(2) 
 var<storage, read> scalar_row_offsets: array<u32>;
 
-// Group 3: Boundary conditions (per boundary type x unknown)
+// Group 3: Boundary conditions (per face x unknown)
 
 @group(3) @binding(0) 
 var<storage, read> bc_kind: array<u32>;
@@ -171,12 +171,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_0 += diff_coeff_phi;
             matrix_values[start_row_0 + neighbor_rank * 1u + 0u] -= diff_coeff_phi;
         } else {
-            if (bc_kind[boundary_type * 1u + 0u] == 1u) {
+            if (bc_kind[face_idx * 1u + 0u] == 1u) {
                 diag_0 += diff_coeff_phi;
-                rhs_0 += diff_coeff_phi * bc_value[boundary_type * 1u + 0u];
+                rhs_0 += diff_coeff_phi * bc_value[face_idx * 1u + 0u];
             } else {
-                if (bc_kind[boundary_type * 1u + 0u] == 2u) {
-                    rhs_0 += -(1.0 * area * bc_value[boundary_type * 1u + 0u]);
+                if (bc_kind[face_idx * 1u + 0u] == 2u) {
+                    rhs_0 += -(1.0 * area * bc_value[face_idx * 1u + 0u]);
                 }
             }
         }

@@ -94,7 +94,7 @@ var<storage, read_write> rhs: array<f32>;
 @group(2) @binding(2) 
 var<storage, read> scalar_row_offsets: array<u32>;
 
-// Group 3: Boundary conditions (per boundary type x unknown)
+// Group 3: Boundary conditions (per face x unknown)
 
 @group(3) @binding(0) 
 var<storage, read> bc_kind: array<u32>;
@@ -304,12 +304,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[start_row_1 + diag_rank * 8u + 4u] += diff_coeff_rho_u;
             matrix_values[start_row_1 + neighbor_rank * 8u + 4u] -= diff_coeff_rho_u;
         } else {
-            if (bc_kind[boundary_type * 8u + 4u] == 1u) {
+            if (bc_kind[face_idx * 8u + 4u] == 1u) {
                 matrix_values[start_row_1 + diag_rank * 8u + 4u] += diff_coeff_rho_u;
-                rhs_1 += diff_coeff_rho_u * bc_value[boundary_type * 8u + 4u];
+                rhs_1 += diff_coeff_rho_u * bc_value[face_idx * 8u + 4u];
             } else {
-                if (bc_kind[boundary_type * 8u + 4u] == 2u) {
-                    rhs_1 += -(constants.viscosity * area * bc_value[boundary_type * 8u + 4u]);
+                if (bc_kind[face_idx * 8u + 4u] == 2u) {
+                    rhs_1 += -(constants.viscosity * area * bc_value[face_idx * 8u + 4u]);
                 }
             }
         }
@@ -317,12 +317,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             matrix_values[start_row_2 + diag_rank * 8u + 5u] += diff_coeff_rho_u;
             matrix_values[start_row_2 + neighbor_rank * 8u + 5u] -= diff_coeff_rho_u;
         } else {
-            if (bc_kind[boundary_type * 8u + 5u] == 1u) {
+            if (bc_kind[face_idx * 8u + 5u] == 1u) {
                 matrix_values[start_row_2 + diag_rank * 8u + 5u] += diff_coeff_rho_u;
-                rhs_2 += diff_coeff_rho_u * bc_value[boundary_type * 8u + 5u];
+                rhs_2 += diff_coeff_rho_u * bc_value[face_idx * 8u + 5u];
             } else {
-                if (bc_kind[boundary_type * 8u + 5u] == 2u) {
-                    rhs_2 += -(constants.viscosity * area * bc_value[boundary_type * 8u + 5u]);
+                if (bc_kind[face_idx * 8u + 5u] == 2u) {
+                    rhs_2 += -(constants.viscosity * area * bc_value[face_idx * 8u + 5u]);
                 }
             }
         }

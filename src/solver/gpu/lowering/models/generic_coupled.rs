@@ -47,6 +47,7 @@ pub(crate) struct GenericCoupledProgramResources {
     krylov: Option<GenericCoupledKrylovResources>,
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
+    boundary_faces: Vec<Vec<u32>>,
 }
 
 struct GenericCoupledSchurResources {
@@ -75,6 +76,7 @@ impl GenericCoupledProgramResources {
         recipe: &SolverRecipe,
         b_bc_kind: wgpu::Buffer,
         b_bc_value: wgpu::Buffer,
+        boundary_faces: Vec<Vec<u32>>,
     ) -> Result<Self, String> {
         // Build graphs from recipe using unified graph builder.
         //
@@ -200,6 +202,7 @@ impl GenericCoupledProgramResources {
             krylov,
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
+            boundary_faces,
         })
     }
 }
@@ -742,10 +745,19 @@ pub(crate) fn spec_set_bc_value(
         return Err(format!("invalid boundary type index {boundary_idx}"));
     }
 
-    let offset_bytes = ((boundary_idx * coupled_stride + unknown_component) * 4) as u64;
-    plan.context
-        .queue
-        .write_buffer(&res(plan)._b_bc_value, offset_bytes, bytes_of(&value));
+    // Per-face BC storage: apply the boundary value to all boundary faces of this type.
+    // (Boundary index 0 is reserved for "None" and should have no boundary faces.)
+    let faces = res(plan)
+        .boundary_faces
+        .get(boundary_idx as usize)
+        .ok_or_else(|| format!("missing boundary_faces[{boundary_idx}]"))?;
+    for &face_idx in faces {
+        let offset_bytes = ((face_idx as u64 * coupled_stride as u64 + unknown_component as u64)
+            * 4) as u64;
+        plan.context
+            .queue
+            .write_buffer(&res(plan)._b_bc_value, offset_bytes, bytes_of(&value));
+    }
     Ok(())
 }
 

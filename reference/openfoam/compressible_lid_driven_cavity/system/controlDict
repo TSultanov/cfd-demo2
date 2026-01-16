@@ -19,12 +19,12 @@ startFrom       startTime;
 startTime       0;
 
 stopAt          endTime;
-endTime         1e-4;
+endTime         3e-3;
 
-deltaT          1e-6;
+deltaT          1e-5;
 
 writeControl    timeStep;
-writeInterval   100;
+writeInterval   300;
 purgeWrite      0;
 
 writeFormat     ascii;

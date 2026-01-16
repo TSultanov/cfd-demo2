@@ -116,8 +116,22 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     let ux_err = common::rel_l2(&ux_sol, &ux_ref, 1e-12);
     let uy_err = common::rel_l2(&uy_sol, &uy_ref, 1e-12);
 
+    // Non-triviality guards.
+    let ux_ref_max = common::max_abs(&ux_ref);
+    let uy_ref_max = common::max_abs(&uy_ref);
+    let p_ref_dev = common::max_abs_centered(&p_ref);
+    let ux_sol_max = common::max_abs(&ux_sol);
+    let uy_sol_max = common::max_abs(&uy_sol);
+    let p_sol_dev = common::max_abs_centered(&p_sol);
+    assert!(ux_ref_max > 200.0 && uy_ref_max > 20.0 && p_ref_dev > 1e4, "reference appears trivial: max_abs(u_x)={ux_ref_max:.3e} max_abs(u_y)={uy_ref_max:.3e} max_abs_centered(p)={p_ref_dev:.3e}");
+    assert!(ux_sol_max > 50.0 && uy_sol_max > 5.0 && p_sol_dev > 1e3, "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e} max_abs_centered(p)={p_sol_dev:.3e}");
+
+    if common::diag_enabled() {
+        eprintln!("[openfoam][compressible_backstep] rel_l2 p={p_err:.6} u_x={ux_err:.6} u_y={uy_err:.6} | max_abs_ref u_x={ux_ref_max:.3e} u_y={uy_ref_max:.3e} p_dev={p_ref_dev:.3e} | max_abs_sol u_x={ux_sol_max:.3e} u_y={uy_sol_max:.3e} p_dev={p_sol_dev:.3e}");
+    }
+
     assert!(
-        p_err < 1.0 && ux_err < 1.0 && uy_err < 3.0,
+        p_err < 0.7 && ux_err < 0.8 && uy_err < 2.0,
         "mismatch vs OpenFOAM: rel_l2(p)={p_err:.3} rel_l2(u_x)={ux_err:.3} rel_l2(u_y)={uy_err:.3}"
     );
 }

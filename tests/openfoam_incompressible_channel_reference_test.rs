@@ -104,7 +104,16 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     let u_y_ref: Vec<f64> = table.rows.iter().map(|r| r[uy_idx]).collect();
 
     let u_x_err = common::rel_l2(&u_x, &u_x_ref, 1e-12);
-    let u_y_err = common::rel_l2(&u_y, &u_y_ref, 1e-12);
+    // NOTE: u_y on this centerline is ~0 in the OpenFOAM reference (O(1e-4)), so a *relative*
+    // L2 error is ill-conditioned and will overreact to tiny absolute differences.
+    let mut u_y_rms_err = 0.0f64;
+    let mut u_y_max_abs_err = 0.0f64;
+    for (&a, &b) in u_y.iter().zip(u_y_ref.iter()) {
+        let d = a - b;
+        u_y_rms_err += d * d;
+        u_y_max_abs_err = u_y_max_abs_err.max(d.abs());
+    }
+    u_y_rms_err = (u_y_rms_err / (u_y.len().max(1) as f64)).sqrt();
     let (min_u_x, max_u_x) = u_x
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
@@ -115,6 +124,10 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
         .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
             (acc.0.min(v), acc.1.max(v))
         });
+
+    // Non-triviality guards.
+    assert!(max_u_x_ref > 0.9, "reference appears trivial: max_u_x_ref={max_u_x_ref:.3e}");
+    assert!(max_u_x > 0.4, "solver appears trivial: max_u_x_sol={max_u_x:.3e}");
 
     // The code and OpenFOAM use different linear solver stacks and discretization details.
     // These tolerances are intended to catch gross regressions while allowing some drift.
@@ -171,6 +184,10 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     let (p_err_affine, p_scale_affine, p_shift_affine) =
         common::rel_l2_best_affine(&p_sol, &p_ref, 1e-12);
 
+    if common::diag_enabled() {
+        eprintln!("[openfoam][incompressible_channel] centerline rel_l2 u_x={u_x_err:.6} | centerline u_y abs rms={u_y_rms_err:.6} max_abs={u_y_max_abs_err:.6} | full rel_l2 u_x={u_x_err_full:.6} u_y={u_y_err_full:.6} p_affine={p_err_affine:.6} | max_u_x sol={max_u_x:.3e} ref={max_u_x_ref:.3e} | p_affine scale={p_scale_affine:.3e} shift={p_shift_affine:.3e} p_shift={p_shift_full:.3e}");
+    }
+
     // Diagnostics: global mass balance over inlet/outlet boundaries (using face geometry).
     let rho = 1.0f64;
     let u_inlet = (1.0f64, 0.0f64);
@@ -205,11 +222,11 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     }
 
     assert!(
-        u_x_err < 0.3
-            && u_y_err < 5.0
-            && u_x_err_full < 0.35
-            && u_y_err_full < 10.0
-            && p_err_affine < 0.25,
-        "mismatch vs OpenFOAM: centerline rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}]); full rel_l2(u_x)={u_x_err_full:.3} rel_l2(u_y)={u_y_err_full:.3} rel_l2(p)={p_err_full:.3} (best shift {p_shift_full:.3e}, best affine err={p_err_affine:.3} scale={p_scale_affine:.3e} shift={p_shift_affine:.3e}); mass balance inflow={m_in:.6} outflow={m_out:.6}"
+        u_x_err < 0.30
+            && u_y_rms_err < 0.02
+            && u_x_err_full < 0.30
+            && u_y_err_full < 5.0
+            && p_err_affine < 0.20,
+        "mismatch vs OpenFOAM: centerline rel_l2(u_x)={u_x_err:.3} u_y_abs_rms={u_y_rms_err:.3} u_y_abs_max={u_y_max_abs_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}]); full rel_l2(u_x)={u_x_err_full:.3} rel_l2(u_y)={u_y_err_full:.3} rel_l2(p)={p_err_full:.3} (best shift {p_shift_full:.3e}, best affine err={p_err_affine:.3} scale={p_scale_affine:.3e} shift={p_shift_affine:.3e}); mass balance inflow={m_in:.6} outflow={m_out:.6}"
     );
 }

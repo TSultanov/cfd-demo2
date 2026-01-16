@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use super::dsl as typed;
-use super::primitive_expr::lower_primitive_expr;
 use super::wgsl_ast::{
     AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
@@ -606,18 +605,7 @@ fn lower_scalar(
             let prim = primitives.get(name.as_str()).unwrap_or_else(|| {
                 panic!("primitive '{}' not found in PrimitiveDerivations", name)
             });
-            // Boundary faces do not have a true neighbor cell index; fall back to the owner
-            // index for primitive evaluation on boundary faces.
-            let idx = if *side == FaceSide::Owner {
-                Expr::ident("owner")
-            } else {
-                dsl::select(
-                    Expr::ident("neigh_idx"),
-                    Expr::ident("owner"),
-                    Expr::ident("is_boundary"),
-                )
-            };
-            lower_primitive_expr(prim, layout, idx, "state")
+            lower_primitive_expr_at_side(prim, layout, *side, flux_layout)
         }
         FaceScalarExpr::Add(a, b) => {
             lower_scalar(a, layout, primitives, flux_layout)
@@ -662,4 +650,69 @@ fn lower_scalar(
             a.dot(&b)
         }
     }
+}
+
+fn lower_primitive_expr_at_side(
+    expr: &PrimitiveExpr,
+    state_layout: &StateLayout,
+    side: FaceSide,
+    flux_layout: &FluxLayout,
+) -> Expr {
+    match expr {
+        PrimitiveExpr::Literal(val) => Expr::lit_f32(*val),
+
+        PrimitiveExpr::Field(name) => {
+            let (base, component) = resolve_state_field_component(state_layout, name);
+            state_component_at_side(state_layout, "state", side, base, component, flux_layout)
+        }
+
+        PrimitiveExpr::Add(lhs, rhs) => {
+            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
+                + lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+        }
+        PrimitiveExpr::Sub(lhs, rhs) => {
+            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
+                - lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+        }
+        PrimitiveExpr::Mul(lhs, rhs) => {
+            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
+                * lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+        }
+        PrimitiveExpr::Div(lhs, rhs) => {
+            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
+                / lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+        }
+
+        PrimitiveExpr::Sqrt(inner) => Expr::call_named(
+            "sqrt",
+            vec![lower_primitive_expr_at_side(inner, state_layout, side, flux_layout)],
+        ),
+        PrimitiveExpr::Neg(inner) => -lower_primitive_expr_at_side(inner, state_layout, side, flux_layout),
+    }
+}
+
+fn resolve_state_field_component<'a>(
+    state_layout: &StateLayout,
+    name: &'a str,
+) -> (&'a str, u32) {
+    if state_layout.offset_for(name).is_some() {
+        return (name, 0);
+    }
+
+    let (base, component) = name
+        .rsplit_once('_')
+        .unwrap_or_else(|| panic!("primitive field '{}' not found in state layout", name));
+
+    let component = match component {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        _ => panic!("primitive field '{}' not found in state layout", name),
+    };
+
+    if state_layout.component_offset(base, component).is_none() {
+        panic!("primitive field '{}' not found in state layout", name);
+    }
+
+    (base, component)
 }

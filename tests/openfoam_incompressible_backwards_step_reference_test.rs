@@ -116,8 +116,20 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     let (p_err_affine, p_scale_affine, p_shift_affine) =
         common::rel_l2_best_affine(&p_sol, &p_ref, 1e-12);
 
+    // Non-triviality guards.
+    let ux_ref_max = common::max_abs(&u_x_ref);
+    let uy_ref_max = common::max_abs(&u_y_ref);
+    let ux_sol_max = common::max_abs(&u_x_sol);
+    let uy_sol_max = common::max_abs(&u_y_sol);
+    assert!(ux_ref_max > 0.8 && uy_ref_max > 0.05, "reference appears trivial: max_abs(u_x)={ux_ref_max:.3e} max_abs(u_y)={uy_ref_max:.3e}");
+    assert!(ux_sol_max > 0.3 && uy_sol_max > 0.01, "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e}");
+
+    if common::diag_enabled() {
+        eprintln!("[openfoam][incompressible_backstep] rel_l2 u_x={u_x_err:.6} u_y={u_y_err:.6} p_affine={p_err_affine:.6} | max_abs_ref u_x={ux_ref_max:.3e} u_y={uy_ref_max:.3e} | max_abs_sol u_x={ux_sol_max:.3e} u_y={uy_sol_max:.3e} | p_affine scale={p_scale_affine:.3e} shift={p_shift_affine:.3e} p_shift={p_shift:.3e} p_err={p_err:.6}");
+    }
+
     assert!(
-        u_x_err < 0.6 && u_y_err < 3.0 && p_err_affine < 0.25,
+        u_x_err < 0.5 && u_y_err < 2.0 && p_err_affine < 0.21,
         "mismatch vs OpenFOAM: rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} rel_l2(p)={p_err:.3} (best shift {p_shift:.3e}, best affine err={p_err_affine:.3} scale={p_scale_affine:.3e} shift={p_shift_affine:.3e})"
     );
 }

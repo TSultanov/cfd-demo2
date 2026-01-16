@@ -1,6 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub fn diag_enabled() -> bool {
+    std::env::var("CFD2_OPENFOAM_DIAG").is_ok()
+}
+
 pub struct CsvTable {
     pub header: Vec<String>,
     pub rows: Vec<Vec<f64>>,
@@ -66,6 +70,22 @@ pub fn rel_l2(a: &[f64], b: &[f64], floor: f64) -> f64 {
         den += y * y;
     }
     (num / a.len().max(1) as f64).sqrt() / (den / a.len().max(1) as f64).sqrt().max(floor)
+}
+
+pub fn mean(xs: &[f64]) -> f64 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+    xs.iter().sum::<f64>() / xs.len() as f64
+}
+
+pub fn max_abs(xs: &[f64]) -> f64 {
+    xs.iter().map(|v| v.abs()).fold(0.0, f64::max)
+}
+
+pub fn max_abs_centered(xs: &[f64]) -> f64 {
+    let m = mean(xs);
+    xs.iter().map(|v| (v - m).abs()).fold(0.0, f64::max)
 }
 
 /// Relative L2 error after applying the best constant offset to `a` (least-squares fit):

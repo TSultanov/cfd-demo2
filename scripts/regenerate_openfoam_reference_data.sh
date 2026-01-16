@@ -92,7 +92,7 @@ python3 "${ROOT_DIR}/scripts/openfoam/extract_probes_to_csv.py" \
 echo "==> Compressible lid-driven cavity (rhoCentralFoam)"
 cp -R "${ROOT_DIR}/reference/openfoam/compressible_lid_driven_cavity" "${WORK_DIR}/"
 gen_probes_all "${WORK_DIR}/compressible_lid_driven_cavity/system/probes_all.cfg" \
-  --write-interval 100 \
+  --write-interval 50 \
   --fields U,p \
   rect --nx 20 --ny 20 --length 1 --height 1
 run_openfoam "cd '${WORK_DIR}/compressible_lid_driven_cavity' && blockMesh > log.blockMesh && rhoCentralFoam > log.rhoCentralFoam"

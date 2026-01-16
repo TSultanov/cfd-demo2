@@ -115,6 +115,7 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     let mut p_ref = Vec::with_capacity(mesh.num_cells());
     let mut ux_ref = Vec::with_capacity(mesh.num_cells());
     let mut uy_ref = Vec::with_capacity(mesh.num_cells());
+    let mut xy_ref = Vec::with_capacity(mesh.num_cells());
 
     for row in &table.rows {
         let x = row[x_idx];
@@ -123,6 +124,7 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
         let Some((p_s, ux_s, uy_s)) = sol_map.get(&key).copied() else {
             panic!("solver mesh does not contain a cell near (x={x}, y={y}) (key={key:?})");
         };
+        xy_ref.push((x, y));
         p_ref.push(row[p_idx]);
         ux_ref.push(row[ux_idx]);
         uy_ref.push(row[uy_idx]);
@@ -135,8 +137,51 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     let ux_err = common::rel_l2(&ux_sol, &ux_ref, 1e-12);
     let uy_err = common::rel_l2(&uy_sol, &uy_ref, 1e-12);
 
+    // Non-triviality guards: this case has near-constant u_x, so use p/u_y variation.
+    let p_ref_dev = common::max_abs_centered(&p_ref);
+    let p_sol_dev = common::max_abs_centered(&p_sol);
+    let uy_ref_max = common::max_abs(&uy_ref);
+    let uy_sol_max = common::max_abs(&uy_sol);
+    assert!(p_ref_dev > 1e3 && uy_ref_max > 5.0, "reference appears trivial: p_dev={p_ref_dev:.3e} max_abs(u_y)={uy_ref_max:.3e}");
+    assert!(p_sol_dev > 1e2 && uy_sol_max > 1.0, "solver appears trivial: p_dev={p_sol_dev:.3e} max_abs(u_y)={uy_sol_max:.3e}");
+
+    if common::diag_enabled() {
+        let p_ref_mean = common::mean(&p_ref);
+        let p_sol_mean = common::mean(&p_sol);
+        let p_ref_min = p_ref
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, |a, b| a.min(b));
+        let p_ref_max = p_ref
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+        let p_sol_min = p_sol
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, |a, b| a.min(b));
+        let p_sol_max = p_sol
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, |a, b| a.max(b));
+
+        let mut max_abs_dp = 0.0f64;
+        let mut max_abs_dp_idx = 0usize;
+        for (i, (&ps, &pr)) in p_sol.iter().zip(p_ref.iter()).enumerate() {
+            let d = (ps - pr).abs();
+            if d > max_abs_dp {
+                max_abs_dp = d;
+                max_abs_dp_idx = i;
+            }
+        }
+        let (x_max, y_max) = xy_ref[max_abs_dp_idx];
+
+        eprintln!("[openfoam][compressible_wedge] rel_l2 p={p_err:.6} u_x={ux_err:.6} u_y={uy_err:.6} | p_dev ref={p_ref_dev:.3e} sol={p_sol_dev:.3e} | uy_max ref={uy_ref_max:.3e} sol={uy_sol_max:.3e}");
+        eprintln!("[openfoam][compressible_wedge] p stats: ref(min={p_ref_min:.3e} max={p_ref_max:.3e} mean={p_ref_mean:.3e}) sol(min={p_sol_min:.3e} max={p_sol_max:.3e} mean={p_sol_mean:.3e}) | max_abs(p_sol-p_ref)={max_abs_dp:.3e} at (x={x_max:.4}, y={y_max:.4})");
+    }
+
     assert!(
-        p_err < 3.0 && ux_err < 2.0 && uy_err < 2.0,
+        p_err < 2.5 && ux_err < 1.5 && uy_err < 1.5,
         "mismatch vs OpenFOAM: rel_l2(p)={p_err:.3} rel_l2(u_x)={ux_err:.3} rel_l2(u_y)={uy_err:.3}"
     );
 }

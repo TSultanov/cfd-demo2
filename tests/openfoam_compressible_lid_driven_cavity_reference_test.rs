@@ -5,6 +5,7 @@ use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
+    SolverCompressibleInletExt,
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::options::{PreconditionerType, TimeScheme};
@@ -29,7 +30,9 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
         BoundaryType::Wall,
         BoundaryType::Wall,
         BoundaryType::Wall,
-        BoundaryType::Wall,
+        // Treat the moving lid as an `Inlet` so we can apply a Dirichlet tangential velocity
+        // (with zero normal component) via the boundary table mechanism.
+        BoundaryType::Inlet,
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
@@ -59,15 +62,25 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     let p0 = 101325.0f32;
     let rho0 = (p0 as f64 / (287.0 * 300.0)) as f32;
 
-    solver.set_dt(1e-6);
+    // Match the OpenFOAM case (rhoCentralFoam) setup:
+    // - Lid tangential speed is high (near Mach 1 at 300K), but normal velocity is 0 so there is
+    //   no net mass flux through the lid.
+    // - Use deliberately high viscosity so the flow becomes non-trivial quickly at this coarse
+    //   resolution.
+    let u_lid = 1.0f32;
+
+    solver.set_dt(1e-5);
     solver.set_dtau(0.0).unwrap();
-    solver.set_viscosity(1.81e-5).unwrap();
+    solver.set_viscosity(1.0).unwrap();
     solver.set_density(rho0).unwrap();
     solver.set_outer_iters(1).unwrap();
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);
+    solver
+        .set_compressible_inlet_isothermal_x(rho0, u_lid, &eos)
+        .unwrap();
     solver.initialize_history();
 
-    for _ in 0..100 {
+    for _ in 0..300 {
         solver.step();
     }
 
@@ -153,6 +166,18 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     let uy_rms_diff = rms_diff(&uy_sol, &uy_ref);
     let ux_max_sol = max_abs(&ux_sol);
     let uy_max_sol = max_abs(&uy_sol);
+
+    // Non-triviality guards: ensure we're not comparing stagnant fields.
+    assert!(
+        ux_max_sol > 1e-3 && uy_max_sol > 1e-3,
+        "solver appears trivial: max_abs_sol(u_x)={ux_max_sol:.3e} max_abs_sol(u_y)={uy_max_sol:.3e}"
+    );
+    let ux_max_ref = max_abs(&ux_ref);
+    let uy_max_ref = max_abs(&uy_ref);
+    assert!(
+        ux_max_ref > 1e-3 && uy_max_ref > 1e-3,
+        "reference appears trivial: max_abs_ref(u_x)={ux_max_ref:.3e} max_abs_ref(u_y)={uy_max_ref:.3e}"
+    );
 
     assert!(
         p_err < 2.0 && ux_err < 2.0 && uy_err < 2.0,

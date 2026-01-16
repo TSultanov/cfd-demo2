@@ -41,7 +41,10 @@ mixture
     transport
     {
         // Dynamic viscosity mu [kg/(m s)].
-        mu              1.81e-5;
+        // Use a deliberately high viscosity to make the flow develop on a short
+        // physical time horizon at this coarse resolution (keeps reference generation
+        // and solver tests fast and non-trivial).
+        mu              1;
         Pr              0.71;
     }
 }

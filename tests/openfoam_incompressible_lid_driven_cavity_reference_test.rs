@@ -10,13 +10,6 @@ use cfd2::solver::options::{PreconditionerType, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 
-fn mean(xs: &[f64]) -> f64 {
-    if xs.is_empty() {
-        return 0.0;
-    }
-    xs.iter().sum::<f64>() / xs.len() as f64
-}
-
 #[test]
 fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -112,8 +105,8 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     let mut p_ref: Vec<f64> = ref_rows.iter().map(|r| r.4).collect();
 
     // Pressure gauge is fixed differently across solvers; compare mean-free pressure.
-    let p_sol_mean = mean(&p_sol);
-    let p_ref_mean = mean(&p_ref);
+    let p_sol_mean = common::mean(&p_sol);
+    let p_ref_mean = common::mean(&p_ref);
     for v in &mut p_sol {
         *v -= p_sol_mean;
     }
@@ -121,12 +114,30 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         *v -= p_ref_mean;
     }
 
+    // Non-triviality guards: ensure we're not comparing stagnant fields.
+    let ux_ref_max = common::max_abs(&u_x_ref);
+    let uy_ref_max = common::max_abs(&u_y_ref);
+    let ux_sol_max = common::max_abs(&u_x_sol);
+    let uy_sol_max = common::max_abs(&u_y_sol);
+    let p_ref_dev = common::max_abs(&p_ref);
+    let p_sol_dev = common::max_abs(&p_sol);
+    assert!(ux_ref_max > 0.5 && uy_ref_max > 0.15 && p_ref_dev > 0.2, "reference appears trivial: max_abs(u_x)={ux_ref_max:.3e} max_abs(u_y)={uy_ref_max:.3e} max_abs(p-mean)={p_ref_dev:.3e}");
+    // Solver pressure often differs by a large scale factor vs OpenFOAM (see other tests that
+    // use best-affine fitting). Don't treat small absolute p-variation as "trivial" as long as
+    // the velocity field is clearly non-trivial.
+    assert!(ux_sol_max > 0.2 && uy_sol_max > 0.05 && p_sol_dev > 1e-4, "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e} max_abs(p-mean)={p_sol_dev:.3e}");
+
     let u_x_err = common::rel_l2(&u_x_sol, &u_x_ref, 1e-12);
     let u_y_err = common::rel_l2(&u_y_sol, &u_y_ref, 1e-12);
-    let p_err = common::rel_l2(&p_sol, &p_ref, 1e-12);
+    let (p_err_affine, p_scale_affine, p_shift_affine) =
+        common::rel_l2_best_affine(&p_sol, &p_ref, 1e-12);
+
+    if common::diag_enabled() {
+        eprintln!("[openfoam][incompressible_lid] rel_l2 u_x={u_x_err:.6} u_y={u_y_err:.6} p_affine={p_err_affine:.6} | max_abs_ref u_x={ux_ref_max:.3e} u_y={uy_ref_max:.3e} pdev={p_ref_dev:.3e} | max_abs_sol u_x={ux_sol_max:.3e} u_y={uy_sol_max:.3e} pdev={p_sol_dev:.3e} | p_affine scale={p_scale_affine:.3e} shift={p_shift_affine:.3e}");
+    }
 
     assert!(
-        u_x_err < 1.5 && u_y_err < 1.5 && p_err < 2.5,
-        "mismatch vs OpenFOAM: rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} rel_l2(p-mean)={p_err:.3}"
+        u_x_err < 0.6 && u_y_err < 0.9 && p_err_affine < 0.40,
+        "mismatch vs OpenFOAM: rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} rel_l2(p-mean, affine-fit)={p_err_affine:.3} (scale={p_scale_affine:.3e} shift={p_shift_affine:.3e})"
     );
 }

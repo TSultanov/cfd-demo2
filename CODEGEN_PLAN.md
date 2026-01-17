@@ -89,6 +89,9 @@ Progress (partial):
   - flux module configuration (0 or 1 allowed)
   - named parameter keys accepted by the runtime plan
   - typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
+ - Extracted Rhie–Chow aux bundle into a dedicated module factory (`src/solver/model/modules/rhie_chow.rs`), eliminating per-model inline `KernelBundleModule` literals for this pass.
+ - Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; EOS/low-mach named keys are now purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
+ - Validation gate: OpenFOAM reference tests passed (`cargo test openfoam_ -- --nocapture`) on 2026-01-17.
 
 ### 1) Flux Modules (reconstruction + method knobs)
 - Flux kernels are IR-driven and now consume boundary conditions consistently with assembly.

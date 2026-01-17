@@ -308,12 +308,12 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     let model = ModelSpec {
         id: "compressible",
         // Route compressible through the generic coupled pipeline.
-        eos,
         system,
         state_layout: layout,
         boundaries,
 
         modules: vec![
+            crate::solver::model::modules::eos::eos_module(eos),
             crate::solver::model::kernel::flux_module_module(flux)
                 .expect("failed to build flux_module module"),
             crate::solver::model::kernel::generic_coupled_module(method),

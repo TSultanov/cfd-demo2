@@ -816,7 +816,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     comp.set_dt(dt);
     comp.set_dtau(5e-5).unwrap();
     comp.set_viscosity(nu).unwrap();
-    let eos = comp.model().eos;
+    let eos = comp.model().eos();
     comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
         .unwrap();
     comp.set_alpha_u(0.3).unwrap();

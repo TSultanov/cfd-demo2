@@ -38,7 +38,7 @@ fn gpu_compressible_amg_smoke() {
     solver.set_dt(0.01);
     solver.set_dtau(0.0).unwrap();
     solver.set_viscosity(0.01).unwrap();
-    let eos = solver.model().eos;
+    let eos = solver.model().eos();
     solver
         .set_compressible_inlet_isothermal_x(1.0, 0.5, &eos)
         .unwrap();

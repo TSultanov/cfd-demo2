@@ -4,10 +4,6 @@ use crate::solver::model::backend::ast::{
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::gpu_spec::ModelGpuSpec;
-use crate::solver::model::kernel::{
-    DispatchKindId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
-};
-use crate::solver::model::KernelId;
 use crate::solver::units::{si, UnitDim};
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -167,59 +163,20 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 
     let model = ModelSpec {
         id: "incompressible_momentum",
-        eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,
 
         modules: vec![
+            crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
             crate::solver::model::kernel::flux_module_module(flux_module)
                 .expect("failed to build flux_module module"),
             crate::solver::model::kernel::generic_coupled_module(method),
-            crate::solver::model::module::KernelBundleModule {
-            name: "rhie_chow_aux",
-            kernels: vec![
-                ModelKernelSpec {
-                    id: KernelId::DP_INIT,
-                    phase: KernelPhaseId::Preparation,
-                    dispatch: DispatchKindId::Cells,
-                },
-                ModelKernelSpec {
-                    id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
-                    phase: KernelPhaseId::Gradients,
-                    dispatch: DispatchKindId::Cells,
-                },
-                ModelKernelSpec {
-                    id: KernelId::DP_UPDATE_FROM_DIAG,
-                    phase: KernelPhaseId::Update,
-                    dispatch: DispatchKindId::Cells,
-                },
-            ],
-            generators: vec![
-                ModelKernelGeneratorSpec {
-                    id: KernelId::DP_INIT,
-                    generator: crate::solver::model::kernel::generate_dp_init_kernel_wgsl,
-                },
-                ModelKernelGeneratorSpec {
-                    id: KernelId::DP_UPDATE_FROM_DIAG,
-                    generator: crate::solver::model::kernel::generate_dp_update_from_diag_kernel_wgsl,
-                },
-                ModelKernelGeneratorSpec {
-                    id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
-                    generator: crate::solver::model::kernel::generate_rhie_chow_correct_velocity_kernel_wgsl,
-                },
-            ],
-            manifest: crate::solver::model::module::ModuleManifest {
-                invariants: vec![
-                    crate::solver::model::module::ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
-                        dp_field: "d_p",
-                        require_vector2_momentum: true,
-                        require_pressure_gradient: true,
-                    },
-                ],
-                ..Default::default()
-            },
-        },
+            crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(
+                "d_p",
+                true,
+                true,
+            ),
         ],
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {

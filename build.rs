@@ -113,6 +113,20 @@ mod solver {
                 "/src/solver/model/gpu_spec.rs"
             ));
         }
+        pub mod modules {
+            pub mod eos {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/model/modules/eos.rs"
+                ));
+            }
+            pub mod rhie_chow {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/model/modules/rhie_chow.rs"
+                ));
+            }
+        }
         pub mod definitions {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

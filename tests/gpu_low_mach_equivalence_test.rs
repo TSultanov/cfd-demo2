@@ -406,7 +406,7 @@ fn low_mach_equivalence_vortex_street() {
     comp.set_dt(dt as f32);
     comp.set_dtau(dtau as f32).unwrap();
     comp.set_viscosity(nu).unwrap();
-    let eos = comp.model().eos;
+    let eos = comp.model().eos();
     comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
         .unwrap();
     comp.set_alpha_u(alpha_u as f32).unwrap();

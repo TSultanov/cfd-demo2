@@ -63,7 +63,7 @@ fn compressible_shock_tube_relaxes_discontinuity() {
     solver.set_outer_iters(3).unwrap();
     solver.set_dt(0.002);
     solver.set_viscosity(0.0).unwrap();
-    let eos = solver.model().eos;
+    let eos = solver.model().eos();
     solver
         .set_compressible_inlet_isothermal_x(1.0, 0.0, &eos)
         .unwrap();
@@ -149,7 +149,7 @@ fn compressible_acoustic_pulse_propagates() {
     solver.set_outer_iters(3).unwrap();
     solver.set_dt(0.005);
     solver.set_viscosity(0.0).unwrap();
-    let eos = solver.model().eos;
+    let eos = solver.model().eos();
     solver
         .set_compressible_inlet_isothermal_x(1.0, 0.0, &eos)
         .unwrap();

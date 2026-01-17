@@ -40,7 +40,7 @@ fn gpu_compressible_solver_preserves_uniform_state() {
     .expect("solver init");
 
     solver.set_dt(0.01);
-    let eos = solver.model().eos;
+    let eos = solver.model().eos();
     solver
         .set_compressible_inlet_isothermal_x(1.0, 0.0, &eos)
         .unwrap();

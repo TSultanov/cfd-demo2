@@ -1399,14 +1399,16 @@ mod tests {
 
         let model = crate::solver::model::ModelSpec {
             id: "schur_vector3_test",
-            eos: eos::EosSpec::Constant,
             system,
             state_layout: layout,
             boundaries: BoundarySpec::default(),
 
-            modules: vec![crate::solver::model::kernel::generic_coupled_module(
-                crate::solver::model::method::MethodSpec::GenericCoupled,
-            )],
+            modules: vec![
+                crate::solver::model::modules::eos::eos_module(eos::EosSpec::Constant),
+                crate::solver::model::kernel::generic_coupled_module(
+                    crate::solver::model::method::MethodSpec::GenericCoupled,
+                ),
+            ],
             linear_solver: Some(ModelLinearSolverSpec {
                 preconditioner: ModelPreconditionerSpec::Schur {
                     omega: 1.0,

@@ -13,6 +13,7 @@ pub mod kernel;
 pub mod linear_solver;
 pub mod module;
 pub mod method;
+pub mod modules;
 pub mod primitives;
 
 pub use definitions::{

@@ -35,7 +35,7 @@ pub(crate) async fn build_generic_coupled_backend(
     let num_cells = runtime.common.num_cells;
 
     // Create unified field resources from recipe.
-    let eos_params = model.eos.runtime_params();
+    let eos_params = model.eos().runtime_params();
     let mut initial_constants = GpuConstants::default();
     initial_constants.eos_gamma = eos_params.gamma;
     initial_constants.eos_gm1 = eos_params.gm1;

@@ -221,6 +221,7 @@ pub fn generic_coupled_module(
             ],
             ..Default::default()
         },
+        ..Default::default()
     }
 }
 
@@ -243,6 +244,7 @@ pub fn flux_module_module(
             flux_module: Some(flux),
             ..Default::default()
         },
+        ..Default::default()
     };
 
     if has_gradients {

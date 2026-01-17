@@ -1,4 +1,5 @@
 use crate::solver::model::kernel::{ModelKernelGeneratorSpec, ModelKernelSpec};
+use crate::solver::model::eos::EosSpec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NamedParamKey {
@@ -73,6 +74,11 @@ pub struct KernelBundleModule {
     pub name: &'static str,
     pub kernels: Vec<ModelKernelSpec>,
     pub generators: Vec<ModelKernelGeneratorSpec>,
+
+    /// Optional EOS configuration carried by this module.
+    ///
+    /// When present, the owning model is considered to have an EOS.
+    pub eos: Option<EosSpec>,
 
     pub manifest: ModuleManifest,
 }

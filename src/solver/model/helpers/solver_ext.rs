@@ -181,7 +181,7 @@ pub trait SolverCompressibleIdealGasExt {
 
 impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
     fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
-        let eos = self.model().eos;
+        let eos = self.model().eos();
         let eos_params = eos.runtime_params();
         let gm1 = eos_params.gm1;
         let r_gas = eos_params.r;
@@ -251,7 +251,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             return;
         }
 
-        let eos = self.model().eos;
+        let eos = self.model().eos();
         let eos_params = eos.runtime_params();
         let gm1 = eos_params.gm1;
         let r_gas = eos_params.r;

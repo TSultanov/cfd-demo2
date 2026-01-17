@@ -9,7 +9,6 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub id: &'static str,
-    pub eos: crate::solver::model::eos::EosSpec,
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub boundaries: BoundarySpec,
@@ -44,31 +43,33 @@ impl ModelSpec {
             }
         }
 
-        // EOS-implied parameters remain derived from the EOS (Option B):
-        // these are not module-declared yet.
-        let requires_low_mach_params = matches!(
-            self.eos,
-            crate::solver::model::eos::EosSpec::IdealGas { .. }
-                | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
-        );
-
-        if requires_low_mach_params {
-            // EOS tuning knobs.
-            out.insert("eos.gamma");
-            out.insert("eos.gm1");
-            out.insert("eos.r");
-            out.insert("eos.dp_drho");
-            out.insert("eos.p_offset");
-            out.insert("eos.theta_ref");
-
-            // Low-mach model knobs (buffer allocation is EOS-implied).
-            out.insert("low_mach.model");
-            out.insert("low_mach.theta_floor");
-        }
-
         let mut v: Vec<&'static str> = out.into_iter().collect();
         v.sort_unstable();
         v
+    }
+
+    pub fn eos(&self) -> crate::solver::model::eos::EosSpec {
+        self.eos_checked().unwrap_or_default()
+    }
+
+    pub fn eos_checked(&self) -> Result<crate::solver::model::eos::EosSpec, String> {
+        let mut found: Option<(&'static str, crate::solver::model::eos::EosSpec)> = None;
+        for module in &self.modules {
+            if let Some(eos) = module.eos {
+                match found {
+                    None => found = Some((module.name, eos)),
+                    Some((prev_name, _)) => {
+                        return Err(format!(
+                            "model defines EOS in multiple modules ('{prev_name}', '{}')",
+                            module.name
+                        ));
+                    }
+                }
+            }
+        }
+        found
+            .map(|(_, eos)| eos)
+            .ok_or_else(|| "model defines no EOS module".to_string())
     }
 
     pub fn method(&self) -> Result<crate::solver::model::method::MethodSpec, String> {
@@ -113,6 +114,7 @@ impl ModelSpec {
     }
 
     pub fn validate_module_manifests(&self) -> Result<(), String> {
+        let _ = self.eos_checked()?;
         let method = self.method()?;
         let flux = self.flux_module()?;
 
@@ -238,9 +240,9 @@ impl ModelSpec {
             stride: self.system.unknowns_per_cell(),
         });
 
-        // Low-Mach parameters are currently only used by compressible models/tests.
+        // Low-Mach parameters are currently only used by compressible EOS variants.
         let requires_low_mach_params = matches!(
-            self.eos,
+            self.eos(),
             crate::solver::model::eos::EosSpec::IdealGas { .. }
                 | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
         );

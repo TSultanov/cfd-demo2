@@ -39,14 +39,16 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
     );
     let model = ModelSpec {
         id: "generic_diffusion_demo",
-        eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,
 
-        modules: vec![crate::solver::model::kernel::generic_coupled_module(
-            crate::solver::model::method::MethodSpec::GenericCoupled,
-        )],
+        modules: vec![
+            crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
+            crate::solver::model::kernel::generic_coupled_module(
+                crate::solver::model::method::MethodSpec::GenericCoupled,
+            ),
+        ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
         gpu: ModelGpuSpec::default(),
@@ -86,14 +88,16 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
     );
     let model = ModelSpec {
         id: "generic_diffusion_demo_neumann",
-        eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,
 
-        modules: vec![crate::solver::model::kernel::generic_coupled_module(
-            crate::solver::model::method::MethodSpec::GenericCoupled,
-        )],
+        modules: vec![
+            crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
+            crate::solver::model::kernel::generic_coupled_module(
+                crate::solver::model::method::MethodSpec::GenericCoupled,
+            ),
+        ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
         gpu: ModelGpuSpec::default(),

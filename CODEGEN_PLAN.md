@@ -22,6 +22,7 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - Models are expressed as `EquationSystem` via the fvm/fvc AST in `src/solver/model/definitions.rs`.
 - Build-time codegen exists (`crates/cfd2_codegen`) and emits WGSL into `src/solver/gpu/shaders/generated` from `build.rs` (no runtime compilation).
 - Kernel schedule/phase/dispatch is model-owned and recipe-driven (`src/solver/model/kernel.rs`, `src/solver/gpu/recipe.rs`).
+- Model modules carry a small manifest (method/flux selection, named params, typed invariants) that is validated explicitly.
 - Lowering uses a single universal spec/ops path (no per-family selection in `lower_program_model_driven`).
 - Kernel registry lookup is uniform for all kernels via `(model_id, KernelId)` (`src/solver/gpu/lowering/kernel_registry.rs`).
 - Host pipelines + bind groups for recipe kernels are built from binding metadata + a uniform `ResourceRegistry` (`src/solver/gpu/modules/generated_kernels.rs`).
@@ -64,6 +65,7 @@ Target:
 - Replace the ad-hoc “KernelKind grows forever” pattern with a **module interface**:
   - A module declares a set of `ModelKernelSpec { id, phase, dispatch }` entries.
   - A module declares (or can emit) its WGSL kernels + binding metadata.
+  - A module declares a **manifest** (method/flux selection, named params, invariants) that is merged with explicit conflicts.
   - The unified solver runs *modules*; it does not interpret “Rhie–Chow” or “d_p” directly.
 - Models select and configure modules (or a method selects modules) via `ModelSpec` (or a derived recipe), e.g.:
   - `flux_module` (KT, Rhie–Chow, …)
@@ -81,8 +83,12 @@ Done when:
 - Module composition (order/phase/dispatch) is emitted by `(ModelSpec + method selection + runtime config)` and validated by contract tests.
 
 Progress (partial):
-- `ModelSpec` can now inject additional kernel passes (`extra_kernels`) and provide build-time WGSL generators for them (`generated_kernels`), so new module kernels can be added from model definitions without extending central kernel-template matches.
-- Moved the Rhie–Chow helper kernels (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) out of `model/kernel.rs` special-casing and into model-owned `extra_kernels` + `generated_kernels` (so the core kernel derivation no longer grows new “builtins” for these passes).
+- `ModelSpec.modules` is the primary mechanism for adding kernel bundles (schedule + WGSL generators) without central registries.
+- Modules now carry a `ModuleManifest` that can contribute:
+  - method selection (exactly one required)
+  - flux module configuration (0 or 1 allowed)
+  - named parameter keys accepted by the runtime plan
+  - typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
 
 ### 1) Flux Modules (reconstruction + method knobs)
 - Flux kernels are IR-driven and now consume boundary conditions consistently with assembly.
@@ -116,7 +122,8 @@ Progress (transitional):
 - Removed the `PlanParam` enum and the `set_param` path; all runtime knobs now route through named parameters.
 - Removed the universal string-key match; lowering registers named-parameter handlers in the plan spec.
 - Moved named-parameter registration into the backend module (`lowering/models/generic_coupled.rs`) so universal lowering no longer owns a “known keys” list.
-- Next step: make modules contribute their own parameter tables (time integration, low-mach, etc.) and merge them via the recipe/model metadata.
+- Made named parameters **module-driven**: the runtime only registers handlers for keys declared by the model's modules (plus EOS-implied keys).
+- Next step: move EOS-implied keys into manifests once low-mach is fully module-owned (or formalize EOS as a module).
 
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
@@ -152,3 +159,4 @@ Progress (partial):
 ## Notes / Constraints
 - `build.rs` uses `include!()`; build-time-only modules must be wired there.
 - Build scripts are std-only; avoid pulling runtime-only crates into code referenced by `build.rs`.
+- Low-mach resources remain EOS-implied for now (not module-declared); document and keep the rule explicit.

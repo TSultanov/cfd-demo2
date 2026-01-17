@@ -1,8 +1,11 @@
-> This is an experiment in LLM-assisted coding. Most of the grunt work was done by Gemini 3 Pro and Claude Opus 4.5, with me only giving directions and pointing at the flaws.
-
 # 2D CFD Solver
 
 2D CFD solver for incompressible laminar flow implemented in Rust and WGPU.
+
+## Docs
+
+- Codegen + solver unification plan: `CODEGEN_PLAN.md`
+- Generated WGSL policy: `GENERATED_WGSL_POLICY.md`
 
 ## How to Run
 

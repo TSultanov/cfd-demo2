@@ -19,7 +19,7 @@ The `build.rs` script generates WGSL files during the build process:
 
 1. **Model-specific kernel generation** (`emit_model_kernels_wgsl`):
    - Generates kernels based on `ModelSpec` definitions
-   - Calls into `src/solver/codegen/emit.rs`
+   - Uses the model's module list (`ModelSpec.modules`) and per-module WGSL generators
    - Outputs to `src/solver/gpu/shaders/generated/`
 
 2. **Binding generation** (`wgsl_bindgen`):
@@ -53,6 +53,29 @@ The runtime accesses shaders via:
 - `bindings::generated::{module}::SHADER_STRING` (embedded source)
 - `create_main_pipeline_embed_source(device)` (pipeline constructors)
 - Registry lookups in `kernel_registry.rs` (using build-time generated tables)
+
+## Module Manifests (Model Contract)
+
+Models are composed from **modules**. Each module carries a small manifest that acts as the contract between:
+- model definitions (`src/solver/model/definitions/*`)
+- build-time WGSL emission (build.rs)
+- runtime lowering/recipes
+
+Today, module manifests can contribute:
+- **Method selection** (exactly one module must define a method)
+- **Flux module configuration** (0 or 1 module may define a flux module)
+- **Named parameter keys** (the set of `plan.set_named_param()` keys accepted)
+- **Typed invariants** (state-layout / equation-system requirements validated early)
+
+Conflicts are **explicit errors** (e.g. multiple modules defining a method or flux module).
+
+### EOS-implied low-mach policy
+
+Low-mach resources and named params are currently **EOS-implied** (not module-declared):
+- When the model EOS is `IdealGas` or `LinearCompressibility`, the runtime allocates low-mach resources.
+- The named params `low_mach.*` are considered valid only when those resources exist.
+
+This keeps the short-term contract simple while we migrate more resource requirements into manifests.
 
 ## Verification
 
@@ -159,4 +182,4 @@ As of 2026-01-12:
 
 - `CODEGEN_PLAN.md` - Overall codegen architecture and future plans
 - `build.rs` - Build-time generation logic
-- `src/solver/codegen/emit.rs` - WGSL emission entry points
+- `src/solver/model/module.rs` - Module + manifest definitions

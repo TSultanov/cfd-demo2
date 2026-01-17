@@ -37,22 +37,22 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
                 BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
             ),
     );
-    ModelSpec {
+    let model = ModelSpec {
         id: "generic_diffusion_demo",
-        method: crate::solver::model::method::MethodSpec::GenericCoupled,
         eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,
 
-        extra_kernels: Vec::new(),
+        modules: vec![crate::solver::model::kernel::generic_coupled_module(
+            crate::solver::model::method::MethodSpec::GenericCoupled,
+        )],
         linear_solver: None,
-        flux_module: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
-        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
-    }
-    .with_derived_gpu()
+    };
+
+    model.with_derived_gpu()
 }
 
 pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
@@ -84,20 +84,20 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
                 BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
             ),
     );
-    ModelSpec {
+    let model = ModelSpec {
         id: "generic_diffusion_demo_neumann",
-        method: crate::solver::model::method::MethodSpec::GenericCoupled,
         eos: crate::solver::model::eos::EosSpec::Constant,
         system,
         state_layout: layout,
         boundaries,
 
-        extra_kernels: Vec::new(),
+        modules: vec![crate::solver::model::kernel::generic_coupled_module(
+            crate::solver::model::method::MethodSpec::GenericCoupled,
+        )],
         linear_solver: None,
-        flux_module: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
-        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
-    }
-    .with_derived_gpu()
+    };
+
+    model.with_derived_gpu()
 }

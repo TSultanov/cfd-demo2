@@ -299,24 +299,29 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             ),
     );
 
-    ModelSpec {
+    let method = crate::solver::model::method::MethodSpec::GenericCoupledImplicit { outer_iters: 1 };
+    let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
+        gradients: None,
+        scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
+    };
+
+    let model = ModelSpec {
         id: "compressible",
         // Route compressible through the generic coupled pipeline.
-        method: crate::solver::model::method::MethodSpec::GenericCoupledImplicit { outer_iters: 1 },
         eos,
         system,
         state_layout: layout,
         boundaries,
 
-        extra_kernels: Vec::new(),
+        modules: vec![
+            crate::solver::model::kernel::flux_module_module(flux)
+                .expect("failed to build flux_module module"),
+            crate::solver::model::kernel::generic_coupled_module(method),
+        ],
         linear_solver: None,
-        flux_module: Some(crate::solver::model::flux_module::FluxModuleSpec::Scheme {
-            gradients: None,
-            scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
-        }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
-        generated_kernels: Vec::new(),
         gpu: ModelGpuSpec::default(),
-    }
-    .with_derived_gpu()
+    };
+
+    model.with_derived_gpu()
 }

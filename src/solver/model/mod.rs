@@ -8,8 +8,10 @@ pub mod flux_module;
 pub mod flux_schemes;
 pub mod gpu_spec;
 pub mod helpers;
+pub mod invariants;
 pub mod kernel;
 pub mod linear_solver;
+pub mod module;
 pub mod method;
 pub mod primitives;
 
@@ -28,5 +30,6 @@ pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuS
 pub use kernel::KernelId;
 pub use linear_solver::SchurBlockLayout;
 pub use linear_solver::{ModelLinearSolverSpec, ModelPreconditionerSpec};
+pub use module::{KernelBundleModule, ModelModule};
 pub use method::MethodSpec;
 pub use primitives::PrimitiveDerivations;

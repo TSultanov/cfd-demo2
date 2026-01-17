@@ -226,8 +226,9 @@ fn validate_schur_model(
         return Err("model does not request Schur preconditioning".into());
     };
 
+    let method = model.method()?;
     if !matches!(
-        model.method,
+        method,
         crate::solver::model::method::MethodSpec::GenericCoupled
             | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. }
             | crate::solver::model::method::MethodSpec::CoupledIncompressible
@@ -673,9 +674,7 @@ pub(crate) fn register_ops_from_recipe(
     Ok(())
 }
 
-pub(crate) fn named_params_for_recipe(
-    _recipe: &SolverRecipe,
-) -> HashMap<&'static str, ProgramParamHandler> {
+fn all_named_param_handlers() -> HashMap<&'static str, ProgramParamHandler> {
     let mut params: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
     params.insert("dt", param_dt);
     params.insert("dtau", param_dtau);
@@ -698,6 +697,25 @@ pub(crate) fn named_params_for_recipe(
     params.insert("outer_iters", param_outer_iters);
     params.insert("detailed_profiling_enabled", param_detailed_profiling);
     params
+}
+
+pub(crate) fn named_params_for_recipe(
+    model: &crate::solver::model::ModelSpec,
+    _recipe: &SolverRecipe,
+) -> Result<HashMap<&'static str, ProgramParamHandler>, String> {
+    let all = all_named_param_handlers();
+    let mut out: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
+
+    for key in model.named_param_keys() {
+        let Some(handler) = all.get(key).copied() else {
+            return Err(format!(
+                "model requested named parameter '{key}', but generic_coupled backend provides no handler"
+            ));
+        };
+        out.insert(key, handler);
+    }
+
+    Ok(out)
 }
 
 pub(crate) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
@@ -1381,25 +1399,25 @@ mod tests {
 
         let model = crate::solver::model::ModelSpec {
             id: "schur_vector3_test",
-            method: crate::solver::model::method::MethodSpec::GenericCoupled,
             eos: eos::EosSpec::Constant,
             system,
             state_layout: layout,
             boundaries: BoundarySpec::default(),
 
-            extra_kernels: Vec::new(),
+            modules: vec![crate::solver::model::kernel::generic_coupled_module(
+                crate::solver::model::method::MethodSpec::GenericCoupled,
+            )],
             linear_solver: Some(ModelLinearSolverSpec {
                 preconditioner: ModelPreconditionerSpec::Schur {
                     omega: 1.0,
                     layout: SchurBlockLayout::from_u_p(&[0, 1, 2], 3).expect("layout build failed"),
                 },
             }),
-            flux_module: None,
             primitives: primitives::PrimitiveDerivations::default(),
-            generated_kernels: Vec::new(),
             gpu: ModelGpuSpec::default(),
-        }
-        .with_derived_gpu();
+        };
+
+        let model = model.with_derived_gpu();
 
         validate_schur_model(&model).expect("Vector3 velocity Schur layout should validate");
     }

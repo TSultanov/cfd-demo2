@@ -138,6 +138,9 @@ async fn lower_parts_for_model(
                 built.backend,
             ));
 
+            let named_params =
+                models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
+
             Ok(LoweredProgramParts {
                 model: built.model,
                 context: built.context,
@@ -152,7 +155,7 @@ async fn lower_parts_for_model(
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     set_bc_value: Some(models::universal::spec_set_bc_value),
                     initialize_history: None,
-                    named_params: models::generic_coupled::named_params_for_recipe(&recipe),
+                    named_params,
                     set_named_param_fallback: None,
                     step_stats: Some(models::universal::step_stats),
                     step_with_stats: None,
@@ -178,6 +181,9 @@ async fn lower_parts_for_model(
                 built.backend,
             ));
 
+            let named_params =
+                models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
+
             Ok(LoweredProgramParts {
                 model: built.model,
                 context: built.context,
@@ -192,7 +198,7 @@ async fn lower_parts_for_model(
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     set_bc_value: Some(models::universal::spec_set_bc_value),
                     initialize_history: None,
-                    named_params: models::generic_coupled::named_params_for_recipe(&recipe),
+                    named_params,
                     set_named_param_fallback: None,
                     step_stats: Some(models::universal::step_stats),
                     step_with_stats: None,
@@ -218,6 +224,9 @@ async fn lower_parts_for_model(
                 built.backend,
             ));
 
+            let named_params =
+                models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
+
             Ok(LoweredProgramParts {
                 model: built.model,
                 context: built.context,
@@ -232,7 +241,7 @@ async fn lower_parts_for_model(
                     write_state_bytes: models::universal::spec_write_state_bytes,
                     set_bc_value: Some(models::universal::spec_set_bc_value),
                     initialize_history: None,
-                    named_params: models::generic_coupled::named_params_for_recipe(&recipe),
+                    named_params,
                     set_named_param_fallback: None,
                     step_stats: Some(models::universal::step_stats),
                     step_with_stats: None,

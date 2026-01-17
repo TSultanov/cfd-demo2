@@ -9,17 +9,18 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub id: &'static str,
-    pub method: crate::solver::model::method::MethodSpec,
     pub eos: crate::solver::model::eos::EosSpec,
     pub system: EquationSystem,
     pub state_layout: StateLayout,
     pub boundaries: BoundarySpec,
 
-    /// Optional, model-defined kernel schedule extensions.
+    /// Model-defined numerical modules.
     ///
-    /// This is the first step toward pluggable numerical “modules” (Gap 0 in `CODEGEN_PLAN.md`):
-    /// models can inject additional kernels without requiring edits to central kernel registries.
-    pub extra_kernels: Vec<crate::solver::model::kernel::ModelKernelSpec>,
+    /// Each module contributes kernel passes (schedule) and optional build-time WGSL generators.
+    ///
+    /// This is the primary mechanism for Gap 0 in `CODEGEN_PLAN.md`: adding a new numerical
+    /// module should not require edits to central kernel registries.
+    pub modules: Vec<crate::solver::model::module::KernelBundleModule>,
 
     /// Optional model-owned linear solver configuration.
     ///
@@ -27,33 +28,209 @@ pub struct ModelSpec {
     /// support model-driven solver selection.
     pub linear_solver: Option<crate::solver::model::linear_solver::ModelLinearSolverSpec>,
 
-    /// Flux computation module (optional: for pure diffusion models, set to None)
-    pub flux_module: Option<crate::solver::model::flux_module::FluxModuleSpec>,
-
     /// Derived primitive recovery expressions (empty if primitives = conserved state)
     pub primitives: crate::solver::model::primitives::PrimitiveDerivations,
-
-    /// Optional, model-defined build-time WGSL generators for extra kernels in `extra_kernels`.
-    ///
-    /// This allows adding new model/method modules without growing global `match` statements in
-    /// `src/solver/model/kernel.rs` or `build.rs`.
-    pub generated_kernels: Vec<crate::solver::model::kernel::ModelKernelGeneratorSpec>,
 
     pub gpu: crate::solver::model::gpu_spec::ModelGpuSpec,
 }
 
 impl ModelSpec {
+    pub fn named_param_keys(&self) -> Vec<&'static str> {
+        let mut out: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
+
+        for module in &self.modules {
+            for key in &module.manifest.named_params {
+                out.insert(key.as_str());
+            }
+        }
+
+        // EOS-implied parameters remain derived from the EOS (Option B):
+        // these are not module-declared yet.
+        let requires_low_mach_params = matches!(
+            self.eos,
+            crate::solver::model::eos::EosSpec::IdealGas { .. }
+                | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
+        );
+
+        if requires_low_mach_params {
+            // EOS tuning knobs.
+            out.insert("eos.gamma");
+            out.insert("eos.gm1");
+            out.insert("eos.r");
+            out.insert("eos.dp_drho");
+            out.insert("eos.p_offset");
+            out.insert("eos.theta_ref");
+
+            // Low-mach model knobs (buffer allocation is EOS-implied).
+            out.insert("low_mach.model");
+            out.insert("low_mach.theta_floor");
+        }
+
+        let mut v: Vec<&'static str> = out.into_iter().collect();
+        v.sort_unstable();
+        v
+    }
+
+    pub fn method(&self) -> Result<crate::solver::model::method::MethodSpec, String> {
+        let mut found: Option<(&'static str, crate::solver::model::method::MethodSpec)> = None;
+        for module in &self.modules {
+            if let Some(method) = module.manifest.method {
+                match found {
+                    None => found = Some((module.name, method)),
+                    Some((prev_name, _)) => {
+                        return Err(format!(
+                            "model defines method in multiple modules ('{prev_name}', '{}')",
+                            module.name
+                        ));
+                    }
+                }
+            }
+        }
+        found
+            .map(|(_, m)| m)
+            .ok_or_else(|| "model defines no method module".to_string())
+    }
+
+    pub fn flux_module(
+        &self,
+    ) -> Result<Option<&crate::solver::model::flux_module::FluxModuleSpec>, String> {
+        let mut found: Option<(&'static str, &crate::solver::model::flux_module::FluxModuleSpec)> =
+            None;
+        for module in &self.modules {
+            if let Some(spec) = module.manifest.flux_module.as_ref() {
+                match found {
+                    None => found = Some((module.name, spec)),
+                    Some((prev_name, _)) => {
+                        return Err(format!(
+                            "model defines flux_module in multiple modules ('{prev_name}', '{}')",
+                            module.name
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(found.map(|(_, spec)| spec))
+    }
+
+    pub fn validate_module_manifests(&self) -> Result<(), String> {
+        let method = self.method()?;
+        let flux = self.flux_module()?;
+
+        if matches!(method, crate::solver::model::method::MethodSpec::CoupledIncompressible)
+            && flux.is_none()
+        {
+            return Err(
+                "CoupledIncompressible requires a flux_module-providing module".to_string(),
+            );
+        }
+
+        // Validate typed invariant requirements declared by modules.
+        for module in &self.modules {
+            for inv in &module.manifest.invariants {
+                use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
+                use crate::solver::model::backend::FieldKind;
+
+                let err_prefix = format!("module '{}' invariant failed: ", module.name);
+
+                match *inv {
+                    ModuleInvariant::RequireStateField { name, kind } => {
+                        let Some(field) = self.state_layout.field(name) else {
+                            return Err(format!("{err_prefix}missing required state field '{name}'"));
+                        };
+                        if let Some(req) = kind {
+                            let expected = match req {
+                                FieldKindReq::Scalar => FieldKind::Scalar,
+                                FieldKindReq::Vector2 => FieldKind::Vector2,
+                                FieldKindReq::Vector3 => FieldKind::Vector3,
+                            };
+                            if field.kind() != expected {
+                                return Err(format!(
+                                    "{err_prefix}state field '{name}' has kind {:?}, expected {:?}",
+                                    field.kind(),
+                                    expected
+                                ));
+                            }
+                        }
+                    }
+                    ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
+                        dp_field,
+                        require_vector2_momentum,
+                        require_pressure_gradient,
+                    } => {
+                        let Some(dp) = self.state_layout.field(dp_field) else {
+                            return Err(format!(
+                                "{err_prefix}requires '{dp_field}' in state layout"
+                            ));
+                        };
+                        if dp.kind() != FieldKind::Scalar {
+                            return Err(format!(
+                                "{err_prefix}requires '{dp_field}' to be a scalar field"
+                            ));
+                        }
+
+                        let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
+                            self,
+                            dp_field,
+                        )
+                        .map_err(|e| format!("{err_prefix}{e}"))?;
+
+                        if require_vector2_momentum && coupling.momentum.kind() != FieldKind::Vector2 {
+                            return Err(format!(
+                                "{err_prefix}requires Vector2 momentum field; got {:?} ('{}')",
+                                coupling.momentum.kind(),
+                                coupling.momentum.name()
+                            ));
+                        }
+
+                        if require_pressure_gradient {
+                            let grad_name = format!("grad_{}", coupling.pressure.name());
+                            let Some(grad) = self.state_layout.field(&grad_name) else {
+                                return Err(format!(
+                                    "{err_prefix}requires '{grad_name}' in state layout"
+                                ));
+                            };
+                            if grad.kind() != FieldKind::Vector2 {
+                                return Err(format!(
+                                    "{err_prefix}requires '{grad_name}' to be Vector2"
+                                ));
+                            }
+
+                            // Ensure the component offsets exist (avoids a later codegen error).
+                            for c in 0..2 {
+                                self.state_layout.component_offset(&grad_name, c).ok_or_else(|| {
+                                    format!(
+                                        "{err_prefix}requires '{grad_name}[{c}]' in state layout"
+                                    )
+                                })?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn with_derived_gpu(mut self) -> Self {
         self.gpu = self.derive_gpu_spec();
         self
     }
 
     pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
+        self.validate_module_manifests()
+            .expect("invalid model module manifests");
+
+        let method = self.method().expect("model missing method module");
+        let flux_module = self
+            .flux_module()
+            .expect("invalid model flux_module manifests");
+
         // Flux storage is model-driven.
         //
         // - If the model has an explicit flux module, store face fluxes for each coupled
         //   unknown component.
-        let flux = self.flux_module.as_ref().map(|_| FluxSpec {
+        let flux = flux_module.as_ref().map(|_| FluxSpec {
             // Flux modules write into a packed per-unknown-component face flux table.
             //
             // Even if the module computes a single scalar face flux (phi), it is replicated
@@ -68,7 +245,7 @@ impl ModelSpec {
                 | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
         );
 
-        let gradient_storage = match self.method {
+        let gradient_storage = match method {
             crate::solver::model::method::MethodSpec::GenericCoupled
             | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. }
             | crate::solver::model::method::MethodSpec::CoupledIncompressible => {

@@ -194,6 +194,8 @@ impl SolverRecipe {
         time_scheme: TimeScheme,
         preconditioner: PreconditionerType,
     ) -> Result<Self, String> {
+        model.validate_module_manifests()?;
+
         let scheme_registry = SchemeRegistry::new(advection_scheme);
         let scheme_expansion = expand_schemes(&model.system, &scheme_registry)
             .map_err(|e| format!("scheme expansion failed: {e}"))?;
@@ -231,7 +233,7 @@ impl SolverRecipe {
 
         // Determine stepping mode from model method selection.
         // This may influence how kernels are mapped into phases.
-        let stepping = derive_stepping_mode(model);
+        let stepping = derive_stepping_mode(model)?;
 
         // Emit kernel specs in terms of stable KernelIds.
         //
@@ -534,10 +536,12 @@ impl SolverRecipe {
 // New recipes should assign phases explicitly when constructing KernelSpecs.
 #[allow(dead_code)]
 /// Derive stepping mode from model structure.
-fn derive_stepping_mode(model: &ModelSpec) -> SteppingMode {
+fn derive_stepping_mode(model: &ModelSpec) -> Result<SteppingMode, String> {
     use crate::solver::model::MethodSpec;
 
-    match model.method {
+    let method = model.method()?;
+
+    Ok(match method {
         MethodSpec::CoupledIncompressible => SteppingMode::Coupled {
             outer_correctors: 3,
         },
@@ -547,7 +551,7 @@ fn derive_stepping_mode(model: &ModelSpec) -> SteppingMode {
         MethodSpec::GenericCoupledImplicit { outer_iters } => {
             SteppingMode::Implicit { outer_iters }
         }
-    }
+    })
 }
 
 #[cfg(test)]

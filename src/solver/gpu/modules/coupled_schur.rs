@@ -42,6 +42,9 @@ pub struct CoupledSchurModule {
     bgl_schur_vectors: wgpu::BindGroupLayout,
     schur_bindings: &'static [wgsl_reflect::WgslBindingDesc],
 
+    /// Schur complement diagonals/params bind group (Group 2)
+    bg_schur_precond: wgpu::BindGroup,
+
     /// Bind group for pressure matrix CSR (Group 3)
     bg_pressure_matrix: wgpu::BindGroup,
 
@@ -57,11 +60,13 @@ pub struct CoupledSchurModule {
 impl CoupledSchurModule {
     pub fn new(
         device: &wgpu::Device,
-        _fgmres: &FgmresWorkspace,
         num_cells: u32,
         pressure_row_offsets: &wgpu::Buffer,
         pressure_col_indices: &wgpu::Buffer,
         pressure_values: &wgpu::Buffer,
+        diag_u_inv: &wgpu::Buffer,
+        diag_p_inv: &wgpu::Buffer,
+        precond_params: &wgpu::Buffer,
         pressure_kind: CoupledPressureSolveKind,
         kernels: CoupledSchurKernelIds,
     ) -> Self {
@@ -100,7 +105,23 @@ impl CoupledSchurModule {
         };
 
         let bgl_schur_vectors = pipeline_predict_and_form.get_bind_group_layout(0);
+        let bgl_schur_precond = pipeline_predict_and_form.get_bind_group_layout(2);
         let bgl_pressure_matrix = pipeline_predict_and_form.get_bind_group_layout(3);
+        let bg_schur_precond = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("diag_u_inv", diag_u_inv)
+                .with_buffer("diag_p_inv", diag_p_inv)
+                .with_buffer("params", precond_params);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                "Schur Precond BG",
+                &bgl_schur_precond,
+                schur_bindings,
+                2,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("Schur precond BG creation failed: {err}"))
+        };
         let bg_pressure_matrix = {
             let registry = ResourceRegistry::new()
                 .with_buffer("p_row_offsets", pressure_row_offsets)
@@ -124,6 +145,7 @@ impl CoupledSchurModule {
             b_p_sol,
             bgl_schur_vectors,
             schur_bindings,
+            bg_schur_precond,
             bg_pressure_matrix,
             pipeline_predict_and_form,
             pipeline_relax_pressure,
@@ -202,7 +224,7 @@ impl CoupledSchurModule {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, schur_bg, &[]);
         pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-        pass.set_bind_group(2, fgmres.schur_precond_bg(), &[]);
+        pass.set_bind_group(2, &self.bg_schur_precond, &[]);
         pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
@@ -298,7 +320,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                 });
                 pass.set_pipeline(&self.pipeline_relax_pressure);
                 pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-                pass.set_bind_group(2, fgmres.schur_precond_bg(), &[]);
+                pass.set_bind_group(2, &self.bg_schur_precond, &[]);
                 pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
 
                 for _ in 0..p_iters {

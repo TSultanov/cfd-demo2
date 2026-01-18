@@ -121,12 +121,10 @@ pub struct FgmresWorkspace {
     bgl_matrix: wgpu::BindGroupLayout,
     bgl_precond: wgpu::BindGroupLayout,
     bgl_params: wgpu::BindGroupLayout,
-    bgl_schur_precond: wgpu::BindGroupLayout,
 
     bg_matrix: wgpu::BindGroup,
     bg_precond: wgpu::BindGroup,
     bg_params: wgpu::BindGroup,
-    bg_schur_precond: wgpu::BindGroup,
     bg_logic: wgpu::BindGroup,
     bg_logic_params: wgpu::BindGroup,
     bg_cgs: wgpu::BindGroup,
@@ -489,205 +487,6 @@ impl FgmresWorkspace {
             .unwrap_or_else(|err| panic!("FGMRES cgs BG creation failed: {err}"))
         };
 
-        let (bgl_schur_precond, bg_schur_precond) = match precond {
-            FgmresPrecondBindings::Diag {
-                diag_u,
-                diag_v,
-                diag_p,
-            } => {
-                let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some(&format!("{label_prefix} FGMRES precond BGL")),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                });
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("{label_prefix} FGMRES precond BG")),
-                    layout: &bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: diag_u.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: diag_v.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: diag_p.as_entire_binding(),
-                        },
-                    ],
-                });
-                (bgl, bg)
-            }
-            FgmresPrecondBindings::DiagWithParams {
-                diag_u,
-                diag_v,
-                diag_p,
-                precond_params,
-            } => {
-                let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some(&format!("{label_prefix} FGMRES precond/params BGL")),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                });
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("{label_prefix} FGMRES precond/params BG")),
-                    layout: &bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: diag_u.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: diag_v.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: diag_p.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: precond_params.as_entire_binding(),
-                        },
-                    ],
-                });
-                (bgl, bg)
-            }
-
-            FgmresPrecondBindings::SchurWithParams {
-                diag_u,
-                diag_p,
-                precond_params,
-            } => {
-                let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some(&format!("{label_prefix} FGMRES schur precond/params BGL")),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                });
-                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(&format!("{label_prefix} FGMRES schur precond/params BG")),
-                    layout: &bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: diag_u.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: diag_p.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: precond_params.as_entire_binding(),
-                        },
-                    ],
-                });
-                (bgl, bg)
-            }
-        };
-
         Self {
             max_restart,
             n,
@@ -711,11 +510,9 @@ impl FgmresWorkspace {
             bgl_matrix,
             bgl_precond,
             bgl_params,
-            bgl_schur_precond,
             bg_matrix,
             bg_precond,
             bg_params,
-            bg_schur_precond,
             bg_logic,
             bg_logic_params,
             bg_cgs,
@@ -1014,10 +811,6 @@ impl FgmresWorkspace {
         &self.bgl_precond
     }
 
-    pub fn schur_precond_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.bgl_schur_precond
-    }
-
     pub fn params_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bgl_params
     }
@@ -1028,10 +821,6 @@ impl FgmresWorkspace {
 
     pub fn precond_bg(&self) -> &wgpu::BindGroup {
         &self.bg_precond
-    }
-
-    pub fn schur_precond_bg(&self) -> &wgpu::BindGroup {
-        &self.bg_schur_precond
     }
 
     pub fn params_bg(&self) -> &wgpu::BindGroup {

@@ -443,11 +443,13 @@ fn build_generic_schur(
 
     let precond = GenericCoupledSchurPreconditioner::new(
         device,
-        &fgmres,
         num_cells,
         scalar_row_offsets,
         scalar_col_indices,
         &b_p_matrix_values,
+        &b_diag_u,
+        &b_diag_p,
+        &b_precond_params,
         setup_bg,
         setup_pipeline,
         b_setup_params,

@@ -32,11 +32,13 @@ pub struct GenericCoupledSchurPreconditioner {
 impl GenericCoupledSchurPreconditioner {
     pub fn new(
         device: &wgpu::Device,
-        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
         num_cells: u32,
         pressure_row_offsets: &wgpu::Buffer,
         pressure_col_indices: &wgpu::Buffer,
         pressure_values: &wgpu::Buffer,
+        diag_u_inv: &wgpu::Buffer,
+        diag_p_inv: &wgpu::Buffer,
+        precond_params: &wgpu::Buffer,
         setup_bg_ping_pong: Vec<wgpu::BindGroup>,
         setup_pipeline: wgpu::ComputePipeline,
         setup_params: wgpu::Buffer,
@@ -52,11 +54,13 @@ impl GenericCoupledSchurPreconditioner {
         Self {
             schur: CoupledSchurModule::new(
                 device,
-                fgmres,
                 num_cells,
                 pressure_row_offsets,
                 pressure_col_indices,
                 pressure_values,
+                diag_u_inv,
+                diag_p_inv,
+                precond_params,
                 CoupledPressureSolveKind::Chebyshev,
                 CoupledSchurKernelIds {
                     predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,

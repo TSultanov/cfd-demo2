@@ -137,6 +137,17 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
     assert_not_contains(&src, "all_named_param_handlers", "generic_coupled.rs");
 }
 
+#[test]
+fn contract_generic_coupled_graphs_have_no_assembly_fallback() {
+    let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let src = read_utf8(&path);
+
+    // Kernel scheduling must be recipe-driven. Avoid hard-coded fallback graphs that can mask
+    // missing module wiring.
+    assert_not_contains(&src, "build_assembly_graph_fallback", "generic_coupled.rs");
+    assert_contains(&src, "build_graph_for_phases(", "generic_coupled.rs");
+}
+
 fn try_consume_char_literal(bytes: &[u8], start: usize) -> Option<usize> {
     debug_assert_eq!(bytes.get(start), Some(&b'\''));
 

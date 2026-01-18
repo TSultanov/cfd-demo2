@@ -4,9 +4,7 @@ use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
 use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
-use crate::solver::gpu::modules::graph::{
-    ComputeSpec, DispatchKind, ModuleGraph, ModuleNode, RuntimeDims,
-};
+use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::solve_fgmres;
@@ -23,7 +21,7 @@ use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{
     GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams, LinearSolverStats,
 };
-use crate::solver::model::{KernelId, ModelPreconditionerSpec, ModelSpec};
+use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,37 +93,16 @@ impl GenericCoupledProgramResources {
             .iter()
             .any(|k| k.phase == KernelPhase::Preparation);
 
-        let has_gradients = recipe
-            .kernels
-            .iter()
-            .any(|k| k.phase == KernelPhase::Gradients);
-        let assembly_graph_result = if has_gradients {
-            build_graph_for_phases(
-                recipe,
-                &[
-                    KernelPhase::Gradients,
-                    KernelPhase::FluxComputation,
-                    KernelPhase::Assembly,
-                ],
-                &kernels,
-                "generic_coupled",
-            )
-        } else {
-            build_graph_for_phases(
-                recipe,
-                &[KernelPhase::FluxComputation, KernelPhase::Assembly],
-                &kernels,
-                "generic_coupled",
-            )
-        };
-
-        let assembly_graph = match assembly_graph_result {
-            Ok(graph) => graph,
-            Err(e) if e.starts_with("no kernels found for phases") => {
-                build_assembly_graph_fallback()
-            }
-            Err(e) => return Err(e),
-        };
+        let assembly_graph = build_graph_for_phases(
+            recipe,
+            &[
+                KernelPhase::Gradients,
+                KernelPhase::FluxComputation,
+                KernelPhase::Assembly,
+            ],
+            &kernels,
+            "generic_coupled",
+        )?;
 
         // Apply and update are optional depending on the stepping mode.
         // (For implicit outer-iteration recipes, update may be executed in the "apply" stage.)
@@ -1260,16 +1237,6 @@ pub(crate) fn param_low_mach_theta_floor(
     r.fields.low_mach_params_mut().theta_floor = theta;
     r.fields.update_low_mach_params(&queue);
     Ok(())
-}
-
-/// Fallback when recipe doesn't define assembly phase
-fn build_assembly_graph_fallback() -> ModuleGraph<GeneratedKernelsModule> {
-    ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
-        label: "generic_coupled:assembly",
-        pipeline: KernelId::GENERIC_COUPLED_ASSEMBLY,
-        bind: KernelId::GENERIC_COUPLED_ASSEMBLY,
-        dispatch: DispatchKind::Cells,
-    })])
 }
 
 #[cfg(test)]

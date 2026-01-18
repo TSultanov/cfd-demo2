@@ -101,6 +101,42 @@ mod tests {
         assert!(wgsl.contains("cell_centers"));
         assert!(wgsl.contains("face_centers"));
     }
+
+    #[test]
+    fn muscl_does_not_reconstruct_boundary_neighbor_state() {
+        // Regression test: when MUSCL reconstruction is enabled, the boundary neighbor value
+        // (Dirichlet/Neumann ghost) must not be modified by reconstruction.
+        //
+        // The simplest way to ensure this in codegen is to force neighbor-side gradients to
+        // zero on boundary faces, so `phi_cell + dot(grad, r)` collapses to `phi_cell`.
+        let phi = vol_scalar("phi", si::DIMENSIONLESS);
+        let grad_phi = vol_vector("grad_phi", si::DIMENSIONLESS);
+        let layout = StateLayout::new(vec![phi, grad_phi]);
+        let flux_layout = FluxLayout {
+            stride: 1,
+            components: vec![FluxComponent {
+                name: "phi".to_string(),
+                offset: 0,
+            }],
+        };
+
+        // Force the kernel to read neighbor-side gradients (which previously used the owner
+        // gradient on boundary faces), so we can assert boundary-specific zeroing exists.
+        let phi_expr = FaceScalarExpr::Dot(
+            Box::new(FaceVec2Expr::state_vec2(FaceSide::Neighbor, "grad_phi")),
+            Box::new(FaceVec2Expr::normal()),
+        );
+        let spec = FluxModuleKernelSpec::ScalarReplicated { phi: phi_expr };
+
+        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec);
+
+        // `phi`(scalar) + `grad_phi`(vec2) => stride=3; grad_phi.x is at offset 1.
+        assert!(wgsl.contains("state[neigh_idx * 3u + 1u]"));
+        assert!(
+            wgsl.contains(", 0.0, is_boundary)"),
+            "expected boundary neighbor gradient to be zeroed via select(..., 0.0, is_boundary)"
+        );
+    }
 }
 
 fn base_items() -> Vec<Item> {
@@ -548,10 +584,30 @@ fn lower_vec2(
             lower_scalar(x, layout, primitives, flux_layout),
             lower_scalar(y, layout, primitives, flux_layout),
         ]),
-        FaceVec2Expr::StateVec2 { side, field } => typed::VecExpr::<2>::from_components([
-            state_component_at_side(layout, "state", *side, field, 0, flux_layout),
-            state_component_at_side(layout, "state", *side, field, 1, flux_layout),
-        ]),
+        FaceVec2Expr::StateVec2 { side, field } => {
+            let x = state_component_at_side(layout, "state", *side, field, 0, flux_layout);
+            let y = state_component_at_side(layout, "state", *side, field, 1, flux_layout);
+
+            // Boundary regression guard for MUSCL reconstruction:
+            //
+            // When `FluxReconstructionSpec::Muscl{...}` is enabled, models conventionally use
+            // `grad_*` state fields to reconstruct face states. On boundary faces, neighbor-side
+            // state reads are replaced with Dirichlet/Neumann "ghost" values via `bc_kind/bc_value`.
+            // If we also use non-zero neighbor-side gradients, the reconstruction step can modify
+            // those ghost values and violate boundary semantics.
+            //
+            // To keep the IR PDE-agnostic and preserve existing BC semantics, treat neighbor-side
+            // `grad_*` vectors as zero on boundary faces.
+            if *side == FaceSide::Neighbor && field.starts_with("grad_") {
+                let is_boundary = Expr::ident("is_boundary");
+                return typed::VecExpr::<2>::from_components([
+                    dsl::select(x, Expr::from(0.0), is_boundary.clone()),
+                    dsl::select(y, Expr::from(0.0), is_boundary),
+                ]);
+            }
+
+            typed::VecExpr::<2>::from_components([x, y])
+        }
         FaceVec2Expr::Add(a, b) => {
             let a = lower_vec2(a, layout, primitives, flux_layout);
             let b = lower_vec2(b, layout, primitives, flux_layout);

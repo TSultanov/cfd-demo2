@@ -124,6 +124,7 @@ Progress (partial):
   - Honors `LimiterSpec::{None, MinMod, VanLeer}`.
 - Enforced the required gradients stage + required `grad_*` fields when MUSCL is selected (early manifest validation).
 - Fixed `CellToFace{Neighbor}` semantics on boundary faces so reconstruction is geometry-correct.
+- Fixed boundary BC preservation for MUSCL: neighbor-side `grad_*` vectors are treated as zero on boundary faces so reconstruction cannot modify Dirichlet/Neumann ghost values.
 
 Remaining (follow-up, not yet started):
 - Add a small contract/validation test that asserts MUSCL selection changes generated WGSL (to prevent silent “knob ignored” regressions).

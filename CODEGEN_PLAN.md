@@ -197,6 +197,7 @@ Completed:
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for limiters/reconstruction), or kept as a lightweight fallback.
 2) Add a small stability/regression test for the new limited scheme variants (`sou_minmod`, `sou_vanleer`, `quick_minmod`, `quick_vanleer`) so they cannot silently degrade.
+   - Done: contract test asserts these variants are still wired in generated WGSL (scheme id branches + MinMod/VanLeer markers).
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

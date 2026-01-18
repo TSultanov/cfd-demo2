@@ -662,6 +662,7 @@ mod tests {
     use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
+    use std::collections::HashSet;
 
     #[test]
     fn contract_muscl_reconstruction_changes_generated_flux_module_wgsl() {
@@ -775,6 +776,72 @@ mod tests {
         assert!(
             wgsl.contains("1e-8") || wgsl.contains("0.00000001"),
             "expected VanLeer epsilon literal to appear in generic_coupled_assembly WGSL"
+        );
+    }
+
+    fn wgsl_compact(wgsl: &str) -> String {
+        wgsl.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    fn scheme_ids_from_wgsl(wgsl: &str) -> HashSet<u32> {
+        let compact = wgsl_compact(wgsl);
+        let mut ids = HashSet::new();
+
+        // Match on the stable runtime selection pattern emitted by codegen.
+        let needle = "constants.scheme==";
+        let mut start = 0;
+        while let Some(idx) = compact[start..].find(needle) {
+            let after = &compact[start + idx + needle.len()..];
+            let end = after.find('u').unwrap_or(after.len());
+            if let Ok(value) = after[..end].parse::<u32>() {
+                ids.insert(value);
+            }
+            start += idx + needle.len();
+        }
+
+        ids
+    }
+
+    #[test]
+    fn contract_unified_assembly_limited_scheme_variants_are_wired() {
+        // Regression test: ensure the new limited advection scheme variants remain wired
+        // and cannot silently degrade back to unlimited reconstruction.
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+
+        let model = crate::solver::model::incompressible_momentum_model();
+        let wgsl = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+        )
+        .expect("failed to generate generic_coupled_assembly WGSL");
+
+        // 1) Ensure runtime branches exist for each limited variant.
+        let ids = scheme_ids_from_wgsl(&wgsl);
+        for scheme in [
+            Scheme::SecondOrderUpwindMinMod,
+            Scheme::SecondOrderUpwindVanLeer,
+            Scheme::QUICKMinMod,
+            Scheme::QUICKVanLeer,
+        ] {
+            assert!(
+                ids.contains(&scheme.gpu_id()),
+                "WGSL should branch on constants.scheme == {}u for {scheme:?}",
+                scheme.gpu_id(),
+            );
+        }
+
+        // 2) Ensure both limiter implementations are present.
+        //    - MinMod: has a nested min(max(...)) clamp.
+        //    - VanLeer: has a small epsilon literal.
+        let compact = wgsl_compact(&wgsl);
+        assert!(
+            compact.contains("min(max("),
+            "expected MinMod limiter clamp (min(max(...))) to appear in WGSL"
+        );
+        assert!(
+            wgsl.contains("1e-8") || wgsl.contains("0.00000001"),
+            "expected VanLeer epsilon literal to appear in WGSL"
         );
     }
 }

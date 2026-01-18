@@ -4,6 +4,7 @@ use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 
 pub(crate) mod kernel_registry;
+pub(crate) mod named_params;
 mod model_driven;
 pub(crate) mod models;
 pub(crate) mod types;

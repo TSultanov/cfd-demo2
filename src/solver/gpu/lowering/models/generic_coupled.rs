@@ -642,48 +642,11 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
 /// Register ops using the unified registry builder.
 /// The recipe's stepping mode determines which ops are registered.
 
-fn all_named_param_handlers() -> HashMap<&'static str, ProgramParamHandler> {
-    let mut params: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
-    params.insert("dt", param_dt);
-    params.insert("dtau", param_dtau);
-    params.insert("advection_scheme", param_advection_scheme);
-    params.insert("time_scheme", param_time_scheme);
-    params.insert("preconditioner", param_preconditioner);
-    params.insert("viscosity", param_viscosity);
-    params.insert("density", param_density);
-    params.insert("eos.gamma", param_eos_gamma);
-    params.insert("eos.gm1", param_eos_gm1);
-    params.insert("eos.r", param_eos_r);
-    params.insert("eos.dp_drho", param_eos_dp_drho);
-    params.insert("eos.p_offset", param_eos_p_offset);
-    params.insert("eos.theta_ref", param_eos_theta_ref);
-    params.insert("alpha_u", param_alpha_u);
-    params.insert("alpha_p", param_alpha_p);
-    params.insert("low_mach.model", param_low_mach_model);
-    params.insert("low_mach.theta_floor", param_low_mach_theta_floor);
-    params.insert("nonconverged_relax", param_nonconverged_relax);
-    params.insert("outer_iters", param_outer_iters);
-    params.insert("detailed_profiling_enabled", param_detailed_profiling);
-    params
-}
-
 pub(crate) fn named_params_for_recipe(
     model: &crate::solver::model::ModelSpec,
     _recipe: &SolverRecipe,
 ) -> Result<HashMap<&'static str, ProgramParamHandler>, String> {
-    let all = all_named_param_handlers();
-    let mut out: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
-
-    for key in model.named_param_keys() {
-        let Some(handler) = all.get(key).copied() else {
-            return Err(format!(
-                "model requested named parameter '{key}', but generic_coupled backend provides no handler"
-            ));
-        };
-        out.insert(key, handler);
-    }
-
-    Ok(out)
+    crate::solver::gpu::lowering::named_params::named_params_for_model(model)
 }
 
 pub(crate) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {

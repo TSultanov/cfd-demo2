@@ -1009,26 +1009,46 @@ fn main_assembly_fn(
                         let phi_neigh =
                             state_component(layout, "state", "other_idx", field_name, component);
 
-                        let scheme_lit =
-                            typed::EnumExpr::<Scheme>::from_expr(conv_op.scheme.gpu_id().into());
+                        // Runtime-configurable advection scheme.
+                        //
+                        // Note: we intentionally do not bake the scheme selection into the WGSL
+                        // at codegen time; the solver drives it through `constants.scheme`.
+                        let scheme_lit = typed::EnumExpr::<Scheme>::from_expr(
+                            Expr::ident("constants").field("scheme"),
+                        );
 
-                        let mut grad_own = dsl::vec2_f32(0.0, 0.0);
-                        let mut grad_neigh = dsl::vec2_f32(0.0, 0.0);
-
-                        if needs_gradients {
-                            grad_own = dsl::array_access_linear(
+                        // Reconstruction gradients.
+                        //
+                        // If a packed `grad_state` buffer exists, use it. Otherwise, fall back to
+                        // a simple two-point gradient estimate based on neighbor differences.
+                        // This keeps the scheme knob meaningful without requiring a dedicated
+                        // gradients kernel for every model.
+                        let (grad_own, grad_neigh) = if needs_gradients {
+                            let grad_own = dsl::array_access_linear(
                                 "grad_state",
                                 Expr::ident("idx"),
                                 layout.stride(),
                                 layout.offset_for(field_name).unwrap() as u32 + component,
                             );
-                            grad_neigh = dsl::array_access_linear(
+                            let grad_neigh = dsl::array_access_linear(
                                 "grad_state",
                                 Expr::ident("other_idx"),
                                 layout.stride(),
                                 layout.offset_for(field_name).unwrap() as u32 + component,
                             );
-                        }
+                            (grad_own, grad_neigh)
+                        } else {
+                            let diff = phi_neigh.clone() - phi_own.clone();
+                            let denom = dsl::max(
+                                Expr::ident("dx") * Expr::ident("dx")
+                                    + Expr::ident("dy") * Expr::ident("dy"),
+                                1e-12,
+                            );
+                            let g_x = diff.clone() * Expr::ident("dx") / denom.clone();
+                            let g_y = diff * Expr::ident("dy") / denom;
+                            let grad = dsl::vec2_f32(g_x, g_y);
+                            (grad.clone(), grad)
+                        };
 
                         let rec = scalar_reconstruction(
                             scheme_lit,

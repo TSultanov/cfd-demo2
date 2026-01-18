@@ -315,7 +315,9 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             ));
 
             match op.scheme {
-                Scheme::SecondOrderUpwind => {
+                Scheme::SecondOrderUpwind
+                | Scheme::SecondOrderUpwindMinMod
+                | Scheme::SecondOrderUpwindVanLeer => {
                     body.push(dsl::if_block_expr(
                         Expr::ident("flux").gt(0.0),
                         dsl::block(vec![
@@ -356,7 +358,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                         ])),
                     ));
                 }
-                Scheme::QUICK => {
+                Scheme::QUICK | Scheme::QUICKMinMod | Scheme::QUICKVanLeer => {
                     body.push(dsl::if_block_expr(
                         Expr::ident("flux").gt(0.0),
                         dsl::block(vec![
@@ -468,7 +470,9 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             ));
 
             match op.scheme {
-                Scheme::SecondOrderUpwind => {
+                Scheme::SecondOrderUpwind
+                | Scheme::SecondOrderUpwindMinMod
+                | Scheme::SecondOrderUpwindVanLeer => {
                     body.push(dsl::if_block_expr(
                         Expr::ident("flux").gt(0.0),
                         dsl::block(vec![dsl::assign_expr(
@@ -489,7 +493,7 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
                         )])),
                     ));
                 }
-                Scheme::QUICK => {
+                Scheme::QUICK | Scheme::QUICKMinMod | Scheme::QUICKVanLeer => {
                     body.push(dsl::if_block_expr(
                         Expr::ident("flux").gt(0.0),
                         dsl::block(vec![dsl::assign_expr(
@@ -792,20 +796,12 @@ fn format_coeff(coeff: &Coefficient) -> String {
 }
 
 fn scheme_name(scheme: Scheme) -> &'static str {
-    match scheme {
-        Scheme::Upwind => "upwind",
-        Scheme::SecondOrderUpwind => "sou",
-        Scheme::QUICK => "quick",
-    }
+    scheme.as_str()
 }
 
 #[allow(dead_code)]
 fn scheme_id(scheme: Scheme) -> u32 {
-    match scheme {
-        Scheme::Upwind => 0,
-        Scheme::SecondOrderUpwind => 1,
-        Scheme::QUICK => 2,
-    }
+    scheme.gpu_id()
 }
 
 #[allow(dead_code)]

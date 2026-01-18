@@ -25,34 +25,80 @@ pub fn scalar_reconstruction(
 
     let phi_upwind = dsl::select(phi_own, phi_neigh, flux.lt(0.0));
 
-    let sou_pos = phi_own
-        + dsl::dot(
-            dsl::vec2_f32_from_xy_fields(grad_own),
-            xy(&face_center) - xy(&center),
-        );
-    let sou_neg = phi_neigh
-        + dsl::dot(
-            dsl::vec2_f32_from_xy_fields(grad_neigh),
-            xy(&face_center) - xy(&other_center),
-        );
+    let minmod_limit = |phi_cell: Expr, phi_other: Expr, delta: Expr| -> Expr {
+        let diff = phi_other - phi_cell.clone();
+        let min_diff = dsl::min(diff.clone(), 0.0);
+        let max_diff = dsl::max(diff, 0.0);
+        dsl::min(dsl::max(delta, min_diff), max_diff)
+    };
+
+    let vanleer_limit = |phi_cell: Expr, phi_other: Expr, delta: Expr| -> Expr {
+        let diff = phi_other - phi_cell.clone();
+        let abs_diff = dsl::abs(diff.clone());
+        let abs_delta = dsl::abs(delta.clone());
+        let denom = dsl::max(abs_diff.clone(), abs_delta + 1e-8);
+        delta * (abs_diff / denom)
+    };
+
+    let delta_sou_pos = dsl::dot(
+        dsl::vec2_f32_from_xy_fields(grad_own.clone()),
+        xy(&face_center) - xy(&center),
+    );
+    let delta_sou_neg = dsl::dot(
+        dsl::vec2_f32_from_xy_fields(grad_neigh.clone()),
+        xy(&face_center) - xy(&other_center),
+    );
+
+    let sou_pos = phi_own.clone() + delta_sou_pos.clone();
+    let sou_neg = phi_neigh.clone() + delta_sou_neg.clone();
     let phi_sou = dsl::select(sou_neg, sou_pos, flux.gt(0.0));
 
-    let quick_pos = phi_own * 0.625
-        + phi_neigh * 0.375
+    let sou_pos_mm = phi_own.clone() + minmod_limit(phi_own.clone(), phi_neigh.clone(), delta_sou_pos.clone());
+    let sou_neg_mm = phi_neigh.clone() + minmod_limit(phi_neigh.clone(), phi_own.clone(), delta_sou_neg.clone());
+    let phi_sou_mm = dsl::select(sou_neg_mm, sou_pos_mm, flux.gt(0.0));
+
+    let sou_pos_vl = phi_own.clone() + vanleer_limit(phi_own.clone(), phi_neigh.clone(), delta_sou_pos);
+    let sou_neg_vl = phi_neigh.clone() + vanleer_limit(phi_neigh.clone(), phi_own.clone(), delta_sou_neg);
+    let phi_sou_vl = dsl::select(sou_neg_vl, sou_pos_vl, flux.gt(0.0));
+
+    let quick_pos = phi_own.clone() * 0.625
+        + phi_neigh.clone() * 0.375
         + dsl::dot(
             dsl::vec2_f32_from_xy_fields(grad_own),
             xy(&other_center) - xy(&center),
         ) * 0.125;
-    let quick_neg = phi_neigh * 0.625
-        + phi_own * 0.375
+    let quick_neg = phi_neigh.clone() * 0.625
+        + phi_own.clone() * 0.375
         + dsl::dot(
             dsl::vec2_f32_from_xy_fields(grad_neigh),
             xy(&center) - xy(&other_center),
         ) * 0.125;
     let phi_quick = dsl::select(quick_neg, quick_pos, flux.gt(0.0));
 
+    let delta_quick_pos = quick_pos.clone() - phi_own.clone();
+    let delta_quick_neg = quick_neg.clone() - phi_neigh.clone();
+    let quick_pos_mm = phi_own.clone() + minmod_limit(phi_own.clone(), phi_neigh.clone(), delta_quick_pos.clone());
+    let quick_neg_mm = phi_neigh.clone() + minmod_limit(phi_neigh.clone(), phi_own.clone(), delta_quick_neg.clone());
+    let phi_quick_mm = dsl::select(quick_neg_mm, quick_pos_mm, flux.gt(0.0));
+
+    let quick_pos_vl = phi_own.clone() + vanleer_limit(phi_own.clone(), phi_neigh.clone(), delta_quick_pos);
+    let quick_neg_vl = phi_neigh.clone() + vanleer_limit(phi_neigh.clone(), phi_own.clone(), delta_quick_neg);
+    let phi_quick_vl = dsl::select(quick_neg_vl, quick_pos_vl, flux.gt(0.0));
+
     let phi_ho = dsl::select(phi_upwind, phi_sou, scheme.eq(Scheme::SecondOrderUpwind));
     let phi_ho = dsl::select(phi_ho, phi_quick, scheme.eq(Scheme::QUICK));
+    let phi_ho = dsl::select(
+        phi_ho,
+        phi_sou_mm,
+        scheme.eq(Scheme::SecondOrderUpwindMinMod),
+    );
+    let phi_ho = dsl::select(
+        phi_ho,
+        phi_sou_vl,
+        scheme.eq(Scheme::SecondOrderUpwindVanLeer),
+    );
+    let phi_ho = dsl::select(phi_ho, phi_quick_mm, scheme.eq(Scheme::QUICKMinMod));
+    let phi_ho = dsl::select(phi_ho, phi_quick_vl, scheme.eq(Scheme::QUICKVanLeer));
 
     ScalarReconstruction { phi_upwind, phi_ho }
 }

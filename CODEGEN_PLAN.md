@@ -190,8 +190,13 @@ Progress:
 4) Add/expand contract tests and keep OpenFOAM reference tests green (or intentionally updated) during refactors.
 
 ## Next Tasks (smallest high-impact first)
-1) Add a contract/validation test that proves `FluxReconstructionSpec::Muscl{...}` actually affects generated WGSL (while keeping shipped models at `FirstOrder`).
-2) Decide whether `unified_assembly`’s advection reconstruction (`Scheme::{SecondOrderUpwind, QUICK, ...}`) should gain an IR-driven limiter knob or be simplified/retired in favor of a single reconstruction path.
+Completed:
+- Added a contract/validation test proving `FluxReconstructionSpec::Muscl{...}` affects generated WGSL (while shipped models remain `FirstOrder`).
+- Made `unified_assembly`’s advection reconstruction configurable via the runtime `constants.scheme` knob, including limited SOU/QUICK variants.
+
+Next:
+1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for limiters/reconstruction), or kept as a lightweight fallback.
+2) Add a small stability/regression test for the new limited scheme variants (`sou_minmod`, `sou_vanleer`, `quick_minmod`, `quick_vanleer`) so they cannot silently degrade.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

@@ -749,4 +749,32 @@ mod tests {
             "FirstOrder WGSL should not contain neighbor CellToFace geometry"
         );
     }
+
+    #[test]
+    fn contract_unified_assembly_uses_runtime_scheme_and_includes_limited_paths() {
+        // Contract: the generic-coupled assembly kernel should not hard-code advection scheme
+        // selection at codegen time. Instead, it should branch on `constants.scheme` and include
+        // the limited reconstruction paths in WGSL (even though shipped defaults remain Upwind).
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+
+        let model = crate::solver::model::incompressible_momentum_model();
+        let wgsl = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+        )
+        .expect("failed to generate generic_coupled_assembly WGSL");
+
+        assert!(
+            wgsl.contains("constants.scheme"),
+            "generic_coupled_assembly WGSL should reference constants.scheme for runtime selection"
+        );
+
+        // VanLeer-limited paths include a small epsilon literal; check it is present so the
+        // limiter is not silently ignored/hard-coded away.
+        assert!(
+            wgsl.contains("1e-8") || wgsl.contains("0.00000001"),
+            "expected VanLeer epsilon literal to appear in generic_coupled_assembly WGSL"
+        );
+    }
 }

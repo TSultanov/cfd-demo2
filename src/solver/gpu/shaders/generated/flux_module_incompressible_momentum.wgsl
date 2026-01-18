@@ -102,6 +102,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let c_neigh = cell_centers[neigh_idx];
     var c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
+    let c_neigh_cell_vec: vec2<f32> = c_neigh_vec;
     if (is_boundary) {
         c_neigh_vec = face_center_vec;
     }

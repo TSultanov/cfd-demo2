@@ -1,6 +1,6 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
-    FluxReconstructionSpec,
+    FluxReconstructionSpec, LimiterSpec,
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
@@ -34,17 +34,124 @@ fn euler_central_upwind(
     let rho_u_name = "rho_u";
     let rho_e_name = "rho_e";
 
-    let rho = |side: FaceSide| S::state(side, rho_name);
-    let rho_e = |side: FaceSide| S::state(side, rho_e_name);
-    let rho_u = |side: FaceSide| V::state_vec2(side, rho_u_name);
-    let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
-    let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
+    let other_side = |side: FaceSide| {
+        if side == FaceSide::Owner {
+            FaceSide::Neighbor
+        } else {
+            FaceSide::Owner
+        }
+    };
+
+    let limited_linear = |side: FaceSide,
+                          phi_cell: S,
+                          phi_other: S,
+                          grad_field: &'static str,
+                          limiter: LimiterSpec|
+     -> S {
+        let grad = V::state_vec2(side, grad_field);
+        let r = V::cell_to_face(side);
+        let delta = S::Dot(Box::new(grad), Box::new(r));
+
+        match limiter {
+            LimiterSpec::None => S::Add(Box::new(phi_cell), Box::new(delta)),
+
+            // Clamp the projected gradient so the reconstructed face value stays within
+            // the local two-point bounds.
+            LimiterSpec::MinMod => {
+                let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
+                let min_diff = S::Min(Box::new(diff.clone()), Box::new(S::lit(0.0)));
+                let max_diff = S::Max(Box::new(diff), Box::new(S::lit(0.0)));
+
+                let delta_limited = S::Min(
+                    Box::new(S::Max(Box::new(delta), Box::new(min_diff))),
+                    Box::new(max_diff),
+                );
+                S::Add(Box::new(phi_cell), Box::new(delta_limited))
+            }
+
+            // Smoothly scale the projected gradient based on the neighbor difference.
+            // This is not a full VanLeer TVD limiter, but it ensures the knob is honored
+            // and behaves distinctly from MinMod.
+            LimiterSpec::VanLeer => {
+                let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
+                let abs_diff = S::Abs(Box::new(diff));
+                let abs_delta = S::Abs(Box::new(delta.clone()));
+                let denom = S::Max(Box::new(abs_diff.clone()), Box::new(S::Add(Box::new(abs_delta), Box::new(S::lit(1e-8)))));
+                let scale = S::Div(Box::new(abs_diff), Box::new(denom));
+                let delta_limited = S::Mul(Box::new(delta), Box::new(scale));
+                S::Add(Box::new(phi_cell), Box::new(delta_limited))
+            }
+        }
+    };
+
+    let rho_raw = |side: FaceSide| S::state(side, rho_name);
+    let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
+    let rho_u_raw = |side: FaceSide| V::state_vec2(side, rho_u_name);
+    let rho_u_x_raw = |side: FaceSide| S::Dot(Box::new(rho_u_raw(side)), Box::new(ex.clone()));
+    let rho_u_y_raw = |side: FaceSide| S::Dot(Box::new(rho_u_raw(side)), Box::new(ey.clone()));
+    let p_raw = |side: FaceSide| S::state(side, "p");
+
+    let rho = |side: FaceSide| match reconstruction {
+        FluxReconstructionSpec::FirstOrder => rho_raw(side),
+        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+            side,
+            rho_raw(side),
+            rho_raw(other_side(side)),
+            "grad_rho",
+            limiter,
+        ),
+    };
+
+    let rho_e = |side: FaceSide| match reconstruction {
+        FluxReconstructionSpec::FirstOrder => rho_e_raw(side),
+        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+            side,
+            rho_e_raw(side),
+            rho_e_raw(other_side(side)),
+            "grad_rho_e",
+            limiter,
+        ),
+    };
+
+    let rho_u_x = |side: FaceSide| match reconstruction {
+        FluxReconstructionSpec::FirstOrder => rho_u_x_raw(side),
+        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+            side,
+            rho_u_x_raw(side),
+            rho_u_x_raw(other_side(side)),
+            "grad_rho_u_x",
+            limiter,
+        ),
+    };
+
+    let rho_u_y = |side: FaceSide| match reconstruction {
+        FluxReconstructionSpec::FirstOrder => rho_u_y_raw(side),
+        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+            side,
+            rho_u_y_raw(side),
+            rho_u_y_raw(other_side(side)),
+            "grad_rho_u_y",
+            limiter,
+        ),
+    };
+
+    let rho_u = |side: FaceSide| V::vec2(rho_u_x(side), rho_u_y(side));
+
+    let p = |side: FaceSide| match reconstruction {
+        FluxReconstructionSpec::FirstOrder => p_raw(side),
+        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+            side,
+            p_raw(side),
+            p_raw(other_side(side)),
+            "grad_p",
+            limiter,
+        ),
+    };
 
     let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
     let u_vec = |side: FaceSide| V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho(side)));
     let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
 
-    let p = |side: FaceSide| S::state(side, "p");
     let c = |side: FaceSide| {
         // Generalized wave speed:
         //   c^2 = gamma * p / rho + dp_drho

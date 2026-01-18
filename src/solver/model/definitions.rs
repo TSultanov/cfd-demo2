@@ -125,6 +125,62 @@ impl ModelSpec {
             return Err("Coupled method requires a flux_module-providing module".to_string());
         }
 
+        // Flux-module reconstruction knobs must be explicitly supported by the model.
+        //
+        // Defaults remain first-order. Higher-order reconstruction requires a gradients stage
+        // and explicit `grad_*` fields in the state layout.
+        if let Some(flux) = flux {
+            use crate::solver::ir::FluxReconstructionSpec;
+            use crate::solver::model::backend::FieldKind;
+            use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
+
+            match flux {
+                crate::solver::model::flux_module::FluxModuleSpec::Kernel { .. } => {}
+                crate::solver::model::flux_module::FluxModuleSpec::Scheme {
+                    gradients,
+                    scheme,
+                    reconstruction,
+                } => {
+                    if matches!(reconstruction, FluxReconstructionSpec::Muscl { .. }) {
+                        if !matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
+                            return Err(
+                                "flux_module MUSCL reconstruction requires a gradients stage (FluxModuleGradientsSpec::FromStateLayout)"
+                                    .to_string(),
+                            );
+                        }
+
+                        let require_grad = |name: &'static str| -> Result<(), String> {
+                            let grad_name = format!("grad_{name}");
+                            let Some(field) = self.state_layout.field(&grad_name) else {
+                                return Err(format!(
+                                    "flux_module MUSCL reconstruction requires '{}' in state layout",
+                                    grad_name
+                                ));
+                            };
+                            if field.kind() != FieldKind::Vector2 {
+                                return Err(format!(
+                                    "flux_module MUSCL reconstruction requires '{}' to be Vector2",
+                                    grad_name
+                                ));
+                            }
+                            Ok(())
+                        };
+
+                        match scheme {
+                            FluxSchemeSpec::EulerCentralUpwind => {
+                                // Minimum set used by the Euler KT flux math.
+                                require_grad("rho")?;
+                                require_grad("rho_u_x")?;
+                                require_grad("rho_u_y")?;
+                                require_grad("rho_e")?;
+                                require_grad("p")?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Validate typed invariant requirements declared by modules.
         for module in &self.modules {
             for inv in &module.manifest.invariants {
@@ -457,8 +513,10 @@ mod tests {
     use super::*;
     use crate::solver::model::backend::ast::Coefficient;
     use crate::solver::model::backend::ast::TermOp;
+    use crate::solver::model::backend::ast::vol_vector;
     use crate::solver::model::kernel::derive_kernel_specs_for_model;
     use crate::solver::model::KernelId;
+    use crate::solver::units::si;
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {
@@ -535,6 +593,70 @@ mod tests {
         assert!(kernel_ids.contains(&KernelId::FLUX_MODULE));
         assert!(kernel_ids.contains(&KernelId::GENERIC_COUPLED_ASSEMBLY));
         assert!(kernel_ids.contains(&KernelId::GENERIC_COUPLED_UPDATE));
+    }
+
+    #[test]
+    fn flux_module_muscl_requires_gradients_stage_and_grad_fields() {
+        use crate::solver::ir::FluxReconstructionSpec;
+        use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
+        use crate::solver::model::kernel::flux_module_module;
+
+        let mut model = compressible_model();
+
+        let muscl_no_gradients = crate::solver::model::FluxModuleSpec::Scheme {
+            gradients: None,
+            scheme: FluxSchemeSpec::EulerCentralUpwind,
+            reconstruction: FluxReconstructionSpec::Muscl {
+                limiter: crate::solver::ir::LimiterSpec::MinMod,
+            },
+        };
+        let mut replaced = false;
+        for module in &mut model.modules {
+            if module.name == "flux_module" {
+                *module = flux_module_module(muscl_no_gradients).unwrap();
+                replaced = true;
+                break;
+            }
+        }
+        assert!(replaced, "expected compressible_model to include flux_module module");
+        let err = model.validate_module_manifests().unwrap_err();
+        assert!(err.contains("requires a gradients stage"));
+
+        let fields = CompressibleFields::new();
+        model.state_layout = StateLayout::new(vec![
+            fields.rho,
+            fields.rho_u,
+            fields.rho_e,
+            fields.p,
+            fields.t,
+            fields.u,
+            vol_vector("grad_rho", si::DENSITY / si::LENGTH),
+            vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH),
+            vol_vector("grad_rho_u_y", si::MOMENTUM_DENSITY / si::LENGTH),
+            vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH),
+            vol_vector("grad_p", si::PRESSURE / si::LENGTH),
+        ]);
+
+        let muscl_with_gradients = crate::solver::model::FluxModuleSpec::Scheme {
+            gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
+            scheme: FluxSchemeSpec::EulerCentralUpwind,
+            reconstruction: FluxReconstructionSpec::Muscl {
+                limiter: crate::solver::ir::LimiterSpec::MinMod,
+            },
+        };
+        let mut replaced = false;
+        for module in &mut model.modules {
+            if module.name == "flux_module" {
+                *module = flux_module_module(muscl_with_gradients).unwrap();
+                replaced = true;
+                break;
+            }
+        }
+        assert!(replaced, "expected compressible_model to include flux_module module");
+
+        model
+            .validate_module_manifests()
+            .expect("muscl manifests should validate when grad fields exist");
     }
 
     #[test]

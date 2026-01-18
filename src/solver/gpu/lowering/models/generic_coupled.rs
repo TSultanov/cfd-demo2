@@ -226,15 +226,8 @@ fn validate_schur_model(
     };
 
     let method = model.method()?;
-    if !matches!(
-        method,
-        crate::solver::model::method::MethodSpec::GenericCoupled
-            | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. }
-            | crate::solver::model::method::MethodSpec::CoupledIncompressible
-    ) {
-        return Err(
-            "Schur preconditioner is only wired for the GenericCoupled pipelines".to_string(),
-        );
+    if !matches!(method, crate::solver::model::method::MethodSpec::Coupled(_)) {
+        return Err("Schur preconditioner is only wired for the coupled pipeline".to_string());
     }
     layout.validate(model.system.unknowns_per_cell())?;
 
@@ -1365,7 +1358,9 @@ mod tests {
             modules: vec![
                 crate::solver::model::modules::eos::eos_module(eos::EosSpec::Constant),
                 crate::solver::model::kernel::generic_coupled_module(
-                    crate::solver::model::method::MethodSpec::GenericCoupled,
+                    crate::solver::model::method::MethodSpec::Coupled(
+                        crate::solver::model::method::CoupledCapabilities::default(),
+                    ),
                 ),
             ],
             linear_solver: Some(ModelLinearSolverSpec {

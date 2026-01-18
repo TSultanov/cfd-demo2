@@ -46,7 +46,9 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         modules: vec![
             crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
             crate::solver::model::kernel::generic_coupled_module(
-                crate::solver::model::method::MethodSpec::GenericCoupled,
+                crate::solver::model::method::MethodSpec::Coupled(
+                    crate::solver::model::method::CoupledCapabilities::default(),
+                ),
             ),
         ],
         linear_solver: None,
@@ -95,7 +97,9 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         modules: vec![
             crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
             crate::solver::model::kernel::generic_coupled_module(
-                crate::solver::model::method::MethodSpec::GenericCoupled,
+                crate::solver::model::method::MethodSpec::Coupled(
+                    crate::solver::model::method::CoupledCapabilities::default(),
+                ),
             ),
         ],
         linear_solver: None,

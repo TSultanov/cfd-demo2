@@ -118,12 +118,11 @@ impl ModelSpec {
         let method = self.method()?;
         let flux = self.flux_module()?;
 
-        if matches!(method, crate::solver::model::method::MethodSpec::CoupledIncompressible)
-            && flux.is_none()
-        {
-            return Err(
-                "CoupledIncompressible requires a flux_module-providing module".to_string(),
-            );
+        let caps = match method {
+            crate::solver::model::method::MethodSpec::Coupled(caps) => caps,
+        };
+        if caps.requires_flux_module && flux.is_none() {
+            return Err("Coupled method requires a flux_module-providing module".to_string());
         }
 
         // Validate typed invariant requirements declared by modules.
@@ -248,11 +247,7 @@ impl ModelSpec {
         );
 
         let gradient_storage = match method {
-            crate::solver::model::method::MethodSpec::GenericCoupled
-            | crate::solver::model::method::MethodSpec::GenericCoupledImplicit { .. }
-            | crate::solver::model::method::MethodSpec::CoupledIncompressible => {
-                GradientStorage::PackedState
-            }
+            crate::solver::model::method::MethodSpec::Coupled(_) => GradientStorage::PackedState,
         };
 
         let required_gradient_fields = Vec::new();

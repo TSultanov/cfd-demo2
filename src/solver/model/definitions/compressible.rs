@@ -299,7 +299,12 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             ),
     );
 
-    let method = crate::solver::model::method::MethodSpec::GenericCoupledImplicit { outer_iters: 1 };
+    let method = crate::solver::model::method::MethodSpec::Coupled(
+        crate::solver::model::method::CoupledCapabilities {
+            apply_relaxation_in_update: false,
+            requires_flux_module: true,
+        },
+    );
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
         gradients: None,
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,

@@ -1,21 +1,24 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MethodSpec {
-    /// Pressure-coupled incompressible momentum + pressure method.
-    CoupledIncompressible,
-
-    /// Generic coupled scalar/vector method (unified assembly/apply/update path).
-    GenericCoupled,
-
-    /// Generic coupled method with an implicit outer iteration loop.
+    /// Coupled multi-unknown method.
     ///
-    /// This is intended as a transitional configuration while we bring all
-    /// multi-unknown systems through the generic discretization/codegen path.
-    GenericCoupledImplicit { outer_iters: usize },
+    /// This captures *capabilities* of the coupled discretization/codegen path.
+    /// Solver strategy (implicit vs coupled vs explicit) is selected separately via
+    /// `SolverConfig.stepping`.
+    Coupled(CoupledCapabilities),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct CoupledCapabilities {
+    /// Whether the model's `generic_coupled_update` kernel should apply under-relaxation.
+    pub apply_relaxation_in_update: bool,
+
+    /// Whether this coupled method requires a `flux_module` to be present.
+    pub requires_flux_module: bool,
 }
 
 impl Default for MethodSpec {
     fn default() -> Self {
-        // Prefer a safe default that does not assume EI/coupled structure.
-        MethodSpec::GenericCoupled
+        MethodSpec::Coupled(CoupledCapabilities::default())
     }
 }

@@ -155,7 +155,12 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             ),
     );
 
-    let method = crate::solver::model::method::MethodSpec::CoupledIncompressible;
+    let method = crate::solver::model::method::MethodSpec::Coupled(
+        crate::solver::model::method::CoupledCapabilities {
+            apply_relaxation_in_update: true,
+            requires_flux_module: true,
+        },
+    );
     let flux_module = crate::solver::model::flux_module::FluxModuleSpec::Kernel {
         gradients: Some(crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout),
         kernel: flux_kernel,

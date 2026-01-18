@@ -172,12 +172,6 @@ pub fn generic_coupled_module(
     method: crate::solver::model::method::MethodSpec,
 ) -> crate::solver::model::module::KernelBundleModule {
     use crate::solver::model::module::{ModuleManifest, NamedParamKey};
-    use crate::solver::model::method::MethodSpec;
-
-    let update_phase = match method {
-        MethodSpec::GenericCoupledImplicit { .. } => KernelPhaseId::Apply,
-        MethodSpec::GenericCoupled | MethodSpec::CoupledIncompressible => KernelPhaseId::Update,
-    };
 
     crate::solver::model::module::KernelBundleModule {
         name: "generic_coupled",
@@ -189,7 +183,7 @@ pub fn generic_coupled_module(
             },
             ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_UPDATE,
-                phase: update_phase,
+                phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
             },
         ],
@@ -506,10 +500,9 @@ fn generate_generic_coupled_update_kernel_wgsl(
         .primitives
         .ordered()
         .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
-    let apply_relaxation = matches!(
-        model.method().map_err(|e| e.to_string())?,
-        crate::solver::model::method::MethodSpec::CoupledIncompressible
-    );
+    let apply_relaxation = match model.method().map_err(|e| e.to_string())? {
+        crate::solver::model::method::MethodSpec::Coupled(caps) => caps.apply_relaxation_in_update,
+    };
     Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
         &discrete,
         &model.state_layout,

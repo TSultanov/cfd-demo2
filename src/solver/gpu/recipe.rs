@@ -261,6 +261,18 @@ impl SolverRecipe {
             });
         }
 
+        // The implicit stepping program uses a dedicated Apply graph.
+        // Keep apply mechanics out of model identity by inserting the shared apply kernel here.
+        if matches!(stepping, SteppingMode::Implicit { .. })
+            && !kernels.iter().any(|k| k.id == KernelId::GENERIC_COUPLED_APPLY)
+        {
+            kernels.push(KernelSpec {
+                id: KernelId::GENERIC_COUPLED_APPLY,
+                phase: KernelPhase::Apply,
+                dispatch: DispatchKind::Cells,
+            });
+        }
+
         // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();
 

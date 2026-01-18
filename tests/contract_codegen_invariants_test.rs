@@ -122,6 +122,194 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
     assert_not_contains(&src, "all_named_param_handlers", "generic_coupled.rs");
 }
 
+fn contains_macro_invocation(src: &str, macro_name: &str) -> bool {
+    let bytes = src.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        // Skip line comments.
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip nested block comments.
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+            i += 2;
+            let mut depth = 1usize;
+            while i + 1 < bytes.len() && depth > 0 {
+                if bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                    depth += 1;
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    depth -= 1;
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip string literals.
+        if bytes[i] == b'"' {
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip char literals.
+        if bytes[i] == b'\'' {
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[i] == b'\'' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip raw strings: r"...", r#"..."#, br#"..."#
+        let mut raw_start = None;
+        if bytes[i] == b'r' {
+            raw_start = Some(i);
+        } else if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r' {
+            raw_start = Some(i + 1);
+        } else if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+            // Byte string b"..."
+            i += 2;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(r_idx) = raw_start {
+            let mut j = r_idx + 1;
+            let mut hashes = 0usize;
+            while j < bytes.len() && bytes[j] == b'#' {
+                hashes += 1;
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'"' {
+                // Consume until closing quote + hashes.
+                j += 1;
+                while j < bytes.len() {
+                    if bytes[j] == b'"' {
+                        let mut k = j + 1;
+                        let mut matched = 0usize;
+                        while matched < hashes && k < bytes.len() && bytes[k] == b'#' {
+                            matched += 1;
+                            k += 1;
+                        }
+                        if matched == hashes {
+                            i = k;
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                continue;
+            }
+        }
+
+        // Identifier scan.
+        let ch = bytes[i];
+        let is_ident_start = ch == b'_' || (ch as char).is_ascii_alphabetic();
+        if !is_ident_start {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        i += 1;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c == b'_' || (c as char).is_ascii_alphanumeric() {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        let ident = &src[start..i];
+        if ident != macro_name {
+            continue;
+        }
+
+        // Skip whitespace/comments between the identifier and '!'.
+        let mut j = i;
+        loop {
+            while j < bytes.len() && (bytes[j] as char).is_ascii_whitespace() {
+                j += 1;
+            }
+
+            if j + 1 < bytes.len() && bytes[j] == b'/' && bytes[j + 1] == b'/' {
+                j += 2;
+                while j < bytes.len() && bytes[j] != b'\n' {
+                    j += 1;
+                }
+                continue;
+            }
+
+            if j + 1 < bytes.len() && bytes[j] == b'/' && bytes[j + 1] == b'*' {
+                j += 2;
+                let mut depth = 1usize;
+                while j + 1 < bytes.len() && depth > 0 {
+                    if bytes[j] == b'/' && bytes[j + 1] == b'*' {
+                        depth += 1;
+                        j += 2;
+                        continue;
+                    }
+                    if bytes[j] == b'*' && bytes[j + 1] == b'/' {
+                        depth -= 1;
+                        j += 2;
+                        continue;
+                    }
+                    j += 1;
+                }
+                continue;
+            }
+
+            break;
+        }
+
+        if j < bytes.len() && bytes[j] == b'!' {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn visit_rs_files_recursive<F: FnMut(&Path)>(dir: &Path, f: &mut F) {
     let entries = fs::read_dir(dir).unwrap_or_else(|err| {
         panic!("failed to read dir {}: {err}", dir.display())
@@ -149,8 +337,10 @@ fn contract_solver_gpu_does_not_embed_wgsl_via_include_str() {
     let solver_gpu_dir = repo_root().join("src/solver/gpu");
     visit_rs_files_recursive(&solver_gpu_dir, &mut |path| {
         let src = read_utf8(path);
-        // Be robust against whitespace/comments between `(` and the string literal.
-        assert_not_contains(&src, "include_str!", "solver/gpu/*.rs");
+        assert!(
+            !contains_macro_invocation(&src, "include_str"),
+            "solver/gpu/*.rs: must not contain include_str! macro invocations"
+        );
     });
 }
 

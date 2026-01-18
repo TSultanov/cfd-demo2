@@ -458,9 +458,17 @@ fn generate_flux_module_kernel_wgsl(
                 kernel,
             ))
         }
-        crate::solver::model::flux_module::FluxModuleSpec::Scheme { scheme, .. } => {
-            let kernel = crate::solver::model::flux_schemes::lower_flux_scheme(scheme, &model.system)
-                .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
+        crate::solver::model::flux_module::FluxModuleSpec::Scheme {
+            scheme,
+            reconstruction,
+            ..
+        } => {
+            let kernel = crate::solver::model::flux_schemes::lower_flux_scheme(
+                scheme,
+                &model.system,
+                *reconstruction,
+            )
+            .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
             Ok(cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl(
                 &model.state_layout,
                 &flux_layout,

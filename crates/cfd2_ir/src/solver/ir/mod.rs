@@ -258,6 +258,10 @@ pub enum FluxModuleKernelSpec {
     /// All fluxes are expressed in the *face-normal* direction and are written as integrated
     /// face fluxes (i.e., multiplied by face `area` at the end of the kernel).
     CentralUpwind {
+        /// Reconstruction method for left/right states.
+        ///
+        /// Defaults must preserve first-order behavior.
+        reconstruction: FluxReconstructionSpec,
         /// Coupled unknown-component names in packed order.
         components: Vec<String>,
         /// Reconstructed left state U_L (one scalar per component).
@@ -273,6 +277,34 @@ pub enum FluxModuleKernelSpec {
         /// Lower wave speed bound (<= 0).
         a_minus: FaceScalarExpr,
     },
+}
+
+/// Reconstruction method for flux-module face states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FluxReconstructionSpec {
+    /// First-order: use cell-centered values as face states.
+    #[default]
+    FirstOrder,
+
+    /// MUSCL-type reconstruction with a slope limiter.
+    Muscl { limiter: LimiterSpec },
+}
+
+/// Slope limiter for high-order reconstruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimiterSpec {
+    /// No limiting (can be unstable).
+    None,
+    /// MinMod limiter.
+    MinMod,
+    /// Van Leer limiter.
+    VanLeer,
+}
+
+impl Default for LimiterSpec {
+    fn default() -> Self {
+        LimiterSpec::None
+    }
 }
 
 // Intentionally no test fixtures here: `cfd2_ir` must not depend on model definitions.

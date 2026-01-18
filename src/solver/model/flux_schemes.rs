@@ -1,5 +1,6 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
+    FluxReconstructionSpec,
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
@@ -7,13 +8,17 @@ use crate::solver::model::flux_module::FluxSchemeSpec;
 pub fn lower_flux_scheme(
     scheme: &FluxSchemeSpec,
     system: &EquationSystem,
+    reconstruction: FluxReconstructionSpec,
 ) -> Result<FluxModuleKernelSpec, String> {
     match *scheme {
-        FluxSchemeSpec::EulerCentralUpwind => euler_central_upwind(system),
+        FluxSchemeSpec::EulerCentralUpwind => euler_central_upwind(system, reconstruction),
     }
 }
 
-fn euler_central_upwind(system: &EquationSystem) -> Result<FluxModuleKernelSpec, String> {
+fn euler_central_upwind(
+    system: &EquationSystem,
+    reconstruction: FluxReconstructionSpec,
+) -> Result<FluxModuleKernelSpec, String> {
     let flux_layout = FluxLayout::from_system(system);
     let components: Vec<String> = flux_layout
         .components
@@ -143,6 +148,7 @@ fn euler_central_upwind(system: &EquationSystem) -> Result<FluxModuleKernelSpec,
     );
 
     Ok(FluxModuleKernelSpec::CentralUpwind {
+        reconstruction,
         components,
         u_left,
         u_right,

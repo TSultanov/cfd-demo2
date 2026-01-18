@@ -30,6 +30,11 @@ pub enum FluxModuleSpec {
         gradients: Option<FluxModuleGradientsSpec>,
         /// Scheme selection + parameters.
         scheme: FluxSchemeSpec,
+        /// Reconstruction method for left/right face states.
+        ///
+        /// This is a numerical-method knob (not PDE-specific). Defaults must preserve
+        /// the existing first-order behavior.
+        reconstruction: crate::solver::ir::FluxReconstructionSpec,
     },
 }
 
@@ -51,32 +56,6 @@ pub enum FluxModuleGradientsSpec {
     /// `<name>` is one of the coupled unknowns; otherwise boundary faces fall back to
     /// zero-gradient extrapolation.
     FromStateLayout,
-}
-
-/// Reconstruction method for face values (used by flux modules).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconstructionSpec {
-    /// First-order upwind (cell-centered values)
-    FirstOrder,
-
-    /// MUSCL (Monotonic Upstream-centered Scheme for Conservation Laws)
-    Muscl {
-        /// Slope limiter
-        limiter: LimiterSpec,
-    },
-}
-
-/// Slope limiter for high-order reconstruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LimiterSpec {
-    /// Van Leer limiter
-    VanLeer,
-
-    /// MinMod limiter
-    MinMod,
-
-    /// No limiting (central difference, can be unstable)
-    None,
 }
 
 impl Default for FluxModuleSpec {

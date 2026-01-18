@@ -8,7 +8,7 @@ use super::wgsl_ast::{
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::{
     FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FieldKind,
-    FluxLayout, FluxModuleKernelSpec, StateLayout,
+    FluxLayout, FluxModuleKernelSpec, FluxReconstructionSpec, StateLayout,
 };
 use crate::solver::shared::PrimitiveExpr;
 
@@ -401,6 +401,7 @@ fn face_stmts(
             }
         }
         FluxModuleKernelSpec::CentralUpwind {
+            reconstruction,
             components,
             u_left,
             u_right,
@@ -409,6 +410,17 @@ fn face_stmts(
             a_plus,
             a_minus,
         } => {
+            // For now, flux modules are first-order only.
+            //
+            // The reconstruction knob is carried in the IR so it can be selected
+            // purely by model/module manifests later, without introducing solver-core
+            // hard-coding.
+            if *reconstruction != FluxReconstructionSpec::FirstOrder {
+                panic!(
+                    "CentralUpwind reconstruction {:?} is not yet supported",
+                    reconstruction
+                );
+            }
             if components.len() != flux_layout.components.len() {
                 panic!("CentralUpwind spec component count does not match FluxLayout");
             }

@@ -26,7 +26,8 @@ pub use definitions::{
 pub use eos::EosSpec;
 pub use fluid::Fluid;
 pub use flux_layout::{FluxComponent, FluxLayout};
-pub use flux_module::{FluxModuleSpec, LimiterSpec, ReconstructionSpec};
+pub use crate::solver::ir::{FluxReconstructionSpec, LimiterSpec};
+pub use flux_module::FluxModuleSpec;
 pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
 pub use kernel::KernelId;
 pub use linear_solver::SchurBlockLayout;

@@ -163,7 +163,9 @@ mod solver {
         #[allow(unused_imports)]
         pub use flux_layout::{FluxComponent, FluxLayout};
         #[allow(unused_imports)]
-        pub use flux_module::{FluxModuleSpec, ReconstructionSpec};
+        pub use super::ir::{FluxReconstructionSpec, LimiterSpec};
+        #[allow(unused_imports)]
+        pub use flux_module::FluxModuleSpec;
         #[allow(unused_imports)]
         pub use gpu_spec::{expand_field_components, FluxSpec, GradientStorage, ModelGpuSpec};
         #[allow(unused_imports)]

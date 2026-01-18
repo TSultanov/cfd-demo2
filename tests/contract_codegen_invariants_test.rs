@@ -91,3 +91,23 @@ fn contract_build_rs_has_no_per_kernel_prefix_discovery_glue() {
     }
 }
 
+#[test]
+fn contract_unified_solver_has_no_model_specific_helpers() {
+    let path = repo_root().join("src/solver/gpu/unified_solver.rs");
+    let src = read_utf8(&path);
+
+    // Core solver API should not encode PDE/physics details (those belong in model helper layers).
+    for needle in [
+        "get_u(",
+        "get_p(",
+        "get_rho(",
+        "set_uniform_state",
+        "set_state_fields",
+        "gamma=",
+        "inlet_velocity",
+        "ramp_time",
+        "outer_correctors",
+    ] {
+        assert_not_contains(&src, needle, "unified_solver.rs");
+    }
+}

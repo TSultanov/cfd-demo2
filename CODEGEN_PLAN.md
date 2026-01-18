@@ -111,19 +111,19 @@ Progress (partial):
 - Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 
 ### 2) Make `UnifiedSolver` truly model-agnostic (API + host-side math)
-Current `GpuUnifiedSolver` (`src/solver/gpu/unified_solver.rs`) still contains model-specific assumptions:
-- Field-name heuristics (`U/u`, `rho`, etc.) and convenience accessors (`get_u/get_p/get_rho`) baked into the core type.
-- Hard-coded thermodynamics (`gamma=1.4`) in `set_uniform_state` / `set_state_fields`.
-- Family/model-specific controls and naming (`set_incompressible_outer_correctors`, `set_inlet_velocity`, etc.) wired through global named-parameter keys (stringly-typed).
+Goal: keep the *public* solver API model-agnostic.
+
+Historically, `GpuUnifiedSolver` (`src/solver/gpu/unified_solver.rs`) contained model-specific assumptions (field-name heuristics, hard-coded thermodynamics, and "inlet velocity" style helpers). Those belong in model helper layers, not in the core solver.
 
 Target:
 - Core solver exposes only generic operations: `set_param(id, value)`, `set_field(name, values)`, `step()`, `read_state()`, etc.
 - Any “physics-aware” helpers live alongside models (e.g. `model::helpers::euler::pack_conservative_state(...)`), not in the solver core.
 - Boundary driving (e.g. inlet velocity) is described declaratively by the model (or recipe), not by ad-hoc host-side special-casing.
 
-Progress (partial):
-- Added a generic boundary table update API (`GpuUnifiedSolver::set_boundary_scalar/set_boundary_vec2/set_boundary_values`).
-- Removed the `inlet_velocity`/`ramp_time` named params and host-side inlet special-casing; tests/UI now drive inlet BCs via model helpers that use the generic boundary API.
+Progress:
+- `GpuUnifiedSolver` exposes generic state/field IO (`read_state_f32` / `write_state_f32`, `set_field_scalar`, `set_field_vec2`, etc.) and a generic boundary update API (`set_boundary_scalar/set_boundary_vec2/set_boundary_values`).
+- Inlet-driving special-casing was removed; tests/UI drive inlet BCs via the generic boundary API + model helpers.
+- Add/expand contract tests to prevent re-introducing solver-core physics assumptions.
 
 ### 3) Retire `PlanParam` as global plumbing
 - Replace global param plumbing with typed, module-owned uniforms/config deltas routed through the recipe (or a model-declared parameter table).

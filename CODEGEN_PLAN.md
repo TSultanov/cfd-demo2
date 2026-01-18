@@ -103,6 +103,7 @@ Progress (partial):
 - Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; EOS/low-mach named keys are now purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
 - Build-script stability for modules: `build.rs` includes `src/solver/model/modules/mod.rs`, so adding a new module file under `src/solver/model/modules/` does not require editing `build.rs` (validated on 2026-01-18).
 - Rhie–Chow module-specific kernel IDs (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) are now module-local (no longer central `KernelId` constants), so adding similar auxiliary modules does not require editing `src/solver/model/kernel.rs` (validated on 2026-01-18).
+- Contract hardening: `contract_gap0_module_defined_kernel_id_is_module_driven` ensures a locally-defined `KernelId("contract/...")` (not a builtin kernel id) can still be scheduled and generated via module wiring (`src/solver/model/kernel.rs`), so future re-centralization breaks the test (added on 2026-01-18).
 - Consolidated coupled method identity into `MethodSpec::Coupled(CoupledCapabilities)`; solver strategy (implicit/coupled) is selected via `SolverConfig.stepping`.
 - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-18.
 

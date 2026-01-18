@@ -648,6 +648,60 @@ pub fn emit_model_kernel_wgsl_by_id(
     cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, &wgsl)
 }
 
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::solver::model::module::KernelBundleModule;
+    use crate::solver::model::ModelSpec;
+
+    fn contract_kernel_generator(
+        _model: &ModelSpec,
+        _schemes: &crate::solver::ir::SchemeRegistry,
+    ) -> Result<String, String> {
+        Ok("// contract: module-defined kernel generator\n".to_string())
+    }
+
+    #[test]
+    fn contract_gap0_module_defined_kernel_id_is_module_driven() {
+        let contract_id = KernelId("contract/module_defined_kernel");
+        assert!(
+            !is_builtin_model_generated_kernel_id(contract_id),
+            "contract id must not be considered a builtin model-generated kernel"
+        );
+
+        let module = KernelBundleModule {
+            name: "contract_module_defined_kernel",
+            kernels: vec![ModelKernelSpec {
+                id: contract_id,
+                phase: KernelPhaseId::Preparation,
+                dispatch: DispatchKindId::Cells,
+            }],
+            generators: vec![ModelKernelGeneratorSpec {
+                id: contract_id,
+                generator: contract_kernel_generator,
+            }],
+            ..Default::default()
+        };
+
+        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        model.modules.push(module);
+
+        let specs = derive_kernel_specs_for_model(&model).expect("failed to derive kernel specs");
+        assert!(
+            specs.iter().any(|s| s.id == contract_id),
+            "derived kernel specs must include module-defined KernelId"
+        );
+
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+        let wgsl = generate_kernel_wgsl_for_model_by_id(&model, &schemes, contract_id)
+            .expect("module-defined kernel generator was not located by id");
+        assert!(
+            wgsl.contains("contract: module-defined kernel generator"),
+            "generated WGSL must contain the module-defined marker"
+        );
+    }
+}
+
 // (intentionally no additional kernel-analysis helpers here; kernel selection is recipe-driven)
 
 #[cfg(test)]

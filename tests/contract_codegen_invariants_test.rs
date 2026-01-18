@@ -689,11 +689,5 @@ fn contract_reconstruction_paths_share_vanleer_eps_constant() {
         .next()
         .unwrap_or(&ua_src);
     assert_not_contains(&ua_impl, "1e-8", "reconstruction.rs");
-    // Allow either direct `VANLEER_EPS` use or delegating to the shared reconstruction helpers.
-    assert!(
-        contains_ident(&ua_impl, "VANLEER_EPS")
-            || ua_impl.contains("ir::reconstruction")
-            || ua_impl.contains("solver::ir::reconstruction"),
-        "reconstruction.rs should reference VANLEER_EPS or use shared reconstruction helpers"
-    );
+    assert_contains(&ua_impl, "limited_linear_face_value", "reconstruction.rs");
 }

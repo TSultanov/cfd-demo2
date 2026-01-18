@@ -215,9 +215,10 @@ Completed:
 - Hardened the `include_str!` contract to avoid false negatives caused by Rust lifetime syntax (e.g. `fn f<'a>(...)`).
 - Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
 - Build-time shared-kernel emission is list-driven (`shared_kernel_generator_specs`), so adding a new shared generated kernel no longer requires editing multiple special-case branches.
+- Reconstruction hardening: unified_assembly and flux-module paths share the same reconstruction/limiter formulas via `cfd2_ir::solver::ir::reconstruction` (single source of truth); decision is to keep unified_assembly as the scalar-convection fallback, but derive its limiter math from the shared helpers.
 
 Next:
-1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
+1) Unify reconstruction knobs: decide whether to keep both `Scheme` (scalar convection) and `FluxReconstructionSpec` (flux-module face states), or converge on a single recipe-driven reconstruction spec.
 2) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
 
 Status:

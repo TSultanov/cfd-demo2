@@ -2,13 +2,61 @@ use super::dsl as typed;
 use super::dsl::EnumExpr;
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
-use crate::solver::ir::VANLEER_EPS;
+use crate::solver::ir::reconstruction::{limited_linear_face_value, quick_face_value, ReconstructionBuilder};
+use crate::solver::ir::LimiterSpec;
 use crate::solver::scheme::Scheme;
 
 #[derive(Debug, Clone)]
 pub struct ScalarReconstruction {
     pub phi_upwind: Expr,
     pub phi_ho: Expr,
+}
+
+struct WgslExprBuilder;
+
+impl ReconstructionBuilder for WgslExprBuilder {
+    type Scalar = Expr;
+    type Vec2 = Expr;
+
+    fn lit(v: f32) -> Self::Scalar {
+        v.into()
+    }
+
+    fn add(a: Self::Scalar, b: Self::Scalar) -> Self::Scalar {
+        a + b
+    }
+
+    fn sub(a: Self::Scalar, b: Self::Scalar) -> Self::Scalar {
+        a - b
+    }
+
+    fn mul(a: Self::Scalar, b: Self::Scalar) -> Self::Scalar {
+        a * b
+    }
+
+    fn div(a: Self::Scalar, b: Self::Scalar) -> Self::Scalar {
+        a / b
+    }
+
+    fn abs(a: Self::Scalar) -> Self::Scalar {
+        dsl::abs(a)
+    }
+
+    fn min(a: Self::Scalar, b: Self::Scalar) -> Self::Scalar {
+        dsl::min(a, b)
+    }
+
+    fn max(a: Self::Scalar, b: Self::Scalar) -> Self::Scalar {
+        dsl::max(a, b)
+    }
+
+    fn vec2_sub(a: Self::Vec2, b: Self::Vec2) -> Self::Vec2 {
+        a - b
+    }
+
+    fn vec2_dot(a: Self::Vec2, b: Self::Vec2) -> Self::Scalar {
+        dsl::dot(a, b)
+    }
 }
 
 pub fn scalar_reconstruction(
@@ -26,67 +74,108 @@ pub fn scalar_reconstruction(
 
     let phi_upwind = dsl::select(phi_own, phi_neigh, flux.lt(0.0));
 
-    let minmod_limit = |phi_cell: Expr, phi_other: Expr, delta: Expr| -> Expr {
-        let diff = phi_other - phi_cell.clone();
-        let min_diff = dsl::min(diff.clone(), 0.0);
-        let max_diff = dsl::max(diff, 0.0);
-        dsl::min(dsl::max(delta, min_diff), max_diff)
-    };
+    let grad_own_vec = dsl::vec2_f32_from_xy_fields(grad_own.clone());
+    let grad_neigh_vec = dsl::vec2_f32_from_xy_fields(grad_neigh.clone());
+    let r_own = xy(&face_center) - xy(&center);
+    let r_neigh = xy(&face_center) - xy(&other_center);
 
-    let vanleer_limit = |phi_cell: Expr, phi_other: Expr, delta: Expr| -> Expr {
-        let diff = phi_other - phi_cell.clone();
-        let abs_diff = dsl::abs(diff.clone());
-        let abs_delta = dsl::abs(delta.clone());
-        let denom = dsl::max(abs_diff.clone(), abs_delta + VANLEER_EPS);
-        let delta_scaled = delta.clone() * (abs_diff / denom);
-        // Guard against opposite-signed slopes to avoid introducing new extrema.
-        let sign_ok = (diff * delta).gt(0.0);
-        dsl::select(0.0, delta_scaled, sign_ok)
-    };
-
-    let delta_sou_pos = dsl::dot(
-        dsl::vec2_f32_from_xy_fields(grad_own.clone()),
-        xy(&face_center) - xy(&center),
+    let sou_pos = limited_linear_face_value::<WgslExprBuilder>(
+        phi_own.clone(),
+        phi_neigh.clone(),
+        grad_own_vec.clone(),
+        r_own.clone(),
+        LimiterSpec::None,
     );
-    let delta_sou_neg = dsl::dot(
-        dsl::vec2_f32_from_xy_fields(grad_neigh.clone()),
-        xy(&face_center) - xy(&other_center),
+    let sou_neg = limited_linear_face_value::<WgslExprBuilder>(
+        phi_neigh.clone(),
+        phi_own.clone(),
+        grad_neigh_vec.clone(),
+        r_neigh.clone(),
+        LimiterSpec::None,
     );
-
-    let sou_pos = phi_own.clone() + delta_sou_pos.clone();
-    let sou_neg = phi_neigh.clone() + delta_sou_neg.clone();
     let phi_sou = dsl::select(sou_neg, sou_pos, flux.gt(0.0));
 
-    let sou_pos_mm = phi_own.clone() + minmod_limit(phi_own.clone(), phi_neigh.clone(), delta_sou_pos.clone());
-    let sou_neg_mm = phi_neigh.clone() + minmod_limit(phi_neigh.clone(), phi_own.clone(), delta_sou_neg.clone());
+    let sou_pos_mm = limited_linear_face_value::<WgslExprBuilder>(
+        phi_own.clone(),
+        phi_neigh.clone(),
+        grad_own_vec.clone(),
+        r_own.clone(),
+        LimiterSpec::MinMod,
+    );
+    let sou_neg_mm = limited_linear_face_value::<WgslExprBuilder>(
+        phi_neigh.clone(),
+        phi_own.clone(),
+        grad_neigh_vec.clone(),
+        r_neigh.clone(),
+        LimiterSpec::MinMod,
+    );
     let phi_sou_mm = dsl::select(sou_neg_mm, sou_pos_mm, flux.gt(0.0));
 
-    let sou_pos_vl = phi_own.clone() + vanleer_limit(phi_own.clone(), phi_neigh.clone(), delta_sou_pos);
-    let sou_neg_vl = phi_neigh.clone() + vanleer_limit(phi_neigh.clone(), phi_own.clone(), delta_sou_neg);
+    let sou_pos_vl = limited_linear_face_value::<WgslExprBuilder>(
+        phi_own.clone(),
+        phi_neigh.clone(),
+        grad_own_vec.clone(),
+        r_own.clone(),
+        LimiterSpec::VanLeer,
+    );
+    let sou_neg_vl = limited_linear_face_value::<WgslExprBuilder>(
+        phi_neigh.clone(),
+        phi_own.clone(),
+        grad_neigh_vec.clone(),
+        r_neigh.clone(),
+        LimiterSpec::VanLeer,
+    );
     let phi_sou_vl = dsl::select(sou_neg_vl, sou_pos_vl, flux.gt(0.0));
 
-    let quick_pos = phi_own.clone() * 0.625
-        + phi_neigh.clone() * 0.375
-        + dsl::dot(
-            dsl::vec2_f32_from_xy_fields(grad_own),
-            xy(&other_center) - xy(&center),
-        ) * 0.125;
-    let quick_neg = phi_neigh.clone() * 0.625
-        + phi_own.clone() * 0.375
-        + dsl::dot(
-            dsl::vec2_f32_from_xy_fields(grad_neigh),
-            xy(&center) - xy(&other_center),
-        ) * 0.125;
+    let d_pos = xy(&other_center) - xy(&center);
+    let d_neg = xy(&center) - xy(&other_center);
+
+    let quick_pos = quick_face_value::<WgslExprBuilder>(
+        phi_own.clone(),
+        phi_neigh.clone(),
+        grad_own_vec.clone(),
+        d_pos.clone(),
+        LimiterSpec::None,
+    );
+    let quick_neg = quick_face_value::<WgslExprBuilder>(
+        phi_neigh.clone(),
+        phi_own.clone(),
+        grad_neigh_vec.clone(),
+        d_neg.clone(),
+        LimiterSpec::None,
+    );
     let phi_quick = dsl::select(quick_neg, quick_pos, flux.gt(0.0));
 
-    let delta_quick_pos = quick_pos.clone() - phi_own.clone();
-    let delta_quick_neg = quick_neg.clone() - phi_neigh.clone();
-    let quick_pos_mm = phi_own.clone() + minmod_limit(phi_own.clone(), phi_neigh.clone(), delta_quick_pos.clone());
-    let quick_neg_mm = phi_neigh.clone() + minmod_limit(phi_neigh.clone(), phi_own.clone(), delta_quick_neg.clone());
+    let quick_pos_mm = quick_face_value::<WgslExprBuilder>(
+        phi_own.clone(),
+        phi_neigh.clone(),
+        grad_own_vec.clone(),
+        d_pos.clone(),
+        LimiterSpec::MinMod,
+    );
+    let quick_neg_mm = quick_face_value::<WgslExprBuilder>(
+        phi_neigh.clone(),
+        phi_own.clone(),
+        grad_neigh_vec.clone(),
+        d_neg.clone(),
+        LimiterSpec::MinMod,
+    );
     let phi_quick_mm = dsl::select(quick_neg_mm, quick_pos_mm, flux.gt(0.0));
 
-    let quick_pos_vl = phi_own.clone() + vanleer_limit(phi_own.clone(), phi_neigh.clone(), delta_quick_pos);
-    let quick_neg_vl = phi_neigh.clone() + vanleer_limit(phi_neigh.clone(), phi_own.clone(), delta_quick_neg);
+    let quick_pos_vl = quick_face_value::<WgslExprBuilder>(
+        phi_own.clone(),
+        phi_neigh.clone(),
+        grad_own_vec,
+        d_pos,
+        LimiterSpec::VanLeer,
+    );
+    let quick_neg_vl = quick_face_value::<WgslExprBuilder>(
+        phi_neigh.clone(),
+        phi_own.clone(),
+        grad_neigh_vec,
+        d_neg,
+        LimiterSpec::VanLeer,
+    );
     let phi_quick_vl = dsl::select(quick_neg_vl, quick_pos_vl, flux.gt(0.0));
 
     let phi_ho = dsl::select(phi_upwind, phi_sou, scheme.eq(Scheme::SecondOrderUpwind));
@@ -173,17 +262,21 @@ mod tests {
     #[test]
     fn vanleer_limiter_guards_opposite_signed_slopes() {
         // Regression: VanLeer-limited schemes must not allow opposite-signed slopes.
-        // Ensure the codegen emits a sign guard (a > 0 check) for the VanLeer branch.
+        // Ensure the codegen emits a sign guard (max(p,0)/max(abs(p),eps)) for the VanLeer branch.
         for scheme in [Scheme::SecondOrderUpwindVanLeer, Scheme::QUICKVanLeer] {
             let wgsl = wgsl_for_phi_ho(scheme);
             let compact: String = wgsl.chars().filter(|c| !c.is_whitespace()).collect();
             assert!(
-                compact.contains(">0.0"),
-                "expected {scheme:?} VanLeer limiter to include a sign guard (> 0.0)"
+                compact.contains("max(abs("),
+                "expected {scheme:?} VanLeer limiter to include max(abs(p), eps) in the sign guard"
             );
             assert!(
-                compact.contains("select(0.0"),
-                "expected {scheme:?} VanLeer limiter to zero out delta via select(0.0, ...)"
+                compact.contains("max(") && compact.contains("abs(") && compact.contains("0.0"),
+                "expected {scheme:?} VanLeer limiter to include abs/max and a 0.0 clamp"
+            );
+            assert!(
+                compact.contains("1e-8") || compact.contains("0.00000001"),
+                "expected {scheme:?} VanLeer limiter to include the epsilon literal"
             );
         }
     }

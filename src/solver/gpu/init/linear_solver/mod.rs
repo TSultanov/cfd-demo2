@@ -39,7 +39,6 @@ pub struct ScalarLinearSolverResources {
     pub pipeline_cg_update_p: wgpu::ComputePipeline,
     pub ports: LinearSystemPorts,
     pub port_space: PortSpace,
-    pipeline_res: pipelines::PipelineResources,
 }
 
 pub struct ScalarCgInit {
@@ -118,7 +117,6 @@ pub fn init_scalar_linear_solver(
         pipeline_cg_update_p: pipeline_res.pipeline_cg_update_p.clone(),
         ports,
         port_space,
-        pipeline_res,
     }
 }
 

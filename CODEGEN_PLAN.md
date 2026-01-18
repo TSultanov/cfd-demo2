@@ -197,7 +197,7 @@ Progress:
 
 ## Next Tasks (smallest high-impact first)
 Completed:
-- Added a contract/validation test proving higher-order flux-module reconstruction affects generated WGSL (while shipped models remain `Scheme::Upwind`).
+- Flux-module reconstruction now branches on the runtime `constants.scheme` / `advection_scheme` knob (including limited SOU/QUICK variants) so the setting is not ignored; OpenFOAM reference tests pass.
 - Made `unified_assembly`’s advection reconstruction configurable via the runtime `constants.scheme` knob, including limited SOU/QUICK variants.
 - Added regression/contract coverage so limited SOU/QUICK variants can’t silently degrade.
 - Aligned VanLeer limiter behavior across unified_assembly and flux-module MUSCL by guarding opposite-signed slopes (prevents new extrema); added an IR-structure contract test.
@@ -219,7 +219,7 @@ Completed:
 - Reconstruction knobs: flux-module reconstruction now uses the shared `Scheme` enum (no duplicate `FluxReconstructionSpec` type).
 
 Next:
-1) Decide how flux-module reconstruction should relate to the runtime `advection_scheme` knob (shared param vs per-module param) and, if shared, how required gradient resources should be derived from `(model + config)` without runtime WGSL generation.
+1) Align gradient resource allocation with generated kernels: either emit/use `grad_state` (and a gradients pass) when `advection_scheme != Upwind`, or stop allocating unused gradient buffers for `PackedState` until they’re wired.
 2) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
 
 Status:

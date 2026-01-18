@@ -155,7 +155,7 @@ mod solver {
         #[allow(unused_imports)]
         pub use flux_layout::{FluxComponent, FluxLayout};
         #[allow(unused_imports)]
-        pub use super::ir::{FluxReconstructionSpec, LimiterSpec};
+        pub use super::ir::LimiterSpec;
         #[allow(unused_imports)]
         pub use flux_module::FluxModuleSpec;
         #[allow(unused_imports)]

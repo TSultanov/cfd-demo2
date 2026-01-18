@@ -47,9 +47,8 @@ pub fn generate_flux_module_wgsl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{
-        vol_scalar, vol_vector, FaceSide, FluxComponent, FluxReconstructionSpec, LimiterSpec,
-    };
+    use crate::solver::ir::{vol_scalar, vol_vector, FaceSide, FluxComponent};
+    use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
 
     #[test]
@@ -85,9 +84,7 @@ mod tests {
         let right = reconstruct(FaceSide::Neighbor, FaceSide::Owner);
 
         let spec = FluxModuleKernelSpec::CentralUpwind {
-            reconstruction: FluxReconstructionSpec::Muscl {
-                limiter: LimiterSpec::MinMod,
-            },
+            reconstruction: Scheme::SecondOrderUpwindMinMod,
             components: vec!["phi".to_string()],
             u_left: vec![left.clone()],
             u_right: vec![right.clone()],
@@ -590,8 +587,8 @@ fn lower_vec2(
 
             // Boundary regression guard for MUSCL reconstruction:
             //
-            // When `FluxReconstructionSpec::Muscl{...}` is enabled, models conventionally use
-            // `grad_*` state fields to reconstruct face states. On boundary faces, neighbor-side
+            // When higher-order reconstruction is enabled, models conventionally use `grad_*`
+            // state fields to reconstruct face states. On boundary faces, neighbor-side
             // state reads are replaced with Dirichlet/Neumann "ghost" values via `bc_kind/bc_value`.
             // If we also use non-zero neighbor-side gradients, the reconstruction step can modify
             // those ghost values and violate boundary semantics.

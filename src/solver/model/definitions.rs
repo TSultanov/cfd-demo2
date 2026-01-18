@@ -130,7 +130,7 @@ impl ModelSpec {
         // Defaults remain first-order. Higher-order reconstruction requires a gradients stage
         // and explicit `grad_*` fields in the state layout.
         if let Some(flux) = flux {
-            use crate::solver::ir::FluxReconstructionSpec;
+            use crate::solver::scheme::Scheme;
             use crate::solver::model::backend::FieldKind;
             use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
 
@@ -141,10 +141,10 @@ impl ModelSpec {
                     scheme,
                     reconstruction,
                 } => {
-                    if matches!(reconstruction, FluxReconstructionSpec::Muscl { .. }) {
+                    if *reconstruction != Scheme::Upwind {
                         if !matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
                             return Err(
-                                "flux_module MUSCL reconstruction requires a gradients stage (FluxModuleGradientsSpec::FromStateLayout)"
+                                "flux_module higher-order reconstruction requires a gradients stage (FluxModuleGradientsSpec::FromStateLayout)"
                                     .to_string(),
                             );
                         }
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn flux_module_muscl_requires_gradients_stage_and_grad_fields() {
-        use crate::solver::ir::FluxReconstructionSpec;
+        use crate::solver::scheme::Scheme;
         use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
         use crate::solver::model::modules::flux_module::flux_module_module;
 
@@ -606,9 +606,7 @@ mod tests {
         let muscl_no_gradients = crate::solver::model::FluxModuleSpec::Scheme {
             gradients: None,
             scheme: FluxSchemeSpec::EulerCentralUpwind,
-            reconstruction: FluxReconstructionSpec::Muscl {
-                limiter: crate::solver::ir::LimiterSpec::MinMod,
-            },
+            reconstruction: Scheme::SecondOrderUpwindMinMod,
         };
         let mut replaced = false;
         for module in &mut model.modules {
@@ -640,9 +638,7 @@ mod tests {
         let muscl_with_gradients = crate::solver::model::FluxModuleSpec::Scheme {
             gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
             scheme: FluxSchemeSpec::EulerCentralUpwind,
-            reconstruction: FluxReconstructionSpec::Muscl {
-                limiter: crate::solver::ir::LimiterSpec::MinMod,
-            },
+            reconstruction: Scheme::SecondOrderUpwindMinMod,
         };
         let mut replaced = false;
         for module in &mut model.modules {

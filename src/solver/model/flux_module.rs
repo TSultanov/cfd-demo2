@@ -30,11 +30,11 @@ pub enum FluxModuleSpec {
         gradients: Option<FluxModuleGradientsSpec>,
         /// Scheme selection + parameters.
         scheme: FluxSchemeSpec,
-        /// Reconstruction method for left/right face states.
+        /// Reconstruction scheme for left/right face states.
         ///
         /// This is a numerical-method knob (not PDE-specific). Defaults must preserve
         /// the existing first-order behavior.
-        reconstruction: crate::solver::ir::FluxReconstructionSpec,
+        reconstruction: crate::solver::scheme::Scheme,
     },
 }
 

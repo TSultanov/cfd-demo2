@@ -16,6 +16,8 @@ pub use crate::solver::model::backend::ast::{
     UnitValidationError,
 };
 
+use crate::solver::scheme::Scheme;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EosSpec {
     IdealGas { gamma: f32 },
@@ -266,10 +268,10 @@ pub enum FluxModuleKernelSpec {
     /// All fluxes are expressed in the *face-normal* direction and are written as integrated
     /// face fluxes (i.e., multiplied by face `area` at the end of the kernel).
     CentralUpwind {
-        /// Reconstruction method for left/right states.
+        /// Reconstruction scheme for left/right states.
         ///
-        /// Defaults must preserve first-order behavior.
-        reconstruction: FluxReconstructionSpec,
+        /// Use `Scheme::Upwind` for first-order behavior.
+        reconstruction: Scheme,
         /// Coupled unknown-component names in packed order.
         components: Vec<String>,
         /// Reconstructed left state U_L (one scalar per component).
@@ -285,17 +287,6 @@ pub enum FluxModuleKernelSpec {
         /// Lower wave speed bound (<= 0).
         a_minus: FaceScalarExpr,
     },
-}
-
-/// Reconstruction method for flux-module face states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FluxReconstructionSpec {
-    /// First-order: use cell-centered values as face states.
-    #[default]
-    FirstOrder,
-
-    /// MUSCL-type reconstruction with a slope limiter.
-    Muscl { limiter: LimiterSpec },
 }
 
 /// Slope limiter for high-order reconstruction.

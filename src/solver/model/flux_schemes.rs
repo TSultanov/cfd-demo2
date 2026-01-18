@@ -1,18 +1,21 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
-    FluxReconstructionSpec, LimiterSpec,
+    LimiterSpec,
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
+use crate::solver::scheme::Scheme;
 
-use crate::solver::ir::reconstruction::{limited_linear_face_value, FaceExprBuilder};
+use crate::solver::ir::reconstruction::{
+    limited_linear_face_value, quick_face_value, FaceExprBuilder,
+};
 
 pub fn lower_flux_scheme(
-    scheme: &FluxSchemeSpec,
+    flux_scheme: &FluxSchemeSpec,
     system: &EquationSystem,
-    reconstruction: FluxReconstructionSpec,
+    reconstruction: Scheme,
 ) -> Result<FluxModuleKernelSpec, String> {
-    match *scheme {
+    match *flux_scheme {
         FluxSchemeSpec::EulerCentralUpwind => euler_central_upwind(system, reconstruction),
     }
 }
@@ -110,7 +113,7 @@ mod tests {
 
 fn euler_central_upwind(
     system: &EquationSystem,
-    reconstruction: FluxReconstructionSpec,
+    reconstruction: Scheme,
 ) -> Result<FluxModuleKernelSpec, String> {
     let flux_layout = FluxLayout::from_system(system);
     let components: Vec<String> = flux_layout
@@ -135,20 +138,46 @@ fn euler_central_upwind(
         }
     };
 
-    let limited_linear = |side: FaceSide,
-                          phi_cell: S,
-                          phi_other: S,
-                          grad_field: &'static str,
-                          limiter: LimiterSpec|
-     -> S {
-        limited_linear_face_value::<FaceExprBuilder>(
-            phi_cell,
-            phi_other,
-            V::state_vec2(side, grad_field),
-            V::cell_to_face(side),
-            limiter,
-        )
+    let limiter_for_scheme = |scheme: Scheme| -> LimiterSpec {
+        match scheme {
+            Scheme::SecondOrderUpwindMinMod | Scheme::QUICKMinMod => LimiterSpec::MinMod,
+            Scheme::SecondOrderUpwindVanLeer | Scheme::QUICKVanLeer => LimiterSpec::VanLeer,
+            _ => LimiterSpec::None,
+        }
     };
+
+    let reconstruct_scalar =
+        |side: FaceSide, phi_cell: S, phi_other: S, grad_field: &'static str| -> S {
+            let grad = V::state_vec2(side, grad_field);
+
+            match reconstruction {
+                Scheme::Upwind => phi_cell,
+
+                Scheme::SecondOrderUpwind
+                | Scheme::SecondOrderUpwindMinMod
+                | Scheme::SecondOrderUpwindVanLeer => limited_linear_face_value::<FaceExprBuilder>(
+                    phi_cell,
+                    phi_other,
+                    grad,
+                    V::cell_to_face(side),
+                    limiter_for_scheme(reconstruction),
+                ),
+
+                Scheme::QUICK | Scheme::QUICKMinMod | Scheme::QUICKVanLeer => {
+                    let d = V::Sub(
+                        Box::new(V::cell_to_face(side)),
+                        Box::new(V::cell_to_face(other_side(side))),
+                    );
+                    quick_face_value::<FaceExprBuilder>(
+                        phi_cell,
+                        phi_other,
+                        grad,
+                        d,
+                        limiter_for_scheme(reconstruction),
+                    )
+                }
+            }
+        };
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);
     let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
@@ -157,61 +186,46 @@ fn euler_central_upwind(
     let rho_u_y_raw = |side: FaceSide| S::Dot(Box::new(rho_u_raw(side)), Box::new(ey.clone()));
     let p_raw = |side: FaceSide| S::state(side, "p");
 
-    let rho = |side: FaceSide| match reconstruction {
-        FluxReconstructionSpec::FirstOrder => rho_raw(side),
-        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+    let rho = |side: FaceSide| {
+        reconstruct_scalar(
             side,
             rho_raw(side),
             rho_raw(other_side(side)),
             "grad_rho",
-            limiter,
-        ),
+        )
     };
 
-    let rho_e = |side: FaceSide| match reconstruction {
-        FluxReconstructionSpec::FirstOrder => rho_e_raw(side),
-        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+    let rho_e = |side: FaceSide| {
+        reconstruct_scalar(
             side,
             rho_e_raw(side),
             rho_e_raw(other_side(side)),
             "grad_rho_e",
-            limiter,
-        ),
+        )
     };
 
-    let rho_u_x = |side: FaceSide| match reconstruction {
-        FluxReconstructionSpec::FirstOrder => rho_u_x_raw(side),
-        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+    let rho_u_x = |side: FaceSide| {
+        reconstruct_scalar(
             side,
             rho_u_x_raw(side),
             rho_u_x_raw(other_side(side)),
             "grad_rho_u_x",
-            limiter,
-        ),
+        )
     };
 
-    let rho_u_y = |side: FaceSide| match reconstruction {
-        FluxReconstructionSpec::FirstOrder => rho_u_y_raw(side),
-        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
+    let rho_u_y = |side: FaceSide| {
+        reconstruct_scalar(
             side,
             rho_u_y_raw(side),
             rho_u_y_raw(other_side(side)),
             "grad_rho_u_y",
-            limiter,
-        ),
+        )
     };
 
     let rho_u = |side: FaceSide| V::vec2(rho_u_x(side), rho_u_y(side));
 
-    let p = |side: FaceSide| match reconstruction {
-        FluxReconstructionSpec::FirstOrder => p_raw(side),
-        FluxReconstructionSpec::Muscl { limiter } => limited_linear(
-            side,
-            p_raw(side),
-            p_raw(other_side(side)),
-            "grad_p",
-            limiter,
-        ),
+    let p = |side: FaceSide| {
+        reconstruct_scalar(side, p_raw(side), p_raw(other_side(side)), "grad_p")
     };
 
     let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));

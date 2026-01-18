@@ -629,9 +629,9 @@ mod tests {
     #[test]
     fn contract_muscl_reconstruction_changes_generated_flux_module_wgsl() {
         // This is intentionally a "contract"-style test: it ensures that
-        // FluxReconstructionSpec::Muscl affects generated WGSL (and is not silently ignored).
+        // enabling higher-order reconstruction affects generated WGSL (and is not silently ignored).
         //
-        // Shipped models remain FirstOrder by default; we only construct a MUSCL variant here.
+        // Shipped models remain first-order by default; we only construct a higher-order variant here.
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
 
         let model_first_order = crate::solver::model::compressible_model();
@@ -664,9 +664,7 @@ mod tests {
         let flux_spec = crate::solver::model::FluxModuleSpec::Scheme {
             gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
             scheme: FluxSchemeSpec::EulerCentralUpwind,
-            reconstruction: crate::solver::ir::FluxReconstructionSpec::Muscl {
-                limiter: crate::solver::ir::LimiterSpec::VanLeer,
-            },
+            reconstruction: Scheme::SecondOrderUpwindVanLeer,
         };
         let flux_module = crate::solver::model::modules::flux_module::flux_module_module(flux_spec)
             .expect("failed to build MUSCL flux_module");
@@ -689,7 +687,7 @@ mod tests {
 
         assert_ne!(
             wgsl_first_order, wgsl_muscl,
-            "FluxReconstructionSpec::Muscl must change flux_module WGSL"
+            "higher-order reconstruction must change flux_module WGSL"
         );
 
         // VanLeer limiter uses an epsilon literal in the IR; ensure it reaches WGSL.

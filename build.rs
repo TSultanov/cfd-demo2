@@ -114,18 +114,10 @@ mod solver {
             ));
         }
         pub mod modules {
-            pub mod eos {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/model/modules/eos.rs"
-                ));
-            }
-            pub mod rhie_chow {
-                include!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/solver/model/modules/rhie_chow.rs"
-                ));
-            }
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/modules/mod.rs"
+            ));
         }
         pub mod definitions {
             include!(concat!(

@@ -116,17 +116,17 @@ Progress (partial):
   - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-16.
 
 Status:
-- **Reconstruction/limiter selection is now IR-driven for CentralUpwind** via `FluxReconstructionSpec::FirstOrder|Muscl{limiter}`.
-- **Defaults remain `FirstOrder` for shipped models**, so OpenFOAM reference targets are unchanged.
+- **Reconstruction/limiter selection is now IR-driven for CentralUpwind** via the shared `Scheme` enum (e.g. `Scheme::Upwind` for first-order; SOU/QUICK + limited variants for higher order).
+- **Defaults remain `Scheme::Upwind` for shipped models**, so OpenFOAM reference targets are unchanged.
 
 Progress (partial):
-- Added `FluxReconstructionSpec` + `LimiterSpec` as **IR-level** knobs and plumbed them from the `flux_module` manifest into `FluxModuleKernelSpec::CentralUpwind`.
-  - Default remains `FirstOrder` (behavior-identical).
+- Flux-module reconstruction now uses the shared `Scheme` enum (no separate `FluxReconstructionSpec`), plumbed from the `flux_module` manifest into `FluxModuleKernelSpec::CentralUpwind`.
+  - Default remains `Scheme::Upwind` (behavior-identical).
   - Added `FaceVec2Builtin::CellToFace { side }` to the IR and codegen lowering so schemes can express limited-linear/MUSCL-style reconstruction purely in IR terms.
 - Implemented MUSCL face-state reconstruction in CentralUpwind lowering (`src/solver/model/flux_schemes.rs`):
   - Uses gradients + `CellToFace` (PDE-agnostic geometry builtin) to build left/right face states.
-  - Honors `LimiterSpec::{None, MinMod, VanLeer}`.
-- Enforced the required gradients stage + required `grad_*` fields when MUSCL is selected (early manifest validation).
+  - Honors the limiter variants encoded in `Scheme` (`*_MinMod`, `*_VanLeer`).
+- Enforced the required gradients stage + required `grad_*` fields when higher-order reconstruction is selected (early manifest validation).
 - Fixed `CellToFace{Neighbor}` semantics on boundary faces so reconstruction is geometry-correct.
 - Fixed boundary BC preservation for MUSCL: neighbor-side `grad_*` vectors are treated as zero on boundary faces so reconstruction cannot modify Dirichlet/Neumann ghost values.
 
@@ -197,7 +197,7 @@ Progress:
 
 ## Next Tasks (smallest high-impact first)
 Completed:
-- Added a contract/validation test proving `FluxReconstructionSpec::Muscl{...}` affects generated WGSL (while shipped models remain `FirstOrder`).
+- Added a contract/validation test proving higher-order flux-module reconstruction affects generated WGSL (while shipped models remain `Scheme::Upwind`).
 - Made `unified_assembly`’s advection reconstruction configurable via the runtime `constants.scheme` knob, including limited SOU/QUICK variants.
 - Added regression/contract coverage so limited SOU/QUICK variants can’t silently degrade.
 - Aligned VanLeer limiter behavior across unified_assembly and flux-module MUSCL by guarding opposite-signed slopes (prevents new extrema); added an IR-structure contract test.
@@ -216,9 +216,10 @@ Completed:
 - Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
 - Build-time shared-kernel emission is list-driven (`shared_kernel_generator_specs`), so adding a new shared generated kernel no longer requires editing multiple special-case branches.
 - Reconstruction hardening: unified_assembly and flux-module paths share the same reconstruction/limiter formulas via `cfd2_ir::solver::ir::reconstruction` (single source of truth); decision is to keep unified_assembly as the scalar-convection fallback, but derive its limiter math from the shared helpers.
+- Reconstruction knobs: flux-module reconstruction now uses the shared `Scheme` enum (no duplicate `FluxReconstructionSpec` type).
 
 Next:
-1) Unify reconstruction knobs: decide whether to keep both `Scheme` (scalar convection) and `FluxReconstructionSpec` (flux-module face states), or converge on a single recipe-driven reconstruction spec.
+1) Decide how flux-module reconstruction should relate to the runtime `advection_scheme` knob (shared param vs per-module param) and, if shared, how required gradient resources should be derived from `(model + config)` without runtime WGSL generation.
 2) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
 
 Status:

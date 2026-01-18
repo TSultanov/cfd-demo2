@@ -40,7 +40,10 @@ fn contract_kernel_registry_has_no_special_case_kernel_matches() {
     // No KernelId-specific switches in the runtime registry lookup.
     assert_not_contains(&src, "match kernel_id", "kernel_registry.rs");
     assert_not_contains(&src, "KernelId::", "kernel_registry.rs");
-    assert_not_contains(&src, "include_str!", "kernel_registry.rs");
+    assert!(
+        !contains_macro_invocation(&src, "include_str"),
+        "kernel_registry.rs: must not contain include_str! macro invocations"
+    );
 }
 
 #[test]

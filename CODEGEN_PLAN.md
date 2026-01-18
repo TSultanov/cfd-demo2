@@ -219,6 +219,7 @@ Completed:
 - Reconstruction knobs: flux-module reconstruction now uses the shared `Scheme` enum (no duplicate `FluxReconstructionSpec` type).
 - Added per-model `packed_state_gradients` kernels that populate `grad_state` (Green–Gauss) and made unified_assembly bind/consume `grad_state` for `GradientStorage::PackedState`; OpenFOAM reference tests pass.
 - Made packed `grad_state` allocation/scheduling conditional on `advection_scheme` by emitting both generic-coupled assembly variants (with/without `grad_state`) and selecting via the recipe; OpenFOAM reference tests pass.
+- Removed the handwritten generic-coupled assembly graph fallback so graph construction is fully recipe-driven; added contract coverage.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

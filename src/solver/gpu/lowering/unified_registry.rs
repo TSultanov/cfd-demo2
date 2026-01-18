@@ -182,7 +182,7 @@ pub fn build_unified_registry(
             )?;
         }
 
-        SteppingMode::Coupled { .. } => {
+        SteppingMode::Coupled => {
             registry.register_cond(
                 CondOpKind("coupled:enabled"),
                 config.coupled_enabled.unwrap_or(cond_true),

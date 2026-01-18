@@ -148,7 +148,7 @@ pub enum SteppingMode {
     /// Implicit with Newton-like outer iterations
     Implicit { outer_iters: usize },
     /// Coupled system (momentum + pressure together)
-    Coupled { outer_correctors: u32 },
+    Coupled,
 }
 
 /// High-level program structure emitted for a recipe.
@@ -321,7 +321,7 @@ impl SolverRecipe {
     pub fn is_implicit(&self) -> bool {
         matches!(
             self.stepping,
-            SteppingMode::Implicit { .. } | SteppingMode::Coupled { .. }
+            SteppingMode::Implicit { .. } | SteppingMode::Coupled
         )
     }
 
@@ -453,9 +453,7 @@ impl SolverRecipe {
                 );
             }
 
-            SteppingMode::Coupled {
-                outer_correctors: _,
-            } => {
+            SteppingMode::Coupled => {
                 // Coupled: if enabled → begin_step → init_prepare → while (before_iter → assembly → solve → clear_max_diff → update → convergence_advance) → finalize_step
                 let step_block = program.new_block();
                 let iter_block = program.new_block();
@@ -542,12 +540,8 @@ fn derive_stepping_mode(model: &ModelSpec) -> Result<SteppingMode, String> {
     let method = model.method()?;
 
     Ok(match method {
-        MethodSpec::CoupledIncompressible => SteppingMode::Coupled {
-            outer_correctors: 3,
-        },
-        MethodSpec::GenericCoupled => SteppingMode::Coupled {
-            outer_correctors: 1,
-        },
+        MethodSpec::CoupledIncompressible => SteppingMode::Coupled,
+        MethodSpec::GenericCoupled => SteppingMode::Coupled,
         MethodSpec::GenericCoupledImplicit { outer_iters } => {
             SteppingMode::Implicit { outer_iters }
         }

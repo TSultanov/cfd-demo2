@@ -120,7 +120,7 @@ async fn lower_parts_for_model(
 ) -> Result<LoweredProgramParts, String> {
     // Otherwise, select the runtime backend based on the derived recipe structure.
     match recipe.stepping {
-        crate::solver::gpu::recipe::SteppingMode::Coupled { .. } => {
+        crate::solver::gpu::recipe::SteppingMode::Coupled => {
             let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
                 mesh,
                 model.clone(),

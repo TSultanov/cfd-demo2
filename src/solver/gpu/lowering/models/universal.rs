@@ -111,7 +111,7 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
             implicit_outer_iters: Some(implicit_outer_iters),
             ..Default::default()
         },
-        SteppingMode::Coupled { .. } => {
+        SteppingMode::Coupled => {
             UnifiedOpRegistryConfig {
                 // These map onto the unified coupled program.
                 prepare: Some(host_coupled_begin_step),

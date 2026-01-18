@@ -208,13 +208,7 @@ impl SolverRecipe {
                 .iter()
                 .map(|f| f.name().to_string())
                 .collect(),
-            GradientStorage::PackedState => {
-                if scheme_expansion.needs_gradients() {
-                    vec!["state".to_string()]
-                } else {
-                    Vec::new()
-                }
-            }
+            GradientStorage::PackedState => Vec::new(),
             GradientStorage::PerFieldComponents => scheme_expansion
                 .gradient_fields()
                 .iter()
@@ -277,9 +271,16 @@ impl SolverRecipe {
         if needs_gradients {
             // Add gradient buffers for each field that needs them
             for field_name in &gradient_fields {
+                let size_per_cell = if model.gpu.gradient_storage == GradientStorage::PackedState
+                    && field_name == "state"
+                {
+                    model.state_layout.stride() as usize * 2
+                } else {
+                    2
+                };
                 aux_buffers.push(BufferSpec {
                     name: Box::leak(format!("grad_{field_name}").into_boxed_str()),
-                    size_per_cell: 2, // 2D gradient (dx, dy)
+                    size_per_cell,
                     purpose: BufferPurpose::Gradient,
                 });
             }
@@ -586,20 +587,51 @@ mod tests {
     }
 
     #[test]
-    fn test_recipe_needs_gradients_with_sou() {
-        let model = generic_diffusion_demo_model();
-        let _recipe = SolverRecipe::from_model(
+    fn recipe_does_not_allocate_packed_gradients_until_wired() {
+        let model = compressible_model();
+        let recipe = SolverRecipe::from_model(
             &model,
             Scheme::SecondOrderUpwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            SteppingMode::Coupled,
+            SteppingMode::Implicit { outer_iters: 1 },
         )
-        .expect("should create recipe");
+        .expect("recipe build");
 
-        // SecondOrderUpwind requires gradients for convection terms
-        // (if the model has convection - check if it does)
-        // For diffusion-only model, may not need gradients
+        assert!(
+            !recipe.needs_gradients(),
+            "PackedState gradients are not allocated unless explicitly required by the model"
+        );
+        assert!(recipe.gradient_fields.is_empty());
+        assert!(!recipe
+            .aux_buffers
+            .iter()
+            .any(|b| b.purpose == BufferPurpose::Gradient));
+    }
+
+    #[test]
+    fn recipe_sizes_grad_state_by_state_stride_when_required() {
+        let mut model = compressible_model();
+        model.gpu.required_gradient_fields = vec!["state".to_string()];
+
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Implicit { outer_iters: 1 },
+        )
+        .expect("recipe build");
+
+        assert!(recipe.needs_gradients());
+        assert_eq!(recipe.gradient_fields, vec!["state".to_string()]);
+
+        let grad_state = recipe
+            .aux_buffers
+            .iter()
+            .find(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state")
+            .expect("recipe must allocate grad_state buffer");
+        assert_eq!(grad_state.size_per_cell, model.state_layout.stride() as usize * 2);
     }
 
     #[test]

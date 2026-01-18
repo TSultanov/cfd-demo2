@@ -82,7 +82,12 @@ impl UnifiedFieldResources {
 
         let mut gradients = HashMap::new();
         for field_name in &recipe.gradient_fields {
-            let grad_size = num_cells as usize * 2; // 2D gradient (dx, dy)
+            let size_per_cell = if field_name == "state" {
+                state_stride as usize * 2
+            } else {
+                2
+            };
+            let grad_size = num_cells as usize * size_per_cell;
             let zero_grad = vec![0.0f32; grad_size];
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("UnifiedField grad_{field_name}")),
@@ -326,7 +331,12 @@ impl UnifiedFieldResources {
         if self.gradients.contains_key(field_name) {
             return;
         }
-        let grad_size = self.num_cells as usize * 2; // 2D gradient (dx, dy)
+        let size_per_cell = if field_name == "state" {
+            self.state_stride as usize * 2
+        } else {
+            2
+        };
+        let grad_size = self.num_cells as usize * size_per_cell;
         let zero_grad = vec![0.0f32; grad_size];
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("UnifiedField grad_{field_name}")),

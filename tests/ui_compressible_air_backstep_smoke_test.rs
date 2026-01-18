@@ -5,7 +5,7 @@ use cfd2::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::compressible_model_with_eos;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
@@ -43,6 +43,7 @@ fn ui_compressible_air_backstep_smoke() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,
@@ -116,4 +117,3 @@ fn ui_compressible_air_backstep_smoke() {
         prev_max_vel = max_vel;
     }
 }
-

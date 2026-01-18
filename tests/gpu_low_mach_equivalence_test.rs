@@ -5,7 +5,9 @@ use cfd2::solver::model::helpers::{
     SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
-use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use cfd2::solver::options::{
+    GpuLowMachPrecondModel, PreconditionerType, SteppingMode, TimeScheme,
+};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use image::{Rgb, RgbImage};
@@ -342,6 +344,7 @@ fn low_mach_equivalence_vortex_street() {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
         },
         None,
         None,
@@ -398,6 +401,7 @@ fn low_mach_equivalence_vortex_street() {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,

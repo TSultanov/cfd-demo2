@@ -5,7 +5,9 @@ use cfd2::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use cfd2::solver::options::{
+    GpuLowMachPrecondModel, PreconditionerType, SteppingMode, TimeScheme,
+};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -115,6 +117,7 @@ fn low_mach_debug_fast() {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,

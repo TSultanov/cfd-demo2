@@ -5,7 +5,7 @@ use cfd2::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -30,6 +30,7 @@ fn gpu_compressible_amg_smoke() {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Amg,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,

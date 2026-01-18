@@ -6,7 +6,7 @@ use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 
@@ -37,6 +37,7 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
         },
         None,
         None,

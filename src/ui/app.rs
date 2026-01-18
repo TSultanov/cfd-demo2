@@ -11,7 +11,9 @@ use crate::solver::model::{
     compressible_model, compressible_model_with_eos, incompressible_momentum_model, Fluid,
     ModelPreconditionerSpec,
 };
-use crate::solver::options::{LinearSolverStats, PreconditionerType, TimeScheme as GpuTimeScheme};
+use crate::solver::options::{
+    LinearSolverStats, PreconditionerType, SteppingMode, TimeScheme as GpuTimeScheme,
+};
 use crate::solver::scheme::Scheme;
 use crate::solver::{SolverConfig, UnifiedSolver};
 use crate::ui::cfd_renderer;
@@ -337,6 +339,10 @@ impl CFDApp {
             advection_scheme: self.selected_scheme,
             time_scheme: self.time_scheme,
             preconditioner: effective_preconditioner,
+            stepping: match self.solver_kind {
+                SolverKind::Incompressible => SteppingMode::Coupled,
+                SolverKind::Compressible => SteppingMode::Implicit { outer_iters: 1 },
+            },
         };
 
         let mut gpu_solver = pollster::block_on(UnifiedSolver::new(

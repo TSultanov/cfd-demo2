@@ -3,7 +3,7 @@ use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
 };
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -29,6 +29,7 @@ fn gpu_compressible_solver_preserves_uniform_state() {
         advection_scheme: Scheme::SecondOrderUpwind,
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Implicit { outer_iters: 1 },
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,

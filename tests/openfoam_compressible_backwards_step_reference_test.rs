@@ -8,7 +8,7 @@ use cfd2::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::compressible_model_with_eos;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 
@@ -37,6 +37,7 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,

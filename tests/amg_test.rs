@@ -3,7 +3,7 @@ use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
@@ -31,6 +31,7 @@ fn test_amg_preconditioner() {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
+                stepping: SteppingMode::Implicit { outer_iters: 1 },
             },
             None,
             None,
@@ -62,6 +63,7 @@ fn test_amg_preconditioner() {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Amg,
+                stepping: SteppingMode::Implicit { outer_iters: 1 },
             },
             None,
             None,

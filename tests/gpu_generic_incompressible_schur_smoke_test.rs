@@ -3,7 +3,7 @@ use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::{incompressible_momentum_generic_model, ModelPreconditionerSpec};
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 
@@ -36,6 +36,7 @@ fn gpu_generic_incompressible_schur_smoke() {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
     };
 
     let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))

@@ -1,7 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
@@ -36,6 +36,7 @@ async fn run_coupled_solver(
             advection_scheme: scheme,
             time_scheme,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
         },
         None,
         None,

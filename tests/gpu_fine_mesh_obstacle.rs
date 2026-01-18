@@ -1,7 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -37,6 +37,7 @@ fn test_gpu_fine_mesh_obstacle() {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
+                stepping: SteppingMode::Coupled,
             },
             None,
             None,

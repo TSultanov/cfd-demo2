@@ -7,7 +7,7 @@ use cfd2::solver::model::helpers::{
     SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
-use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use cfd2::solver::options::{GpuLowMachPrecondModel, PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use image::{Rgb, RgbImage};
@@ -468,6 +468,7 @@ fn incompressible_structured_mesh_preserves_rest_state() {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::BDF2,
         preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
@@ -575,6 +576,7 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
                 advection_scheme: scheme_enum,
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
+                stepping: SteppingMode::Implicit { outer_iters: 1 },
             };
             let mut solver = pollster::block_on(UnifiedSolver::new(
                 &mesh,
@@ -785,6 +787,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
         },
         None,
         None,
@@ -808,6 +811,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,
@@ -1043,6 +1047,7 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
                 advection_scheme: scheme_enum,
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
+                stepping: SteppingMode::Implicit { outer_iters: 1 },
             };
             let mut solver = pollster::block_on(UnifiedSolver::new(
                 &mesh,

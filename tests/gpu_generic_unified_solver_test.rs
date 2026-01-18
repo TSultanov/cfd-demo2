@@ -1,6 +1,6 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};
-use cfd2::solver::options::TimeScheme;
+use cfd2::solver::options::{SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -64,6 +64,7 @@ fn gpu_unified_solver_runs_generic_heat_step() {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
         preconditioner: cfd2::solver::options::PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
     };
 
     let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))
@@ -116,6 +117,7 @@ fn gpu_unified_solver_runs_generic_heat_step_neumann() {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
         preconditioner: cfd2::solver::options::PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
     };
 
     let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))

@@ -11,7 +11,7 @@ use cfd2::solver::model::incompressible_momentum_model;
 /// - CPU-side computation that could be offloaded to GPU
 ///
 /// The goal is to identify bottlenecks and opportunities for GPU offloading.
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::profiling::ProfileCategory;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -53,6 +53,7 @@ fn test_gpu_transfer_profile() {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,
                 preconditioner: PreconditionerType::Jacobi,
+                stepping: SteppingMode::Coupled,
             },
             None,
             None,
@@ -314,6 +315,7 @@ fn test_gpu_transfer_profile_scaling() {
                     advection_scheme: Scheme::Upwind,
                     time_scheme: TimeScheme::Euler,
                     preconditioner: PreconditionerType::Jacobi,
+                    stepping: SteppingMode::Coupled,
                 },
                 None,
                 None,

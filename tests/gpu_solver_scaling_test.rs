@@ -1,7 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::gpu::csr::build_block_csr;
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -176,6 +176,7 @@ fn gpu_solvers_scale_with_mesh_size() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
         };
         let mut solver = pollster::block_on(UnifiedSolver::new(
             &mesh,

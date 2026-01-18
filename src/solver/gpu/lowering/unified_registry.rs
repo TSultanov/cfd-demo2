@@ -265,8 +265,7 @@ mod tests {
             Scheme::Upwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            crate::solver::gpu::recipe::derive_stepping_mode_from_model(&model)
-                .expect("invalid model stepping"),
+            crate::solver::gpu::recipe::SteppingMode::Coupled,
         )
         .expect("should create recipe");
 

@@ -526,26 +526,7 @@ impl SolverRecipe {
     }
 }
 
-/// Map kernel kind to execution phase.
-// Legacy mapping used by older/handwritten recipe constructors.
-// New recipes should assign phases explicitly when constructing KernelSpecs.
-#[allow(dead_code)]
-/// Derive stepping mode from model structure.
-///
-/// This is a transitional helper while we move stepping selection out of `MethodSpec`.
-pub(crate) fn derive_stepping_mode_from_model(model: &ModelSpec) -> Result<SteppingMode, String> {
-    use crate::solver::model::MethodSpec;
-
-    let method = model.method()?;
-
-    Ok(match method {
-        MethodSpec::CoupledIncompressible => SteppingMode::Coupled,
-        MethodSpec::GenericCoupled => SteppingMode::Coupled,
-        MethodSpec::GenericCoupledImplicit { outer_iters } => {
-            SteppingMode::Implicit { outer_iters }
-        }
-    })
-}
+// Stepping selection is owned by the solver config (not the model).
 
 #[cfg(test)]
 mod tests {
@@ -564,7 +545,7 @@ mod tests {
             Scheme::Upwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            derive_stepping_mode_from_model(&model).expect("invalid model stepping"),
+            SteppingMode::Coupled,
         )
         .expect("should create recipe");
 
@@ -581,7 +562,7 @@ mod tests {
             Scheme::SecondOrderUpwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            derive_stepping_mode_from_model(&model).expect("invalid model stepping"),
+            SteppingMode::Coupled,
         )
         .expect("should create recipe");
 
@@ -610,7 +591,7 @@ mod tests {
             Scheme::Upwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            derive_stepping_mode_from_model(&model).expect("invalid model stepping"),
+            SteppingMode::Coupled,
         )
         .expect("should create recipe");
 
@@ -631,7 +612,7 @@ mod tests {
             Scheme::Upwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            derive_stepping_mode_from_model(&model).expect("invalid model stepping"),
+            SteppingMode::Implicit { outer_iters: 1 },
         )
         .expect("should create recipe");
 
@@ -656,7 +637,7 @@ mod tests {
             Scheme::Upwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            derive_stepping_mode_from_model(&model).expect("invalid model stepping"),
+            SteppingMode::Coupled,
         )
         .expect("should create recipe");
 
@@ -682,7 +663,7 @@ mod tests {
             Scheme::Upwind,
             TimeScheme::Euler,
             PreconditionerType::Jacobi,
-            derive_stepping_mode_from_model(&model).expect("invalid model stepping"),
+            SteppingMode::Coupled,
         )
         .expect("should create recipe");
 

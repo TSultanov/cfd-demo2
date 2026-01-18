@@ -1,7 +1,7 @@
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
 use cfd2::solver::model::generic_diffusion_demo_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::units::{si, UnitDim};
 use cfd2::solver::{SolverConfig, UnifiedSolver};
@@ -266,6 +266,7 @@ fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         mesh,

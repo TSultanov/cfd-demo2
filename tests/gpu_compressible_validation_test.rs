@@ -5,7 +5,7 @@ use cfd2::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
@@ -55,6 +55,7 @@ fn compressible_shock_tube_relaxes_discontinuity() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,
@@ -141,6 +142,7 @@ fn compressible_acoustic_pulse_propagates() {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
         None,
         None,

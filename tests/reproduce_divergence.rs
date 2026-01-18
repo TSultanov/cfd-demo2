@@ -3,7 +3,7 @@ use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverIncompressibleStatsExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::Vector2;
@@ -37,6 +37,7 @@ fn test_reproduce_divergence() {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
         },
         None,
         None,

@@ -3,7 +3,7 @@ use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, TimeScheme};
+use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{SolverConfig, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
@@ -43,6 +43,7 @@ fn test_gpu_divergence_channel_obstacle() {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
     };
     let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
         &mesh,

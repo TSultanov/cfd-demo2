@@ -2,6 +2,10 @@
 
 This repo includes regression tests that compare `cfd2` against reference data generated with OpenFOAM v2512.
 
+To run the reference suite (and fail loudly if it accidentally runs 0 tests):
+
+- `bash scripts/run_openfoam_reference_tests.sh`
+
 The OpenFOAM case templates live in:
 
 - `reference/openfoam/incompressible_channel`

@@ -23,7 +23,8 @@ To keep unification/refactor work low-risk, follow a strict loop:
 
 - **test → patch → test → commit** (small, frequent commits)
 - **OpenFOAM reference tests are the primary quality gate** for solver behavior:
-  - `cargo test openfoam_ -- --nocapture`
+  - `bash scripts/run_openfoam_reference_tests.sh`
+    - (equivalent to `cargo test -p cfd2 --tests openfoam_ -- --nocapture`, but fails loudly if 0 tests are discovered)
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
 - If tests are skipped or filtered unintentionally (CI/sandbox/GPU env), call it out explicitly in the PR/notes.
 
@@ -156,7 +157,7 @@ Progress:
 
 ### 6) Validation Tests (OpenFOAM reference suite)
 - After any solver or numerical-method change, run the OpenFOAM reference tests to catch whole-field regressions:
-  - `cargo test openfoam_ -- --nocapture`
+  - `bash scripts/run_openfoam_reference_tests.sh`
 - If a change intentionally alters the reference target, regenerate the datasets and re-run:
   - `bash scripts/regenerate_openfoam_reference_data.sh`
  - Treat these tests as a **validation gate** during solver unification work (especially when reshaping kernel/module orchestration).

@@ -1,6 +1,6 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
-    FluxReconstructionSpec, LimiterSpec,
+    FluxReconstructionSpec, LimiterSpec, VANLEER_EPS,
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
@@ -31,13 +31,13 @@ fn vanleer_delta_limited(diff: S, delta: S) -> S {
 
     let denom = S::Max(
         Box::new(abs_diff.clone()),
-        Box::new(S::Add(Box::new(abs_delta), Box::new(S::lit(1e-8)))),
+        Box::new(S::Add(Box::new(abs_delta), Box::new(S::lit(VANLEER_EPS)))),
     );
     let scale = S::Div(Box::new(abs_diff), Box::new(denom));
 
     let p = S::Mul(Box::new(diff.clone()), Box::new(delta.clone()));
     let sign_num = S::Max(Box::new(p.clone()), Box::new(S::lit(0.0)));
-    let sign_denom = S::Max(Box::new(S::Abs(Box::new(p))), Box::new(S::lit(1e-8)));
+    let sign_denom = S::Max(Box::new(S::Abs(Box::new(p))), Box::new(S::lit(VANLEER_EPS)));
     let sign_guard = S::Div(Box::new(sign_num), Box::new(sign_denom));
 
     let delta_scaled = S::Mul(Box::new(delta), Box::new(scale));
@@ -109,7 +109,7 @@ mod tests {
             let p = |e: &S| is_mul_named_states(e, a, b);
             let abs_p = |e: &S| matches!(e, S::Abs(inner) if p(inner));
             let num_ok = is_max_of(num, p, |e| is_lit(e, 0.0));
-            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, 1e-8));
+            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, VANLEER_EPS));
 
             if num_ok && denom_ok {
                 found = true;

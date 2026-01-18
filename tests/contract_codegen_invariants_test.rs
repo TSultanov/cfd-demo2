@@ -25,6 +25,13 @@ fn assert_contains(haystack: &str, needle: &str, context: &str) {
     assert!(haystack.contains(needle), "{context}: missing '{needle}'");
 }
 
+fn assert_contains_ident(haystack: &str, ident: &str, context: &str) {
+    assert!(
+        contains_ident(haystack, ident),
+        "{context}: missing identifier '{ident}'"
+    );
+}
+
 #[test]
 fn contract_kernel_registry_has_no_special_case_kernel_matches() {
     let path = repo_root().join("src/solver/gpu/lowering/kernel_registry.rs");
@@ -380,6 +387,162 @@ fn contains_macro_invocation(src: &str, macro_name: &str) -> bool {
     false
 }
 
+fn contains_ident(src: &str, ident_name: &str) -> bool {
+    let bytes = src.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        // Skip line comments.
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip nested block comments.
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+            i += 2;
+            let mut depth = 1usize;
+            while i + 1 < bytes.len() && depth > 0 {
+                if bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                    depth += 1;
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    depth -= 1;
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip string literals.
+        if bytes[i] == b'"' {
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // Skip char literals and lifetimes.
+        if bytes[i] == b'\'' {
+            if let Some(next) = try_consume_char_literal(bytes, i) {
+                i = next;
+                continue;
+            }
+
+            // Lifetime.
+            i += 1;
+            if i < bytes.len() {
+                let c = bytes[i];
+                let is_lifetime_start = c == b'_' || (c as char).is_ascii_alphabetic();
+                if is_lifetime_start {
+                    i += 1;
+                    while i < bytes.len() {
+                        let c = bytes[i];
+                        if c == b'_' || (c as char).is_ascii_alphanumeric() {
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Skip raw strings: r"...", r#"..."#, br#"..."#
+        let mut raw_start = None;
+        if bytes[i] == b'r' {
+            raw_start = Some(i);
+        } else if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r' {
+            raw_start = Some(i + 1);
+        } else if bytes[i] == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+            // Byte string b"..."
+            i += 2;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        if let Some(r_idx) = raw_start {
+            let mut j = r_idx + 1;
+            let mut hashes = 0usize;
+            while j < bytes.len() && bytes[j] == b'#' {
+                hashes += 1;
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'"' {
+                // Consume until closing quote + hashes.
+                j += 1;
+                while j < bytes.len() {
+                    if bytes[j] == b'"' {
+                        let mut k = j + 1;
+                        let mut matched = 0usize;
+                        while matched < hashes && k < bytes.len() && bytes[k] == b'#' {
+                            matched += 1;
+                            k += 1;
+                        }
+                        if matched == hashes {
+                            i = k;
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                continue;
+            }
+        }
+
+        // Identifier scan.
+        let ch = bytes[i];
+        let is_ident_start = ch == b'_' || (ch as char).is_ascii_alphabetic();
+        if !is_ident_start {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        i += 1;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c == b'_' || (c as char).is_ascii_alphanumeric() {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if &src[start..i] == ident_name {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[test]
 fn contract_contains_macro_invocation_detects_include_str_despite_lifetime_syntax() {
     let src = r#"
@@ -442,4 +605,32 @@ fn contract_recipe_does_not_inject_generic_coupled_apply_kernel_by_id() {
     let path = repo_root().join("src/solver/gpu/recipe.rs");
     let src = read_utf8(&path);
     assert_not_contains(&src, "KernelId::GENERIC_COUPLED_APPLY", "recipe.rs");
+}
+
+#[test]
+fn contract_reconstruction_paths_share_vanleer_eps_constant() {
+    // Drift guard: ensure unified_assembly and flux-module reconstruction use the same shared
+    // epsilon constant (no duplicated numeric literals in separate implementations).
+
+    let ir_path = repo_root().join("crates/cfd2_ir/src/solver/ir/mod.rs");
+    let ir_src = read_utf8(&ir_path);
+    assert_contains_ident(&ir_src, "VANLEER_EPS", "cfd2_ir::ir/mod.rs");
+
+    let flux_path = repo_root().join("src/solver/model/flux_schemes.rs");
+    let flux_src = read_utf8(&flux_path);
+    let flux_impl = flux_src
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap_or(&flux_src);
+    assert_contains_ident(&flux_impl, "VANLEER_EPS", "flux_schemes.rs");
+    assert_not_contains(&flux_impl, "1e-8", "flux_schemes.rs");
+
+    let ua_path = repo_root().join("crates/cfd2_codegen/src/solver/codegen/reconstruction.rs");
+    let ua_src = read_utf8(&ua_path);
+    let ua_impl = ua_src
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap_or(&ua_src);
+    assert_contains_ident(&ua_impl, "VANLEER_EPS", "reconstruction.rs");
+    assert_not_contains(&ua_impl, "1e-8", "reconstruction.rs");
 }

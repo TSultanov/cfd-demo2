@@ -309,6 +309,13 @@ pub enum LimiterSpec {
     VanLeer,
 }
 
+/// Shared epsilon used by VanLeer-style limiter guards.
+///
+/// This constant is a *cross-path drift guard*: both unified_assembly reconstruction and
+/// flux-module MUSCL reconstruction should use this value (via a shared constant) rather than
+/// embedding separate numeric literals.
+pub const VANLEER_EPS: f32 = 1e-8;
+
 impl Default for LimiterSpec {
     fn default() -> Self {
         LimiterSpec::None

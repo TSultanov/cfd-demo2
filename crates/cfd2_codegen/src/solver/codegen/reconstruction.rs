@@ -2,6 +2,7 @@ use super::dsl as typed;
 use super::dsl::EnumExpr;
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
+use crate::solver::ir::VANLEER_EPS;
 use crate::solver::scheme::Scheme;
 
 #[derive(Debug, Clone)]
@@ -36,7 +37,7 @@ pub fn scalar_reconstruction(
         let diff = phi_other - phi_cell.clone();
         let abs_diff = dsl::abs(diff.clone());
         let abs_delta = dsl::abs(delta.clone());
-        let denom = dsl::max(abs_diff.clone(), abs_delta + 1e-8);
+        let denom = dsl::max(abs_diff.clone(), abs_delta + VANLEER_EPS);
         let delta_scaled = delta.clone() * (abs_diff / denom);
         // Guard against opposite-signed slopes to avoid introducing new extrema.
         let sign_ok = (diff * delta).gt(0.0);

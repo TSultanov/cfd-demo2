@@ -208,7 +208,7 @@ impl SolverRecipe {
                 .iter()
                 .map(|f| f.name().to_string())
                 .collect(),
-            GradientStorage::PackedState => Vec::new(),
+            GradientStorage::PackedState => vec!["state".to_string()],
             GradientStorage::PerFieldComponents => scheme_expansion
                 .gradient_fields()
                 .iter()
@@ -582,38 +582,14 @@ mod tests {
         .expect("should create recipe");
 
         assert_eq!(recipe.model_id, "generic_diffusion_demo");
-        assert!(!recipe.needs_gradients()); // Upwind doesn't need gradients
+        assert!(recipe.needs_gradients());
+        assert_eq!(recipe.gradient_fields, vec!["state".to_string()]);
         assert_eq!(recipe.unknowns_per_cell, 1);
     }
 
     #[test]
-    fn recipe_does_not_allocate_packed_gradients_until_wired() {
+    fn recipe_allocates_packed_gradients_for_packed_storage() {
         let model = compressible_model();
-        let recipe = SolverRecipe::from_model(
-            &model,
-            Scheme::SecondOrderUpwind,
-            TimeScheme::Euler,
-            PreconditionerType::Jacobi,
-            SteppingMode::Implicit { outer_iters: 1 },
-        )
-        .expect("recipe build");
-
-        assert!(
-            !recipe.needs_gradients(),
-            "PackedState gradients are not allocated unless explicitly required by the model"
-        );
-        assert!(recipe.gradient_fields.is_empty());
-        assert!(!recipe
-            .aux_buffers
-            .iter()
-            .any(|b| b.purpose == BufferPurpose::Gradient));
-    }
-
-    #[test]
-    fn recipe_sizes_grad_state_by_state_stride_when_required() {
-        let mut model = compressible_model();
-        model.gpu.required_gradient_fields = vec!["state".to_string()];
-
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -625,6 +601,9 @@ mod tests {
 
         assert!(recipe.needs_gradients());
         assert_eq!(recipe.gradient_fields, vec!["state".to_string()]);
+        assert!(recipe.kernels.iter().any(|k|
+            k.id.as_str() == "packed_state_gradients" && k.phase == KernelPhase::Gradients
+        ));
 
         let grad_state = recipe
             .aux_buffers

@@ -3,9 +3,16 @@ use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedPara
 use crate::solver::model::{KernelId, MethodSpec};
 
 pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
+    const PACKED_STATE_GRADIENTS: KernelId = KernelId("packed_state_gradients");
+
     KernelBundleModule {
         name: "generic_coupled",
         kernels: vec![
+            ModelKernelSpec {
+                id: PACKED_STATE_GRADIENTS,
+                phase: KernelPhaseId::Gradients,
+                dispatch: DispatchKindId::Cells,
+            },
             ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_ASSEMBLY,
                 phase: KernelPhaseId::Assembly,
@@ -18,6 +25,10 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
             },
         ],
         generators: vec![
+            ModelKernelGeneratorSpec {
+                id: PACKED_STATE_GRADIENTS,
+                generator: crate::solver::model::kernel::generate_packed_state_gradients_kernel_wgsl,
+            },
             ModelKernelGeneratorSpec {
                 id: KernelId::GENERIC_COUPLED_ASSEMBLY,
                 generator: crate::solver::model::kernel::generate_generic_coupled_assembly_kernel_wgsl,

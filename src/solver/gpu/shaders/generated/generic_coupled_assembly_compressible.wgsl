@@ -80,6 +80,9 @@ var<storage, read> state_old_old: array<f32>;
 @group(1) @binding(3) 
 var<uniform> constants: Constants;
 
+@group(1) @binding(4) 
+var<storage, read> grad_state: array<Vector2>;
+
 @group(1) @binding(5) 
 var<storage, read_write> fluxes: array<f32>;
 

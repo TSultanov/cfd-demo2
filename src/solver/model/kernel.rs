@@ -395,11 +395,14 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
+    use crate::solver::model::GradientStorage;
+
     let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
         .map_err(|e| e.to_string())?;
-    let needs_gradients = crate::solver::ir::expand_schemes(&model.system, schemes)
-        .map(|e| e.needs_gradients())
-        .unwrap_or(false);
+
+    // Packed gradients are model-owned via `ModelGpuSpec.gradient_storage`. Treat this as the
+    // authoritative contract for whether `grad_state` is bound/used by unified_assembly.
+    let needs_gradients = model.gpu.gradient_storage == GradientStorage::PackedState;
     let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
@@ -407,6 +410,17 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
         flux_stride,
         needs_gradients,
     ))
+}
+
+pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    _schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<String, String> {
+    cfd2_codegen::solver::codegen::generate_packed_state_gradients_wgsl(
+        &model.state_layout,
+        model.system.unknowns_per_cell(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 pub(crate) fn generate_generic_coupled_update_kernel_wgsl(

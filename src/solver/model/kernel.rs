@@ -653,3 +653,100 @@ pub fn emit_model_kernel_wgsl_by_id(
 }
 
 // (intentionally no additional kernel-analysis helpers here; kernel selection is recipe-driven)
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::model::backend::ast::vol_vector;
+    use crate::solver::model::backend::StateLayout;
+    use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
+    use crate::solver::scheme::Scheme;
+    use crate::solver::units::si;
+
+    #[test]
+    fn contract_muscl_reconstruction_changes_generated_flux_module_wgsl() {
+        // This is intentionally a "contract"-style test: it ensures that
+        // FluxReconstructionSpec::Muscl affects generated WGSL (and is not silently ignored).
+        //
+        // Shipped models remain FirstOrder by default; we only construct a MUSCL variant here.
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+
+        let model_first_order = crate::solver::model::compressible_model();
+        let wgsl_first_order = generate_kernel_wgsl_for_model_by_id(
+            &model_first_order,
+            &schemes,
+            KernelId::FLUX_MODULE,
+        )
+        .expect("failed to generate FirstOrder flux_module WGSL");
+
+        let mut model_muscl = crate::solver::model::compressible_model();
+
+        // Enable the gradients stage + add the gradient fields required by MUSCL validation.
+        let fields = crate::solver::model::CompressibleFields::new();
+        let mut state_fields =
+            vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.t, fields.u];
+        state_fields.push(vol_vector("grad_rho", si::DENSITY / si::LENGTH));
+        state_fields.push(vol_vector(
+            "grad_rho_u_x",
+            si::MOMENTUM_DENSITY / si::LENGTH,
+        ));
+        state_fields.push(vol_vector(
+            "grad_rho_u_y",
+            si::MOMENTUM_DENSITY / si::LENGTH,
+        ));
+        state_fields.push(vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH));
+        state_fields.push(vol_vector("grad_p", si::PRESSURE_GRADIENT));
+        model_muscl.state_layout = StateLayout::new(state_fields);
+
+        let flux_spec = crate::solver::model::FluxModuleSpec::Scheme {
+            gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
+            scheme: FluxSchemeSpec::EulerCentralUpwind,
+            reconstruction: crate::solver::ir::FluxReconstructionSpec::Muscl {
+                limiter: crate::solver::ir::LimiterSpec::VanLeer,
+            },
+        };
+        let flux_module = flux_module_module(flux_spec).expect("failed to build MUSCL flux_module");
+
+        let mut replaced = false;
+        for module in &mut model_muscl.modules {
+            if module.name == "flux_module" {
+                *module = flux_module.clone();
+                replaced = true;
+            }
+        }
+        assert!(replaced, "compressible_model must include a flux_module module");
+
+        // Re-run manifest validation + derive GPU spec after changing modules/state layout.
+        model_muscl = model_muscl.with_derived_gpu();
+
+        let wgsl_muscl =
+            generate_kernel_wgsl_for_model_by_id(&model_muscl, &schemes, KernelId::FLUX_MODULE)
+                .expect("failed to generate MUSCL flux_module WGSL");
+
+        assert_ne!(
+            wgsl_first_order, wgsl_muscl,
+            "FluxReconstructionSpec::Muscl must change flux_module WGSL"
+        );
+
+        // VanLeer limiter uses an epsilon literal in the IR; ensure it reaches WGSL.
+        let has_vanleer_epsilon = wgsl_muscl.contains("1e-8") || wgsl_muscl.contains("0.00000001");
+        assert!(
+            has_vanleer_epsilon,
+            "MUSCL(VanLeer) WGSL should contain the VanLeer epsilon literal"
+        );
+        assert!(
+            !wgsl_first_order.contains("1e-8") && !wgsl_first_order.contains("0.00000001"),
+            "FirstOrder WGSL should not contain the VanLeer epsilon literal"
+        );
+
+        // MUSCL reconstruction relies on CellToFace{Neighbor}, which lowers to face_center - neigh_cell.
+        assert!(
+            wgsl_muscl.contains("face_center_vec - c_neigh_cell_vec"),
+            "MUSCL WGSL should contain neighbor CellToFace geometry"
+        );
+        assert!(
+            !wgsl_first_order.contains("face_center_vec - c_neigh_cell_vec"),
+            "FirstOrder WGSL should not contain neighbor CellToFace geometry"
+        );
+    }
+}

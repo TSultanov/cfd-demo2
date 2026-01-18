@@ -207,6 +207,8 @@ Completed:
 - Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
 - Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.
 - Gap 4 hardening: added a contract test preventing `include_str!()` WGSL embedding in `src/solver/gpu` (solver runtime must consume registry-provided WGSL).
+- Gap 4 progress: infrastructure bind groups now build from `kernel_registry` binding metadata + pipeline layouts (no direct `crate::solver::gpu::bindings` usage in solver runtime).
+- Gap 4 hardening: added a contract test preventing `crate::solver::gpu::bindings` dependencies in `src/solver/gpu` (runtime wiring must stay metadata-driven).
 - Hardened the `include_str!` contract to detect macro invocations even with intervening whitespace/comments.
 - Hardened the `include_str!` contract to avoid false negatives caused by Rust lifetime syntax (e.g. `fn f<'a>(...)`).
 - Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
@@ -214,7 +216,7 @@ Completed:
 
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
-2) Finish Gap 4: treat handwritten solver-infrastructure WGSL the same way as generated kernels (registry + metadata-driven binding; no ad-hoc runtime embeds).
+2) Finish Gap 4: migrate remaining handwritten infrastructure shader call sites (e.g. FGMRES/AMG) to the same registry + metadata-driven bind group path (no manual `BindGroupLayoutDescriptor` wiring).
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

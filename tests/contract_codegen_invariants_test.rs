@@ -604,6 +604,27 @@ fn contract_solver_gpu_does_not_embed_wgsl_via_include_str() {
 }
 
 #[test]
+fn contract_solver_gpu_does_not_depend_on_wgsl_bindgen_bindings() {
+    // Gap 4: infrastructure shaders should be consumed via the kernel registry + binding
+    // metadata path, not by reaching into wgsl_bindgen-generated Rust bindings at runtime.
+
+    let solver_gpu_dir = repo_root().join("src/solver/gpu");
+    visit_rs_files_recursive(&solver_gpu_dir, &mut |path| {
+        if path.file_name().and_then(|s| s.to_str()) == Some("bindings.rs") {
+            return;
+        }
+
+        let src = read_utf8(path);
+        let context = path
+            .strip_prefix(repo_root())
+            .unwrap_or(path)
+            .display()
+            .to_string();
+        assert_not_contains(&src, "crate::solver::gpu::bindings", &context);
+    });
+}
+
+#[test]
 fn contract_recipe_does_not_inject_generic_coupled_apply_kernel_by_id() {
     // Apply-kernel presence in implicit stepping should come from composing a module into the
     // derived recipe, not from hard-coded `KernelId::GENERIC_COUPLED_APPLY` insertion.

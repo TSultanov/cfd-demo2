@@ -1,7 +1,6 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
-use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
 use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
@@ -18,7 +17,7 @@ use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
 use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry, ProgramParamHandler};
+use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramParamHandler};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -649,30 +648,6 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
 
 /// Register ops using the unified registry builder.
 /// The recipe's stepping mode determines which ops are registered.
-pub(crate) fn register_ops_from_recipe(
-    recipe: &SolverRecipe,
-    registry: &mut ProgramOpRegistry,
-) -> Result<(), String> {
-    let config = UnifiedOpRegistryConfig {
-        prepare: Some(host_prepare_step),
-        finalize: Some(host_finalize_step),
-        solve: Some(host_solve_linear_system),
-        assembly_graph: Some(assembly_graph_run),
-        apply_graph: Some(apply_graph_run),
-        update_graph: Some(update_graph_run),
-        implicit_update_graph: Some(update_graph_run),
-        implicit_outer_iters: Some(count_outer_iters),
-        ..Default::default()
-    };
-
-    let built =
-        crate::solver::gpu::lowering::unified_registry::build_unified_registry(recipe, config)?;
-
-    // Merge built registry into provided registry
-    registry.merge(built)?;
-
-    Ok(())
-}
 
 fn all_named_param_handlers() -> HashMap<&'static str, ProgramParamHandler> {
     let mut params: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
@@ -1331,28 +1306,12 @@ pub(crate) fn param_low_mach_theta_floor(
     Ok(())
 }
 
-pub(crate) fn linear_debug_provider(
-    plan: &mut GpuProgramPlan,
-) -> Option<&mut dyn PlanLinearSystemDebug> {
-    Some(res_mut(plan) as &mut dyn PlanLinearSystemDebug)
-}
-
 /// Fallback when recipe doesn't define assembly phase
 fn build_assembly_graph_fallback() -> ModuleGraph<GeneratedKernelsModule> {
     ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
         label: "generic_coupled:assembly",
         pipeline: KernelId::GENERIC_COUPLED_ASSEMBLY,
         bind: KernelId::GENERIC_COUPLED_ASSEMBLY,
-        dispatch: DispatchKind::Cells,
-    })])
-}
-
-/// Fallback when recipe doesn't define update phase
-fn build_update_graph_fallback() -> ModuleGraph<GeneratedKernelsModule> {
-    ModuleGraph::new(vec![ModuleNode::Compute(ComputeSpec {
-        label: "generic_coupled:update",
-        pipeline: KernelId::GENERIC_COUPLED_UPDATE,
-        bind: KernelId::GENERIC_COUPLED_UPDATE,
         dispatch: DispatchKind::Cells,
     })])
 }

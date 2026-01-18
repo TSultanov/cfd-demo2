@@ -54,28 +54,6 @@ impl PlanLinearSystemDebug for UniversalProgramResources {
     }
 }
 
-// --- Universal resource access helpers ---
-
-fn wrap(plan: &GpuProgramPlan) -> &UniversalProgramResources {
-    plan.resources
-        .get::<UniversalProgramResources>()
-        .expect("missing UniversalProgramResources")
-}
-
-fn wrap_mut(plan: &mut GpuProgramPlan) -> &mut UniversalProgramResources {
-    plan.resources
-        .get_mut::<UniversalProgramResources>()
-        .expect("missing UniversalProgramResources")
-}
-
-fn generic_coupled(plan: &GpuProgramPlan) -> Option<&GenericCoupledProgramResources> {
-    wrap(plan).generic_coupled()
-}
-
-fn generic_coupled_mut(plan: &mut GpuProgramPlan) -> Option<&mut GenericCoupledProgramResources> {
-    wrap_mut(plan).generic_coupled_mut()
-}
-
 // --- Universal op registration ---
 
 /// Single universal lowering path: register the unified op kinds emitted by `SolverRecipe::build_program_spec()`.
@@ -170,10 +148,6 @@ pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
     value: f32,
 ) -> Result<(), String> {
     generic_coupled_model::spec_set_bc_value(plan, boundary, unknown_component, value)
-}
-
-pub(in crate::solver::gpu::lowering) fn init_history(_plan: &GpuProgramPlan) {
-    // Generic-coupled time integration seeds history via `TimeIntegrationModule::set_dt`.
 }
 
 pub(in crate::solver::gpu::lowering) fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {

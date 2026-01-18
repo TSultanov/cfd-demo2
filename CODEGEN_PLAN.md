@@ -201,10 +201,11 @@ Completed:
 - Added regression/contract coverage so limited SOU/QUICK variants can’t silently degrade.
 - Gap 0 hardening: Rhie–Chow aux kernel IDs are module-local; plus a contract test proving a module-defined `KernelId("contract/...")` can be scheduled/generated without editing `src/solver/model/kernel.rs`.
 - Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
+- Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.
 
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
-2) Gap 3 follow-up: remove the centralized named-param handler map (`all_named_param_handlers` in `src/solver/gpu/lowering/models/generic_coupled.rs`) by making handler registration module-owned.
+2) Gap 4 follow-up: ensure *all* solver-runtime WGSL comes from the generated registry and add contract coverage to prevent reintroducing `include_str!()` in `src/solver/gpu`.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

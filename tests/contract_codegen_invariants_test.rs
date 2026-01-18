@@ -121,3 +121,34 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
     // Do not reintroduce a centralized `all_named_param_handlers()` registry.
     assert_not_contains(&src, "all_named_param_handlers", "generic_coupled.rs");
 }
+
+fn visit_rs_files_recursive<F: FnMut(&Path)>(dir: &Path, f: &mut F) {
+    let entries = fs::read_dir(dir).unwrap_or_else(|err| {
+        panic!("failed to read dir {}: {err}", dir.display())
+    });
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|err| {
+            panic!("failed to read entry in {}: {err}", dir.display())
+        });
+        let path = entry.path();
+        if path.is_dir() {
+            visit_rs_files_recursive(&path, f);
+            continue;
+        }
+        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+            f(&path);
+        }
+    }
+}
+
+#[test]
+fn contract_solver_gpu_does_not_embed_wgsl_via_include_str() {
+    // Gap 4: runtime should consume registry-provided WGSL, not ad-hoc `include_str!()`.
+    // This contract focuses on the solver runtime (src/solver/gpu), not UI shaders.
+
+    let solver_gpu_dir = repo_root().join("src/solver/gpu");
+    visit_rs_files_recursive(&solver_gpu_dir, &mut |path| {
+        let src = read_utf8(path);
+        assert_not_contains(&src, "include_str!(\"", "solver/gpu/*.rs");
+    });
+}

@@ -10,6 +10,8 @@ impl KernelId {
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
+    pub const GENERIC_COUPLED_ASSEMBLY_GRAD_STATE: KernelId =
+        KernelId("generic_coupled_assembly_grad_state");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
     pub const GENERIC_COUPLED_UPDATE: KernelId = KernelId("generic_coupled_update");
 
@@ -122,6 +124,19 @@ pub enum DispatchKindId {
     Faces,
 }
 
+/// Kernel inclusion conditions expressed on the model side and evaluated when building a recipe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KernelConditionId {
+    /// Always include this kernel when the module is present.
+    Always,
+
+    /// Include only when the recipe allocates a packed `grad_state` buffer.
+    RequiresGradState,
+
+    /// Include only when the recipe does not allocate a packed `grad_state` buffer.
+    RequiresNoGradState,
+}
+
 /// A fully specified kernel pass derived from the model + method selection.
 ///
 /// This is the "model side" of a recipe: phase/dispatch are decided here so the
@@ -131,6 +146,7 @@ pub struct ModelKernelSpec {
     pub id: KernelId,
     pub phase: KernelPhaseId,
     pub dispatch: DispatchKindId,
+    pub condition: KernelConditionId,
 }
 
 pub(crate) type ModelKernelWgslGenerator = fn(
@@ -395,14 +411,38 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
+    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
+        .map_err(|e| e.to_string())?;
+
+    // `generic_coupled_assembly` is the no-grad_state variant.
+    // The grad_state-binding variant is emitted under `KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE`.
+    let needs_gradients = false;
+    let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+    Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+        &discrete,
+        &model.state_layout,
+        flux_stride,
+        needs_gradients,
+    ))
+}
+
+pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<String, String> {
     use crate::solver::model::GradientStorage;
+
+    if model.gpu.gradient_storage != GradientStorage::PackedState {
+        return Err(
+            "generic_coupled_assembly_grad_state requires ModelGpuSpec.gradient_storage == PackedState"
+                .to_string(),
+        );
+    }
 
     let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
         .map_err(|e| e.to_string())?;
 
-    // Packed gradients are model-owned via `ModelGpuSpec.gradient_storage`. Treat this as the
-    // authoritative contract for whether `grad_state` is bound/used by unified_assembly.
-    let needs_gradients = model.gpu.gradient_storage == GradientStorage::PackedState;
+    let needs_gradients = true;
     let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
@@ -614,6 +654,7 @@ mod contract_tests {
                 id: contract_id,
                 phase: KernelPhaseId::Preparation,
                 dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
             }],
             generators: vec![ModelKernelGeneratorSpec {
                 id: contract_id,
@@ -779,6 +820,34 @@ mod tests {
         assert!(
             wgsl.contains("1e-8") || wgsl.contains("0.00000001"),
             "expected VanLeer epsilon literal to appear in WGSL"
+        );
+    }
+
+    #[test]
+    fn contract_unified_assembly_variants_have_distinct_grad_state_bindings() {
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+        let model = crate::solver::model::incompressible_momentum_model();
+
+        let no_grad = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+        )
+        .expect("failed to generate generic_coupled_assembly WGSL");
+        assert!(
+            !no_grad.contains("grad_state"),
+            "generic_coupled_assembly must not bind grad_state"
+        );
+
+        let with_grad = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
+        )
+        .expect("failed to generate generic_coupled_assembly_grad_state WGSL");
+        assert!(
+            with_grad.contains("grad_state"),
+            "generic_coupled_assembly_grad_state must bind grad_state"
         );
     }
 }

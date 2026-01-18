@@ -1,4 +1,4 @@
-use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId, ModelKernelSpec};
+use crate::solver::model::kernel::{DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelSpec};
 use crate::solver::model::module::KernelBundleModule;
 use crate::solver::model::KernelId;
 
@@ -9,6 +9,7 @@ pub fn generic_coupled_apply_module() -> KernelBundleModule {
             id: KernelId::GENERIC_COUPLED_APPLY,
             phase: KernelPhaseId::Apply,
             dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
         }],
         ..Default::default()
     }

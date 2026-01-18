@@ -1,5 +1,7 @@
 use crate::solver::model::flux_module::FluxModuleSpec;
-use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec};
+use crate::solver::model::kernel::{
+    DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
+};
 use crate::solver::model::module::{KernelBundleModule, ModuleManifest};
 use crate::solver::model::KernelId;
 
@@ -25,6 +27,7 @@ pub fn flux_module_module(flux: FluxModuleSpec) -> Result<KernelBundleModule, St
             id: KernelId::FLUX_MODULE_GRADIENTS,
             phase: KernelPhaseId::Gradients,
             dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
         });
         out.generators.push(ModelKernelGeneratorSpec {
             id: KernelId::FLUX_MODULE_GRADIENTS,
@@ -36,6 +39,7 @@ pub fn flux_module_module(flux: FluxModuleSpec) -> Result<KernelBundleModule, St
         id: KernelId::FLUX_MODULE,
         phase: KernelPhaseId::FluxComputation,
         dispatch: DispatchKindId::Faces,
+        condition: KernelConditionId::Always,
     });
     out.generators.push(ModelKernelGeneratorSpec {
         id: KernelId::FLUX_MODULE,

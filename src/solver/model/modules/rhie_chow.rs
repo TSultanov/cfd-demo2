@@ -1,4 +1,4 @@
-use crate::solver::model::kernel::{ModelKernelGeneratorSpec, ModelKernelSpec};
+use crate::solver::model::kernel::{KernelConditionId, ModelKernelGeneratorSpec, ModelKernelSpec};
 use crate::solver::model::module::{KernelBundleModule, ModuleInvariant, ModuleManifest};
 use crate::solver::model::KernelId;
 use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId};
@@ -19,16 +19,19 @@ pub fn rhie_chow_aux_module(
                 id: kernel_dp_init,
                 phase: KernelPhaseId::Preparation,
                 dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
             },
             ModelKernelSpec {
                 id: kernel_rhie_chow_correct_velocity,
                 phase: KernelPhaseId::Gradients,
                 dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
             },
             ModelKernelSpec {
                 id: kernel_dp_update_from_diag,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
             },
         ],
         generators: vec![

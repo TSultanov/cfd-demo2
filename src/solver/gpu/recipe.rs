@@ -208,7 +208,13 @@ impl SolverRecipe {
                 .iter()
                 .map(|f| f.name().to_string())
                 .collect(),
-            GradientStorage::PackedState => vec!["state".to_string()],
+            GradientStorage::PackedState => {
+                if scheme_expansion.needs_gradients() {
+                    vec!["state".to_string()]
+                } else {
+                    Vec::new()
+                }
+            }
             GradientStorage::PerFieldComponents => scheme_expansion
                 .gradient_fields()
                 .iter()
@@ -223,6 +229,7 @@ impl SolverRecipe {
         gradient_fields.retain(|name| seen.insert(name.clone()));
 
         let needs_gradients = !gradient_fields.is_empty();
+        let has_grad_state = gradient_fields.iter().any(|field| field == "state");
         let flux = model.gpu.flux;
         let requires_low_mach_params = model.gpu.requires_low_mach_params;
 
@@ -242,6 +249,17 @@ impl SolverRecipe {
 
         let mut kernels: Vec<KernelSpec> = Vec::new();
         for spec in model_kernel_specs {
+            let include = match spec.condition {
+                crate::solver::model::kernel::KernelConditionId::Always => true,
+                crate::solver::model::kernel::KernelConditionId::RequiresGradState => has_grad_state,
+                crate::solver::model::kernel::KernelConditionId::RequiresNoGradState => {
+                    !has_grad_state
+                }
+            };
+            if !include {
+                continue;
+            }
+
             let phase = match spec.phase {
                 crate::solver::model::kernel::KernelPhaseId::Preparation => KernelPhase::Preparation,
                 crate::solver::model::kernel::KernelPhaseId::Gradients => KernelPhase::Gradients,
@@ -582,15 +600,33 @@ mod tests {
         .expect("should create recipe");
 
         assert_eq!(recipe.model_id, "generic_diffusion_demo");
-        assert!(recipe.needs_gradients());
-        assert_eq!(recipe.gradient_fields, vec!["state".to_string()]);
+        assert!(!recipe.needs_gradients());
+        assert!(recipe.gradient_fields.is_empty());
+        assert!(!recipe
+            .aux_buffers
+            .iter()
+            .any(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state"));
         assert_eq!(recipe.unknowns_per_cell, 1);
+
+        assert!(recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+        assert!(!recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE));
+        assert!(!recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "packed_state_gradients"));
     }
 
     #[test]
-    fn recipe_allocates_packed_gradients_for_packed_storage() {
+    fn recipe_selects_packed_gradients_and_assembly_variant_from_scheme() {
         let model = compressible_model();
-        let recipe = SolverRecipe::from_model(
+
+        let upwind = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
             TimeScheme::Euler,
@@ -599,13 +635,48 @@ mod tests {
         )
         .expect("recipe build");
 
-        assert!(recipe.needs_gradients());
-        assert_eq!(recipe.gradient_fields, vec!["state".to_string()]);
-        assert!(recipe.kernels.iter().any(|k|
+        assert!(!upwind.needs_gradients());
+        assert!(upwind.gradient_fields.is_empty());
+        assert!(!upwind.kernels.iter().any(|k| {
             k.id.as_str() == "packed_state_gradients" && k.phase == KernelPhase::Gradients
-        ));
+        }));
+        assert!(upwind
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+        assert!(!upwind
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE));
+        assert!(!upwind
+            .aux_buffers
+            .iter()
+            .any(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state"));
 
-        let grad_state = recipe
+        let high_order = SolverRecipe::from_model(
+            &model,
+            Scheme::SecondOrderUpwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Implicit { outer_iters: 1 },
+        )
+        .expect("recipe build");
+
+        assert!(high_order.needs_gradients());
+        assert_eq!(high_order.gradient_fields, vec!["state".to_string()]);
+        assert!(high_order.kernels.iter().any(|k| {
+            k.id.as_str() == "packed_state_gradients" && k.phase == KernelPhase::Gradients
+        }));
+        assert!(!high_order
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+        assert!(high_order
+            .kernels
+            .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE));
+
+        let grad_state = high_order
             .aux_buffers
             .iter()
             .find(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state")

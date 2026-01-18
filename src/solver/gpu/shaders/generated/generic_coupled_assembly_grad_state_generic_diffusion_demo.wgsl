@@ -80,6 +80,9 @@ var<storage, read> state_old_old: array<f32>;
 @group(1) @binding(3) 
 var<uniform> constants: Constants;
 
+@group(1) @binding(4) 
+var<storage, read> grad_state: array<Vector2>;
+
 // Group 2: Solver (block CSR values + RHS)
 
 @group(2) @binding(0) 

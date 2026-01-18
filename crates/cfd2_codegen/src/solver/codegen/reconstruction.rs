@@ -173,16 +173,18 @@ mod tests {
     fn vanleer_limiter_guards_opposite_signed_slopes() {
         // Regression: VanLeer-limited schemes must not allow opposite-signed slopes.
         // Ensure the codegen emits a sign guard (a > 0 check) for the VanLeer branch.
-        let wgsl = wgsl_for_phi_ho(Scheme::SecondOrderUpwindVanLeer);
-        let compact: String = wgsl.chars().filter(|c| !c.is_whitespace()).collect();
-        assert!(
-            compact.contains(">0.0"),
-            "expected VanLeer limiter to include a sign guard (> 0.0)"
-        );
-        assert!(
-            compact.contains("select(0.0"),
-            "expected VanLeer limiter to zero out delta via select(0.0, ...)"
-        );
+        for scheme in [Scheme::SecondOrderUpwindVanLeer, Scheme::QUICKVanLeer] {
+            let wgsl = wgsl_for_phi_ho(scheme);
+            let compact: String = wgsl.chars().filter(|c| !c.is_whitespace()).collect();
+            assert!(
+                compact.contains(">0.0"),
+                "expected {scheme:?} VanLeer limiter to include a sign guard (> 0.0)"
+            );
+            assert!(
+                compact.contains("select(0.0"),
+                "expected {scheme:?} VanLeer limiter to zero out delta via select(0.0, ...)"
+            );
+        }
     }
 }
 

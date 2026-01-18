@@ -98,12 +98,12 @@ Progress (partial):
   - method selection (exactly one required)
   - flux module configuration (0 or 1 allowed)
   - named parameter keys accepted by the runtime plan
- - typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
- - Extracted Rhie–Chow aux bundle into a dedicated module factory (`src/solver/model/modules/rhie_chow.rs`), eliminating per-model inline `KernelBundleModule` literals for this pass.
- - Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; EOS/low-mach named keys are now purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
- - Consolidated coupled method identity into `MethodSpec::Coupled(CoupledCapabilities)`; solver strategy (implicit/coupled) is selected via `SolverConfig.stepping`.
- - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-18.
- - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-17.
+- typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
+- Extracted Rhie–Chow aux bundle into a dedicated module factory (`src/solver/model/modules/rhie_chow.rs`), eliminating per-model inline `KernelBundleModule` literals for this pass.
+- Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; EOS/low-mach named keys are now purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
+- Build-script stability for modules: `build.rs` includes `src/solver/model/modules/mod.rs`, so adding a new module file under `src/solver/model/modules/` does not require editing `build.rs` (validated on 2026-01-18).
+- Consolidated coupled method identity into `MethodSpec::Coupled(CoupledCapabilities)`; solver strategy (implicit/coupled) is selected via `SolverConfig.stepping`.
+- Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-18.
 
 ### 1) Flux Modules (reconstruction + method knobs)
 - Flux kernels are IR-driven and now consume boundary conditions consistently with assembly.
@@ -189,15 +189,14 @@ Progress:
 4) Add/expand contract tests and keep OpenFOAM reference tests green (or intentionally updated) during refactors.
 
 ## Next Tasks (smallest high-impact first)
-1) Remove build-script friction for new model modules: ensure `build.rs` does not need edits when a new file is added under `src/solver/model/modules/`.
-2) Add a contract/validation test that proves `FluxReconstructionSpec::Muscl{...}` actually affects generated WGSL (while keeping shipped models at `FirstOrder`).
-3) Decide whether `unified_assembly`’s advection reconstruction (`Scheme::{SecondOrderUpwind, QUICK, ...}`) should gain an IR-driven limiter knob or be simplified/retired in favor of a single reconstruction path.
+1) Add a contract/validation test that proves `FluxReconstructionSpec::Muscl{...}` actually affects generated WGSL (while keeping shipped models at `FirstOrder`).
+2) Decide whether `unified_assembly`’s advection reconstruction (`Scheme::{SecondOrderUpwind, QUICK, ...}`) should gain an IR-driven limiter knob or be simplified/retired in favor of a single reconstruction path.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).
 - Options selection uses typed enums.
 
 ## Notes / Constraints
-- `build.rs` uses `include!()`; build-time-only modules must be wired there.
+- `build.rs` uses `include!()`; model modules are wired for build-time use via `src/solver/model/modules/mod.rs`.
 - Build scripts are std-only; avoid pulling runtime-only crates into code referenced by `build.rs`.
 - EOS/low-Mach named params are declared via the EOS module manifest (not solver-core implied).

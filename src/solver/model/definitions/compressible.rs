@@ -308,7 +308,6 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
         gradients: None,
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
-        reconstruction: crate::solver::scheme::Scheme::Upwind,
     };
 
     let model = ModelSpec {

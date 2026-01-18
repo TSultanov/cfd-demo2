@@ -962,7 +962,7 @@ impl eframe::App for CFDApp {
                         }
 
                         if matches!(self.solver_kind, SolverKind::Compressible) {
-                            ui.label("Compressible solver uses this for KT reconstruction (piecewise-constant vs limited linear).");
+                            ui.label("Compressible solver uses this for KT flux reconstruction + deferred-correction advection.");
                         }
 
                         ui.separator();

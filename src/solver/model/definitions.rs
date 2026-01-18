@@ -125,58 +125,103 @@ impl ModelSpec {
             return Err("Coupled method requires a flux_module-providing module".to_string());
         }
 
-        // Flux-module reconstruction knobs must be explicitly supported by the model.
+        // Flux-module gradients stages must be explicitly supported by the model.
         //
-        // Defaults remain first-order. Higher-order reconstruction requires a gradients stage
-        // and explicit `grad_*` fields in the state layout.
+        // Reconstruction scheme selection is a numerical-method knob driven by the runtime
+        // `advection_scheme` parameter (shared with unified_assembly), but some flux modules
+        // still require precomputed `grad_*` fields (e.g. Rhie–Chow / pressure-correction).
         if let Some(flux) = flux {
-            use crate::solver::scheme::Scheme;
             use crate::solver::model::backend::FieldKind;
-            use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
+            use crate::solver::model::flux_module::FluxModuleGradientsSpec;
 
-            match flux {
-                crate::solver::model::flux_module::FluxModuleSpec::Kernel { .. } => {}
-                crate::solver::model::flux_module::FluxModuleSpec::Scheme {
-                    gradients,
-                    scheme,
-                    reconstruction,
-                } => {
-                    if *reconstruction != Scheme::Upwind {
-                        if !matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
-                            return Err(
-                                "flux_module higher-order reconstruction requires a gradients stage (FluxModuleGradientsSpec::FromStateLayout)"
-                                    .to_string(),
-                            );
-                        }
+            let gradients = match flux {
+                crate::solver::model::flux_module::FluxModuleSpec::Kernel { gradients, .. } => {
+                    gradients.as_ref()
+                }
+                crate::solver::model::flux_module::FluxModuleSpec::Scheme { gradients, .. } => {
+                    gradients.as_ref()
+                }
+            };
 
-                        let require_grad = |name: &'static str| -> Result<(), String> {
-                            let grad_name = format!("grad_{name}");
-                            let Some(field) = self.state_layout.field(&grad_name) else {
-                                return Err(format!(
-                                    "flux_module MUSCL reconstruction requires '{}' in state layout",
-                                    grad_name
-                                ));
-                            };
-                            if field.kind() != FieldKind::Vector2 {
-                                return Err(format!(
-                                    "flux_module MUSCL reconstruction requires '{}' to be Vector2",
-                                    grad_name
-                                ));
-                            }
-                            Ok(())
-                        };
+            if matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
+                let mut found_target = false;
 
-                        match scheme {
-                            FluxSchemeSpec::EulerCentralUpwind => {
-                                // Minimum set used by the Euler KT flux math.
-                                require_grad("rho")?;
-                                require_grad("rho_u_x")?;
-                                require_grad("rho_u_y")?;
-                                require_grad("rho_e")?;
-                                require_grad("p")?;
-                            }
-                        }
+                for field in self.state_layout.fields() {
+                    let Some(base) = field.name().strip_prefix("grad_") else {
+                        continue;
+                    };
+                    if base.is_empty() {
+                        continue;
                     }
+
+                    // Match codegen's `collect_gradients` behavior:
+                    // - `grad_<scalar>` targets scalar fields.
+                    // - `grad_<vec>_x` / `grad_<vec>_y` / `grad_<vec>_z` target vector components.
+                    //
+                    // `grad_*` fields whose base does not exist are ignored (e.g. auxiliary
+                    // fields that happen to use the `grad_` prefix but are not computed by the
+                    // gradients stage).
+                    let base_exists = if let Some(base_field) = self.state_layout.field(base) {
+                        if base_field.kind() != FieldKind::Scalar {
+                            return Err(format!(
+                                "flux_module gradients stage expects '{base}' to be scalar (base for '{}')",
+                                field.name()
+                            ));
+                        }
+                        true
+                    } else if let Some((base_field_name, component)) = base.rsplit_once('_') {
+                        if let Some(base_field) = self.state_layout.field(base_field_name) {
+                            let idx = match component {
+                                "x" => Some(0),
+                                "y" => Some(1),
+                                "z" => Some(2),
+                                _ => None,
+                            };
+                            if let Some(idx) = idx {
+                                if idx as u32 >= base_field.component_count() {
+                                    return Err(format!(
+                                        "flux_module gradients stage: base field '{}' has {} components, cannot select '{base}'",
+                                        base_field.name(),
+                                        base_field.component_count(),
+                                    ));
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if !base_exists {
+                        continue;
+                    }
+
+                    if field.kind() != FieldKind::Vector2 {
+                        return Err(format!(
+                            "flux_module gradients stage requires '{}' to be Vector2",
+                            field.name()
+                        ));
+                    }
+
+                    // Ensure the component offsets exist (avoids later codegen errors).
+                    for c in 0..2 {
+                        self.state_layout.component_offset(field.name(), c).ok_or_else(|| {
+                            format!(
+                                "flux_module gradients stage requires '{}[{c}]' in state layout",
+                                field.name()
+                            )
+                        })?;
+                    }
+
+                    found_target = true;
+                }
+
+                if !found_target {
+                    return Err("flux_module_gradients requested but no grad_<field> targets found in state layout".to_string());
                 }
             }
         }
@@ -513,7 +558,6 @@ mod tests {
     use super::*;
     use crate::solver::model::backend::ast::Coefficient;
     use crate::solver::model::backend::ast::TermOp;
-    use crate::solver::model::backend::ast::vol_vector;
     use crate::solver::model::kernel::derive_kernel_specs_for_model;
     use crate::solver::model::KernelId;
     use crate::solver::units::si;
@@ -596,30 +640,14 @@ mod tests {
     }
 
     #[test]
-    fn flux_module_muscl_requires_gradients_stage_and_grad_fields() {
-        use crate::solver::scheme::Scheme;
+    fn flux_module_gradients_stage_validates_grad_field_shape_and_base_field() {
+        use crate::solver::model::backend::ast::vol_scalar;
         use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
         use crate::solver::model::modules::flux_module::flux_module_module;
 
         let mut model = compressible_model();
 
-        let muscl_no_gradients = crate::solver::model::FluxModuleSpec::Scheme {
-            gradients: None,
-            scheme: FluxSchemeSpec::EulerCentralUpwind,
-            reconstruction: Scheme::SecondOrderUpwindMinMod,
-        };
-        let mut replaced = false;
-        for module in &mut model.modules {
-            if module.name == "flux_module" {
-                *module = flux_module_module(muscl_no_gradients).unwrap();
-                replaced = true;
-                break;
-            }
-        }
-        assert!(replaced, "expected compressible_model to include flux_module module");
-        let err = model.validate_module_manifests().unwrap_err();
-        assert!(err.contains("requires a gradients stage"));
-
+        // Add an invalid grad_* field: wrong shape (scalar instead of Vector2).
         let fields = CompressibleFields::new();
         model.state_layout = StateLayout::new(vec![
             fields.rho,
@@ -628,31 +656,25 @@ mod tests {
             fields.p,
             fields.t,
             fields.u,
-            vol_vector("grad_rho", si::DENSITY / si::LENGTH),
-            vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH),
-            vol_vector("grad_rho_u_y", si::MOMENTUM_DENSITY / si::LENGTH),
-            vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH),
-            vol_vector("grad_p", si::PRESSURE / si::LENGTH),
+            vol_scalar("grad_rho", si::DENSITY / si::LENGTH),
         ]);
 
-        let muscl_with_gradients = crate::solver::model::FluxModuleSpec::Scheme {
+        let with_gradients = crate::solver::model::FluxModuleSpec::Scheme {
             gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
             scheme: FluxSchemeSpec::EulerCentralUpwind,
-            reconstruction: Scheme::SecondOrderUpwindMinMod,
         };
         let mut replaced = false;
         for module in &mut model.modules {
             if module.name == "flux_module" {
-                *module = flux_module_module(muscl_with_gradients).unwrap();
+                *module = flux_module_module(with_gradients).unwrap();
                 replaced = true;
                 break;
             }
         }
         assert!(replaced, "expected compressible_model to include flux_module module");
 
-        model
-            .validate_module_manifests()
-            .expect("muscl manifests should validate when grad fields exist");
+        let err = model.validate_module_manifests().unwrap_err();
+        assert!(err.contains("requires 'grad_rho' to be Vector2"));
     }
 
     #[test]

@@ -356,23 +356,36 @@ pub(crate) fn generate_flux_module_kernel_wgsl(
                 kernel,
             ))
         }
-        crate::solver::model::flux_module::FluxModuleSpec::Scheme {
-            scheme,
-            reconstruction,
-            ..
-        } => {
-            let kernel = crate::solver::model::flux_schemes::lower_flux_scheme(
-                scheme,
-                &model.system,
-                *reconstruction,
-            )
-            .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
-            Ok(cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl(
+        crate::solver::model::flux_module::FluxModuleSpec::Scheme { scheme, .. } => {
+            use crate::solver::scheme::Scheme;
+
+            let schemes = [
+                Scheme::Upwind,
+                Scheme::SecondOrderUpwind,
+                Scheme::QUICK,
+                Scheme::SecondOrderUpwindMinMod,
+                Scheme::SecondOrderUpwindVanLeer,
+                Scheme::QUICKMinMod,
+                Scheme::QUICKVanLeer,
+            ];
+
+            let mut variants = Vec::new();
+            for reconstruction in schemes {
+                let kernel = crate::solver::model::flux_schemes::lower_flux_scheme(
+                    scheme,
+                    &model.system,
+                    reconstruction,
+                )
+                .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
+                variants.push((reconstruction, kernel));
+            }
+
+            Ok(cfd2_codegen::solver::codegen::flux_module::generate_flux_module_wgsl_runtime_scheme(
                 &model.state_layout,
                 &flux_layout,
                 flux_stride,
                 &prims,
-                &kernel,
+                &variants,
             ))
         }
     }
@@ -619,96 +632,45 @@ mod contract_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::vol_vector;
-    use crate::solver::model::backend::StateLayout;
-    use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
     use crate::solver::scheme::Scheme;
-    use crate::solver::units::si;
     use std::collections::HashSet;
 
     #[test]
-    fn contract_muscl_reconstruction_changes_generated_flux_module_wgsl() {
-        // This is intentionally a "contract"-style test: it ensures that
-        // enabling higher-order reconstruction affects generated WGSL (and is not silently ignored).
-        //
-        // Shipped models remain first-order by default; we only construct a higher-order variant here.
+    fn contract_flux_module_uses_runtime_scheme_and_includes_limited_paths() {
+        // Contract: the flux-module kernel must not ignore the runtime `advection_scheme` knob.
+        // It should branch on `constants.scheme` and include the limited reconstruction paths
+        // in WGSL (even though shipped defaults remain Upwind).
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
 
-        let model_first_order = crate::solver::model::compressible_model();
-        let wgsl_first_order = generate_kernel_wgsl_for_model_by_id(
-            &model_first_order,
-            &schemes,
-            KernelId::FLUX_MODULE,
-        )
-        .expect("failed to generate FirstOrder flux_module WGSL");
+        let model = crate::solver::model::compressible_model();
+        let wgsl = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+            .expect("failed to generate flux_module WGSL");
 
-        let mut model_muscl = crate::solver::model::compressible_model();
+        assert!(
+            wgsl.contains("constants.scheme"),
+            "flux_module WGSL should reference constants.scheme for runtime selection"
+        );
 
-        // Enable the gradients stage + add the gradient fields required by MUSCL validation.
-        let fields = crate::solver::model::CompressibleFields::new();
-        let mut state_fields =
-            vec![fields.rho, fields.rho_u, fields.rho_e, fields.p, fields.t, fields.u];
-        state_fields.push(vol_vector("grad_rho", si::DENSITY / si::LENGTH));
-        state_fields.push(vol_vector(
-            "grad_rho_u_x",
-            si::MOMENTUM_DENSITY / si::LENGTH,
-        ));
-        state_fields.push(vol_vector(
-            "grad_rho_u_y",
-            si::MOMENTUM_DENSITY / si::LENGTH,
-        ));
-        state_fields.push(vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH));
-        state_fields.push(vol_vector("grad_p", si::PRESSURE_GRADIENT));
-        model_muscl.state_layout = StateLayout::new(state_fields);
-
-        let flux_spec = crate::solver::model::FluxModuleSpec::Scheme {
-            gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
-            scheme: FluxSchemeSpec::EulerCentralUpwind,
-            reconstruction: Scheme::SecondOrderUpwindVanLeer,
-        };
-        let flux_module = crate::solver::model::modules::flux_module::flux_module_module(flux_spec)
-            .expect("failed to build MUSCL flux_module");
-
-        let mut replaced = false;
-        for module in &mut model_muscl.modules {
-            if module.name == "flux_module" {
-                *module = flux_module.clone();
-                replaced = true;
-            }
+        // 1) Ensure runtime branches exist for each limited variant.
+        let ids = scheme_ids_from_wgsl(&wgsl);
+        for scheme in [
+            Scheme::SecondOrderUpwindMinMod,
+            Scheme::SecondOrderUpwindVanLeer,
+            Scheme::QUICKMinMod,
+            Scheme::QUICKVanLeer,
+        ] {
+            assert!(
+                ids.contains(&scheme.gpu_id()),
+                "WGSL should branch on constants.scheme == {}u for {scheme:?}",
+                scheme.gpu_id(),
+            );
         }
-        assert!(replaced, "compressible_model must include a flux_module module");
 
-        // Re-run manifest validation + derive GPU spec after changing modules/state layout.
-        model_muscl = model_muscl.with_derived_gpu();
-
-        let wgsl_muscl =
-            generate_kernel_wgsl_for_model_by_id(&model_muscl, &schemes, KernelId::FLUX_MODULE)
-                .expect("failed to generate MUSCL flux_module WGSL");
-
-        assert_ne!(
-            wgsl_first_order, wgsl_muscl,
-            "higher-order reconstruction must change flux_module WGSL"
-        );
-
-        // VanLeer limiter uses an epsilon literal in the IR; ensure it reaches WGSL.
-        let has_vanleer_epsilon = wgsl_muscl.contains("1e-8") || wgsl_muscl.contains("0.00000001");
+        // 2) Ensure limiter implementations are present.
+        //    - VanLeer: has a small epsilon literal.
         assert!(
-            has_vanleer_epsilon,
-            "MUSCL(VanLeer) WGSL should contain the VanLeer epsilon literal"
-        );
-        assert!(
-            !wgsl_first_order.contains("1e-8") && !wgsl_first_order.contains("0.00000001"),
-            "FirstOrder WGSL should not contain the VanLeer epsilon literal"
-        );
-
-        // MUSCL reconstruction relies on CellToFace{Neighbor}, which lowers to face_center - neigh_cell.
-        assert!(
-            wgsl_muscl.contains("face_center_vec - c_neigh_cell_vec"),
-            "MUSCL WGSL should contain neighbor CellToFace geometry"
-        );
-        assert!(
-            !wgsl_first_order.contains("face_center_vec - c_neigh_cell_vec"),
-            "FirstOrder WGSL should not contain neighbor CellToFace geometry"
+            wgsl.contains("1e-8") || wgsl.contains("0.00000001"),
+            "expected VanLeer epsilon literal to appear in flux_module WGSL"
         );
     }
 

@@ -29,12 +29,10 @@ pub enum FluxModuleSpec {
         /// Optional gradients stage spec.
         gradients: Option<FluxModuleGradientsSpec>,
         /// Scheme selection + parameters.
-        scheme: FluxSchemeSpec,
-        /// Reconstruction scheme for left/right face states.
         ///
-        /// This is a numerical-method knob (not PDE-specific). Defaults must preserve
-        /// the existing first-order behavior.
-        reconstruction: crate::solver::scheme::Scheme,
+        /// Note: the reconstruction/upwinding order used *within* the flux kernel is driven by
+        /// the runtime `advection_scheme` knob (`constants.scheme`), shared with unified_assembly.
+        scheme: FluxSchemeSpec,
     },
 }
 

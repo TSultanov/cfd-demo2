@@ -146,9 +146,26 @@ fn euler_central_upwind(
         }
     };
 
+    let approximate_gradient = |side: FaceSide, phi_cell: S, phi_other: S| -> V {
+        // Simple two-point gradient estimate based on neighbor differences:
+        //   grad ≈ (phi_other - phi_cell) * d / max(dot(d,d), eps)
+        // where d is the vector from the cell center to the opposite cell center.
+        let d = V::Sub(
+            Box::new(V::cell_to_face(side)),
+            Box::new(V::cell_to_face(other_side(side))),
+        );
+        let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
+        let denom = S::Max(
+            Box::new(S::Dot(Box::new(d.clone()), Box::new(d.clone()))),
+            Box::new(S::lit(1e-12)),
+        );
+        let scale = S::Div(Box::new(diff), Box::new(denom));
+        V::MulScalar(Box::new(d), Box::new(scale))
+    };
+
     let reconstruct_scalar =
-        |side: FaceSide, phi_cell: S, phi_other: S, grad_field: &'static str| -> S {
-            let grad = V::state_vec2(side, grad_field);
+        |side: FaceSide, phi_cell: S, phi_other: S| -> S {
+            let grad = approximate_gradient(side, phi_cell.clone(), phi_other.clone());
 
             match reconstruction {
                 Scheme::Upwind => phi_cell,
@@ -187,45 +204,25 @@ fn euler_central_upwind(
     let p_raw = |side: FaceSide| S::state(side, "p");
 
     let rho = |side: FaceSide| {
-        reconstruct_scalar(
-            side,
-            rho_raw(side),
-            rho_raw(other_side(side)),
-            "grad_rho",
-        )
+        reconstruct_scalar(side, rho_raw(side), rho_raw(other_side(side)))
     };
 
     let rho_e = |side: FaceSide| {
-        reconstruct_scalar(
-            side,
-            rho_e_raw(side),
-            rho_e_raw(other_side(side)),
-            "grad_rho_e",
-        )
+        reconstruct_scalar(side, rho_e_raw(side), rho_e_raw(other_side(side)))
     };
 
     let rho_u_x = |side: FaceSide| {
-        reconstruct_scalar(
-            side,
-            rho_u_x_raw(side),
-            rho_u_x_raw(other_side(side)),
-            "grad_rho_u_x",
-        )
+        reconstruct_scalar(side, rho_u_x_raw(side), rho_u_x_raw(other_side(side)))
     };
 
     let rho_u_y = |side: FaceSide| {
-        reconstruct_scalar(
-            side,
-            rho_u_y_raw(side),
-            rho_u_y_raw(other_side(side)),
-            "grad_rho_u_y",
-        )
+        reconstruct_scalar(side, rho_u_y_raw(side), rho_u_y_raw(other_side(side)))
     };
 
     let rho_u = |side: FaceSide| V::vec2(rho_u_x(side), rho_u_y(side));
 
     let p = |side: FaceSide| {
-        reconstruct_scalar(side, p_raw(side), p_raw(other_side(side)), "grad_p")
+        reconstruct_scalar(side, p_raw(side), p_raw(other_side(side)))
     };
 
     let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));

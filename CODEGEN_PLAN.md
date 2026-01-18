@@ -104,6 +104,7 @@ Progress (partial):
 - Build-script stability for modules: `build.rs` includes `src/solver/model/modules/mod.rs`, so adding a new module file under `src/solver/model/modules/` does not require editing `build.rs` (validated on 2026-01-18).
 - Rhie–Chow module-specific kernel IDs (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) are now module-local (no longer central `KernelId` constants), so adding similar auxiliary modules does not require editing `src/solver/model/kernel.rs` (validated on 2026-01-18).
 - Contract hardening: `contract_gap0_module_defined_kernel_id_is_module_driven` ensures a locally-defined `KernelId("contract/...")` (not a builtin kernel id) can still be scheduled and generated via module wiring (`src/solver/model/kernel.rs`), so future re-centralization breaks the test (added on 2026-01-18).
+- Removed the last central “builtin model-generated kernel id” whitelist (`is_builtin_model_generated_kernel_id`); kernel specs/generators now flow only from the model’s module list.
 - Consolidated coupled method identity into `MethodSpec::Coupled(CoupledCapabilities)`; solver strategy (implicit/coupled) is selected via `SolverConfig.stepping`.
 - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-18.
 
@@ -195,11 +196,12 @@ Progress:
 Completed:
 - Added a contract/validation test proving `FluxReconstructionSpec::Muscl{...}` affects generated WGSL (while shipped models remain `FirstOrder`).
 - Made `unified_assembly`’s advection reconstruction configurable via the runtime `constants.scheme` knob, including limited SOU/QUICK variants.
+- Added regression/contract coverage so limited SOU/QUICK variants can’t silently degrade.
+- Gap 0 hardening: Rhie–Chow aux kernel IDs are module-local; plus a contract test proving a module-defined `KernelId("contract/...")` can be scheduled/generated without editing `src/solver/model/kernel.rs`.
 
 Next:
-1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for limiters/reconstruction), or kept as a lightweight fallback.
-2) Add a small stability/regression test for the new limited scheme variants (`sou_minmod`, `sou_vanleer`, `quick_minmod`, `quick_vanleer`) so they cannot silently degrade.
-   - Done: contract test asserts these variants are still wired in generated WGSL (scheme id branches + MinMod/VanLeer markers).
+1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
+2) Continue Gap 0 cleanup: move `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` so `src/solver/model/kernel.rs` is primarily shared infra + generator plumbing.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

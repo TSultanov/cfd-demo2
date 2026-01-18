@@ -585,16 +585,6 @@ pub fn emit_shared_kernels_wgsl_with_ids(
     Ok(outputs)
 }
 
-pub fn is_builtin_model_generated_kernel_id(kernel_id: KernelId) -> bool {
-    matches!(
-        kernel_id.as_str(),
-        "flux_module_gradients"
-            | "flux_module"
-            | "generic_coupled_assembly"
-            | "generic_coupled_update"
-    )
-}
-
 pub fn emit_model_kernels_wgsl(
     base_dir: impl AsRef<std::path::Path>,
     model: &crate::solver::model::ModelSpec,
@@ -664,10 +654,6 @@ mod contract_tests {
     #[test]
     fn contract_gap0_module_defined_kernel_id_is_module_driven() {
         let contract_id = KernelId("contract/module_defined_kernel");
-        assert!(
-            !is_builtin_model_generated_kernel_id(contract_id),
-            "contract id must not be considered a builtin model-generated kernel"
-        );
 
         let module = KernelBundleModule {
             name: "contract_module_defined_kernel",

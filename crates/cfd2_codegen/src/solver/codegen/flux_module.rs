@@ -399,6 +399,17 @@ fn face_stmts(
         Type::vec2_f32(),
         Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
     ));
+
+    // Preserve the true neighbor-cell center even on boundary faces.
+    //
+    // For boundary faces, we sometimes override `c_neigh_vec` for interpolation convenience,
+    // but geometry builtins (e.g. `CellToFace{Neighbor}`) should still reference the neighbor
+    // cell center (which degenerates to the owner cell for boundary faces).
+    body.push(dsl::let_typed_expr(
+        "c_neigh_cell_vec",
+        Type::vec2_f32(),
+        Expr::ident("c_neigh_vec"),
+    ));
     body.push(dsl::if_block_expr(
         Expr::ident("is_boundary"),
         dsl::block(vec![dsl::assign_expr(
@@ -527,7 +538,9 @@ fn lower_vec2(
             let face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"));
             let center = match side {
                 FaceSide::Owner => typed::VecExpr::<2>::from_expr(Expr::ident("c_owner_vec")),
-                FaceSide::Neighbor => typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec")),
+                FaceSide::Neighbor => {
+                    typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_cell_vec"))
+                }
             };
             face.sub(&center)
         }

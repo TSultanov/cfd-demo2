@@ -209,6 +209,8 @@ Completed:
 - Gap 4 hardening: added a contract test preventing `include_str!()` WGSL embedding in `src/solver/gpu` (solver runtime must consume registry-provided WGSL).
 - Gap 4 progress: infrastructure bind groups now build from `kernel_registry` binding metadata + pipeline layouts (no direct `crate::solver::gpu::bindings` usage in solver runtime).
 - Gap 4 hardening: added a contract test preventing `crate::solver::gpu::bindings` dependencies in `src/solver/gpu` (runtime wiring must stay metadata-driven).
+- Gap 4 completion: migrated remaining infrastructure shader call sites (FGMRES/CoupledSchur/AMG) to registry pipelines + metadata-driven bind groups (no manual bind-group/pipeline layout wiring); OpenFOAM reference tests pass.
+- Gap 4 hardening: added a contract test preventing manual `create_bind_group_layout` / `create_pipeline_layout` usage in `src/solver/gpu` (excluding generated `bindings.rs`).
 - Hardened the `include_str!` contract to detect macro invocations even with intervening whitespace/comments.
 - Hardened the `include_str!` contract to avoid false negatives caused by Rust lifetime syntax (e.g. `fn f<'a>(...)`).
 - Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
@@ -216,7 +218,7 @@ Completed:
 
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
-2) Finish Gap 4: migrate remaining handwritten infrastructure shader call sites (e.g. FGMRES/AMG) to the same registry + metadata-driven bind group path (no manual `BindGroupLayoutDescriptor` wiring).
+2) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

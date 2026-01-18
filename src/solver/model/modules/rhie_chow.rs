@@ -8,36 +8,40 @@ pub fn rhie_chow_aux_module(
     require_vector2_momentum: bool,
     require_pressure_gradient: bool,
 ) -> KernelBundleModule {
+    let kernel_dp_init = KernelId("dp_init");
+    let kernel_dp_update_from_diag = KernelId("dp_update_from_diag");
+    let kernel_rhie_chow_correct_velocity = KernelId("rhie_chow/correct_velocity");
+
     KernelBundleModule {
         name: "rhie_chow_aux",
         kernels: vec![
             ModelKernelSpec {
-                id: KernelId::DP_INIT,
+                id: kernel_dp_init,
                 phase: KernelPhaseId::Preparation,
                 dispatch: DispatchKindId::Cells,
             },
             ModelKernelSpec {
-                id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
+                id: kernel_rhie_chow_correct_velocity,
                 phase: KernelPhaseId::Gradients,
                 dispatch: DispatchKindId::Cells,
             },
             ModelKernelSpec {
-                id: KernelId::DP_UPDATE_FROM_DIAG,
+                id: kernel_dp_update_from_diag,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
             },
         ],
         generators: vec![
             ModelKernelGeneratorSpec {
-                id: KernelId::DP_INIT,
+                id: kernel_dp_init,
                 generator: crate::solver::model::kernel::generate_dp_init_kernel_wgsl,
             },
             ModelKernelGeneratorSpec {
-                id: KernelId::DP_UPDATE_FROM_DIAG,
+                id: kernel_dp_update_from_diag,
                 generator: crate::solver::model::kernel::generate_dp_update_from_diag_kernel_wgsl,
             },
             ModelKernelGeneratorSpec {
-                id: KernelId::RHIE_CHOW_CORRECT_VELOCITY,
+                id: kernel_rhie_chow_correct_velocity,
                 generator: crate::solver::model::kernel::generate_rhie_chow_correct_velocity_kernel_wgsl,
             },
         ],

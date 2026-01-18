@@ -6,10 +6,6 @@
 pub struct KernelId(pub &'static str);
 
 impl KernelId {
-    pub const DP_INIT: KernelId = KernelId("dp_init");
-    pub const DP_UPDATE_FROM_DIAG: KernelId = KernelId("dp_update_from_diag");
-    pub const RHIE_CHOW_CORRECT_VELOCITY: KernelId = KernelId("rhie_chow/correct_velocity");
-
     pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 

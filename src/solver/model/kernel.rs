@@ -447,15 +447,37 @@ pub fn generate_kernel_wgsl_for_model_by_id(
 }
 
 pub fn generate_shared_kernel_wgsl_by_id(kernel_id: KernelId) -> Result<String, String> {
-    if kernel_id != KernelId::GENERIC_COUPLED_APPLY {
+    let Some(spec) = shared_kernel_generator_specs()
+        .iter()
+        .find(|spec| spec.id == kernel_id)
+        .copied()
+    else {
         return Err(format!(
             "KernelId '{}' is not a build-time generated shared kernel",
             kernel_id.as_str()
         ));
-    }
-    Ok(
-        cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl(),
-    )
+    };
+    Ok((spec.generator)())
+}
+
+type SharedKernelWgslGenerator = fn() -> String;
+
+#[derive(Clone, Copy)]
+struct SharedKernelGeneratorSpec {
+    id: KernelId,
+    generator: SharedKernelWgslGenerator,
+}
+
+fn generate_generic_coupled_apply_wgsl() -> String {
+    cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
+}
+
+fn shared_kernel_generator_specs() -> &'static [SharedKernelGeneratorSpec] {
+    const SPECS: &[SharedKernelGeneratorSpec] = &[SharedKernelGeneratorSpec {
+        id: KernelId::GENERIC_COUPLED_APPLY,
+        generator: generate_generic_coupled_apply_wgsl,
+    }];
+    SPECS
 }
 
 pub fn emit_shared_kernels_wgsl(
@@ -473,16 +495,18 @@ pub fn emit_shared_kernels_wgsl_with_ids(
     let base_dir = base_dir.as_ref();
     let mut outputs = Vec::new();
 
-    // Shared kernel(s) are emitted once and keyed by kernel id only.
-    let kernel_id = KernelId::GENERIC_COUPLED_APPLY;
-    let filename = kernel_output_name_for_model("", kernel_id)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-    let wgsl = generate_shared_kernel_wgsl_by_id(kernel_id)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-    let path = cfd2_codegen::compiler::write_generated_wgsl(
-        base_dir, filename, &wgsl,
-    )?;
-    outputs.push((kernel_id, path));
+    // Shared kernels are emitted once and keyed by kernel id only.
+    for spec in shared_kernel_generator_specs() {
+        let kernel_id = spec.id;
+        let filename = kernel_output_name_for_model("", kernel_id)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+        let wgsl = generate_shared_kernel_wgsl_by_id(kernel_id)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+        let path = cfd2_codegen::compiler::write_generated_wgsl(
+            base_dir, filename, &wgsl,
+        )?;
+        outputs.push((kernel_id, path));
+    }
 
     Ok(outputs)
 }

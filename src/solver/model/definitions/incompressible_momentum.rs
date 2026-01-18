@@ -174,9 +174,9 @@ pub fn incompressible_momentum_model() -> ModelSpec {
 
         modules: vec![
             crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
-            crate::solver::model::kernel::flux_module_module(flux_module)
+            crate::solver::model::modules::flux_module::flux_module_module(flux_module)
                 .expect("failed to build flux_module module"),
-            crate::solver::model::kernel::generic_coupled_module(method),
+            crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
             crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(
                 "d_p",
                 true,

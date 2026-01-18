@@ -105,6 +105,7 @@ Progress (partial):
 - Rhie–Chow module-specific kernel IDs (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) are now module-local (no longer central `KernelId` constants), so adding similar auxiliary modules does not require editing `src/solver/model/kernel.rs` (validated on 2026-01-18).
 - Contract hardening: `contract_gap0_module_defined_kernel_id_is_module_driven` ensures a locally-defined `KernelId("contract/...")` (not a builtin kernel id) can still be scheduled and generated via module wiring (`src/solver/model/kernel.rs`), so future re-centralization breaks the test (added on 2026-01-18).
 - Removed the last central “builtin model-generated kernel id” whitelist (`is_builtin_model_generated_kernel_id`); kernel specs/generators now flow only from the model’s module list.
+- Moved the remaining core module factory functions (`flux_module_module`, `generic_coupled_module`) out of `src/solver/model/kernel.rs` and into `src/solver/model/modules/` (validated on 2026-01-18).
 - Consolidated coupled method identity into `MethodSpec::Coupled(CoupledCapabilities)`; solver strategy (implicit/coupled) is selected via `SolverConfig.stepping`.
 - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-18.
 
@@ -198,10 +199,11 @@ Completed:
 - Made `unified_assembly`’s advection reconstruction configurable via the runtime `constants.scheme` knob, including limited SOU/QUICK variants.
 - Added regression/contract coverage so limited SOU/QUICK variants can’t silently degrade.
 - Gap 0 hardening: Rhie–Chow aux kernel IDs are module-local; plus a contract test proving a module-defined `KernelId("contract/...")` can be scheduled/generated without editing `src/solver/model/kernel.rs`.
+- Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
 
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
-2) Continue Gap 0 cleanup: move `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` so `src/solver/model/kernel.rs` is primarily shared infra + generator plumbing.
+2) Gap 3 follow-up: remove the centralized named-param handler map (`all_named_param_handlers` in `src/solver/gpu/lowering/models/generic_coupled.rs`) by making handler registration module-owned.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

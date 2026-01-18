@@ -1357,7 +1357,7 @@ mod tests {
 
             modules: vec![
                 crate::solver::model::modules::eos::eos_module(eos::EosSpec::Constant),
-                crate::solver::model::kernel::generic_coupled_module(
+                crate::solver::model::modules::generic_coupled::generic_coupled_module(
                     crate::solver::model::method::MethodSpec::Coupled(
                         crate::solver::model::method::CoupledCapabilities::default(),
                     ),

@@ -164,104 +164,6 @@ pub fn derive_kernel_specs_for_model(
     Ok(kernels)
 }
 
-pub fn generic_coupled_module(
-    method: crate::solver::model::method::MethodSpec,
-) -> crate::solver::model::module::KernelBundleModule {
-    use crate::solver::model::module::{ModuleManifest, NamedParamKey};
-
-    crate::solver::model::module::KernelBundleModule {
-        name: "generic_coupled",
-        kernels: vec![
-            ModelKernelSpec {
-                id: KernelId::GENERIC_COUPLED_ASSEMBLY,
-                phase: KernelPhaseId::Assembly,
-                dispatch: DispatchKindId::Cells,
-            },
-            ModelKernelSpec {
-                id: KernelId::GENERIC_COUPLED_UPDATE,
-                phase: KernelPhaseId::Update,
-                dispatch: DispatchKindId::Cells,
-            },
-        ],
-        generators: vec![
-            ModelKernelGeneratorSpec {
-                id: KernelId::GENERIC_COUPLED_ASSEMBLY,
-                generator: generate_generic_coupled_assembly_kernel_wgsl,
-            },
-            ModelKernelGeneratorSpec {
-                id: KernelId::GENERIC_COUPLED_UPDATE,
-                generator: generate_generic_coupled_update_kernel_wgsl,
-            },
-        ],
-        manifest: ModuleManifest {
-            method: Some(method),
-            named_params: vec![
-                NamedParamKey::Key("dt"),
-                NamedParamKey::Key("dtau"),
-                NamedParamKey::Key("advection_scheme"),
-                NamedParamKey::Key("time_scheme"),
-                NamedParamKey::Key("preconditioner"),
-                NamedParamKey::Key("viscosity"),
-                NamedParamKey::Key("density"),
-                NamedParamKey::Key("alpha_u"),
-                NamedParamKey::Key("alpha_p"),
-                NamedParamKey::Key("nonconverged_relax"),
-                NamedParamKey::Key("outer_iters"),
-                NamedParamKey::Key("detailed_profiling_enabled"),
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
-pub fn flux_module_module(
-    flux: crate::solver::model::flux_module::FluxModuleSpec,
-) -> Result<crate::solver::model::module::KernelBundleModule, String> {
-    use crate::solver::model::flux_module::FluxModuleSpec;
-    use crate::solver::model::module::ModuleManifest;
-
-    let has_gradients = match &flux {
-        FluxModuleSpec::Kernel { gradients, .. } => gradients.is_some(),
-        FluxModuleSpec::Scheme { gradients, .. } => gradients.is_some(),
-    };
-
-    let mut out = crate::solver::model::module::KernelBundleModule {
-        name: "flux_module",
-        kernels: Vec::new(),
-        generators: Vec::new(),
-        manifest: ModuleManifest {
-            flux_module: Some(flux),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    if has_gradients {
-        out.kernels.push(ModelKernelSpec {
-            id: KernelId::FLUX_MODULE_GRADIENTS,
-            phase: KernelPhaseId::Gradients,
-            dispatch: DispatchKindId::Cells,
-        });
-        out.generators.push(ModelKernelGeneratorSpec {
-            id: KernelId::FLUX_MODULE_GRADIENTS,
-            generator: generate_flux_module_gradients_kernel_wgsl,
-        });
-    }
-
-    out.kernels.push(ModelKernelSpec {
-        id: KernelId::FLUX_MODULE,
-        phase: KernelPhaseId::FluxComputation,
-        dispatch: DispatchKindId::Faces,
-    });
-    out.generators.push(ModelKernelGeneratorSpec {
-        id: KernelId::FLUX_MODULE,
-        generator: generate_flux_module_kernel_wgsl,
-    });
-
-    Ok(out)
-}
-
 pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Result<String, String> {
     let prefix = kernel_id.as_str().replace('/', "_");
     if model_id.is_empty() {
@@ -399,7 +301,7 @@ pub fn generate_rhie_chow_correct_velocity_kernel_wgsl(
     ))
 }
 
-fn generate_flux_module_gradients_kernel_wgsl(
+pub(crate) fn generate_flux_module_gradients_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
@@ -428,7 +330,7 @@ fn generate_flux_module_gradients_kernel_wgsl(
     }
 }
 
-fn generate_flux_module_kernel_wgsl(
+pub(crate) fn generate_flux_module_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
@@ -476,7 +378,7 @@ fn generate_flux_module_kernel_wgsl(
     }
 }
 
-fn generate_generic_coupled_assembly_kernel_wgsl(
+pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
@@ -494,7 +396,7 @@ fn generate_generic_coupled_assembly_kernel_wgsl(
     ))
 }
 
-fn generate_generic_coupled_update_kernel_wgsl(
+pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
@@ -742,7 +644,8 @@ mod tests {
                 limiter: crate::solver::ir::LimiterSpec::VanLeer,
             },
         };
-        let flux_module = flux_module_module(flux_spec).expect("failed to build MUSCL flux_module");
+        let flux_module = crate::solver::model::modules::flux_module::flux_module_module(flux_spec)
+            .expect("failed to build MUSCL flux_module");
 
         let mut replaced = false;
         for module in &mut model_muscl.modules {

@@ -599,7 +599,7 @@ mod tests {
     fn flux_module_muscl_requires_gradients_stage_and_grad_fields() {
         use crate::solver::ir::FluxReconstructionSpec;
         use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
-        use crate::solver::model::kernel::flux_module_module;
+        use crate::solver::model::modules::flux_module::flux_module_module;
 
         let mut model = compressible_model();
 

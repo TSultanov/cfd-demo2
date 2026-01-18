@@ -1,4 +1,6 @@
 use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
@@ -79,6 +81,7 @@ pub struct AmgResources {
     pub bgl_op: wgpu::BindGroupLayout, // For P and R
     pub bgl_state: wgpu::BindGroupLayout,
     pub bgl_cross: wgpu::BindGroupLayout,
+    bg_cross_dummy: wgpu::BindGroup,
 }
 
 // Simple greedy aggregation
@@ -248,128 +251,25 @@ impl AmgResources {
         let mut levels = Vec::new();
         let mut current_matrix = fine_matrix.clone();
 
-        // Create Bind Group Layouts
-        let bgl_matrix = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("AMG Matrix BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let smooth_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_SMOOTH_OP)
+            .expect("amg/smooth_op shader missing from kernel registry");
+        let restrict_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_RESTRICT_RESIDUAL)
+            .expect("amg/restrict_residual shader missing from kernel registry");
+        let bindings = restrict_src.bindings;
+        let prolongate_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_PROLONGATE_OP)
+            .expect("amg/prolongate_op shader missing from kernel registry");
+        let clear_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_CLEAR)
+            .expect("amg/clear shader missing from kernel registry");
 
-        let bgl_state = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("AMG State BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let pipeline_smooth = (smooth_src.create_pipeline)(device);
+        let pipeline_restrict_residual = (restrict_src.create_pipeline)(device);
+        let pipeline_prolongate = (prolongate_src.create_pipeline)(device);
+        let pipeline_clear = (clear_src.create_pipeline)(device);
 
-        let bgl_op = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("AMG Op BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let bgl_cross = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("AMG Cross Level BGL"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        let bgl_matrix = pipeline_restrict_residual.get_bind_group_layout(0);
+        let bgl_state = pipeline_restrict_residual.get_bind_group_layout(1);
+        let bgl_op = pipeline_restrict_residual.get_bind_group_layout(2);
+        let bgl_cross = pipeline_restrict_residual.get_bind_group_layout(3);
 
         // Build Hierarchy
         for level_idx in 0..max_levels {
@@ -413,24 +313,21 @@ impl AmgResources {
             });
 
             // Bind Groups
-            let bg_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("AMG L{} Matrix BG", level_idx)),
-                layout: &bgl_matrix,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: b_matrix_row_offsets.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: b_matrix_col_indices.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: b_matrix_values.as_entire_binding(),
-                    },
-                ],
-            });
+            let bg_matrix = {
+                let registry = ResourceRegistry::new()
+                    .with_buffer("row_offsets", &b_matrix_row_offsets)
+                    .with_buffer("col_indices", &b_matrix_col_indices)
+                    .with_buffer("values", &b_matrix_values);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("AMG L{level_idx} Matrix BG"),
+                    &bgl_matrix,
+                    bindings,
+                    0,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| panic!("AMG L{level_idx} matrix BG creation failed: {err}"))
+            };
 
             // Params buffer
             let params = AmgParams {
@@ -444,24 +341,21 @@ impl AmgResources {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-            let bg_state = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("AMG L{} State BG", level_idx)),
-                layout: &bgl_state,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: b_x.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: b_b.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: b_params.as_entire_binding(),
-                    },
-                ],
-            });
+            let bg_state = {
+                let registry = ResourceRegistry::new()
+                    .with_buffer("x", &b_x)
+                    .with_buffer("b", &b_b)
+                    .with_buffer("params", &b_params);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("AMG L{level_idx} State BG"),
+                    &bgl_state,
+                    bindings,
+                    1,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| panic!("AMG L{level_idx} state BG creation failed: {err}"))
+            };
 
             // Coarsening (if not last level)
             let (p, r) = if level_idx < max_levels - 1 && n > 100 {
@@ -530,43 +424,37 @@ impl AmgResources {
             let (b_p_row, b_p_col, b_p_val) = create_csr_buffers(p.as_ref());
             let (b_r_row, b_r_col, b_r_val) = create_csr_buffers(r.as_ref());
 
-            let bg_p = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("AMG L{} P BG", level_idx)),
-                layout: &bgl_op,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: b_p_row.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: b_p_col.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: b_p_val.as_entire_binding(),
-                    },
-                ],
-            });
+            let bg_p = {
+                let registry = ResourceRegistry::new()
+                    .with_buffer("op_row_offsets", &b_p_row)
+                    .with_buffer("op_col_indices", &b_p_col)
+                    .with_buffer("op_values", &b_p_val);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("AMG L{level_idx} P BG"),
+                    &bgl_op,
+                    bindings,
+                    2,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| panic!("AMG L{level_idx} P BG creation failed: {err}"))
+            };
 
-            let bg_r = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("AMG L{} R BG", level_idx)),
-                layout: &bgl_op,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: b_r_row.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: b_r_col.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: b_r_val.as_entire_binding(),
-                    },
-                ],
-            });
+            let bg_r = {
+                let registry = ResourceRegistry::new()
+                    .with_buffer("op_row_offsets", &b_r_row)
+                    .with_buffer("op_col_indices", &b_r_col)
+                    .with_buffer("op_values", &b_r_val);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("AMG L{level_idx} R BG"),
+                    &bgl_op,
+                    bindings,
+                    2,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| panic!("AMG L{level_idx} R BG creation failed: {err}"))
+            };
 
             levels.push(AmgLevel {
                 size: n as u32,
@@ -600,68 +488,65 @@ impl AmgResources {
             let coarse_b = &levels[i + 1].b_b;
             let coarse_x = &levels[i + 1].b_x;
 
-            let bg_restrict = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("AMG L{} Cross Restrict", i)),
-                layout: &bgl_cross,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: coarse_b.as_entire_binding(),
-                }],
-            });
+            let bg_restrict = {
+                let registry = ResourceRegistry::new().with_buffer("coarse_vec", coarse_b);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("AMG L{i} Cross Restrict"),
+                    &bgl_cross,
+                    bindings,
+                    3,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| panic!("AMG L{i} cross restrict BG creation failed: {err}"))
+            };
 
-            let bg_prolongate = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("AMG L{} Cross Prolongate", i)),
-                layout: &bgl_cross,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: coarse_x.as_entire_binding(),
-                }],
-            });
+            let bg_prolongate = {
+                let registry = ResourceRegistry::new().with_buffer("coarse_vec", coarse_x);
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    &format!("AMG L{i} Cross Prolongate"),
+                    &bgl_cross,
+                    bindings,
+                    3,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| {
+                    panic!("AMG L{i} cross prolongate BG creation failed: {err}")
+                })
+            };
 
             levels[i].bg_restrict = Some(bg_restrict);
             levels[i].bg_prolongate = Some(bg_prolongate);
         }
 
-        // Pipelines
-        let shader = kernel_registry::kernel_shader_module_by_id(device, "", KernelId::AMG_SMOOTH_OP)
-            .expect("amg shader missing from kernel registry");
-
-        // Layouts
-        // bgl_cross moved up
-
-        let layout_smooth = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("AMG Smooth Layout"),
-            bind_group_layouts: &[&bgl_matrix, &bgl_state],
-            push_constant_ranges: &[],
-        });
-
-        let layout_op = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("AMG Op Layout"),
-            bind_group_layouts: &[&bgl_matrix, &bgl_state, &bgl_op, &bgl_cross],
-            push_constant_ranges: &[],
-        });
-
-        let make_pipeline = |entry: &str, layout: &wgpu::PipelineLayout| {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(&format!("AMG {}", entry)),
-                layout: Some(layout),
-                module: &shader,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                cache: None,
-            })
+        let bg_cross_dummy = {
+            let coarsest = levels
+                .last()
+                .expect("AMG hierarchy must contain at least one level");
+            let registry = ResourceRegistry::new().with_buffer("coarse_vec", &coarsest.b_x);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                "AMG Cross Dummy BG",
+                &bgl_cross,
+                bindings,
+                3,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("AMG cross dummy BG creation failed: {err}"))
         };
 
         AmgResources {
             levels,
-            pipeline_smooth: make_pipeline("smooth_op", &layout_smooth),
-            pipeline_restrict_residual: make_pipeline("restrict_residual", &layout_op),
-            pipeline_prolongate: make_pipeline("prolongate_op", &layout_op),
-            pipeline_clear: make_pipeline("clear", &layout_smooth),
+            pipeline_smooth,
+            pipeline_restrict_residual,
+            pipeline_prolongate,
+            pipeline_clear,
             bgl_matrix,
             bgl_op,
             bgl_state,
             bgl_cross,
+            bg_cross_dummy,
         }
     }
 
@@ -703,6 +588,8 @@ impl AmgResources {
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
             pass.set_bind_group(1, state_bg(i), &[]);
+            pass.set_bind_group(2, &fine.bg_r, &[]);
+            pass.set_bind_group(3, fine.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
             pass.dispatch_workgroups(fine_groups, 1, 1);
 
             // 2. Fused Residual + Restrict (r_fine implicit, r_coarse = R * (b - Ax))
@@ -724,6 +611,8 @@ impl AmgResources {
             pass.set_pipeline(&self.pipeline_clear);
             pass.set_bind_group(0, &coarse.bg_matrix, &[]); // Dummy bind, just for layout
             pass.set_bind_group(1, state_bg(i + 1), &[]); // Binds coarse x
+            pass.set_bind_group(2, &coarse.bg_r, &[]);
+            pass.set_bind_group(3, coarse.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
             pass.dispatch_workgroups(coarse_groups, 1, 1);
 
             pass.pop_debug_group();
@@ -737,6 +626,8 @@ impl AmgResources {
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &coarsest.bg_matrix, &[]);
             pass.set_bind_group(1, state_bg(num_levels - 1), &[]);
+            pass.set_bind_group(2, &coarsest.bg_r, &[]);
+            pass.set_bind_group(3, &self.bg_cross_dummy, &[]);
             for _ in 0..10 {
                 pass.dispatch_workgroups(coarsest_groups, 1, 1);
             }
@@ -765,6 +656,8 @@ impl AmgResources {
             pass.set_pipeline(&self.pipeline_smooth);
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
             pass.set_bind_group(1, state_bg(i), &[]);
+            pass.set_bind_group(2, &fine.bg_p, &[]);
+            pass.set_bind_group(3, fine.bg_prolongate.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
             pass.dispatch_workgroups(fine_groups, 1, 1);
 
             pass.pop_debug_group();

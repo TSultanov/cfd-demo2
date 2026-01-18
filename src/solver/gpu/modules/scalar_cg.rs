@@ -31,8 +31,6 @@ pub struct ScalarCgModule {
     bg_dot_pair_r0r_rr: wgpu::BindGroup,
     bg_scalars: wgpu::BindGroup,
 
-    bgl_dot_pair_inputs: wgpu::BindGroupLayout,
-
     pipeline_spmv_p_v: wgpu::ComputePipeline,
     pipeline_dot: wgpu::ComputePipeline,
     pipeline_dot_pair: wgpu::ComputePipeline,
@@ -134,7 +132,6 @@ impl ScalarCgModule {
             bg_dot_r_r: bg_dot_r_r.clone(),
             bg_dot_pair_r0r_rr,
             bg_scalars: bg_scalars.clone(),
-            bgl_dot_pair_inputs: bgl_dot_pair_inputs.clone(),
             pipeline_spmv_p_v: pipeline_spmv_p_v.clone(),
             pipeline_dot: pipeline_dot.clone(),
             pipeline_dot_pair: pipeline_dot_pair.clone(),

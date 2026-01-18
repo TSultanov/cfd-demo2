@@ -15,6 +15,125 @@ pub fn lower_flux_scheme(
     }
 }
 
+fn vanleer_delta_limited(diff: S, delta: S) -> S {
+    // VanLeer-style slope scaling:
+    // - Always scale by |diff| / max(|diff|, |delta| + eps)
+    // - Additionally guard against opposite-signed slopes (diff * delta <= 0) to avoid
+    //   introducing new extrema.
+    //
+    // Note: `FaceScalarExpr` has no explicit comparisons/conditionals, so the sign-guard is
+    // implemented with arithmetic:
+    //   sign_guard = max(p, 0) / max(abs(p), eps), where p = diff * delta.
+    // This is 0 for p < 0 and ~1 for p >> eps.
+
+    let abs_diff = S::Abs(Box::new(diff.clone()));
+    let abs_delta = S::Abs(Box::new(delta.clone()));
+
+    let denom = S::Max(
+        Box::new(abs_diff.clone()),
+        Box::new(S::Add(Box::new(abs_delta), Box::new(S::lit(1e-8)))),
+    );
+    let scale = S::Div(Box::new(abs_diff), Box::new(denom));
+
+    let p = S::Mul(Box::new(diff.clone()), Box::new(delta.clone()));
+    let sign_num = S::Max(Box::new(p.clone()), Box::new(S::lit(0.0)));
+    let sign_denom = S::Max(Box::new(S::Abs(Box::new(p))), Box::new(S::lit(1e-8)));
+    let sign_guard = S::Div(Box::new(sign_num), Box::new(sign_denom));
+
+    let delta_scaled = S::Mul(Box::new(delta), Box::new(scale));
+    S::Mul(Box::new(delta_scaled), Box::new(sign_guard))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_state_named(expr: &S, name: &str) -> bool {
+        matches!(
+            expr,
+            S::State {
+                name: n,
+                ..
+            } if n == name
+        )
+    }
+
+    fn is_lit(expr: &S, value: f32) -> bool {
+        matches!(expr, S::Literal(v) if *v == value)
+    }
+
+    fn is_mul_named_states(expr: &S, a: &str, b: &str) -> bool {
+        match expr {
+            S::Mul(x, y) => {
+                (is_state_named(x, a) && is_state_named(y, b))
+                    || (is_state_named(x, b) && is_state_named(y, a))
+            }
+            _ => false,
+        }
+    }
+
+    fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {
+        fn walk(expr: &S, f: &mut impl FnMut(&S)) {
+            f(expr);
+            match expr {
+                S::Add(x, y)
+                | S::Sub(x, y)
+                | S::Mul(x, y)
+                | S::Div(x, y)
+                | S::Max(x, y)
+                | S::Min(x, y)
+                | S::Lerp(x, y) => {
+                    walk(x, f);
+                    walk(y, f);
+                }
+                S::Neg(x) | S::Abs(x) | S::Sqrt(x) => walk(x, f),
+                S::Dot(_, _) => {}
+                S::Literal(_) | S::Builtin(_) | S::Constant { .. } | S::State { .. }
+                | S::Primitive { .. } => {}
+            }
+        }
+
+        let mut found = false;
+        walk(expr, &mut |node| {
+            let S::Div(num, denom) = node else {
+                return;
+            };
+
+            fn is_max_of(expr: &S, mut a: impl FnMut(&S) -> bool, mut b: impl FnMut(&S) -> bool) -> bool {
+                match expr {
+                    S::Max(x, y) => (a(x) && b(y)) || (a(y) && b(x)),
+                    _ => false,
+                }
+            }
+
+            let p = |e: &S| is_mul_named_states(e, a, b);
+            let abs_p = |e: &S| matches!(e, S::Abs(inner) if p(inner));
+            let num_ok = is_max_of(num, p, |e| is_lit(e, 0.0));
+            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, 1e-8));
+
+            if num_ok && denom_ok {
+                found = true;
+            }
+        });
+
+        found
+    }
+
+    #[test]
+    fn contract_flux_module_vanleer_has_opposite_slope_sign_guard() {
+        // This is a structural/IR contract (not a brittle WGSL string match):
+        // VanLeer MUSCL must include a guard that zeros the correction when diff*delta <= 0.
+        let diff = S::state(FaceSide::Owner, "diff");
+        let delta = S::state(FaceSide::Owner, "delta");
+        let delta_limited = vanleer_delta_limited(diff, delta);
+
+        assert!(
+            contains_sign_guard_for_states(&delta_limited, "diff", "delta"),
+            "expected VanLeer sign-guard structure (max(p,0)/max(abs(p),eps))"
+        );
+    }
+}
+
 fn euler_central_upwind(
     system: &EquationSystem,
     reconstruction: FluxReconstructionSpec,
@@ -74,11 +193,7 @@ fn euler_central_upwind(
             // and behaves distinctly from MinMod.
             LimiterSpec::VanLeer => {
                 let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
-                let abs_diff = S::Abs(Box::new(diff));
-                let abs_delta = S::Abs(Box::new(delta.clone()));
-                let denom = S::Max(Box::new(abs_diff.clone()), Box::new(S::Add(Box::new(abs_delta), Box::new(S::lit(1e-8)))));
-                let scale = S::Div(Box::new(abs_diff), Box::new(denom));
-                let delta_limited = S::Mul(Box::new(delta), Box::new(scale));
+                let delta_limited = vanleer_delta_limited(diff, delta);
                 S::Add(Box::new(phi_cell), Box::new(delta_limited))
             }
         }

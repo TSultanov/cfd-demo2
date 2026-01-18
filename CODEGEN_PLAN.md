@@ -199,6 +199,7 @@ Completed:
 - Added a contract/validation test proving `FluxReconstructionSpec::Muscl{...}` affects generated WGSL (while shipped models remain `FirstOrder`).
 - Made `unified_assembly`’s advection reconstruction configurable via the runtime `constants.scheme` knob, including limited SOU/QUICK variants.
 - Added regression/contract coverage so limited SOU/QUICK variants can’t silently degrade.
+- Aligned VanLeer limiter behavior across unified_assembly and flux-module MUSCL by guarding opposite-signed slopes (prevents new extrema); added an IR-structure contract test.
 - Gap 0 hardening: Rhie–Chow aux kernel IDs are module-local; plus a contract test proving a module-defined `KernelId("contract/...")` can be scheduled/generated without editing `src/solver/model/kernel.rs`.
 - Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
 - Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.

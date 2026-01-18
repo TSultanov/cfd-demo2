@@ -203,10 +203,11 @@ Completed:
 - Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
 - Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.
 - Gap 4 hardening: added a contract test preventing `include_str!()` WGSL embedding in `src/solver/gpu` (solver runtime must consume registry-provided WGSL).
+- Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
 
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
-2) Reduce shared-kernel special-casing (`KernelId::GENERIC_COUPLED_APPLY`) so new shared infrastructure kernels don’t require edits in multiple places.
+2) Reduce build-time shared-kernel special-casing so adding new shared infrastructure kernels doesn’t require edits in multiple places.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

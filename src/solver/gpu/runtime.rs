@@ -3,22 +3,9 @@ use crate::solver::gpu::csr::build_block_csr;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
-use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::runtime_common::GpuRuntimeCommon;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::mesh::Mesh;
-
-pub(crate) struct GpuScalarRuntime {
-    pub common: GpuRuntimeCommon,
-    pub num_nonzeros: u32,
-
-    pub linear_ports: LinearSystemPorts,
-    pub linear_port_space: PortSpace,
-
-    pub scalar_cg: ScalarCgModule,
-
-    pub time_integration: TimeIntegrationModule,
-}
 
 /// Generic CSR runtime sized by an arbitrary DOF count.
 ///
@@ -29,7 +16,6 @@ pub(crate) struct GpuScalarRuntime {
 /// generic coupled path without relying on specialized kernels.
 pub(crate) struct GpuCsrRuntime {
     pub common: GpuRuntimeCommon,
-    pub unknowns_per_cell: u32,
     pub num_dofs: u32,
     pub num_nonzeros: u32,
 
@@ -65,7 +51,6 @@ impl GpuCsrRuntime {
 
         Self {
             common,
-            unknowns_per_cell,
             num_dofs,
             num_nonzeros: cg.num_nonzeros,
             linear_ports: cg.ports,
@@ -105,95 +90,5 @@ impl GpuCsrRuntime {
             bytemuck::cast_slice(rhs),
         );
         Ok(())
-    }
-}
-
-impl GpuScalarRuntime {
-    pub async fn new(
-        mesh: &Mesh,
-        device: Option<wgpu::Device>,
-        queue: Option<wgpu::Queue>,
-    ) -> Self {
-        let common = GpuRuntimeCommon::new(mesh, device, queue).await;
-
-        let cg = linear_solver::init_scalar_cg(
-            &common.context.device,
-            common.num_cells,
-            &common.mesh.scalar_row_offsets,
-            &common.mesh.scalar_col_indices,
-        );
-
-        Self {
-            common,
-            num_nonzeros: cg.num_nonzeros,
-            linear_ports: cg.ports,
-            linear_port_space: cg.port_space,
-            scalar_cg: cg.scalar_cg,
-            time_integration: TimeIntegrationModule::new(),
-        }
-    }
-
-    pub fn solve_linear_system_cg_with_size(
-        &self,
-        n: u32,
-        max_iters: u32,
-        tol: f32,
-    ) -> LinearSolverStats {
-        self.scalar_cg
-            .solve(&self.common.context, n, max_iters, tol)
-    }
-
-    pub fn solve_linear_system_cg(&self, max_iters: u32, tol: f32) -> LinearSolverStats {
-        self.solve_linear_system_cg_with_size(self.common.num_cells, max_iters, tol)
-    }
-
-    pub fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        if matrix_values.len() != self.num_nonzeros as usize {
-            return Err(format!(
-                "matrix_values length {} does not match num_nonzeros {}",
-                matrix_values.len(),
-                self.num_nonzeros
-            ));
-        }
-        if rhs.len() != self.common.num_cells as usize {
-            return Err(format!(
-                "rhs length {} does not match num_cells {}",
-                rhs.len(),
-                self.common.num_cells
-            ));
-        }
-        self.common.context.queue.write_buffer(
-            self.linear_port_space.buffer(self.linear_ports.values),
-            0,
-            bytemuck::cast_slice(matrix_values),
-        );
-        self.common.context.queue.write_buffer(
-            self.linear_port_space.buffer(self.linear_ports.rhs),
-            0,
-            bytemuck::cast_slice(rhs),
-        );
-        Ok(())
-    }
-
-    pub async fn get_linear_solution(&self, n: u32) -> Result<Vec<f32>, String> {
-        if n != self.common.num_cells {
-            return Err(format!(
-                "requested solution size {} does not match num_cells {}",
-                n, self.common.num_cells
-            ));
-        }
-        let raw = self
-            .read_buffer(
-                self.linear_port_space.buffer(self.linear_ports.x),
-                (n as u64) * 4,
-            )
-            .await;
-        Ok(bytemuck::cast_slice(&raw).to_vec())
-    }
-
-    pub async fn read_buffer(&self, buffer: &wgpu::Buffer, size: u64) -> Vec<u8> {
-        self.common
-            .read_buffer(buffer, size, "Scalar Runtime Staging Buffer (cached)")
-            .await
     }
 }

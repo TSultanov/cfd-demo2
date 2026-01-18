@@ -217,10 +217,10 @@ Completed:
 - Build-time shared-kernel emission is list-driven (`shared_kernel_generator_specs`), so adding a new shared generated kernel no longer requires editing multiple special-case branches.
 - Reconstruction hardening: unified_assembly and flux-module paths share the same reconstruction/limiter formulas via `cfd2_ir::solver::ir::reconstruction` (single source of truth); decision is to keep unified_assembly as the scalar-convection fallback, but derive its limiter math from the shared helpers.
 - Reconstruction knobs: flux-module reconstruction now uses the shared `Scheme` enum (no duplicate `FluxReconstructionSpec` type).
-- Stopped allocating packed `grad_state` buffers from scheme expansion until a packed gradients pass is wired; when explicitly required, `grad_state` is sized as `2*state_stride` per cell; OpenFOAM reference tests pass.
+- Added per-model `packed_state_gradients` kernels that populate `grad_state` (Green–Gauss) and made unified_assembly bind/consume `grad_state` for `GradientStorage::PackedState`; OpenFOAM reference tests pass.
 
 Next:
-1) Wire packed gradients end-to-end (`grad_state` layout + gradients pass) so unified_assembly can use them instead of the two-point fallback when desired.
+1) Make packed `grad_state` allocation/scheduling conditional on `advection_scheme` (generate/bind both assembly variants and select via the recipe) to avoid always allocating gradients for `Upwind`.
 2) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
 
 Status:

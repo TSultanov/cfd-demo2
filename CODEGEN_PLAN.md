@@ -162,6 +162,7 @@ Progress (transitional):
 - Moved named-parameter registration into the backend module (`lowering/models/generic_coupled.rs`) so universal lowering no longer owns a “known keys” list.
 - Made named parameters **module-driven**: the runtime only registers handlers for keys declared by the model's modules.
   - EOS + low-Mach named keys are declared by the EOS module manifest (not implied by solver-core).
+ - Removed the centralized named-parameter handler map (`all_named_param_handlers`) in favor of a module-owned registry (`src/solver/gpu/lowering/named_params/`).
 
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).

@@ -111,3 +111,13 @@ fn contract_unified_solver_has_no_model_specific_helpers() {
         assert_not_contains(&src, needle, "unified_solver.rs");
     }
 }
+
+#[test]
+fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
+    let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let src = read_utf8(&path);
+
+    // Gap 3: named-parameter handler registration must be module-owned and manifest-driven.
+    // Do not reintroduce a centralized `all_named_param_handlers()` registry.
+    assert_not_contains(&src, "all_named_param_handlers", "generic_coupled.rs");
+}

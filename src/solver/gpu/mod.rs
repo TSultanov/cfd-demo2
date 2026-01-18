@@ -18,7 +18,6 @@ pub(crate) mod runtime;
 pub(crate) mod runtime_common;
 pub mod structs;
 pub mod unified_solver;
-pub(crate) mod wgsl_meta;
 pub(crate) mod wgsl_reflect;
 
 pub use recipe::{LinearSolverSpec, SolverRecipe, TimeIntegrationSpec};

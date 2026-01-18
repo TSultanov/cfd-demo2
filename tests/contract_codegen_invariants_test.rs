@@ -99,6 +99,11 @@ fn contract_build_rs_has_no_per_kernel_prefix_discovery_glue() {
     ] {
         assert_not_contains(&src, needle, "build.rs");
     }
+
+    // Gap 4: handwritten solver-infrastructure shaders should flow through the same registry
+    // mechanism as generated kernels. Avoid a separate wgsl_meta binding table.
+    assert_not_contains(&src, "wgsl_binding_meta", "build.rs");
+    assert_not_contains(&src, "wgsl_meta", "build.rs");
 }
 
 #[test]

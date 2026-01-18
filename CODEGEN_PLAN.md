@@ -170,6 +170,7 @@ Progress (transitional):
 
 Progress (partial):
 - `build.rs` derives handwritten kernel registry entries by scanning `src/solver/gpu/shaders/*.wgsl` for `@compute` entrypoints (removes the manual `id_only_entries` list and reduces per-kernel glue).
+- Handwritten shader binding metadata is now inlined into the generated kernel registry map (no separate `wgsl_meta` table).
 
 ### 5) Contract Tests
 - Add regression tests that fail if:

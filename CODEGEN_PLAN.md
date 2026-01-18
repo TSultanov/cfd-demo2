@@ -204,12 +204,13 @@ Completed:
 - Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.
 - Gap 4 hardening: added a contract test preventing `include_str!()` WGSL embedding in `src/solver/gpu` (solver runtime must consume registry-provided WGSL).
 - Hardened the `include_str!` contract to detect macro invocations even with intervening whitespace/comments.
+- Hardened the `include_str!` contract to avoid false negatives caused by Rust lifetime syntax (e.g. `fn f<'a>(...)`).
 - Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
 - Build-time shared-kernel emission is list-driven (`shared_kernel_generator_specs`), so adding a new shared generated kernel no longer requires editing multiple special-case branches.
 
 Next:
 1) Decide whether `unified_assembly` reconstruction should be retired in favor of the flux-module IR path (single source of truth for reconstruction/limiters), or kept as a lightweight fallback.
-2) Reduce build-time shared-kernel special-casing so adding new shared infrastructure kernels doesn’t require edits in multiple places.
+2) Finish Gap 4: treat handwritten solver-infrastructure WGSL the same way as generated kernels (registry + metadata-driven binding; no ad-hoc runtime embeds).
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

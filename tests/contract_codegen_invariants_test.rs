@@ -125,6 +125,61 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
     assert_not_contains(&src, "all_named_param_handlers", "generic_coupled.rs");
 }
 
+fn try_consume_char_literal(bytes: &[u8], start: usize) -> Option<usize> {
+    debug_assert_eq!(bytes.get(start), Some(&b'\''));
+
+    let mut i = start + 1;
+    if i >= bytes.len() {
+        return None;
+    }
+
+    if bytes[i] == b'\\' {
+        // Escape sequence.
+        i += 1;
+        if i >= bytes.len() {
+            return None;
+        }
+
+        match bytes[i] {
+            // Unicode escape: \u{...}
+            b'u' if i + 1 < bytes.len() && bytes[i + 1] == b'{' => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'}' {
+                    i += 1;
+                }
+                if i >= bytes.len() {
+                    return None;
+                }
+                i += 1;
+            }
+            // Hex byte escape: \xNN
+            b'x' => {
+                i += 1;
+                if i + 1 >= bytes.len() {
+                    return None;
+                }
+                i += 2;
+            }
+            // Simple escape: \n, \t, \\', etc.
+            _ => {
+                i += 1;
+            }
+        }
+    } else {
+        // A single character (consume UTF-8 sequence conservatively).
+        i += 1;
+        while i < bytes.len() && (bytes[i] & 0b1100_0000) == 0b1000_0000 {
+            i += 1;
+        }
+    }
+
+    if i < bytes.len() && bytes[i] == b'\'' {
+        Some(i + 1)
+    } else {
+        None
+    }
+}
+
 fn contains_macro_invocation(src: &str, macro_name: &str) -> bool {
     let bytes = src.as_bytes();
     let mut i = 0usize;
@@ -176,19 +231,31 @@ fn contains_macro_invocation(src: &str, macro_name: &str) -> bool {
             continue;
         }
 
-        // Skip char literals.
+        // Skip char literals (e.g. '\n', 'a') and lifetimes (e.g. 'a, 'static, '_).
+        // Important: do not treat lifetimes as unterminated char literals, or we may skip
+        // over macro invocations and produce false negatives.
         if bytes[i] == b'\'' {
+            if let Some(next) = try_consume_char_literal(bytes, i) {
+                i = next;
+                continue;
+            }
+
+            // Lifetime.
             i += 1;
-            while i < bytes.len() {
-                if bytes[i] == b'\\' {
-                    i = (i + 2).min(bytes.len());
-                    continue;
-                }
-                if bytes[i] == b'\'' {
+            if i < bytes.len() {
+                let c = bytes[i];
+                let is_lifetime_start = c == b'_' || (c as char).is_ascii_alphabetic();
+                if is_lifetime_start {
                     i += 1;
-                    break;
+                    while i < bytes.len() {
+                        let c = bytes[i];
+                        if c == b'_' || (c as char).is_ascii_alphanumeric() {
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
                 }
-                i += 1;
             }
             continue;
         }
@@ -311,6 +378,27 @@ fn contains_macro_invocation(src: &str, macro_name: &str) -> bool {
     }
 
     false
+}
+
+#[test]
+fn contract_contains_macro_invocation_detects_include_str_despite_lifetime_syntax() {
+    let src = r#"
+        fn f<'a>(x: &'a str) -> &'a str {
+            let _ = include_str!("ok");
+            x
+        }
+    "#;
+    assert!(contains_macro_invocation(src, "include_str"));
+}
+
+#[test]
+fn contract_contains_macro_invocation_detects_include_str_with_static_lifetime() {
+    let src = r#"
+        fn f() -> &'static str {
+            include_str!("ok")
+        }
+    "#;
+    assert!(contains_macro_invocation(src, "include_str"));
 }
 
 fn visit_rs_files_recursive<F: FnMut(&Path)>(dir: &Path, f: &mut F) {

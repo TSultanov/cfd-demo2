@@ -1,6 +1,8 @@
 use crate::solver::gpu::lowering::kernel_registry;
-use crate::solver::model::KernelId;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::wgsl_reflect;
+use crate::solver::model::KernelId;
 use bytemuck::{bytes_of, Pod, Zeroable};
 
 pub const WORKGROUP_SIZE: u32 = 64;
@@ -119,10 +121,12 @@ pub struct FgmresWorkspace {
     bgl_matrix: wgpu::BindGroupLayout,
     bgl_precond: wgpu::BindGroupLayout,
     bgl_params: wgpu::BindGroupLayout,
+    bgl_schur_precond: wgpu::BindGroupLayout,
 
     bg_matrix: wgpu::BindGroup,
     bg_precond: wgpu::BindGroup,
     bg_params: wgpu::BindGroup,
+    bg_schur_precond: wgpu::BindGroup,
     bg_logic: wgpu::BindGroup,
     bg_logic_params: wgpu::BindGroup,
     bg_cgs: wgpu::BindGroup,
@@ -278,79 +282,214 @@ impl FgmresWorkspace {
             mapped_at_creation: false,
         });
 
-        let bgl_vectors = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES vectors BGL")),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let ops_spmv_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SPMV)
+            .expect("gmres_ops/spmv shader missing from kernel registry");
+        let ops_bindings = ops_spmv_src.bindings;
 
-        let bgl_matrix = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES matrix BGL")),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let pipeline_spmv = (ops_spmv_src.create_pipeline)(device);
+        let pipeline_axpy = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPY)
+                .expect("gmres_ops/axpy shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_axpy_from_y = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPY_FROM_Y)
+                .expect("gmres_ops/axpy_from_y shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_axpby = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPBY)
+                .expect("gmres_ops/axpby shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_scale = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SCALE)
+                .expect("gmres_ops/scale shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_scale_in_place = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SCALE_IN_PLACE)
+                .expect("gmres_ops/scale_in_place shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_copy = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_COPY)
+                .expect("gmres_ops/copy shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_norm_sq = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_NORM_SQ_PARTIAL)
+                .expect("gmres_ops/norm_sq_partial shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_reduce_final = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_REDUCE_FINAL)
+                .expect("gmres_ops/reduce_final shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_reduce_final_and_finish_norm = {
+            let src = kernel_registry::kernel_source_by_id(
+                "",
+                KernelId::GMRES_OPS_REDUCE_FINAL_AND_FINISH_NORM,
+            )
+            .expect("gmres_ops/reduce_final_and_finish_norm shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
 
-        let (bgl_precond, bg_precond) = match precond {
+        let bgl_vectors = pipeline_spmv.get_bind_group_layout(0);
+        let bgl_matrix = pipeline_spmv.get_bind_group_layout(1);
+        let bgl_precond = pipeline_spmv.get_bind_group_layout(2);
+        let bgl_params = pipeline_spmv.get_bind_group_layout(3);
+
+        let (diag_u, diag_v, diag_p) = match &precond {
+            FgmresPrecondBindings::Diag {
+                diag_u,
+                diag_v,
+                diag_p,
+            } => (*diag_u, *diag_v, *diag_p),
+            FgmresPrecondBindings::DiagWithParams {
+                diag_u,
+                diag_v,
+                diag_p,
+                ..
+            } => (*diag_u, *diag_v, *diag_p),
+            FgmresPrecondBindings::SchurWithParams { diag_u, diag_p, .. } => {
+                (*diag_u, *diag_p, *diag_p)
+            }
+        };
+
+        let bg_matrix = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("row_offsets", matrix_row_offsets)
+                .with_buffer("col_indices", matrix_col_indices)
+                .with_buffer("matrix_values", matrix_values);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES matrix BG"),
+                &bgl_matrix,
+                ops_bindings,
+                1,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("FGMRES matrix BG creation failed: {err}"))
+        };
+
+        let bg_precond = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("diag_u", diag_u)
+                .with_buffer("diag_v", diag_v)
+                .with_buffer("diag_p", diag_p);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES precond BG"),
+                &bgl_precond,
+                ops_bindings,
+                2,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("FGMRES precond BG creation failed: {err}"))
+        };
+
+        let bg_params = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("params", &b_params)
+                .with_buffer("scalars", &b_scalars)
+                .with_buffer("iter_params", &b_iter_params)
+                .with_buffer("hessenberg", &b_hessenberg)
+                .with_buffer("y_sol", &b_y);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES params BG"),
+                &bgl_params,
+                ops_bindings,
+                3,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("FGMRES params BG creation failed: {err}"))
+        };
+
+        let logic_update_src = kernel_registry::kernel_source_by_id(
+            "",
+            KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS,
+        )
+        .expect("gmres_logic/update_hessenberg_givens shader missing from kernel registry");
+        let pipeline_update_hessenberg = (logic_update_src.create_pipeline)(device);
+        let pipeline_solve_triangular = {
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId::GMRES_LOGIC_SOLVE_TRIANGULAR)
+                    .expect("gmres_logic/solve_triangular shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+
+        let bgl_logic = pipeline_update_hessenberg.get_bind_group_layout(0);
+        let bgl_logic_params = pipeline_update_hessenberg.get_bind_group_layout(1);
+
+        let bg_logic = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("hessenberg", &b_hessenberg)
+                .with_buffer("givens", &b_givens)
+                .with_buffer("g_rhs", &b_g)
+                .with_buffer("y_sol", &b_y);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES logic BG"),
+                &bgl_logic,
+                logic_update_src.bindings,
+                0,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("FGMRES logic BG creation failed: {err}"))
+        };
+
+        let bg_logic_params = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("iter_params", &b_iter_params)
+                .with_buffer("scalars", &b_scalars);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES logic params BG"),
+                &bgl_logic_params,
+                logic_update_src.bindings,
+                1,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("FGMRES logic params BG creation failed: {err}"))
+        };
+
+        let cgs_calc_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_CALC_DOTS)
+            .expect("gmres_cgs/calc_dots_cgs shader missing from kernel registry");
+        let pipeline_calc_dots_cgs = (cgs_calc_src.create_pipeline)(device);
+        let pipeline_reduce_dots_cgs = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_REDUCE_DOTS)
+                .expect("gmres_cgs/reduce_dots_cgs shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_update_w_cgs = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_UPDATE_W)
+                .expect("gmres_cgs/update_w_cgs shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+
+        let bgl_cgs = pipeline_calc_dots_cgs.get_bind_group_layout(0);
+        let bg_cgs = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("params", &b_params)
+                .with_buffer("b_basis", &b_basis)
+                .with_buffer("b_w", &b_w)
+                .with_buffer("b_dot_partial", &b_dot_partial)
+                .with_buffer("b_hessenberg", &b_hessenberg);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES cgs BG"),
+                &bgl_cgs,
+                cgs_calc_src.bindings,
+                0,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("FGMRES cgs BG creation failed: {err}"))
+        };
+
+        let (bgl_schur_precond, bg_schur_precond) = match precond {
             FgmresPrecondBindings::Diag {
                 diag_u,
                 diag_v,
@@ -549,404 +688,6 @@ impl FgmresWorkspace {
             }
         };
 
-        let bgl_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES params BGL")),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let bg_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES matrix BG")),
-            layout: &bgl_matrix,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: matrix_row_offsets.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: matrix_col_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: matrix_values.as_entire_binding(),
-                },
-            ],
-        });
-
-        let bg_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES params BG")),
-            layout: &bgl_params,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: b_params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: b_scalars.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: b_iter_params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: b_hessenberg.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: b_y.as_entire_binding(),
-                },
-            ],
-        });
-
-        let bgl_logic = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES logic BGL")),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let bgl_logic_params = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES logic params BGL")),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let bg_logic = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES logic BG")),
-            layout: &bgl_logic,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: b_hessenberg.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: b_givens.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: b_g.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: b_y.as_entire_binding(),
-                },
-            ],
-        });
-
-        let bg_logic_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES logic params BG")),
-            layout: &bgl_logic_params,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: b_iter_params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: b_scalars.as_entire_binding(),
-                },
-            ],
-        });
-
-        let bgl_cgs = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES cgs BGL")),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let bg_cgs = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES cgs BG")),
-            layout: &bgl_cgs,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: b_params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: b_basis.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: b_w.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: b_dot_partial.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: b_hessenberg.as_entire_binding(),
-                },
-            ],
-        });
-
-        let shader_ops =
-            kernel_registry::kernel_shader_module_by_id(device, "", KernelId::GMRES_OPS_SPMV)
-                .expect("gmres_ops shader missing from kernel registry");
-        let pipeline_layout_ops = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES ops layout")),
-            bind_group_layouts: &[&bgl_vectors, &bgl_matrix, &bgl_precond, &bgl_params],
-            push_constant_ranges: &[],
-        });
-        let make_ops_pipeline = |label: &str, entry: &str| {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_ops),
-                module: &shader_ops,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        };
-
-        let pipeline_spmv = make_ops_pipeline(&format!("{label_prefix} FGMRES SpMV"), "spmv");
-        let pipeline_axpy = make_ops_pipeline(&format!("{label_prefix} FGMRES AXPY"), "axpy");
-        let pipeline_axpy_from_y =
-            make_ops_pipeline(&format!("{label_prefix} FGMRES AXPY From Y"), "axpy_from_y");
-        let pipeline_axpby = make_ops_pipeline(&format!("{label_prefix} FGMRES AXPBY"), "axpby");
-        let pipeline_scale = make_ops_pipeline(&format!("{label_prefix} FGMRES Scale"), "scale");
-        let pipeline_scale_in_place = make_ops_pipeline(
-            &format!("{label_prefix} FGMRES Scale In Place"),
-            "scale_in_place",
-        );
-        let pipeline_copy = make_ops_pipeline(&format!("{label_prefix} FGMRES Copy"), "copy");
-        let pipeline_norm_sq =
-            make_ops_pipeline(&format!("{label_prefix} FGMRES Norm Sq"), "norm_sq_partial");
-        let pipeline_reduce_final = make_ops_pipeline(
-            &format!("{label_prefix} FGMRES Reduce Final"),
-            "reduce_final",
-        );
-        let pipeline_reduce_final_and_finish_norm = make_ops_pipeline(
-            &format!("{label_prefix} FGMRES Reduce Final & Finish Norm"),
-            "reduce_final_and_finish_norm",
-        );
-
-        let shader_logic = kernel_registry::kernel_shader_module_by_id(
-            device,
-            "",
-            KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS,
-        )
-        .expect("gmres_logic shader missing from kernel registry");
-        let pipeline_layout_logic =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&format!("{label_prefix} FGMRES logic layout")),
-                bind_group_layouts: &[&bgl_logic, &bgl_logic_params],
-                push_constant_ranges: &[],
-            });
-        let make_logic_pipeline = |label: &str, entry: &str| {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_logic),
-                module: &shader_logic,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        };
-
-        let pipeline_update_hessenberg = make_logic_pipeline(
-            &format!("{label_prefix} FGMRES Update Hessenberg"),
-            "update_hessenberg_givens",
-        );
-        let pipeline_solve_triangular = make_logic_pipeline(
-            &format!("{label_prefix} FGMRES Solve Triangular"),
-            "solve_triangular",
-        );
-
-        let shader_cgs =
-            kernel_registry::kernel_shader_module_by_id(device, "", KernelId::GMRES_CGS_CALC_DOTS)
-                .expect("gmres_cgs shader missing from kernel registry");
-        let pipeline_layout_cgs = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(&format!("{label_prefix} FGMRES cgs layout")),
-            bind_group_layouts: &[&bgl_cgs],
-            push_constant_ranges: &[],
-        });
-        let make_cgs_pipeline = |label: &str, entry: &str| {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_cgs),
-                module: &shader_cgs,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                cache: None,
-            })
-        };
-
-        let pipeline_calc_dots_cgs =
-            make_cgs_pipeline(&format!("{label_prefix} FGMRES CGS Calc"), "calc_dots_cgs");
-        let pipeline_reduce_dots_cgs = make_cgs_pipeline(
-            &format!("{label_prefix} FGMRES CGS Reduce"),
-            "reduce_dots_cgs",
-        );
-        let pipeline_update_w_cgs = make_cgs_pipeline(
-            &format!("{label_prefix} FGMRES CGS Update W"),
-            "update_w_cgs",
-        );
-
         Self {
             max_restart,
             n,
@@ -970,9 +711,11 @@ impl FgmresWorkspace {
             bgl_matrix,
             bgl_precond,
             bgl_params,
+            bgl_schur_precond,
             bg_matrix,
             bg_precond,
             bg_params,
+            bg_schur_precond,
             bg_logic,
             bg_logic_params,
             bg_cgs,
@@ -1271,6 +1014,10 @@ impl FgmresWorkspace {
         &self.bgl_precond
     }
 
+    pub fn schur_precond_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bgl_schur_precond
+    }
+
     pub fn params_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bgl_params
     }
@@ -1281,6 +1028,10 @@ impl FgmresWorkspace {
 
     pub fn precond_bg(&self) -> &wgpu::BindGroup {
         &self.bg_precond
+    }
+
+    pub fn schur_precond_bg(&self) -> &wgpu::BindGroup {
+        &self.bg_schur_precond
     }
 
     pub fn params_bg(&self) -> &wgpu::BindGroup {

@@ -1,9 +1,9 @@
-use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
-use crate::solver::model::KernelId;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::structs::PreconditionerType;
+use crate::solver::model::KernelId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoupledPressureSolveKind {
@@ -191,7 +191,7 @@ impl CoupledSchurModule {
                 bind_group_layouts: &[
                     &bgl_schur_vectors,
                     fgmres.matrix_layout(),
-                    fgmres.precond_layout(),
+                    fgmres.schur_precond_layout(),
                     &bgl_pressure_matrix,
                 ],
                 push_constant_ranges: &[],
@@ -297,7 +297,7 @@ impl CoupledSchurModule {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, schur_bg, &[]);
         pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-        pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+        pass.set_bind_group(2, fgmres.schur_precond_bg(), &[]);
         pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
@@ -403,7 +403,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                 });
                 pass.set_pipeline(&self.pipeline_relax_pressure);
                 pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-                pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+                pass.set_bind_group(2, fgmres.schur_precond_bg(), &[]);
                 pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
 
                 for _ in 0..p_iters {

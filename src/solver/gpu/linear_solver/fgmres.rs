@@ -119,9 +119,6 @@ pub struct FgmresWorkspace {
     bgl_matrix: wgpu::BindGroupLayout,
     bgl_precond: wgpu::BindGroupLayout,
     bgl_params: wgpu::BindGroupLayout,
-    bgl_logic: wgpu::BindGroupLayout,
-    bgl_logic_params: wgpu::BindGroupLayout,
-    bgl_cgs: wgpu::BindGroupLayout,
 
     bg_matrix: wgpu::BindGroup,
     bg_precond: wgpu::BindGroup,
@@ -137,7 +134,6 @@ pub struct FgmresWorkspace {
     pipeline_scale: wgpu::ComputePipeline,
     pipeline_scale_in_place: wgpu::ComputePipeline,
     pipeline_copy: wgpu::ComputePipeline,
-    pipeline_dot_partial: wgpu::ComputePipeline,
     pipeline_norm_sq: wgpu::ComputePipeline,
     pipeline_reduce_final: wgpu::ComputePipeline,
     pipeline_reduce_final_and_finish_norm: wgpu::ComputePipeline,
@@ -878,10 +874,6 @@ impl FgmresWorkspace {
             "scale_in_place",
         );
         let pipeline_copy = make_ops_pipeline(&format!("{label_prefix} FGMRES Copy"), "copy");
-        let pipeline_dot_partial = make_ops_pipeline(
-            &format!("{label_prefix} FGMRES Dot Partial"),
-            "dot_product_partial",
-        );
         let pipeline_norm_sq =
             make_ops_pipeline(&format!("{label_prefix} FGMRES Norm Sq"), "norm_sq_partial");
         let pipeline_reduce_final = make_ops_pipeline(
@@ -978,9 +970,6 @@ impl FgmresWorkspace {
             bgl_matrix,
             bgl_precond,
             bgl_params,
-            bgl_logic,
-            bgl_logic_params,
-            bgl_cgs,
             bg_matrix,
             bg_precond,
             bg_params,
@@ -994,7 +983,6 @@ impl FgmresWorkspace {
             pipeline_scale,
             pipeline_scale_in_place,
             pipeline_copy,
-            pipeline_dot_partial,
             pipeline_norm_sq,
             pipeline_reduce_final,
             pipeline_reduce_final_and_finish_norm,

@@ -236,8 +236,18 @@ impl SolverRecipe {
         //
         // Kernel selection, phase membership, and dispatch kind are model-owned and derived
         // from the method + module configuration.
+        let mut model_kernel_specs = crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
+
+        // The implicit stepping program uses a dedicated Apply graph.
+        // Keep apply mechanics out of model identity by composing a small apply module
+        // into the derived recipe (rather than hard-coding kernel insertion here).
+        if matches!(stepping, SteppingMode::Implicit { .. }) {
+            let apply_module = crate::solver::model::modules::generic_coupled_apply::generic_coupled_apply_module();
+            model_kernel_specs.extend_from_slice(&apply_module.kernels);
+        }
+
         let mut kernels: Vec<KernelSpec> = Vec::new();
-        for spec in crate::solver::model::kernel::derive_kernel_specs_for_model(model)? {
+        for spec in model_kernel_specs {
             let phase = match spec.phase {
                 crate::solver::model::kernel::KernelPhaseId::Preparation => KernelPhase::Preparation,
                 crate::solver::model::kernel::KernelPhaseId::Gradients => KernelPhase::Gradients,
@@ -258,18 +268,6 @@ impl SolverRecipe {
                 id: spec.id,
                 phase,
                 dispatch,
-            });
-        }
-
-        // The implicit stepping program uses a dedicated Apply graph.
-        // Keep apply mechanics out of model identity by inserting the shared apply kernel here.
-        if matches!(stepping, SteppingMode::Implicit { .. })
-            && !kernels.iter().any(|k| k.id == KernelId::GENERIC_COUPLED_APPLY)
-        {
-            kernels.push(KernelSpec {
-                id: KernelId::GENERIC_COUPLED_APPLY,
-                phase: KernelPhase::Apply,
-                dispatch: DispatchKind::Cells,
             });
         }
 
@@ -548,6 +546,27 @@ mod tests {
     use crate::solver::model::{
         compressible_model, incompressible_momentum_generic_model, incompressible_momentum_model,
     };
+
+    #[test]
+    fn implicit_recipe_includes_apply_kernel_via_module_composition() {
+        let model = generic_diffusion_demo_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Implicit { outer_iters: 1 },
+        )
+        .expect("recipe build");
+
+        assert!(
+            recipe
+                .kernels
+                .iter()
+                .any(|k| k.id.as_str() == "generic_coupled_apply" && k.phase == KernelPhase::Apply),
+            "implicit stepping recipes must include the Apply kernel"
+        );
+    }
 
     #[test]
     fn test_recipe_from_generic_diffusion_model() {

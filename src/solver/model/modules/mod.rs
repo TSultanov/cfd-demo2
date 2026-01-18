@@ -13,3 +13,7 @@ pub mod flux_module {
 pub mod generic_coupled {
     include!("generic_coupled.rs");
 }
+
+pub mod generic_coupled_apply {
+    include!("generic_coupled_apply.rs");
+}

@@ -4,7 +4,7 @@ use crate::solver::model::backend::ast::{
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::gpu_spec::ModelGpuSpec;
-use crate::solver::units::{si, UnitDim};
+use crate::solver::units::si;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
@@ -204,7 +204,6 @@ struct RhieChowFields {
     momentum: String,
     pressure: String,
     d_p: String,
-    grad_p: String,
 }
 
 fn rhie_chow_flux_module_kernel(
@@ -226,41 +225,6 @@ fn rhie_chow_flux_module_kernel(
                 collect_coeff_fields(lhs, out);
                 collect_coeff_fields(rhs, out);
             }
-        }
-    }
-
-    fn find_grad_field_for_scalar(
-        layout: &StateLayout,
-        scalar: &str,
-        unit: UnitDim,
-    ) -> Result<String, String> {
-        let expected = format!("grad_{scalar}");
-        if let Some(f) = layout.field(&expected) {
-            if f.kind() == FieldKind::Vector2 {
-                return Ok(expected);
-            }
-        }
-
-        let mut candidates = Vec::new();
-        for f in layout.fields() {
-            if f.kind() != FieldKind::Vector2 {
-                continue;
-            }
-            if f.unit() != unit {
-                continue;
-            }
-            candidates.push(f.name().to_string());
-        }
-
-        match candidates.as_slice() {
-            [only] => Ok(only.clone()),
-            [] => Err(format!(
-                "state layout missing required gradient field for '{scalar}' (expected '{expected}' or a unique Vector2 field with unit {unit})"
-            )),
-            many => Err(format!(
-                "state layout has multiple candidate gradient fields for '{scalar}' (unit {unit}); add an explicit '{expected}' field or disambiguate: [{}]",
-                many.join(", ")
-            )),
         }
     }
 
@@ -368,13 +332,10 @@ fn rhie_chow_flux_module_kernel(
         }
     };
 
-    let grad_p = find_grad_field_for_scalar(layout, &pressure, si::PRESSURE_GRADIENT)?;
-
     let fields = RhieChowFields {
         momentum,
         pressure,
         d_p,
-        grad_p,
     };
 
     // Rhie–Chow-style mass flux:

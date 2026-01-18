@@ -664,14 +664,23 @@ fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     let ir_src = read_utf8(&ir_path);
     assert_contains_ident(&ir_src, "VANLEER_EPS", "cfd2_ir::ir/mod.rs");
 
+    let recon_path = repo_root().join("crates/cfd2_ir/src/solver/ir/reconstruction.rs");
+    let recon_src = read_utf8(&recon_path);
+    assert_contains_ident(&recon_src, "VANLEER_EPS", "cfd2_ir::ir/reconstruction.rs");
+    assert_not_contains(&recon_src, "1e-8", "cfd2_ir::ir/reconstruction.rs");
+
     let flux_path = repo_root().join("src/solver/model/flux_schemes.rs");
     let flux_src = read_utf8(&flux_path);
     let flux_impl = flux_src
         .split("#[cfg(test)]")
         .next()
         .unwrap_or(&flux_src);
-    assert_contains_ident(&flux_impl, "VANLEER_EPS", "flux_schemes.rs");
     assert_not_contains(&flux_impl, "1e-8", "flux_schemes.rs");
+    assert_contains(
+        &flux_impl,
+        "limited_linear_face_value",
+        "flux_schemes.rs",
+    );
 
     let ua_path = repo_root().join("crates/cfd2_codegen/src/solver/codegen/reconstruction.rs");
     let ua_src = read_utf8(&ua_path);
@@ -679,6 +688,12 @@ fn contract_reconstruction_paths_share_vanleer_eps_constant() {
         .split("#[cfg(test)]")
         .next()
         .unwrap_or(&ua_src);
-    assert_contains_ident(&ua_impl, "VANLEER_EPS", "reconstruction.rs");
     assert_not_contains(&ua_impl, "1e-8", "reconstruction.rs");
+    // Allow either direct `VANLEER_EPS` use or delegating to the shared reconstruction helpers.
+    assert!(
+        contains_ident(&ua_impl, "VANLEER_EPS")
+            || ua_impl.contains("ir::reconstruction")
+            || ua_impl.contains("solver::ir::reconstruction"),
+        "reconstruction.rs should reference VANLEER_EPS or use shared reconstruction helpers"
+    );
 }

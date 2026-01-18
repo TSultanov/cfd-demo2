@@ -1,9 +1,11 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
-    FluxReconstructionSpec, LimiterSpec, VANLEER_EPS,
+    FluxReconstructionSpec, LimiterSpec,
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
+
+use crate::solver::ir::reconstruction::{limited_linear_face_value, FaceExprBuilder};
 
 pub fn lower_flux_scheme(
     scheme: &FluxSchemeSpec,
@@ -13,35 +15,6 @@ pub fn lower_flux_scheme(
     match *scheme {
         FluxSchemeSpec::EulerCentralUpwind => euler_central_upwind(system, reconstruction),
     }
-}
-
-fn vanleer_delta_limited(diff: S, delta: S) -> S {
-    // VanLeer-style slope scaling:
-    // - Always scale by |diff| / max(|diff|, |delta| + eps)
-    // - Additionally guard against opposite-signed slopes (diff * delta <= 0) to avoid
-    //   introducing new extrema.
-    //
-    // Note: `FaceScalarExpr` has no explicit comparisons/conditionals, so the sign-guard is
-    // implemented with arithmetic:
-    //   sign_guard = max(p, 0) / max(abs(p), eps), where p = diff * delta.
-    // This is 0 for p < 0 and ~1 for p >> eps.
-
-    let abs_diff = S::Abs(Box::new(diff.clone()));
-    let abs_delta = S::Abs(Box::new(delta.clone()));
-
-    let denom = S::Max(
-        Box::new(abs_diff.clone()),
-        Box::new(S::Add(Box::new(abs_delta), Box::new(S::lit(VANLEER_EPS)))),
-    );
-    let scale = S::Div(Box::new(abs_diff), Box::new(denom));
-
-    let p = S::Mul(Box::new(diff.clone()), Box::new(delta.clone()));
-    let sign_num = S::Max(Box::new(p.clone()), Box::new(S::lit(0.0)));
-    let sign_denom = S::Max(Box::new(S::Abs(Box::new(p))), Box::new(S::lit(VANLEER_EPS)));
-    let sign_guard = S::Div(Box::new(sign_num), Box::new(sign_denom));
-
-    let delta_scaled = S::Mul(Box::new(delta), Box::new(scale));
-    S::Mul(Box::new(delta_scaled), Box::new(sign_guard))
 }
 
 #[cfg(test)]
@@ -109,7 +82,7 @@ mod tests {
             let p = |e: &S| is_mul_named_states(e, a, b);
             let abs_p = |e: &S| matches!(e, S::Abs(inner) if p(inner));
             let num_ok = is_max_of(num, p, |e| is_lit(e, 0.0));
-            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, VANLEER_EPS));
+            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, crate::solver::ir::VANLEER_EPS));
 
             if num_ok && denom_ok {
                 found = true;
@@ -125,7 +98,8 @@ mod tests {
         // VanLeer MUSCL must include a guard that zeros the correction when diff*delta <= 0.
         let diff = S::state(FaceSide::Owner, "diff");
         let delta = S::state(FaceSide::Owner, "delta");
-        let delta_limited = vanleer_delta_limited(diff, delta);
+        let delta_limited =
+            crate::solver::ir::reconstruction::vanleer_delta_limited::<FaceExprBuilder>(diff, delta);
 
         assert!(
             contains_sign_guard_for_states(&delta_limited, "diff", "delta"),
@@ -167,36 +141,13 @@ fn euler_central_upwind(
                           grad_field: &'static str,
                           limiter: LimiterSpec|
      -> S {
-        let grad = V::state_vec2(side, grad_field);
-        let r = V::cell_to_face(side);
-        let delta = S::Dot(Box::new(grad), Box::new(r));
-
-        match limiter {
-            LimiterSpec::None => S::Add(Box::new(phi_cell), Box::new(delta)),
-
-            // Clamp the projected gradient so the reconstructed face value stays within
-            // the local two-point bounds.
-            LimiterSpec::MinMod => {
-                let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
-                let min_diff = S::Min(Box::new(diff.clone()), Box::new(S::lit(0.0)));
-                let max_diff = S::Max(Box::new(diff), Box::new(S::lit(0.0)));
-
-                let delta_limited = S::Min(
-                    Box::new(S::Max(Box::new(delta), Box::new(min_diff))),
-                    Box::new(max_diff),
-                );
-                S::Add(Box::new(phi_cell), Box::new(delta_limited))
-            }
-
-            // Smoothly scale the projected gradient based on the neighbor difference.
-            // This is not a full VanLeer TVD limiter, but it ensures the knob is honored
-            // and behaves distinctly from MinMod.
-            LimiterSpec::VanLeer => {
-                let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
-                let delta_limited = vanleer_delta_limited(diff, delta);
-                S::Add(Box::new(phi_cell), Box::new(delta_limited))
-            }
-        }
+        limited_linear_face_value::<FaceExprBuilder>(
+            phi_cell,
+            phi_other,
+            V::state_vec2(side, grad_field),
+            V::cell_to_face(side),
+            limiter,
+        )
     };
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);

@@ -218,21 +218,25 @@ impl ProgramOpRegistry {
     }
 
     /// Check if a host op is registered.
+    #[cfg(test)]
     pub fn has_host(&self, kind: &HostOpKind) -> bool {
         self.host.contains_key(kind)
     }
 
     /// Check if a graph op is registered.
+    #[cfg(test)]
     pub fn has_graph(&self, kind: &GraphOpKind) -> bool {
         self.graph.contains_key(kind)
     }
 
     /// Check if a cond op is registered.
+    #[cfg(test)]
     pub fn has_cond(&self, kind: &CondOpKind) -> bool {
         self.cond.contains_key(kind)
     }
 
     /// Check if a count op is registered.
+    #[cfg(test)]
     pub fn has_count(&self, kind: &CountOpKind) -> bool {
         self.count.contains_key(kind)
     }
@@ -407,10 +411,6 @@ impl ProgramResources {
 
     pub fn insert<T: Any + Send>(&mut self, value: T) {
         self.by_type.insert(TypeId::of::<T>(), Box::new(value));
-    }
-
-    pub fn has<T: Any + Send>(&self) -> bool {
-        self.by_type.contains_key(&TypeId::of::<T>())
     }
 
     pub fn get<T: Any + Send>(&self) -> Option<&T> {

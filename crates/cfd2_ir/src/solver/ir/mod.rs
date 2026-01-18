@@ -156,6 +156,10 @@ pub enum FaceScalarBuiltin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FaceVec2Builtin {
     Normal,
+    /// Vector from the given side's cell center to the face center.
+    ///
+    /// This is geometry-only (PDE-agnostic) and enables IR-driven reconstruction.
+    CellToFace { side: FaceSide },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +238,10 @@ impl FaceScalarExpr {
 impl FaceVec2Expr {
     pub fn normal() -> Self {
         FaceVec2Expr::Builtin(FaceVec2Builtin::Normal)
+    }
+
+    pub fn cell_to_face(side: FaceSide) -> Self {
+        FaceVec2Expr::Builtin(FaceVec2Builtin::CellToFace { side })
     }
 
     pub fn vec2(x: FaceScalarExpr, y: FaceScalarExpr) -> Self {

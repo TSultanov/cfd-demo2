@@ -8,7 +8,7 @@ use super::wgsl_ast::{
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::{
     FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FieldKind,
-    FluxLayout, FluxModuleKernelSpec, FluxReconstructionSpec, StateLayout,
+    FluxLayout, FluxModuleKernelSpec, StateLayout,
 };
 use crate::solver::shared::PrimitiveExpr;
 
@@ -42,6 +42,65 @@ pub fn generate_flux_module_wgsl(
         spec,
     )));
     module.to_wgsl()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::ir::{
+        vol_scalar, vol_vector, FaceSide, FluxComponent, FluxReconstructionSpec, LimiterSpec,
+    };
+    use crate::solver::units::si;
+
+    #[test]
+    fn flux_module_codegen_accepts_cell_to_face_reconstruction_exprs() {
+        let phi = vol_scalar("phi", si::DIMENSIONLESS);
+        let grad_phi = vol_vector("grad_phi", si::DIMENSIONLESS);
+        let layout = StateLayout::new(vec![phi, grad_phi]);
+        let flux_layout = FluxLayout {
+            stride: 1,
+            components: vec![FluxComponent {
+                name: "phi".to_string(),
+                offset: 0,
+            }],
+        };
+
+        let reconstruct = |side: FaceSide, other: FaceSide| -> FaceScalarExpr {
+            let phi_cell = FaceScalarExpr::state(side, "phi");
+            let phi_other = FaceScalarExpr::state(other, "phi");
+            let grad = FaceVec2Expr::state_vec2(side, "grad_phi");
+            let r = FaceVec2Expr::cell_to_face(side);
+            let delta = FaceScalarExpr::Dot(Box::new(grad), Box::new(r));
+            let diff = FaceScalarExpr::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
+            let min_diff = FaceScalarExpr::Min(Box::new(diff.clone()), Box::new(FaceScalarExpr::lit(0.0)));
+            let max_diff = FaceScalarExpr::Max(Box::new(diff), Box::new(FaceScalarExpr::lit(0.0)));
+            let delta_limited = FaceScalarExpr::Min(
+                Box::new(FaceScalarExpr::Max(Box::new(delta), Box::new(min_diff))),
+                Box::new(max_diff),
+            );
+            FaceScalarExpr::Add(Box::new(phi_cell), Box::new(delta_limited))
+        };
+
+        let left = reconstruct(FaceSide::Owner, FaceSide::Neighbor);
+        let right = reconstruct(FaceSide::Neighbor, FaceSide::Owner);
+
+        let spec = FluxModuleKernelSpec::CentralUpwind {
+            reconstruction: FluxReconstructionSpec::Muscl {
+                limiter: LimiterSpec::MinMod,
+            },
+            components: vec!["phi".to_string()],
+            u_left: vec![left.clone()],
+            u_right: vec![right.clone()],
+            flux_left: vec![left],
+            flux_right: vec![right],
+            a_plus: FaceScalarExpr::lit(1.0),
+            a_minus: FaceScalarExpr::lit(-1.0),
+        };
+
+        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec);
+        assert!(wgsl.contains("cell_centers"));
+        assert!(wgsl.contains("face_centers"));
+    }
 }
 
 fn base_items() -> Vec<Item> {
@@ -401,7 +460,7 @@ fn face_stmts(
             }
         }
         FluxModuleKernelSpec::CentralUpwind {
-            reconstruction,
+            reconstruction: _,
             components,
             u_left,
             u_right,
@@ -410,17 +469,6 @@ fn face_stmts(
             a_plus,
             a_minus,
         } => {
-            // For now, flux modules are first-order only.
-            //
-            // The reconstruction knob is carried in the IR so it can be selected
-            // purely by model/module manifests later, without introducing solver-core
-            // hard-coding.
-            if *reconstruction != FluxReconstructionSpec::FirstOrder {
-                panic!(
-                    "CentralUpwind reconstruction {:?} is not yet supported",
-                    reconstruction
-                );
-            }
             if components.len() != flux_layout.components.len() {
                 panic!("CentralUpwind spec component count does not match FluxLayout");
             }
@@ -474,6 +522,14 @@ fn lower_vec2(
     match expr {
         FaceVec2Expr::Builtin(FaceVec2Builtin::Normal) => {
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
+        }
+        FaceVec2Expr::Builtin(FaceVec2Builtin::CellToFace { side }) => {
+            let face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"));
+            let center = match side {
+                FaceSide::Owner => typed::VecExpr::<2>::from_expr(Expr::ident("c_owner_vec")),
+                FaceSide::Neighbor => typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec")),
+            };
+            face.sub(&center)
         }
         FaceVec2Expr::Vec2(x, y) => typed::VecExpr::<2>::from_components([
             lower_scalar(x, layout, primitives, flux_layout),

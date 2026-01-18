@@ -876,7 +876,7 @@ mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::ir::{fvc, fvm, surface_scalar, vol_scalar, vol_vector, SchemeRegistry};
-    use crate::solver::units::{si, UnitDim};
+    use crate::solver::units::si;
 
     #[test]
     fn generate_wgsl_emits_terms_and_metadata() {
@@ -958,10 +958,14 @@ mod tests {
     #[test]
     fn generate_wgsl_includes_ddt_and_source_terms() {
         let u = vol_vector("U", si::VELOCITY);
-        let source_u = vol_vector("Su", UnitDim::new(0, 1, -2));
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()))
-            .with_term(fvc::source(source_u));
+            // Source terms are scalar coefficients applied to the unknown.
+            // Use an `inv_time` coefficient so the integrated unit matches the `ddt` term.
+            .with_term(fvm::source_coeff(
+                Coefficient::constant_unit(1.0, si::INV_TIME),
+                u.clone(),
+            ));
 
         let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);

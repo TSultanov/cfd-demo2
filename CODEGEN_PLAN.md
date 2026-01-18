@@ -111,6 +111,12 @@ Progress (partial):
   - This eliminates the mismatch where boundary conditions affected assembly but not face fluxes.
   - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-16.
 - Remaining: add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
+
+Progress (partial):
+- Added `FluxReconstructionSpec` + `LimiterSpec` as **IR-level** knobs and plumbed them from the `flux_module` manifest into `FluxModuleKernelSpec::CentralUpwind`.
+  - Default remains `FirstOrder` (behavior-identical).
+  - Added `FaceVec2Builtin::CellToFace { side }` to the IR and codegen lowering so schemes can express limited-linear/MUSCL-style reconstruction purely in IR terms.
+  - (Not yet enabled for any shipped model; OpenFOAM reference targets unchanged.)
 - Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 
 ### 2) Make `UnifiedSolver` truly model-agnostic (API + host-side math)

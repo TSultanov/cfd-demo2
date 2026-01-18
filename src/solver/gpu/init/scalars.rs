@@ -1,5 +1,6 @@
-use crate::solver::gpu::bindings::scalars;
 use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
 pub struct ScalarResources {
@@ -21,26 +22,26 @@ pub fn init_scalars(
     b_dot_result_2: &wgpu::Buffer,
     b_solver_params: &wgpu::Buffer,
 ) -> ScalarResources {
-    // Group 0: Scalars
-    let bgl_scalars = device.create_bind_group_layout(&scalars::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
+    let init_src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_INIT)
+        .unwrap_or_else(|e| panic!("missing scalars/init_scalars kernel: {e}"));
+    let pipeline_init_scalars = (init_src.create_pipeline)(device);
 
-    let bg_scalars = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Scalars Bind Group"),
-        layout: &bgl_scalars,
-        entries: &scalars::WgpuBindGroup0Entries::new(scalars::WgpuBindGroup0EntriesParams {
-            scalars: b_scalars.as_entire_buffer_binding(),
-            dot_result_1: b_dot_result.as_entire_buffer_binding(),
-            dot_result_2: b_dot_result_2.as_entire_buffer_binding(),
-            params: b_solver_params.as_entire_buffer_binding(),
-        })
-        .into_array(),
-    });
+    let bgl_scalars = pipeline_init_scalars.get_bind_group_layout(0);
+    let registry = ResourceRegistry::new()
+        .with_buffer("scalars", b_scalars)
+        .with_buffer("dot_result_1", b_dot_result)
+        .with_buffer("dot_result_2", b_dot_result_2)
+        .with_buffer("params", b_solver_params);
+    let bg_scalars = wgsl_reflect::create_bind_group_from_bindings(
+        device,
+        "Scalars Bind Group",
+        &bgl_scalars,
+        init_src.bindings,
+        0,
+        |name| registry.resolve(name),
+    )
+    .unwrap_or_else(|err| panic!("failed to create scalars bind group: {err}"));
 
-    let pipeline_init_scalars = {
-        let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_INIT)
-            .unwrap_or_else(|e| panic!("missing scalars/init_scalars kernel: {e}"));
-        (src.create_pipeline)(device)
-    };
     let pipeline_init_cg_scalars = {
         let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_INIT_CG)
             .unwrap_or_else(|e| panic!("missing scalars/init_cg_scalars kernel: {e}"));

@@ -20,7 +20,9 @@ use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug
 use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramParamHandler};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
-use crate::solver::gpu::structs::LinearSolverStats;
+use crate::solver::gpu::structs::{
+    GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams, LinearSolverStats,
+};
 use crate::solver::model::{KernelId, ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
 use std::collections::HashMap;
@@ -348,14 +350,12 @@ fn build_generic_schur(
     let b_precond_params =
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("GenericCoupled Schur precond_params"),
-            size: std::mem::size_of::<
-                crate::solver::gpu::bindings::schur_precond_generic::PrecondParams,
-            >() as u64,
+            size: std::mem::size_of::<GpuSchurPrecondGenericParams>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-    let params = crate::solver::gpu::bindings::schur_precond_generic::PrecondParams {
+    let params = GpuSchurPrecondGenericParams {
         n: num_dofs,
         num_cells,
         omega,
@@ -382,9 +382,7 @@ fn build_generic_schur(
 
     let b_setup_params = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur setup_params"),
-        size: std::mem::size_of::<
-            crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams,
-        >() as u64,
+        size: std::mem::size_of::<GpuGenericCoupledSchurSetupParams>() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });

@@ -2,11 +2,12 @@ use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::structs::GpuGenericCoupledSchurSetupParams;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 const WORKGROUP_SIZE: u32 = 64;
 
-use crate::solver::gpu::bindings::generic_coupled_schur_setup::SetupParams;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -100,10 +101,21 @@ impl GenericCoupledSchurPreconditioner {
         )?;
         let bgl = pipeline.get_bind_group_layout(0);
 
+        let base_registry = ResourceRegistry::new()
+            .with_buffer("scalar_row_offsets", scalar_row_offsets)
+            .with_buffer("diagonal_indices", diagonal_indices)
+            .with_buffer("matrix_values", matrix_values)
+            .with_buffer("diag_u_inv", diag_u_inv)
+            .with_buffer("diag_p_inv", diag_p_inv)
+            .with_buffer("p_matrix_values", p_matrix_values)
+            .with_buffer("cell_vols", cell_vols)
+            .with_buffer("params", setup_params);
+
         let mut out = Vec::with_capacity(3);
         for phase in 0..3usize {
             let (idx_state, _, _) = crate::solver::gpu::modules::state::ping_pong_indices(phase);
             let state = &state_buffers[idx_state];
+            let registry = base_registry.clone().with_buffer("state", state);
 
             let label = format!("Generic Coupled Schur Setup BG (phase {phase})");
             let bg = wgsl_reflect::create_bind_group_from_bindings(
@@ -112,23 +124,7 @@ impl GenericCoupledSchurPreconditioner {
                 &bgl,
                 src.bindings,
                 0,
-                |name| {
-                    let buf = match name {
-                        "scalar_row_offsets" => scalar_row_offsets,
-                        "diagonal_indices" => diagonal_indices,
-                        "matrix_values" => matrix_values,
-                        "diag_u_inv" => diag_u_inv,
-                        "diag_p_inv" => diag_p_inv,
-                        "p_matrix_values" => p_matrix_values,
-                        "state" => state,
-                        "cell_vols" => cell_vols,
-                        "params" => setup_params,
-                        _ => return None,
-                    };
-                    Some(wgpu::BindingResource::Buffer(
-                        buf.as_entire_buffer_binding(),
-                    ))
-                },
+                |name| registry.resolve(name),
             )?;
             out.push(bg);
         }
@@ -154,17 +150,18 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         _rhs: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
-        let params = SetupParams::new(
-            dispatch.cells.0 * WORKGROUP_SIZE,
-            self.num_cells,
-            self.unknowns_per_cell,
-            self.p,
-            self.u_len,
-            self.state_stride,
-            self.d_p_offset,
-            self.u0123,
-            self.u4567,
-        );
+        let params = GpuGenericCoupledSchurSetupParams {
+            dispatch_x: dispatch.cells.0 * WORKGROUP_SIZE,
+            num_cells: self.num_cells,
+            unknowns_per_cell: self.unknowns_per_cell,
+            p: self.p,
+            u_len: self.u_len,
+            state_stride: self.state_stride,
+            d_p_offset: self.d_p_offset,
+            _pad0: 0,
+            u0123: self.u0123,
+            u4567: self.u4567,
+        };
         queue.write_buffer(&self.setup_params, 0, bytemuck::bytes_of(&params));
 
         let phase = self.state_step_index.load(Ordering::Relaxed) % 3;

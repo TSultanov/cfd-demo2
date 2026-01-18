@@ -1,16 +1,14 @@
 use super::matrix::MatrixResources;
 use super::state::StateResources;
-use crate::solver::gpu::bindings::dot_product;
-use crate::solver::gpu::bindings::dot_product_pair;
-use crate::solver::gpu::bindings::linear_solver;
 use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
 pub struct PipelineResources {
     pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,
-    pub bg_linear_state_ro: wgpu::BindGroup,
     pub bg_dot_params: wgpu::BindGroup,
     pub bg_dot_r0_v: wgpu::BindGroup,
     pub bg_dot_p_v: wgpu::BindGroup,
@@ -20,7 +18,6 @@ pub struct PipelineResources {
     pub bgl_solver: wgpu::BindGroupLayout,
     pub bgl_linear_matrix: wgpu::BindGroupLayout,
     pub bgl_linear_state: wgpu::BindGroupLayout,
-    pub bgl_linear_state_ro: wgpu::BindGroupLayout,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
     pub pipeline_spmv_s_t: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,
@@ -41,278 +38,10 @@ pub fn init_pipelines(
     matrix: &MatrixResources,
     state: &StateResources,
 ) -> PipelineResources {
-    // Use generated layouts
-    // Group 0: Linear State (Vectors)
-    let bgl_linear_state =
-        device.create_bind_group_layout(&linear_solver::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-    // Group 1: Linear Matrix (Matrix & Params)
-    let bgl_linear_matrix =
-        device.create_bind_group_layout(&linear_solver::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-
-    // Dot Product Layouts
-    let bgl_dot_params =
-        device.create_bind_group_layout(&dot_product::WgpuBindGroup0::LAYOUT_DESCRIPTOR);
-    let bgl_dot_inputs =
-        device.create_bind_group_layout(&dot_product::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-    let bgl_dot_pair_inputs =
-        device.create_bind_group_layout(&dot_product_pair::WgpuBindGroup1::LAYOUT_DESCRIPTOR);
-
-    // Create Bind Groups
-    let entries_1 = matrix.as_bind_group_1_entries(
-        state.b_scalars.as_entire_buffer_binding(),
-        state.b_solver_params.as_entire_buffer_binding(),
-    );
-    let entries_struct_1 = linear_solver::WgpuBindGroup1Entries::new(entries_1);
-    let entries_array_1 = entries_struct_1.into_array();
-    let bg_linear_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Linear Matrix Bind Group"),
-        layout: &bgl_linear_matrix,
-        entries: &entries_array_1,
-    });
-
-    let entries_0 = state.as_bind_group_0_entries();
-    let entries_struct_0 = linear_solver::WgpuBindGroup0Entries::new(entries_0);
-    let entries_array_0 = entries_struct_0.into_array();
-    let bg_linear_state = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Linear State Bind Group"),
-        layout: &bgl_linear_state,
-        entries: &entries_array_0,
-    });
-
-    // Manual creation of RO layout and bind group
-    let bgl_linear_state_ro = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Linear State RO Bind Group Layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 3,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-    });
-
-    let bg_linear_state_ro = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Linear State RO Bind Group"),
-        layout: &bgl_linear_state_ro,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_x.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_p_solver.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state.b_v.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state.b_s.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state.b_t.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_params = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot Params Bind Group"),
-        layout: &bgl_dot_params,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: state.b_solver_params.as_entire_binding(),
-        }],
-    });
-
-    let bg_dot_r0_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot R0 V Bind Group"),
-        layout: &bgl_dot_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_r0.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_v.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_p_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot P V Bind Group"),
-        layout: &bgl_dot_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_p_solver.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_v.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_r_r = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot R R Bind Group"),
-        layout: &bgl_dot_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_r.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_pair_r0r_rr = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot Pair R0R & RR Bind Group"),
-        layout: &bgl_dot_pair_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_dot_result_2.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_r0.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state.b_r.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state.b_r.as_entire_binding(),
-            },
-        ],
-    });
-
-    let bg_dot_pair_tstt = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Dot Pair TS & TT Bind Group"),
-        layout: &bgl_dot_pair_inputs,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: state.b_dot_result.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: state.b_dot_result_2.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: state.b_t.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: state.b_s.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: state.b_t.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: state.b_t.as_entire_binding(),
-            },
-        ],
-    });
-
     // Pipelines
-    let pipeline_spmv_p_v = {
-        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
-            .unwrap_or_else(|err| {
-                panic!("missing linear_solver/spmv_p_v kernel registry entry: {err}")
-            });
-        (source.create_pipeline)(device)
-    };
+    let linear_src = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
+        .unwrap_or_else(|err| panic!("missing linear_solver/spmv_p_v kernel: {err}"));
+    let pipeline_spmv_p_v = (linear_src.create_pipeline)(device);
     let pipeline_spmv_s_t = {
         let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_S_T)
             .unwrap_or_else(|err| {
@@ -321,18 +50,13 @@ pub fn init_pipelines(
         (source.create_pipeline)(device)
     };
 
-    let pipeline_dot = {
-        let source = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
-            .unwrap_or_else(|err| panic!("missing dot_product kernel registry entry: {err}"));
-        (source.create_pipeline)(device)
-    };
-    let pipeline_dot_pair = {
-        let source = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
-            .unwrap_or_else(|err| {
-                panic!("missing dot_product_pair kernel registry entry: {err}")
-            });
-        (source.create_pipeline)(device)
-    };
+    let dot_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
+        .unwrap_or_else(|err| panic!("missing dot_product kernel: {err}"));
+    let pipeline_dot = (dot_src.create_pipeline)(device);
+
+    let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
+        .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
+    let pipeline_dot_pair = (dot_pair_src.create_pipeline)(device);
 
     let pipeline_bicgstab_update_x_r = {
         let source = kernel_registry::kernel_source_by_id(
@@ -375,11 +99,147 @@ pub fn init_pipelines(
         (source.create_pipeline)(device)
     };
 
+    let bgl_linear_state = pipeline_spmv_p_v.get_bind_group_layout(0);
+    let bgl_linear_matrix = pipeline_spmv_p_v.get_bind_group_layout(1);
+
+    let bgl_dot_params = pipeline_dot.get_bind_group_layout(0);
+    let bgl_dot_inputs = pipeline_dot.get_bind_group_layout(1);
+    let bgl_dot_pair_inputs = pipeline_dot_pair.get_bind_group_layout(1);
+
+    let linear_registry = ResourceRegistry::new()
+        .with_buffer("x", &state.b_x)
+        .with_buffer("r", &state.b_r)
+        .with_buffer("p", &state.b_p_solver)
+        .with_buffer("v", &state.b_v)
+        .with_buffer("s", &state.b_s)
+        .with_buffer("t", &state.b_t)
+        .with_buffer("row_offsets", &matrix.b_row_offsets)
+        .with_buffer("col_indices", &matrix.b_col_indices)
+        .with_buffer("matrix_values", &matrix.b_matrix_values)
+        .with_buffer("scalars", &state.b_scalars)
+        .with_buffer("params", &state.b_solver_params);
+
+    let bg_linear_state = wgsl_reflect::create_bind_group_from_bindings(
+        device,
+        "Linear State Bind Group",
+        &bgl_linear_state,
+        linear_src.bindings,
+        0,
+        |name| linear_registry.resolve(name),
+    )
+    .unwrap_or_else(|err| panic!("failed to create linear state bind group: {err}"));
+
+    let bg_linear_matrix = wgsl_reflect::create_bind_group_from_bindings(
+        device,
+        "Linear Matrix Bind Group",
+        &bgl_linear_matrix,
+        linear_src.bindings,
+        1,
+        |name| linear_registry.resolve(name),
+    )
+    .unwrap_or_else(|err| panic!("failed to create linear matrix bind group: {err}"));
+
+    let dot_params_registry = ResourceRegistry::new().with_buffer("params", &state.b_solver_params);
+    let bg_dot_params = wgsl_reflect::create_bind_group_from_bindings(
+        device,
+        "Dot Params Bind Group",
+        &bgl_dot_params,
+        dot_src.bindings,
+        0,
+        |name| dot_params_registry.resolve(name),
+    )
+    .unwrap_or_else(|err| panic!("failed to create dot params bind group: {err}"));
+
+    let bg_dot_r0_v = {
+        let registry = ResourceRegistry::new()
+            .with_buffer("dot_result", &state.b_dot_result)
+            .with_buffer("dot_a", &state.b_r0)
+            .with_buffer("dot_b", &state.b_v);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Dot R0 V Bind Group",
+            &bgl_dot_inputs,
+            dot_src.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("failed to create dot r0_v bind group: {err}"))
+    };
+
+    let bg_dot_p_v = {
+        let registry = ResourceRegistry::new()
+            .with_buffer("dot_result", &state.b_dot_result)
+            .with_buffer("dot_a", &state.b_p_solver)
+            .with_buffer("dot_b", &state.b_v);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Dot P V Bind Group",
+            &bgl_dot_inputs,
+            dot_src.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("failed to create dot p_v bind group: {err}"))
+    };
+
+    let bg_dot_r_r = {
+        let registry = ResourceRegistry::new()
+            .with_buffer("dot_result", &state.b_dot_result)
+            .with_buffer("dot_a", &state.b_r)
+            .with_buffer("dot_b", &state.b_r);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Dot R R Bind Group",
+            &bgl_dot_inputs,
+            dot_src.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("failed to create dot r_r bind group: {err}"))
+    };
+
+    let bg_dot_pair_r0r_rr = {
+        let registry = ResourceRegistry::new()
+            .with_buffer("dot_result_a", &state.b_dot_result)
+            .with_buffer("dot_result_b", &state.b_dot_result_2)
+            .with_buffer("dot_a0", &state.b_r0)
+            .with_buffer("dot_b0", &state.b_r)
+            .with_buffer("dot_a1", &state.b_r)
+            .with_buffer("dot_b1", &state.b_r);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Dot Pair R0R & RR Bind Group",
+            &bgl_dot_pair_inputs,
+            dot_pair_src.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("failed to create dot pair r0r_rr bind group: {err}"))
+    };
+
+    let bg_dot_pair_tstt = {
+        let registry = ResourceRegistry::new()
+            .with_buffer("dot_result_a", &state.b_dot_result)
+            .with_buffer("dot_result_b", &state.b_dot_result_2)
+            .with_buffer("dot_a0", &state.b_t)
+            .with_buffer("dot_b0", &state.b_s)
+            .with_buffer("dot_a1", &state.b_t)
+            .with_buffer("dot_b1", &state.b_t);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Dot Pair TS & TT Bind Group",
+            &bgl_dot_pair_inputs,
+            dot_pair_src.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("failed to create dot pair tstt bind group: {err}"))
+    };
+
     PipelineResources {
         bg_solver: bg_linear_state.clone(),
         bg_linear_matrix,
         bg_linear_state: bg_linear_state.clone(),
-        bg_linear_state_ro,
         bg_dot_params,
         bg_dot_r0_v,
         bg_dot_p_v,
@@ -389,7 +249,6 @@ pub fn init_pipelines(
         bgl_solver: bgl_linear_state.clone(),
         bgl_linear_matrix,
         bgl_linear_state,
-        bgl_linear_state_ro,
         pipeline_spmv_p_v,
         pipeline_spmv_s_t,
         pipeline_dot,

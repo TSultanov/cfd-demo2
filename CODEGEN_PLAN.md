@@ -18,6 +18,15 @@ This file tracks *remaining* work to reach a **fully model-agnostic solver** whe
 - **No handwritten bind groups:** host binding is assembled from metadata + a uniform resource registry.
 - **Codegen is PDE-agnostic:** `crates/cfd2_codegen/src/solver/codegen` must not depend on `src/solver/model` (enforced by `build.rs:enforce_codegen_ir_boundary`).
 
+## Development Cadence (required)
+To keep unification/refactor work low-risk, follow a strict loop:
+
+- **test → patch → test → commit** (small, frequent commits)
+- **OpenFOAM reference tests are the primary quality gate** for solver behavior:
+  - `cargo test openfoam_ -- --nocapture`
+- Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
+- If tests are skipped or filtered unintentionally (CI/sandbox/GPU env), call it out explicitly in the PR/notes.
+
 ## Current Baseline (already implemented, for context only)
 - Models are expressed as `EquationSystem` via the fvm/fvc AST in `src/solver/model/definitions.rs`.
 - Build-time codegen exists (`crates/cfd2_codegen`) and emits WGSL into `src/solver/gpu/shaders/generated` from `build.rs` (no runtime compilation).
@@ -141,6 +150,9 @@ Progress (partial):
   - lowering selects a backend by “family”
   - adding a kernel requires editing a central `match` (bind groups / pipeline selection)
   - `build.rs` contains per-model hardcoding or kernel-kind-specific codegen glue
+
+Progress:
+- Source-level contract tests exist in `tests/contract_codegen_invariants_test.rs` and should be expanded as new invariants are introduced.
 
 ### 6) Validation Tests (OpenFOAM reference suite)
 - After any solver or numerical-method change, run the OpenFOAM reference tests to catch whole-field regressions:

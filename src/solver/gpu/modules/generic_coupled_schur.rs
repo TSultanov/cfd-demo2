@@ -1,6 +1,8 @@
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::lowering::kernel_registry;
-use crate::solver::gpu::modules::coupled_schur::{CoupledPressureSolveKind, CoupledSchurModule};
+use crate::solver::gpu::modules::coupled_schur::{
+    CoupledPressureSolveKind, CoupledSchurKernelIds, CoupledSchurModule,
+};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::GpuGenericCoupledSchurSetupParams;
@@ -56,7 +58,11 @@ impl GenericCoupledSchurPreconditioner {
                 pressure_col_indices,
                 pressure_values,
                 CoupledPressureSolveKind::Chebyshev,
-                crate::solver::model::KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
+                CoupledSchurKernelIds {
+                    predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
+                    relax_pressure: KernelId::SCHUR_GENERIC_PRECOND_RELAX_PRESSURE,
+                    correct_velocity: KernelId::SCHUR_GENERIC_PRECOND_CORRECT_VELOCITY,
+                },
             ),
             setup_pipeline,
             setup_bg_ping_pong,

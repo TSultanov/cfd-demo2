@@ -2,7 +2,9 @@ use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::PreconditionerType;
+use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +22,13 @@ impl CoupledPressureSolveKind {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CoupledSchurKernelIds {
+    pub predict_and_form: KernelId,
+    pub relax_pressure: KernelId,
+    pub correct_velocity: KernelId,
+}
+
 pub struct CoupledSchurModule {
     num_cells: u32,
     pressure_kind: CoupledPressureSolveKind,
@@ -31,6 +40,7 @@ pub struct CoupledSchurModule {
 
     /// Schur Vector bind group layout (r_in, z_out, temp_p, p_sol, aux)
     bgl_schur_vectors: wgpu::BindGroupLayout,
+    schur_bindings: &'static [wgsl_reflect::WgslBindingDesc],
 
     /// Bind group for pressure matrix CSR (Group 3)
     bg_pressure_matrix: wgpu::BindGroup,
@@ -47,13 +57,13 @@ pub struct CoupledSchurModule {
 impl CoupledSchurModule {
     pub fn new(
         device: &wgpu::Device,
-        fgmres: &FgmresWorkspace,
+        _fgmres: &FgmresWorkspace,
         num_cells: u32,
         pressure_row_offsets: &wgpu::Buffer,
         pressure_col_indices: &wgpu::Buffer,
         pressure_values: &wgpu::Buffer,
         pressure_kind: CoupledPressureSolveKind,
-        shader_id: KernelId,
+        kernels: CoupledSchurKernelIds,
     ) -> Self {
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Schur temp_p"),
@@ -73,141 +83,38 @@ impl CoupledSchurModule {
             mapped_at_creation: false,
         });
 
-        let bgl_pressure_matrix =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Schur Pressure Matrix BGL"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+        let schur_src = kernel_registry::kernel_source_by_id("", kernels.predict_and_form)
+            .expect("schur_precond predict_and_form shader missing from kernel registry");
+        let schur_bindings = schur_src.bindings;
 
-        let bg_pressure_matrix = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Schur Pressure Matrix BG"),
-            layout: &bgl_pressure_matrix,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: pressure_row_offsets.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: pressure_col_indices.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: pressure_values.as_entire_binding(),
-                },
-            ],
-        });
+        let pipeline_predict_and_form = (schur_src.create_pipeline)(device);
+        let pipeline_relax_pressure = {
+            let src = kernel_registry::kernel_source_by_id("", kernels.relax_pressure)
+                .expect("schur_precond relax_pressure shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
+        let pipeline_correct_vel = {
+            let src = kernel_registry::kernel_source_by_id("", kernels.correct_velocity)
+                .expect("schur_precond correct_velocity shader missing from kernel registry");
+            (src.create_pipeline)(device)
+        };
 
-        let bgl_schur_vectors = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Schur Vectors BGL"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout_schur =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Schur Pipeline Layout"),
-                bind_group_layouts: &[
-                    &bgl_schur_vectors,
-                    fgmres.matrix_layout(),
-                    fgmres.schur_precond_layout(),
-                    &bgl_pressure_matrix,
-                ],
-                push_constant_ranges: &[],
-            });
-
-        let shader_schur = kernel_registry::kernel_shader_module_by_id(device, "", shader_id)
-            .expect("schur_precond shader missing from kernel registry");
-        let make_schur_pipeline = |label: &str, entry: &str| -> wgpu::ComputePipeline {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout_schur),
-                module: &shader_schur,
-                entry_point: Some(entry),
-                compilation_options: Default::default(),
-                cache: None,
-            })
+        let bgl_schur_vectors = pipeline_predict_and_form.get_bind_group_layout(0);
+        let bgl_pressure_matrix = pipeline_predict_and_form.get_bind_group_layout(3);
+        let bg_pressure_matrix = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("p_row_offsets", pressure_row_offsets)
+                .with_buffer("p_col_indices", pressure_col_indices)
+                .with_buffer("p_matrix_values", pressure_values);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                "Schur Pressure Matrix BG",
+                &bgl_pressure_matrix,
+                schur_bindings,
+                3,
+                |name| registry.resolve(name),
+            )
+            .unwrap_or_else(|err| panic!("Schur pressure matrix BG creation failed: {err}"))
         };
 
         Self {
@@ -216,13 +123,11 @@ impl CoupledSchurModule {
             b_temp_p,
             b_p_sol,
             bgl_schur_vectors,
+            schur_bindings,
             bg_pressure_matrix,
-            pipeline_predict_and_form: make_schur_pipeline(
-                "Schur Predict & Form",
-                "predict_and_form_schur",
-            ),
-            pipeline_relax_pressure: make_schur_pipeline("Schur Relax P", "relax_pressure"),
-            pipeline_correct_vel: make_schur_pipeline("Schur Correct Vel", "correct_velocity"),
+            pipeline_predict_and_form,
+            pipeline_relax_pressure,
+            pipeline_correct_vel,
             amg: None,
             amg_level0_state_override: None,
         }
@@ -311,32 +216,22 @@ impl CoupledSchurModule {
         aux: wgpu::BindingResource<'a>,
         label: &str,
     ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: &self.bgl_schur_vectors,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: v,
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: z,
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.b_temp_p.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: p_sol,
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: aux,
-                },
-            ],
-        })
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            label,
+            &self.bgl_schur_vectors,
+            self.schur_bindings,
+            0,
+            |name| match name {
+                "r_in" => Some(v.clone()),
+                "z_out" => Some(z.clone()),
+                "temp_p" => Some(self.b_temp_p.as_entire_binding()),
+                "p_sol" => Some(p_sol.clone()),
+                "p_prev" => Some(aux.clone()),
+                _ => None,
+            },
+        )
+        .unwrap_or_else(|err| panic!("Schur vectors BG creation failed: {err}"))
     }
 }
 

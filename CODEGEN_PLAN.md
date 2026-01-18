@@ -203,6 +203,7 @@ Completed:
 - Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
 - Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.
 - Gap 4 hardening: added a contract test preventing `include_str!()` WGSL embedding in `src/solver/gpu` (solver runtime must consume registry-provided WGSL).
+- Hardened the `include_str!` contract to detect macro invocations even with intervening whitespace/comments.
 - Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
 
 Next:

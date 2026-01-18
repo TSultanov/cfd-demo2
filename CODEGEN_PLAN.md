@@ -98,16 +98,18 @@ Progress (partial):
   - method selection (exactly one required)
   - flux module configuration (0 or 1 allowed)
   - named parameter keys accepted by the runtime plan
-  - typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
+ - typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
  - Extracted Rhie–Chow aux bundle into a dedicated module factory (`src/solver/model/modules/rhie_chow.rs`), eliminating per-model inline `KernelBundleModule` literals for this pass.
  - Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; EOS/low-mach named keys are now purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
- - Validation gate: OpenFOAM reference tests passed (`cargo test openfoam_ -- --nocapture`) on 2026-01-17.
+ - Consolidated coupled method identity into `MethodSpec::Coupled(CoupledCapabilities)`; solver strategy (implicit/coupled) is selected via `SolverConfig.stepping`.
+ - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-18.
+ - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-17.
 
 ### 1) Flux Modules (reconstruction + method knobs)
 - Flux kernels are IR-driven and now consume boundary conditions consistently with assembly.
   - `bc_kind`/`bc_value` are treated as **per-face × unknown-component** buffers (indexed by `face_idx`/`idx`, not by `boundary_type`).
   - This eliminates the mismatch where boundary conditions affected assembly but not face fluxes.
-  - Validation gate: OpenFOAM reference tests passed (`cargo test openfoam_ -- --nocapture`) on 2026-01-16.
+  - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-16.
 - Remaining: add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
 - Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 

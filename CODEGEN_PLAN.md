@@ -110,14 +110,26 @@ Progress (partial):
   - `bc_kind`/`bc_value` are treated as **per-face × unknown-component** buffers (indexed by `face_idx`/`idx`, not by `boundary_type`).
   - This eliminates the mismatch where boundary conditions affected assembly but not face fluxes.
   - Validation gate: OpenFOAM reference tests passed (`bash scripts/run_openfoam_reference_tests.sh`) on 2026-01-16.
-- Remaining: add IR/DSL coverage for common flux-module “method knobs” (reconstruction/limiters, optional preconditioning) without encoding PDE semantics in codegen.
+
+Status:
+- **Reconstruction/limiter selection is now IR-driven for CentralUpwind** via `FluxReconstructionSpec::FirstOrder|Muscl{limiter}`.
+- **Defaults remain `FirstOrder` for shipped models**, so OpenFOAM reference targets are unchanged.
 
 Progress (partial):
 - Added `FluxReconstructionSpec` + `LimiterSpec` as **IR-level** knobs and plumbed them from the `flux_module` manifest into `FluxModuleKernelSpec::CentralUpwind`.
   - Default remains `FirstOrder` (behavior-identical).
   - Added `FaceVec2Builtin::CellToFace { side }` to the IR and codegen lowering so schemes can express limited-linear/MUSCL-style reconstruction purely in IR terms.
-  - (Not yet enabled for any shipped model; OpenFOAM reference targets unchanged.)
-- Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
+- Implemented MUSCL face-state reconstruction in CentralUpwind lowering (`src/solver/model/flux_schemes.rs`):
+  - Uses gradients + `CellToFace` (PDE-agnostic geometry builtin) to build left/right face states.
+  - Honors `LimiterSpec::{None, MinMod, VanLeer}`.
+- Enforced the required gradients stage + required `grad_*` fields when MUSCL is selected (early manifest validation).
+- Fixed `CellToFace{Neighbor}` semantics on boundary faces so reconstruction is geometry-correct.
+
+Remaining (follow-up, not yet started):
+- Add a small contract/validation test that asserts MUSCL selection changes generated WGSL (to prevent silent “knob ignored” regressions).
+- Decide whether the non-flux-module advection reconstruction path (`unified_assembly`’s `Scheme`) should also become limiter-aware / IR-driven, or be retired in favor of flux-module-style IR.
+
+Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 
 ### 2) Make `UnifiedSolver` truly model-agnostic (API + host-side math)
 Goal: keep the *public* solver API model-agnostic.
@@ -143,8 +155,8 @@ Progress (transitional):
 - Removed the `PlanParam` enum and the `set_param` path; all runtime knobs now route through named parameters.
 - Removed the universal string-key match; lowering registers named-parameter handlers in the plan spec.
 - Moved named-parameter registration into the backend module (`lowering/models/generic_coupled.rs`) so universal lowering no longer owns a “known keys” list.
-- Made named parameters **module-driven**: the runtime only registers handlers for keys declared by the model's modules (plus EOS-implied keys).
-- Next step: move EOS-implied keys into manifests once low-mach is fully module-owned (or formalize EOS as a module).
+- Made named parameters **module-driven**: the runtime only registers handlers for keys declared by the model's modules.
+  - EOS + low-Mach named keys are declared by the EOS module manifest (not implied by solver-core).
 
 ### 4) Handwritten WGSL (treat infrastructure the same way)
 - Move handwritten solver infrastructure shaders under `src/solver/gpu/shaders` behind the same registry/metadata mechanism and treat them as registry-provided artifacts (even if template-generated).
@@ -173,8 +185,13 @@ Progress:
 ## Recommended Sequence (high leverage)
 1) Make `UnifiedSolver` surface model-agnostic (remove solver-core physics assumptions; push helpers into model-side code).
 2) Retire `PlanParam` and replace with model/method-declared runtime controls.
-3) Finish flux-module boundary semantics + method knobs in the IR/DSL.
+3) Finish closing remaining “numerics knobs” gaps by keeping selection manifest/IR-driven (reconstruction/limiters, optional method-specific passes) and adding contract tests that prevent silent ignored settings.
 4) Add/expand contract tests and keep OpenFOAM reference tests green (or intentionally updated) during refactors.
+
+## Next Tasks (smallest high-impact first)
+1) Remove build-script friction for new model modules: ensure `build.rs` does not need edits when a new file is added under `src/solver/model/modules/`.
+2) Add a contract/validation test that proves `FluxReconstructionSpec::Muscl{...}` actually affects generated WGSL (while keeping shipped models at `FirstOrder`).
+3) Decide whether `unified_assembly`’s advection reconstruction (`Scheme::{SecondOrderUpwind, QUICK, ...}`) should gain an IR-driven limiter knob or be simplified/retired in favor of a single reconstruction path.
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).
@@ -183,4 +200,4 @@ Progress:
 ## Notes / Constraints
 - `build.rs` uses `include!()`; build-time-only modules must be wired there.
 - Build scripts are std-only; avoid pulling runtime-only crates into code referenced by `build.rs`.
-- Low-mach resources remain EOS-implied for now (not module-declared); document and keep the rule explicit.
+- EOS/low-Mach named params are declared via the EOS module manifest (not solver-core implied).

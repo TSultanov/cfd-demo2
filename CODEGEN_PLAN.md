@@ -126,9 +126,9 @@ Progress (partial):
 - Fixed `CellToFace{Neighbor}` semantics on boundary faces so reconstruction is geometry-correct.
 - Fixed boundary BC preservation for MUSCL: neighbor-side `grad_*` vectors are treated as zero on boundary faces so reconstruction cannot modify Dirichlet/Neumann ghost values.
 
-Remaining (follow-up, not yet started):
-- Add a small contract/validation test that asserts MUSCL selection changes generated WGSL (to prevent silent “knob ignored” regressions).
-- Decide whether the non-flux-module advection reconstruction path (`unified_assembly`’s `Scheme`) should also become limiter-aware / IR-driven, or be retired in favor of flux-module-style IR.
+Follow-ups:
+- Contract/validation tests ensure reconstruction/limiter knobs are honored (MUSCL + unified_assembly scheme/limiter variants).
+- VanLeer-limited scheme variants guard against opposite-signed slopes (prevents new extrema).
 
 Long-term: derive flux-module specs from `EquationSystem` where possible; otherwise require explicit flux formulas as part of `ModelSpec` (still keeping codegen PDE-agnostic).
 

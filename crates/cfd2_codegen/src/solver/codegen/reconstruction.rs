@@ -37,7 +37,10 @@ pub fn scalar_reconstruction(
         let abs_diff = dsl::abs(diff.clone());
         let abs_delta = dsl::abs(delta.clone());
         let denom = dsl::max(abs_diff.clone(), abs_delta + 1e-8);
-        delta * (abs_diff / denom)
+        let delta_scaled = delta.clone() * (abs_diff / denom);
+        // Guard against opposite-signed slopes to avoid introducing new extrema.
+        let sign_ok = (diff * delta).gt(0.0);
+        dsl::select(0.0, delta_scaled, sign_ok)
     };
 
     let delta_sou_pos = dsl::dot(
@@ -101,6 +104,86 @@ pub fn scalar_reconstruction(
     let phi_ho = dsl::select(phi_ho, phi_quick_vl, scheme.eq(Scheme::QUICKVanLeer));
 
     ScalarReconstruction { phi_upwind, phi_ho }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::codegen::wgsl_ast::{
+        Block, Function, Item, Module, Param, StructDef, StructField, Type,
+    };
+
+    fn wgsl_for_phi_ho(scheme: Scheme) -> String {
+        let mut module = Module::new();
+
+        module.push(Item::Struct(StructDef::new(
+            "Vector2",
+            vec![
+                StructField::new("x", Type::F32),
+                StructField::new("y", Type::F32),
+            ],
+        )));
+
+        let rec = scalar_reconstruction(
+            typed::EnumExpr::<Scheme>::from_expr(scheme.gpu_id().into()),
+            Expr::ident("flux"),
+            Expr::ident("phi_own"),
+            Expr::ident("phi_neigh"),
+            Expr::ident("grad_own"),
+            Expr::ident("grad_neigh"),
+            Expr::ident("center"),
+            Expr::ident("other_center"),
+            Expr::ident("face_center"),
+        );
+
+        let body = Block::new(vec![Stmt::Return(Some(rec.phi_ho))]);
+        module.push(Item::Function(Function::new(
+            "test_phi_ho",
+            vec![
+                Param::new("flux", Type::F32, Vec::new()),
+                Param::new("phi_own", Type::F32, Vec::new()),
+                Param::new("phi_neigh", Type::F32, Vec::new()),
+                Param::new("grad_own", Type::Custom("Vector2".to_string()), Vec::new()),
+                Param::new(
+                    "grad_neigh",
+                    Type::Custom("Vector2".to_string()),
+                    Vec::new(),
+                ),
+                Param::new("center", Type::Custom("Vector2".to_string()), Vec::new()),
+                Param::new(
+                    "other_center",
+                    Type::Custom("Vector2".to_string()),
+                    Vec::new(),
+                ),
+                Param::new(
+                    "face_center",
+                    Type::Custom("Vector2".to_string()),
+                    Vec::new(),
+                ),
+            ],
+            Some(Type::F32),
+            Vec::new(),
+            body,
+        )));
+
+        module.to_wgsl()
+    }
+
+    #[test]
+    fn vanleer_limiter_guards_opposite_signed_slopes() {
+        // Regression: VanLeer-limited schemes must not allow opposite-signed slopes.
+        // Ensure the codegen emits a sign guard (a > 0 check) for the VanLeer branch.
+        let wgsl = wgsl_for_phi_ho(Scheme::SecondOrderUpwindVanLeer);
+        let compact: String = wgsl.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compact.contains(">0.0"),
+            "expected VanLeer limiter to include a sign guard (> 0.0)"
+        );
+        assert!(
+            compact.contains("select(0.0"),
+            "expected VanLeer limiter to zero out delta via select(0.0, ...)"
+        );
+    }
 }
 
 #[derive(Debug, Clone)]

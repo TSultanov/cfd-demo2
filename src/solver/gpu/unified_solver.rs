@@ -10,6 +10,7 @@ use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 use crate::solver::model::backend::FieldKind;
 use crate::solver::scheme::Scheme;
+use crate::solver::gpu::recipe::derive_stepping_mode_from_model;
 use std::sync::Arc;
 
 pub use crate::solver::gpu::plans::plan_instance::FgmresSizing;
@@ -51,6 +52,8 @@ impl GpuUnifiedSolver {
             config.preconditioner,
         )?;
 
+        let stepping = derive_stepping_mode_from_model(&model)?;
+
         let plan = build_plan_instance(
             mesh,
             &model,
@@ -58,6 +61,7 @@ impl GpuUnifiedSolver {
                 advection_scheme: config.advection_scheme,
                 time_scheme: config.time_scheme,
                 preconditioner: config.preconditioner,
+                stepping,
             },
             device,
             queue,

@@ -22,6 +22,7 @@ pub(crate) async fn lower_program_model_driven(
         config.advection_scheme,
         config.time_scheme,
         config.preconditioner,
+        config.stepping,
     )?;
 
     let parts = lower_parts_for_model(mesh, model, recipe.clone(), device, queue).await?;

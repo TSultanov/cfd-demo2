@@ -1,5 +1,6 @@
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
+use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::scheme::Scheme;
 use std::future::Future;
 use std::pin::Pin;
@@ -27,6 +28,7 @@ pub struct PlanInitConfig {
     pub advection_scheme: Scheme,
     pub time_scheme: TimeScheme,
     pub preconditioner: PreconditionerType,
+    pub stepping: SteppingMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

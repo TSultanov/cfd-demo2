@@ -237,6 +237,7 @@ Completed:
 - Gap 0 progress: initial advection/time-scheme constants are derived from the recipe/config (no post-build `set_named_param` initialization); OpenFOAM reference tests pass.
 - Preconditioner knob: generic-coupled now honors `SolverConfig.preconditioner=Amg` by wiring an AMG V-cycle preconditioner (instead of silently ignoring it); added contract coverage; OpenFOAM reference tests pass.
 - Schur preconditioner: `PreconditionerType` now selects the pressure solve strategy (Chebyshev vs AMG) for model-owned Schur blocks; added smoke coverage; OpenFOAM reference tests pass.
+- Preconditioner init: model-driven lowering seeds the `preconditioner` named param only when declared by module manifests (no linear-solver-specific gating in lowering).
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

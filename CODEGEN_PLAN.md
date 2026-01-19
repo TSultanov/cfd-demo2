@@ -39,6 +39,7 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Runtime wiring is metadata-driven (no kernel-id switches for bind groups/pipeline layouts; registry provides bindings + pipelines).
 - A single model-driven lowering path is used across stepping modes (explicit/implicit/coupled share the universal backend wiring).
 - Low-Mach preconditioning parameters are consumed by generated compressible flux wave-speed bounds (default Off; contract + OpenFOAM coverage).
+- Explicit stepping rejects recipes that bind the implicit solution buffer `x` (regression test prevents silent state clobbering).
 
 ## Remaining Gaps (current blockers)
 
@@ -46,17 +47,9 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 
-### 2) Explicit stepping is not correct for generic-coupled models
-`SteppingMode::Explicit` currently reuses the generic-coupled update path where the generated `generic_coupled_update_*` kernel overwrites `state` from the solution buffer `x`. In explicit stepping there is no solve step producing `x`, so models can silently evolve using stale/uninitialized values.
-
-Done when:
-- Explicit stepping either emits a model-provided explicit update kernel (derived from modules/recipe), **or** is rejected with a clear error for methods that do not support it.
-- A small regression test prevents “explicit mode silently clobbers state”.
-
 ## Next
-1) Fix explicit stepping for generic-coupled models (kernel/recipe-driven, no silent misuse of `x`).
-2) Add a small explicit-mode regression test once behavior is correct.
-3) Keep hardening contracts + metadata-driven derivation as new gaps are discovered.
+1) Keep hardening contracts + metadata-driven derivation as new gaps are discovered.
+2) Close the next “dead knob” / missing config-to-kernel wiring with a targeted regression + OpenFOAM coverage.
 
 ## Notes / Constraints
 - `build.rs` uses `include!()`; model modules are wired for build-time use via `src/solver/model/modules/mod.rs`.

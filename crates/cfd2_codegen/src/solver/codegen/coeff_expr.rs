@@ -21,7 +21,15 @@ fn f32_literal(value: f64) -> Expr {
 fn coeff_named_expr(name: &str) -> Option<Expr> {
     match name {
         "rho" => Some(Expr::ident("constants").field("density")),
-        "inv_dt" => Some(Expr::from(1.0) / Expr::ident("constants").field("dt")),
+        "inv_dt" => {
+            let dt = Expr::ident("constants").field("dt");
+            let dtau = Expr::ident("constants").field("dtau");
+            let dt_eff = Expr::call_named(
+                "select",
+                vec![dt, dtau.clone(), dtau.clone().gt(0.0)],
+            );
+            Some(Expr::from(1.0) / dt_eff)
+        }
         // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
         // but `nu` is conventionally kinematic viscosity; accept both for now.
         "mu" | "nu" => Some(Expr::ident("constants").field("viscosity")),
@@ -150,6 +158,15 @@ mod tests {
     use super::*;
     use crate::solver::ir::{vol_scalar, vol_vector};
     use crate::solver::units::si;
+
+    #[test]
+    fn coeff_expr_inv_dt_prefers_dtau_when_set() {
+        let inv_dt = coeff_named_expr("inv_dt").expect("inv_dt");
+        assert_eq!(
+            inv_dt.to_string(),
+            "1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)"
+        );
+    }
 
     #[test]
     fn coeff_expr_handles_product_and_constants() {

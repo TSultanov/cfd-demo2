@@ -1,6 +1,6 @@
 use crate::solver::model::backend::FieldRef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GradientStorage {
     /// No gradient buffers are allocated/bound.
     None,
@@ -18,19 +18,6 @@ impl Default for GradientStorage {
     fn default() -> Self {
         Self::None
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ModelGpuSpec {
-    /// How gradient buffers are exposed to shaders.
-    pub gradient_storage: GradientStorage,
-
-    /// Additional gradient buffers that must exist regardless of scheme expansion.
-    ///
-    /// Names must match the reflection binding convention used by kernels:
-    /// - `PerFieldComponents`: names like `rho`, `rho_u_x`, `rho_u_y` (bound as `grad_<name>`)
-    /// - `PackedState`: the single name `state` (bound as `grad_state`)
-    pub required_gradient_fields: Vec<String>,
 }
 
 pub fn expand_field_components(field: FieldRef) -> Vec<String> {

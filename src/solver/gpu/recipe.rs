@@ -209,7 +209,12 @@ impl SolverRecipe {
         let scheme_expansion = expand_schemes(&model.system, &scheme_registry)
             .map_err(|e| format!("scheme expansion failed: {e}"))?;
 
-        let mut gradient_fields: Vec<String> = match model.gpu.gradient_storage {
+        let method = model.method()?;
+        let gradient_storage = match method {
+            crate::solver::model::method::MethodSpec::Coupled(caps) => caps.gradient_storage,
+        };
+
+        let mut gradient_fields: Vec<String> = match gradient_storage {
             GradientStorage::None => Vec::new(),
             GradientStorage::PerFieldName => scheme_expansion
                 .gradient_fields()
@@ -229,8 +234,6 @@ impl SolverRecipe {
                 .flat_map(|&f| expand_field_components(f))
                 .collect(),
         };
-
-        gradient_fields.extend(model.gpu.required_gradient_fields.iter().cloned());
 
         // Dedupe while preserving a stable order.
         let mut seen = HashSet::new();
@@ -308,7 +311,7 @@ impl SolverRecipe {
         if needs_gradients {
             // Add gradient buffers for each field that needs them
             for field_name in &gradient_fields {
-                let size_per_cell = if model.gpu.gradient_storage == GradientStorage::PackedState
+                let size_per_cell = if gradient_storage == GradientStorage::PackedState
                     && field_name == "state"
                 {
                     model.state_layout.stride() as usize * 2

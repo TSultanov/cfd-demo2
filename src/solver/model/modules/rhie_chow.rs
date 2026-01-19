@@ -195,7 +195,7 @@ mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem};
     use crate::solver::model::backend::state_layout::StateLayout;
-    use crate::solver::model::{BoundarySpec, ModelGpuSpec, PrimitiveDerivations};
+    use crate::solver::model::{BoundarySpec, PrimitiveDerivations};
     use crate::solver::units::si;
 
     #[test]
@@ -244,7 +244,6 @@ mod tests {
             modules: vec![rhie_chow_aux_module("dp_custom", true, true)],
             linear_solver: None,
             primitives: PrimitiveDerivations::identity(),
-            gpu: ModelGpuSpec::default(),
         };
 
         let schemes = crate::solver::ir::SchemeRegistry::default();

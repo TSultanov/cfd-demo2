@@ -3,7 +3,6 @@ use crate::solver::model::backend::ast::{
     fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::gpu_spec::ModelGpuSpec;
 use crate::solver::units::si;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -159,6 +158,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         crate::solver::model::method::CoupledCapabilities {
             apply_relaxation_in_update: true,
             requires_flux_module: true,
+            gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
         },
     );
     let flux_module = crate::solver::model::flux_module::FluxModuleSpec::Kernel {
@@ -193,16 +193,15 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             ..Default::default()
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
-        gpu: ModelGpuSpec::default(),
     };
 
-    model.with_derived_gpu()
+    model
 }
 
 pub fn incompressible_momentum_generic_model() -> ModelSpec {
     let mut model = incompressible_momentum_model();
     model.id = "incompressible_momentum_generic";
-    model.with_derived_gpu()
+    model
 }
 
 #[derive(Debug, Clone)]

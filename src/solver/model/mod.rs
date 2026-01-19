@@ -28,7 +28,7 @@ pub use fluid::Fluid;
 pub use flux_layout::{FluxComponent, FluxLayout};
 pub use crate::solver::ir::LimiterSpec;
 pub use flux_module::FluxModuleSpec;
-pub use gpu_spec::{expand_field_components, GradientStorage, ModelGpuSpec};
+pub use gpu_spec::{expand_field_components, GradientStorage};
 pub use kernel::KernelId;
 pub use linear_solver::SchurBlockLayout;
 pub use linear_solver::{ModelLinearSolverSpec, ModelPreconditionerSpec};

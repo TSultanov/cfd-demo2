@@ -3,7 +3,6 @@ use crate::solver::model::backend::ast::{
     fvm, vol_scalar, Coefficient, EquationSystem,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::gpu_spec::ModelGpuSpec;
 use crate::solver::units::si;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -53,10 +52,9 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
-        gpu: ModelGpuSpec::default(),
     };
 
-    model.with_derived_gpu()
+    model
 }
 
 pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
@@ -104,8 +102,7 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
-        gpu: ModelGpuSpec::default(),
     };
 
-    model.with_derived_gpu()
+    model
 }

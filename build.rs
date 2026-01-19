@@ -159,7 +159,7 @@ mod solver {
         #[allow(unused_imports)]
         pub use flux_module::FluxModuleSpec;
         #[allow(unused_imports)]
-        pub use gpu_spec::{expand_field_components, GradientStorage, ModelGpuSpec};
+        pub use gpu_spec::{expand_field_components, GradientStorage};
         #[allow(unused_imports)]
         pub use kernel::KernelId;
         #[allow(unused_imports)]

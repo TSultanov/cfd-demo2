@@ -1297,7 +1297,7 @@ mod tests {
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
     use crate::solver::model::{eos, primitives};
     use crate::solver::model::{
-        incompressible_momentum_generic_model, BoundarySpec, ModelGpuSpec, ModelLinearSolverSpec,
+        incompressible_momentum_generic_model, BoundarySpec, ModelLinearSolverSpec,
         ModelPreconditionerSpec, SchurBlockLayout,
     };
     use crate::solver::units::si;
@@ -1353,10 +1353,7 @@ mod tests {
                 ..Default::default()
             }),
             primitives: primitives::PrimitiveDerivations::default(),
-            gpu: ModelGpuSpec::default(),
         };
-
-        let model = model.with_derived_gpu();
 
         validate_schur_model(&model).expect("Vector3 velocity Schur layout should validate");
     }

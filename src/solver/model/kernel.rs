@@ -352,9 +352,14 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
 ) -> Result<String, String> {
     use crate::solver::model::GradientStorage;
 
-    if model.gpu.gradient_storage != GradientStorage::PackedState {
+    let method = model.method().map_err(|e| e.to_string())?;
+    let gradient_storage = match method {
+        crate::solver::model::method::MethodSpec::Coupled(caps) => caps.gradient_storage,
+    };
+
+    if gradient_storage != GradientStorage::PackedState {
         return Err(
-            "generic_coupled_assembly_grad_state requires ModelGpuSpec.gradient_storage == PackedState"
+            "generic_coupled_assembly_grad_state requires MethodSpec::Coupled(CoupledCapabilities { gradient_storage: PackedState })"
                 .to_string(),
         );
     }

@@ -4,7 +4,6 @@ use crate::solver::model::backend::ast::{
     FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::gpu_spec::ModelGpuSpec;
 use crate::solver::units::si;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -303,6 +302,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         crate::solver::model::method::CoupledCapabilities {
             apply_relaxation_in_update: false,
             requires_flux_module: true,
+            gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
         },
     );
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
@@ -325,8 +325,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
-        gpu: ModelGpuSpec::default(),
     };
 
-    model.with_derived_gpu()
+    model
 }

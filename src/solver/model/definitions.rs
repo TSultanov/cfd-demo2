@@ -2,7 +2,6 @@
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::gpu_spec::{GradientStorage, ModelGpuSpec};
 use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
 
@@ -29,8 +28,6 @@ pub struct ModelSpec {
 
     /// Derived primitive recovery expressions (empty if primitives = conserved state)
     pub primitives: crate::solver::model::primitives::PrimitiveDerivations,
-
-    pub gpu: crate::solver::model::gpu_spec::ModelGpuSpec,
 }
 
 impl ModelSpec {
@@ -314,28 +311,6 @@ impl ModelSpec {
         Ok(())
     }
 
-    pub fn with_derived_gpu(mut self) -> Self {
-        self.gpu = self.derive_gpu_spec();
-        self
-    }
-
-    pub fn derive_gpu_spec(&self) -> ModelGpuSpec {
-        self.validate_module_manifests()
-            .expect("invalid model module manifests");
-
-        let method = self.method().expect("model missing method module");
-
-        let gradient_storage = match method {
-            crate::solver::model::method::MethodSpec::Coupled(_) => GradientStorage::PackedState,
-        };
-
-        let required_gradient_fields = Vec::new();
-
-        ModelGpuSpec {
-            gradient_storage,
-            required_gradient_fields,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -214,7 +214,7 @@ Completed:
 - Hardened the `include_str!` contract to detect macro invocations even with intervening whitespace/comments.
 - Hardened the `include_str!` contract to avoid false negatives caused by Rust lifetime syntax (e.g. `fn f<'a>(...)`).
 - Apply kernel (`generic_coupled_apply`) inclusion is now module-driven: `generic_coupled_module` declares it with `KernelConditionId::RequiresImplicitStepping`, and `SolverRecipe::from_model` no longer injects it; OpenFOAM reference tests pass.
-- Build-time shared-kernel emission is list-driven (`shared_kernel_generator_specs`), so adding a new shared generated kernel no longer requires editing multiple special-case branches.
+- Build-time shared-kernel emission is module-driven via `KernelWgslScope::Shared` generator specs (no central shared-kernel list); OpenFOAM reference tests pass.
 - Reconstruction hardening: unified_assembly and flux-module paths share the same reconstruction/limiter formulas via `cfd2_ir::solver::ir::reconstruction` (single source of truth); decision is to keep unified_assembly as the scalar-convection fallback, but derive its limiter math from the shared helpers.
 - Reconstruction knobs: flux-module reconstruction now uses the shared `Scheme` enum (no duplicate `FluxReconstructionSpec` type).
 - Added per-model `packed_state_gradients` kernels that populate `grad_state` (Green–Gauss) and made unified_assembly bind/consume `grad_state` for `GradientStorage::PackedState`; OpenFOAM reference tests pass.
@@ -234,7 +234,7 @@ Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
 
 Status:
-- Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).
+- Shared generated kernels are discovered via module-owned `kernel_generators()` entries scoped as `KernelWgslScope::Shared` (and emitted once at build time).
 
 ## Decisions (Locked In)
 - Generated-per-model WGSL stays (no runtime compilation).

@@ -9,7 +9,7 @@ pub fn generic_coupled_apply_module() -> KernelBundleModule {
             id: KernelId::GENERIC_COUPLED_APPLY,
             phase: KernelPhaseId::Apply,
             dispatch: DispatchKindId::Cells,
-            condition: KernelConditionId::Always,
+            condition: KernelConditionId::RequiresImplicitStepping,
         }],
         ..Default::default()
     }

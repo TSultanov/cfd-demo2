@@ -135,6 +135,9 @@ pub enum KernelConditionId {
 
     /// Include only when the recipe does not allocate a packed `grad_state` buffer.
     RequiresNoGradState,
+
+    /// Include only when the solver stepping mode is implicit.
+    RequiresImplicitStepping,
 }
 
 /// A fully specified kernel pass derived from the model + method selection.

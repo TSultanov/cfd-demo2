@@ -237,15 +237,7 @@ impl SolverRecipe {
         //
         // Kernel selection, phase membership, and dispatch kind are model-owned and derived
         // from the method + module configuration.
-        let mut model_kernel_specs = crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
-
-        // The implicit stepping program uses a dedicated Apply graph.
-        // Keep apply mechanics out of model identity by composing a small apply module
-        // into the derived recipe (rather than hard-coding kernel insertion here).
-        if matches!(stepping, SteppingMode::Implicit { .. }) {
-            let apply_module = crate::solver::model::modules::generic_coupled_apply::generic_coupled_apply_module();
-            model_kernel_specs.extend_from_slice(&apply_module.kernels);
-        }
+        let model_kernel_specs = crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
 
         let mut kernels: Vec<KernelSpec> = Vec::new();
         for spec in model_kernel_specs {
@@ -254,6 +246,9 @@ impl SolverRecipe {
                 crate::solver::model::kernel::KernelConditionId::RequiresGradState => has_grad_state,
                 crate::solver::model::kernel::KernelConditionId::RequiresNoGradState => {
                     !has_grad_state
+                }
+                crate::solver::model::kernel::KernelConditionId::RequiresImplicitStepping => {
+                    matches!(stepping, SteppingMode::Implicit { .. })
                 }
             };
             if !include {

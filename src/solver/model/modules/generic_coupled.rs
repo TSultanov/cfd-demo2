@@ -29,6 +29,12 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 condition: KernelConditionId::RequiresGradState,
             },
             ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_APPLY,
+                phase: KernelPhaseId::Apply,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresImplicitStepping,
+            },
+            ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_UPDATE,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,

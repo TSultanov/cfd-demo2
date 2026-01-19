@@ -2,7 +2,7 @@
 
 This file tracks *remaining* work to reach a **fully model-agnostic solver** where the set of model-dependent kernels is derived automatically from the **math in `ModelSpec.system`** (as declared in `src/solver/model/definitions.rs`) plus selected numerical methods.
 
-This is intentionally **not a changelog**: once a gap is closed, remove it from here (or summarize it in high-level “Completed Milestones”) so this file stays focused on what remains.
+This is intentionally **not a changelog**: once a gap is closed, remove it from here so this file stays focused on what remains.
 
 ## Target State (definition of done)
 - A single runtime orchestration path (no per-family stepping templates or “compressible/incompressible” branches).
@@ -26,21 +26,6 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
   - `bash scripts/run_openfoam_reference_tests.sh`
     - (equivalent to `cargo test -p cfd2 --tests openfoam_ -- --nocapture`, but fails loudly if 0 tests are discovered)
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
-
-## Current Baseline (already implemented, for context only)
-- Models are expressed as `EquationSystem` via the fvm/fvc AST in `src/solver/model/definitions.rs`.
-- Build-time codegen exists (`crates/cfd2_codegen`) and emits WGSL into `src/solver/gpu/shaders/generated` from `build.rs` (no runtime compilation).
-- Kernel schedule/phase/dispatch is model-owned and recipe-driven (`src/solver/model/kernel.rs`, `src/solver/gpu/recipe.rs`).
-- Kernel registry lookup is uniform for all kernels via `(model_id, KernelId)` (`src/solver/gpu/lowering/kernel_registry.rs`).
-- Host pipelines + bind groups for recipe kernels are built from binding metadata + a uniform `ResourceRegistry` (`src/solver/gpu/modules/generated_kernels.rs`).
-
-## Completed Milestones (high-level)
-- Model-owned modules + manifests drive kernel scheduling, named params, and optional passes (contract tests protect against re-centralization).
-- Runtime wiring is metadata-driven (no kernel-id switches for bind groups/pipeline layouts; registry provides bindings + pipelines).
-- A single model-driven lowering path is used across stepping modes (explicit/implicit/coupled share the universal backend wiring).
-- Low-Mach preconditioning parameters and model variants are consumed by generated compressible flux wave-speed bounds (Off/Legacy/WeissSmith distinct; default Off; contract + OpenFOAM coverage).
-- Explicit stepping rejects recipes that bind the implicit solution buffer `x` (regression test prevents silent state clobbering).
-- `dtau` now drives the model-declared `inv_dt` coefficient in generated WGSL (dtau>0 => inv_dt=1/dtau), so compressible algebraic constraints can tune conditioning independently of physical `dt` (contract + OpenFOAM coverage).
 
 ## Remaining Gaps (current blockers)
 

@@ -213,7 +213,7 @@ Completed:
 - Gap 4 hardening: added a contract test preventing manual `create_bind_group_layout` / `create_pipeline_layout` usage in `src/solver/gpu` (excluding generated `bindings.rs`).
 - Hardened the `include_str!` contract to detect macro invocations even with intervening whitespace/comments.
 - Hardened the `include_str!` contract to avoid false negatives caused by Rust lifetime syntax (e.g. `fn f<'a>(...)`).
-- Apply kernel (`generic_coupled_apply`) is now composed into implicit recipes via a module (`generic_coupled_apply_module`) instead of being injected by `SolverRecipe::from_model`.
+- Apply kernel (`generic_coupled_apply`) inclusion is now module-driven: `generic_coupled_module` declares it with `KernelConditionId::RequiresImplicitStepping`, and `SolverRecipe::from_model` no longer injects it; OpenFOAM reference tests pass.
 - Build-time shared-kernel emission is list-driven (`shared_kernel_generator_specs`), so adding a new shared generated kernel no longer requires editing multiple special-case branches.
 - Reconstruction hardening: unified_assembly and flux-module paths share the same reconstruction/limiter formulas via `cfd2_ir::solver::ir::reconstruction` (single source of truth); decision is to keep unified_assembly as the scalar-convection fallback, but derive its limiter math from the shared helpers.
 - Reconstruction knobs: flux-module reconstruction now uses the shared `Scheme` enum (no duplicate `FluxReconstructionSpec` type).
@@ -228,7 +228,7 @@ Completed:
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
-2) Remove remaining recipe-builder kernel injections (e.g. implicit apply) by expressing config-dependent inclusion as model module conditions, keeping scheduling fully module-driven.
+2) Derive linear solver defaults from model/method + runtime config (stop hard-coding FGMRES params/tolerances in `SolverRecipe::from_model`).
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

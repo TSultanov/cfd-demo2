@@ -33,6 +33,12 @@ struct SolverParams {
 }
 @group(1) @binding(4) var<uniform> params: SolverParams;
 
+const WORKGROUP_SIZE: u32 = 64u;
+
+fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
+    return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
+}
+
 // Group 2: Preconditioner data
 // block_inv stores 3x3 inverse blocks per cell in row-major order (9 floats)
 @group(2) @binding(0) var<storage, read_write> block_inv: array<f32>;
@@ -105,13 +111,16 @@ fn safe_inverse(val: f32) -> f32 {
 
 // Stage 2: build Schur RHS g' = g - D * y_u for current mode
 @compute @workgroup_size(64)
-fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn build_schur_rhs(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
     let total_unknowns = params.n;
     if (total_unknowns < 3u) {
         return;
     }
     let num_cells = total_unknowns / 3u;
-    let cell = global_id.x;
+    let cell = global_index(global_id, num_workgroups);
     if (cell >= num_cells) {
         return;
     }
@@ -136,13 +145,16 @@ fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Stage 3: apply velocity correction y_u - A^{-1} * G * y_p after AMG solve
 @compute @workgroup_size(64)
-fn finalize_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn finalize_precond(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
     let total_unknowns = params.n;
     if (total_unknowns < 3u) {
         return;
     }
     let num_cells = total_unknowns / 3u;
-    let cell = global_id.x;
+    let cell = global_index(global_id, num_workgroups);
     if (cell >= num_cells) {
         return;
     }
@@ -183,8 +195,11 @@ fn finalize_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Preconditioned SpMV: v = A * p_hat (where p_hat = M^{-1} * p)
 @compute @workgroup_size(64)
-fn spmv_phat_v(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = global_id.x;
+fn spmv_phat_v(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let row = global_index(global_id, num_workgroups);
     if (row >= params.n) {
         return;
     }
@@ -204,8 +219,11 @@ fn spmv_phat_v(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Preconditioned SpMV: t = A * s_hat (where s_hat = M^{-1} * s)
 @compute @workgroup_size(64)
-fn spmv_shat_t(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = global_id.x;
+fn spmv_shat_t(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let row = global_index(global_id, num_workgroups);
     if (row >= params.n) {
         return;
     }
@@ -222,4 +240,3 @@ fn spmv_shat_t(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     t[row] = sum;
 }
-

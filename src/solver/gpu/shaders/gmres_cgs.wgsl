@@ -30,11 +30,19 @@ fn calc_dots_cgs(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
     @builtin(workgroup_id) group_id: vec3<u32>,
-    @builtin(num_workgroups) num_groups: vec3<u32>
+    @builtin(num_workgroups) num_workgroups: vec3<u32>
 ) {
-    let idx = global_id.x;
     let j = params.num_iters; // Current iteration index
     let n = params.n;
+    let num_groups_n = (n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
+
+    let stride_x = num_workgroups.x * WORKGROUP_SIZE;
+    let idx = global_id.y * stride_x + global_id.x;
+    let group_flat = group_id.y * num_workgroups.x + group_id.x;
+
+    if (group_flat >= num_groups_n) {
+        return;
+    }
 
     let stride_bytes = (n * 4u + 255u) & 4294967040u; // & !255
     let stride_words = stride_bytes / 4u;
@@ -72,10 +80,10 @@ fn calc_dots_cgs(
             let sum = sdata_vec4[0];
             
             // Write partial sums
-            if (i <= j) { b_dot_partial[i * num_groups.x + group_id.x] = sum.x; }
-            if (i + 1u <= j) { b_dot_partial[(i + 1u) * num_groups.x + group_id.x] = sum.y; }
-            if (i + 2u <= j) { b_dot_partial[(i + 2u) * num_groups.x + group_id.x] = sum.z; }
-            if (i + 3u <= j) { b_dot_partial[(i + 3u) * num_groups.x + group_id.x] = sum.w; }
+            if (i <= j) { b_dot_partial[i * num_groups_n + group_flat] = sum.x; }
+            if (i + 1u <= j) { b_dot_partial[(i + 1u) * num_groups_n + group_flat] = sum.y; }
+            if (i + 2u <= j) { b_dot_partial[(i + 2u) * num_groups_n + group_flat] = sum.z; }
+            if (i + 3u <= j) { b_dot_partial[(i + 3u) * num_groups_n + group_flat] = sum.w; }
         }
         workgroupBarrier(); // Wait for all threads to finish using sdata before next iteration
     }
@@ -124,9 +132,11 @@ fn reduce_dots_cgs(
 // Vectorized to process 4 vectors at a time
 @compute @workgroup_size(64)
 fn update_w_cgs(
-    @builtin(global_invocation_id) global_id: vec3<u32>
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
-    let idx = global_id.x;
+    let stride_x = num_workgroups.x * WORKGROUP_SIZE;
+    let idx = global_id.y * stride_x + global_id.x;
     let j = params.num_iters;
     let n = params.n;
     let max_restart = params.max_restart;

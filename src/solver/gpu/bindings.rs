@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 75fd99a6cf5b4a27d42bcf35e265a6d69eb6ea5c768aef52b5b283c155a2b386
+// SourceHash: d8b98a3fff2f5e3b9f4630e5b31c9676f7f8a3e541688f20dd127fac681c49f0
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -119,11 +119,15 @@ pub mod layout_asserts {
     };
     const DOT_PRODUCT_SOLVER_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(dot_product::SolverParams, n) == 0);
-        assert!(std::mem::size_of::<dot_product::SolverParams>() == 4);
+        assert!(std::mem::offset_of!(dot_product::SolverParams, num_groups) == 4);
+        assert!(std::mem::offset_of!(dot_product::SolverParams, padding) == 8);
+        assert!(std::mem::size_of::<dot_product::SolverParams>() == 16);
     };
     const DOT_PRODUCT_PAIR_SOLVER_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(dot_product_pair::SolverParams, n) == 0);
-        assert!(std::mem::size_of::<dot_product_pair::SolverParams>() == 4);
+        assert!(std::mem::offset_of!(dot_product_pair::SolverParams, num_groups) == 4);
+        assert!(std::mem::offset_of!(dot_product_pair::SolverParams, padding) == 8);
+        assert!(std::mem::size_of::<dot_product_pair::SolverParams>() == 16);
     };
     const GENERATED_DP_INIT_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
         assert!(
@@ -3940,167 +3944,171 @@ var<storage> op_values: array<f32>;
 var<storage, read_write> coarse_vec: array<f32>;
 
 @compute @workgroup_size(64, 1, 1) 
-fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sigma: f32 = 0f;
     var diag: f32 = 1f;
     var k: u32;
 
-    let i = global_id.x;
-    let _e6 = params.n;
-    if (i >= _e6) {
+    let stride_x = (num_workgroups.x * 64u);
+    let i = ((global_id.y * stride_x) + global_id.x);
+    let _e13 = params.n;
+    if (i >= _e13) {
         return;
     }
     let start = row_offsets[i];
     let end = row_offsets[(i + 1u)];
     k = start;
     loop {
-        let _e17 = k;
-        if (_e17 < end) {
+        let _e24 = k;
+        if (_e24 < end) {
         } else {
             break;
         }
         {
-            let _e20 = k;
-            let col = col_indices[_e20];
-            let _e24 = k;
-            let val = values[_e24];
+            let _e27 = k;
+            let col = col_indices[_e27];
+            let _e31 = k;
+            let val = values[_e31];
             if (col == i) {
                 diag = val;
             } else {
-                let _e32 = x[col];
-                let _e34 = sigma;
-                sigma = (_e34 + (val * _e32));
+                let _e39 = x[col];
+                let _e41 = sigma;
+                sigma = (_e41 + (val * _e39));
             }
         }
         continuing {
-            let _e37 = k;
-            k = (_e37 + 1u);
+            let _e44 = k;
+            k = (_e44 + 1u);
         }
     }
-    let _e39 = diag;
-    if (abs(_e39) < 0.00000000000001f) {
+    let _e46 = diag;
+    if (abs(_e46) < 0.00000000000001f) {
         diag = 1f;
     }
-    let _e46 = b[i];
-    let _e47 = sigma;
-    let _e49 = diag;
-    let x_new = ((_e46 - _e47) / _e49);
-    let _e55 = x[i];
-    let _e58 = params.omega;
-    x[i] = mix(_e55, x_new, _e58);
+    let _e53 = b[i];
+    let _e54 = sigma;
+    let _e56 = diag;
+    let x_new = ((_e53 - _e54) / _e56);
+    let _e62 = x[i];
+    let _e65 = params.omega;
+    x[i] = mix(_e62, x_new, _e65);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn prolongate_op(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+fn prolongate_op(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var correction: f32 = 0f;
     var k_1: u32;
 
-    let i_1 = global_id_1.x;
-    let _e5 = params.n;
-    if (i_1 >= _e5) {
+    let stride_x_1 = (num_workgroups_1.x * 64u);
+    let i_1 = ((global_id_1.y * stride_x_1) + global_id_1.x);
+    let _e12 = params.n;
+    if (i_1 >= _e12) {
         return;
     }
     let start_1 = op_row_offsets[i_1];
     let end_1 = op_row_offsets[(i_1 + 1u)];
     k_1 = start_1;
     loop {
-        let _e16 = k_1;
-        if (_e16 < end_1) {
+        let _e23 = k_1;
+        if (_e23 < end_1) {
         } else {
             break;
         }
         {
-            let _e19 = k_1;
-            let coarse_idx = op_col_indices[_e19];
-            let _e23 = k_1;
-            let val_1 = op_values[_e23];
-            let _e29 = coarse_vec[coarse_idx];
-            let _e31 = correction;
-            correction = (_e31 + (val_1 * _e29));
+            let _e26 = k_1;
+            let coarse_idx = op_col_indices[_e26];
+            let _e30 = k_1;
+            let val_1 = op_values[_e30];
+            let _e36 = coarse_vec[coarse_idx];
+            let _e38 = correction;
+            correction = (_e38 + (val_1 * _e36));
         }
         continuing {
-            let _e34 = k_1;
-            k_1 = (_e34 + 1u);
+            let _e41 = k_1;
+            k_1 = (_e41 + 1u);
         }
     }
-    let _e38 = correction;
-    let _e39 = x[i_1];
-    x[i_1] = (_e39 + _e38);
+    let _e45 = correction;
+    let _e46 = x[i_1];
+    x[i_1] = (_e46 + _e45);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn restrict_residual(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn restrict_residual(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var sum: f32 = 0f;
     var k_2: u32;
     var ax: f32;
     var j: u32;
 
-    let i_2 = global_id_2.x;
-    let _e5 = params.n;
-    if (i_2 >= _e5) {
+    let stride_x_2 = (num_workgroups_2.x * 64u);
+    let i_2 = ((global_id_2.y * stride_x_2) + global_id_2.x);
+    let _e12 = params.n;
+    if (i_2 >= _e12) {
         return;
     }
     let start_2 = op_row_offsets[i_2];
     let end_2 = op_row_offsets[(i_2 + 1u)];
     k_2 = start_2;
     loop {
-        let _e16 = k_2;
-        if (_e16 < end_2) {
+        let _e23 = k_2;
+        if (_e23 < end_2) {
         } else {
             break;
         }
         {
-            let _e19 = k_2;
-            let fine_idx = op_col_indices[_e19];
-            let _e23 = k_2;
-            let r_val = op_values[_e23];
+            let _e26 = k_2;
+            let fine_idx = op_col_indices[_e26];
+            let _e30 = k_2;
+            let r_val = op_values[_e30];
             let a_start = row_offsets[fine_idx];
             let a_end = row_offsets[(fine_idx + 1u)];
             ax = 0f;
             j = a_start;
             loop {
-                let _e37 = j;
-                if (_e37 < a_end) {
+                let _e44 = j;
+                if (_e44 < a_end) {
                 } else {
                     break;
                 }
                 {
-                    let _e40 = j;
-                    let _e42 = values[_e40];
-                    let _e45 = j;
-                    let _e47 = col_indices[_e45];
-                    let _e49 = x[_e47];
-                    let _e51 = ax;
-                    ax = (_e51 + (_e42 * _e49));
+                    let _e47 = j;
+                    let _e49 = values[_e47];
+                    let _e52 = j;
+                    let _e54 = col_indices[_e52];
+                    let _e56 = x[_e54];
+                    let _e58 = ax;
+                    ax = (_e58 + (_e49 * _e56));
                 }
                 continuing {
-                    let _e54 = j;
-                    j = (_e54 + 1u);
+                    let _e61 = j;
+                    j = (_e61 + 1u);
                 }
             }
-            let _e58 = b[fine_idx];
-            let _e59 = ax;
-            let fine_r = (_e58 - _e59);
-            let _e63 = sum;
-            sum = (_e63 + (r_val * fine_r));
+            let _e65 = b[fine_idx];
+            let _e66 = ax;
+            let fine_r = (_e65 - _e66);
+            let _e70 = sum;
+            sum = (_e70 + (r_val * fine_r));
         }
         continuing {
-            let _e66 = k_2;
-            k_2 = (_e66 + 1u);
+            let _e73 = k_2;
+            k_2 = (_e73 + 1u);
         }
     }
-    let _e70 = sum;
-    coarse_vec[i_2] = _e70;
+    let _e77 = sum;
+    coarse_vec[i_2] = _e77;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn clear(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
-    let i_3 = global_id_3.x;
-    let _e4 = params.n;
-    if (i_3 >= _e4) {
+fn clear(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
+    let stride_x_3 = (num_workgroups_3.x * 64u);
+    let i_3 = ((global_id_3.y * stride_x_3) + global_id_3.x);
+    let _e11 = params.n;
+    if (i_3 >= _e11) {
         return;
     }
     x[i_3] = 0f;
@@ -4705,30 +4713,32 @@ var<storage, read_write> output_buf: array<f32>;
 var<uniform> params: PackParams;
 
 @compute @workgroup_size(64, 1, 1) 
-fn pack_component(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
-    let _e4 = params.num_cells;
-    if (idx >= _e4) {
+fn pack_component(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
+    let stride_x = (num_workgroups.x * 64u);
+    let idx = ((global_id.y * stride_x) + global_id.x);
+    let _e11 = params.num_cells;
+    if (idx >= _e11) {
         return;
     }
-    let _e10 = params.component;
-    let base = ((idx * 4u) + _e10);
-    let _e16 = input_buf[base];
-    output_buf[idx] = _e16;
+    let _e17 = params.component;
+    let base = ((idx * 4u) + _e17);
+    let _e23 = input_buf[base];
+    output_buf[idx] = _e23;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn unpack_component(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
-    let idx_1 = global_id_1.x;
-    let _e4 = params.num_cells;
-    if (idx_1 >= _e4) {
+fn unpack_component(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
+    let stride_x_1 = (num_workgroups_1.x * 64u);
+    let idx_1 = ((global_id_1.y * stride_x_1) + global_id_1.x);
+    let _e11 = params.num_cells;
+    if (idx_1 >= _e11) {
         return;
     }
-    let _e10 = params.component;
-    let base_1 = ((idx_1 * 4u) + _e10);
-    let _e16 = input_buf[idx_1];
-    output_buf[base_1] = _e16;
+    let _e17 = params.component;
+    let base_1 = ((idx_1 * 4u) + _e17);
+    let _e23 = input_buf[idx_1];
+    output_buf[base_1] = _e23;
     return;
 }
 "#;
@@ -5372,7 +5382,7 @@ fn swap_rows(a_1: ptr<function, array<array<f32, 4>, 4>>, b: ptr<function, array
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var a: array<array<f32, 4>, 4>;
     var inv: array<array<f32, 4>, 4>;
     var diag_orig: array<f32, 4>;
@@ -5393,303 +5403,305 @@ fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var r_4: u32 = 0u;
     var c_4: u32;
 
-    let cell = global_id.x;
-    let _e6 = params.num_cells;
-    if (cell >= _e6) {
+    let stride_x = (num_workgroups.x * 64u);
+    let cell = ((global_id.y * stride_x) + global_id.x);
+    let _e13 = params.num_cells;
+    if (cell >= _e13) {
         return;
     }
     let base = (cell * 4u);
     loop {
-        let _e11 = r;
-        if (_e11 < 4u) {
+        let _e18 = r;
+        if (_e18 < 4u) {
         } else {
             break;
         }
         {
             c = 0u;
             loop {
-                let _e16 = c;
-                if (_e16 < 4u) {
+                let _e23 = c;
+                if (_e23 < 4u) {
                 } else {
                     break;
                 }
                 {
-                    let _e20 = r;
-                    let _e22 = c;
-                    a[_e20][_e22] = 0f;
-                    let _e26 = r;
-                    let _e28 = c;
-                    inv[_e26][_e28] = 0f;
+                    let _e27 = r;
+                    let _e29 = c;
+                    a[_e27][_e29] = 0f;
+                    let _e33 = r;
+                    let _e35 = c;
+                    inv[_e33][_e35] = 0f;
                 }
                 continuing {
-                    let _e31 = c;
-                    c = (_e31 + 1u);
+                    let _e38 = c;
+                    c = (_e38 + 1u);
                 }
             }
-            let _e34 = r;
-            let row = (base + _e34);
+            let _e41 = r;
+            let row = (base + _e41);
             let start = row_offsets[row];
             let end = row_offsets[(row + 1u)];
             k = start;
             loop {
-                let _e45 = k;
-                if (_e45 < end) {
+                let _e52 = k;
+                if (_e52 < end) {
                 } else {
                     break;
                 }
                 {
-                    let _e48 = k;
-                    let col = col_indices[_e48];
+                    let _e55 = k;
+                    let col = col_indices[_e55];
                     if ((col >= base) && (col < (base + 4u))) {
                         let local = (col - base);
-                        let _e57 = r;
-                        let _e61 = k;
-                        let _e63 = matrix_values[_e61];
-                        a[_e57][local] = _e63;
+                        let _e64 = r;
+                        let _e68 = k;
+                        let _e70 = matrix_values[_e68];
+                        a[_e64][local] = _e70;
                     }
                 }
                 continuing {
-                    let _e64 = k;
-                    k = (_e64 + 1u);
+                    let _e71 = k;
+                    k = (_e71 + 1u);
                 }
             }
-            let _e67 = r;
-            let _e69 = r;
-            inv[_e67][_e69] = 1f;
-            let _e73 = r;
-            let _e75 = r;
-            let _e77 = r;
-            let _e79 = a[_e75][_e77];
-            diag_orig[_e73] = _e79;
+            let _e74 = r;
+            let _e76 = r;
+            inv[_e74][_e76] = 1f;
+            let _e80 = r;
+            let _e82 = r;
+            let _e84 = r;
+            let _e86 = a[_e82][_e84];
+            diag_orig[_e80] = _e86;
         }
         continuing {
-            let _e80 = r;
-            r = (_e80 + 1u);
+            let _e87 = r;
+            r = (_e87 + 1u);
         }
     }
     loop {
-        let _e84 = i;
-        if (_e84 < 4u) {
+        let _e91 = i;
+        if (_e91 < 4u) {
         } else {
             break;
         }
         {
-            let _e87 = i;
-            pivot = _e87;
-            let _e89 = i;
-            let _e91 = i;
-            let _e93 = a[_e89][_e91];
-            pivot_val = abs(_e93);
+            let _e94 = i;
+            pivot = _e94;
             let _e96 = i;
-            r_1 = (_e96 + 1u);
+            let _e98 = i;
+            let _e100 = a[_e96][_e98];
+            pivot_val = abs(_e100);
+            let _e103 = i;
+            r_1 = (_e103 + 1u);
             loop {
-                let _e100 = r_1;
-                if (_e100 < 4u) {
+                let _e107 = r_1;
+                if (_e107 < 4u) {
                 } else {
                     break;
                 }
                 {
-                    let _e103 = r_1;
-                    let _e105 = i;
-                    let _e107 = a[_e103][_e105];
-                    let val_1 = abs(_e107);
-                    let _e109 = pivot_val;
-                    if (val_1 > _e109) {
+                    let _e110 = r_1;
+                    let _e112 = i;
+                    let _e114 = a[_e110][_e112];
+                    let val_1 = abs(_e114);
+                    let _e116 = pivot_val;
+                    if (val_1 > _e116) {
                         pivot_val = val_1;
-                        let _e111 = r_1;
-                        pivot = _e111;
+                        let _e118 = r_1;
+                        pivot = _e118;
                     }
                 }
                 continuing {
-                    let _e112 = r_1;
-                    r_1 = (_e112 + 1u);
+                    let _e119 = r_1;
+                    r_1 = (_e119 + 1u);
                 }
             }
-            let _e115 = pivot_val;
-            if (_e115 < 0.000000000001f) {
+            let _e122 = pivot_val;
+            if (_e122 < 0.000000000001f) {
                 singular = true;
             }
-            let _e120 = i;
-            let _e121 = pivot;
-            swap_rows((&a), (&inv), _e120, _e121);
-            let _e122 = i;
-            let _e124 = i;
-            let _e126 = a[_e122][_e124];
-            piv = _e126;
-            let _e128 = piv;
-            if (abs(_e128) < 0.000000000001f) {
-                let _e132 = piv;
-                piv = select(0.000000000001f, -0.000000000001f, (_e132 < 0f));
+            let _e127 = i;
+            let _e128 = pivot;
+            swap_rows((&a), (&inv), _e127, _e128);
+            let _e129 = i;
+            let _e131 = i;
+            let _e133 = a[_e129][_e131];
+            piv = _e133;
+            let _e135 = piv;
+            if (abs(_e135) < 0.000000000001f) {
+                let _e139 = piv;
+                piv = select(0.000000000001f, -0.000000000001f, (_e139 < 0f));
             }
-            let _e138 = piv;
-            let inv_piv = (1f / _e138);
+            let _e145 = piv;
+            let inv_piv = (1f / _e145);
             c_1 = 0u;
             loop {
-                let _e143 = c_1;
-                if (_e143 < 4u) {
+                let _e150 = c_1;
+                if (_e150 < 4u) {
                 } else {
                     break;
                 }
                 {
-                    let _e146 = i;
-                    let _e148 = c_1;
-                    let _e150 = i;
-                    let _e152 = c_1;
-                    let _e154 = a[_e150][_e152];
-                    a[_e146][_e148] = (_e154 * inv_piv);
-                    let _e156 = i;
-                    let _e158 = c_1;
-                    let _e160 = i;
-                    let _e162 = c_1;
-                    let _e164 = inv[_e160][_e162];
-                    inv[_e156][_e158] = (_e164 * inv_piv);
+                    let _e153 = i;
+                    let _e155 = c_1;
+                    let _e157 = i;
+                    let _e159 = c_1;
+                    let _e161 = a[_e157][_e159];
+                    a[_e153][_e155] = (_e161 * inv_piv);
+                    let _e163 = i;
+                    let _e165 = c_1;
+                    let _e167 = i;
+                    let _e169 = c_1;
+                    let _e171 = inv[_e167][_e169];
+                    inv[_e163][_e165] = (_e171 * inv_piv);
                 }
                 continuing {
-                    let _e166 = c_1;
-                    c_1 = (_e166 + 1u);
+                    let _e173 = c_1;
+                    c_1 = (_e173 + 1u);
                 }
             }
             r_2 = 0u;
             loop {
-                let _e171 = r_2;
-                if (_e171 < 4u) {
+                let _e178 = r_2;
+                if (_e178 < 4u) {
                 } else {
                     break;
                 }
                 {
-                    let _e174 = r_2;
-                    let _e175 = i;
-                    if (_e174 == _e175) {
+                    let _e181 = r_2;
+                    let _e182 = i;
+                    if (_e181 == _e182) {
                         continue;
                     }
-                    let _e177 = r_2;
-                    let _e179 = i;
-                    let factor = a[_e177][_e179];
+                    let _e184 = r_2;
+                    let _e186 = i;
+                    let factor = a[_e184][_e186];
                     c_2 = 0u;
                     loop {
-                        let _e184 = c_2;
-                        if (_e184 < 4u) {
+                        let _e191 = c_2;
+                        if (_e191 < 4u) {
                         } else {
                             break;
                         }
                         {
-                            let _e187 = r_2;
-                            let _e189 = c_2;
-                            let _e191 = r_2;
-                            let _e193 = c_2;
-                            let _e195 = a[_e191][_e193];
-                            let _e196 = i;
-                            let _e198 = c_2;
-                            let _e200 = a[_e196][_e198];
-                            a[_e187][_e189] = (_e195 - (factor * _e200));
-                            let _e203 = r_2;
+                            let _e194 = r_2;
+                            let _e196 = c_2;
+                            let _e198 = r_2;
+                            let _e200 = c_2;
+                            let _e202 = a[_e198][_e200];
+                            let _e203 = i;
                             let _e205 = c_2;
-                            let _e207 = r_2;
-                            let _e209 = c_2;
-                            let _e211 = inv[_e207][_e209];
-                            let _e212 = i;
-                            let _e214 = c_2;
-                            let _e216 = inv[_e212][_e214];
-                            inv[_e203][_e205] = (_e211 - (factor * _e216));
+                            let _e207 = a[_e203][_e205];
+                            a[_e194][_e196] = (_e202 - (factor * _e207));
+                            let _e210 = r_2;
+                            let _e212 = c_2;
+                            let _e214 = r_2;
+                            let _e216 = c_2;
+                            let _e218 = inv[_e214][_e216];
+                            let _e219 = i;
+                            let _e221 = c_2;
+                            let _e223 = inv[_e219][_e221];
+                            inv[_e210][_e212] = (_e218 - (factor * _e223));
                         }
                         continuing {
-                            let _e219 = c_2;
-                            c_2 = (_e219 + 1u);
+                            let _e226 = c_2;
+                            c_2 = (_e226 + 1u);
                         }
                     }
                 }
                 continuing {
-                    let _e222 = r_2;
-                    r_2 = (_e222 + 1u);
+                    let _e229 = r_2;
+                    r_2 = (_e229 + 1u);
                 }
             }
         }
         continuing {
-            let _e225 = i;
-            i = (_e225 + 1u);
+            let _e232 = i;
+            i = (_e232 + 1u);
         }
     }
-    let _e228 = singular;
-    if _e228 {
+    let _e235 = singular;
+    if _e235 {
         loop {
-            let _e230 = r_3;
-            if (_e230 < 4u) {
+            let _e237 = r_3;
+            if (_e237 < 4u) {
             } else {
                 break;
             }
             {
                 c_3 = 0u;
                 loop {
-                    let _e235 = c_3;
-                    if (_e235 < 4u) {
+                    let _e242 = c_3;
+                    if (_e242 < 4u) {
                     } else {
                         break;
                     }
                     {
-                        let _e238 = r_3;
-                        let _e240 = c_3;
-                        inv[_e238][_e240] = 0f;
+                        let _e245 = r_3;
+                        let _e247 = c_3;
+                        inv[_e245][_e247] = 0f;
                     }
                     continuing {
-                        let _e243 = c_3;
-                        c_3 = (_e243 + 1u);
+                        let _e250 = c_3;
+                        c_3 = (_e250 + 1u);
                     }
                 }
-                let _e246 = r_3;
-                let _e248 = r_3;
-                let _e250 = r_3;
-                let _e252 = diag_orig[_e250];
-                let _e253 = safe_inverse(_e252);
-                inv[_e246][_e248] = _e253;
+                let _e253 = r_3;
+                let _e255 = r_3;
+                let _e257 = r_3;
+                let _e259 = diag_orig[_e257];
+                let _e260 = safe_inverse(_e259);
+                inv[_e253][_e255] = _e260;
             }
             continuing {
-                let _e254 = r_3;
-                r_3 = (_e254 + 1u);
+                let _e261 = r_3;
+                r_3 = (_e261 + 1u);
             }
         }
     }
     let offset = (cell * 16u);
     loop {
-        let _e260 = r_4;
-        if (_e260 < 4u) {
+        let _e267 = r_4;
+        if (_e267 < 4u) {
         } else {
             break;
         }
         {
             c_4 = 0u;
             loop {
-                let _e265 = c_4;
-                if (_e265 < 4u) {
+                let _e272 = c_4;
+                if (_e272 < 4u) {
                 } else {
                     break;
                 }
                 {
-                    let _e268 = r_4;
-                    let _e273 = c_4;
-                    let _e276 = r_4;
-                    let _e278 = c_4;
-                    let _e280 = inv[_e276][_e278];
-                    block_inv[((offset + (_e268 * 4u)) + _e273)] = _e280;
+                    let _e275 = r_4;
+                    let _e280 = c_4;
+                    let _e283 = r_4;
+                    let _e285 = c_4;
+                    let _e287 = inv[_e283][_e285];
+                    block_inv[((offset + (_e275 * 4u)) + _e280)] = _e287;
                 }
                 continuing {
-                    let _e281 = c_4;
-                    c_4 = (_e281 + 1u);
+                    let _e288 = c_4;
+                    c_4 = (_e288 + 1u);
                 }
             }
         }
         continuing {
-            let _e284 = r_4;
-            r_4 = (_e284 + 1u);
+            let _e291 = r_4;
+            r_4 = (_e291 + 1u);
         }
     }
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
-    let cell_1 = global_id_1.x;
-    let _e4 = params.num_cells;
-    if (cell_1 >= _e4) {
+fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
+    let stride_x_1 = (num_workgroups_1.x * 64u);
+    let cell_1 = ((global_id_1.y * stride_x_1) + global_id_1.x);
+    let _e11 = params.num_cells;
+    if (cell_1 >= _e11) {
         return;
     }
     let base_1 = (cell_1 * 4u);
@@ -5698,26 +5710,26 @@ fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     let x1_ = vec_x[(base_1 + 1u)];
     let x2_ = vec_x[(base_1 + 2u)];
     let x3_ = vec_x[(base_1 + 3u)];
-    let _e34 = block_inv[(offset_1 + 0u)];
-    let _e40 = block_inv[(offset_1 + 1u)];
-    let _e47 = block_inv[(offset_1 + 2u)];
-    let _e54 = block_inv[(offset_1 + 3u)];
-    let y0_ = ((((_e34 * x0_) + (_e40 * x1_)) + (_e47 * x2_)) + (_e54 * x3_));
-    let _e61 = block_inv[(offset_1 + 4u)];
-    let _e67 = block_inv[(offset_1 + 5u)];
-    let _e74 = block_inv[(offset_1 + 6u)];
-    let _e81 = block_inv[(offset_1 + 7u)];
-    let y1_ = ((((_e61 * x0_) + (_e67 * x1_)) + (_e74 * x2_)) + (_e81 * x3_));
-    let _e88 = block_inv[(offset_1 + 8u)];
-    let _e94 = block_inv[(offset_1 + 9u)];
-    let _e101 = block_inv[(offset_1 + 10u)];
-    let _e108 = block_inv[(offset_1 + 11u)];
-    let y2_ = ((((_e88 * x0_) + (_e94 * x1_)) + (_e101 * x2_)) + (_e108 * x3_));
-    let _e115 = block_inv[(offset_1 + 12u)];
-    let _e121 = block_inv[(offset_1 + 13u)];
-    let _e128 = block_inv[(offset_1 + 14u)];
-    let _e135 = block_inv[(offset_1 + 15u)];
-    let y3_ = ((((_e115 * x0_) + (_e121 * x1_)) + (_e128 * x2_)) + (_e135 * x3_));
+    let _e41 = block_inv[(offset_1 + 0u)];
+    let _e47 = block_inv[(offset_1 + 1u)];
+    let _e54 = block_inv[(offset_1 + 2u)];
+    let _e61 = block_inv[(offset_1 + 3u)];
+    let y0_ = ((((_e41 * x0_) + (_e47 * x1_)) + (_e54 * x2_)) + (_e61 * x3_));
+    let _e68 = block_inv[(offset_1 + 4u)];
+    let _e74 = block_inv[(offset_1 + 5u)];
+    let _e81 = block_inv[(offset_1 + 6u)];
+    let _e88 = block_inv[(offset_1 + 7u)];
+    let y1_ = ((((_e68 * x0_) + (_e74 * x1_)) + (_e81 * x2_)) + (_e88 * x3_));
+    let _e95 = block_inv[(offset_1 + 8u)];
+    let _e101 = block_inv[(offset_1 + 9u)];
+    let _e108 = block_inv[(offset_1 + 10u)];
+    let _e115 = block_inv[(offset_1 + 11u)];
+    let y2_ = ((((_e95 * x0_) + (_e101 * x1_)) + (_e108 * x2_)) + (_e115 * x3_));
+    let _e122 = block_inv[(offset_1 + 12u)];
+    let _e128 = block_inv[(offset_1 + 13u)];
+    let _e135 = block_inv[(offset_1 + 14u)];
+    let _e142 = block_inv[(offset_1 + 15u)];
+    let y3_ = ((((_e122 * x0_) + (_e128 * x1_)) + (_e135 * x2_)) + (_e142 * x3_));
     vec_y[(base_1 + 0u)] = y0_;
     vec_y[(base_1 + 1u)] = y1_;
     vec_y[(base_1 + 2u)] = y2_;
@@ -5728,15 +5740,23 @@ fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
 }
 pub mod dot_product {
     use super::{_root, _root::*};
-    #[repr(C, align(4))]
+    #[repr(C, align(8))]
     #[derive(Debug, PartialEq, Clone, Copy)]
     pub struct SolverParams {
         #[doc = "offset: 0, size: 4, type: `u32`"]
         pub n: u32,
+        #[doc = "offset: 4, size: 4, type: `u32`"]
+        pub num_groups: u32,
+        #[doc = "offset: 8, size: 8, type: `vec2<u32>`"]
+        pub padding: [u32; 2],
     }
     impl SolverParams {
-        pub const fn new(n: u32) -> Self {
-            Self { n }
+        pub const fn new(n: u32, num_groups: u32, padding: [u32; 2]) -> Self {
+            Self {
+                n,
+                num_groups,
+                padding,
+            }
         }
     }
     pub mod compute {
@@ -5962,6 +5982,8 @@ pub mod dot_product {
     pub const SHADER_STRING: &str = r#"
 struct SolverParams {
     n: u32,
+    num_groups: u32,
+    padding: vec2<u32>,
 }
 
 @group(0) @binding(0) 
@@ -5975,46 +5997,53 @@ var<storage> dot_b: array<f32>;
 var<workgroup> scratch: array<f32, 64>;
 
 @compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>) {
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var val: f32 = 0f;
     var i: u32 = 32u;
 
-    let idx = global_id.x;
+    let stride_x = (num_workgroups.x * 64u);
+    let idx = ((global_id.y * stride_x) + global_id.x);
     let lid = local_id.x;
-    let _e8 = params.n;
-    if (idx < _e8) {
-        let _e12 = dot_a[idx];
-        let _e15 = dot_b[idx];
-        val = (_e12 * _e15);
+    let _e15 = params.n;
+    if (idx < _e15) {
+        let _e19 = dot_a[idx];
+        let _e22 = dot_b[idx];
+        val = (_e19 * _e22);
     }
-    let _e20 = val;
-    scratch[lid] = _e20;
+    let _e27 = val;
+    scratch[lid] = _e27;
     workgroupBarrier();
     loop {
-        let _e22 = i;
-        if (_e22 > 0u) {
+        let _e29 = i;
+        if (_e29 > 0u) {
         } else {
             break;
         }
         {
-            let _e25 = i;
-            if (lid < _e25) {
-                let _e30 = i;
-                let _e33 = scratch[(lid + _e30)];
-                let _e34 = scratch[lid];
-                scratch[lid] = (_e34 + _e33);
+            let _e32 = i;
+            if (lid < _e32) {
+                let _e37 = i;
+                let _e40 = scratch[(lid + _e37)];
+                let _e41 = scratch[lid];
+                scratch[lid] = (_e41 + _e40);
             }
             workgroupBarrier();
         }
         continuing {
-            let _e37 = i;
-            i = (_e37 >> 1u);
+            let _e44 = i;
+            i = (_e44 >> 1u);
         }
     }
     if (lid == 0u) {
-        let _e47 = scratch[0];
-        dot_result[group_id.x] = _e47;
-        return;
+        let group_flat = ((group_id.y * num_workgroups.x) + group_id.x);
+        let _e56 = params.num_groups;
+        if (group_flat < _e56) {
+            let _e62 = scratch[0];
+            dot_result[group_flat] = _e62;
+            return;
+        } else {
+            return;
+        }
     } else {
         return;
     }
@@ -6023,15 +6052,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invo
 }
 pub mod dot_product_pair {
     use super::{_root, _root::*};
-    #[repr(C, align(4))]
+    #[repr(C, align(8))]
     #[derive(Debug, PartialEq, Clone, Copy)]
     pub struct SolverParams {
         #[doc = "offset: 0, size: 4, type: `u32`"]
         pub n: u32,
+        #[doc = "offset: 4, size: 4, type: `u32`"]
+        pub num_groups: u32,
+        #[doc = "offset: 8, size: 8, type: `vec2<u32>`"]
+        pub padding: [u32; 2],
     }
     impl SolverParams {
-        pub const fn new(n: u32) -> Self {
-            Self { n }
+        pub const fn new(n: u32, num_groups: u32, padding: [u32; 2]) -> Self {
+            Self {
+                n,
+                num_groups,
+                padding,
+            }
         }
     }
     pub mod compute {
@@ -6315,6 +6352,8 @@ pub mod dot_product_pair {
     pub const SHADER_STRING: &str = r#"
 struct SolverParams {
     n: u32,
+    num_groups: u32,
+    padding: vec2<u32>,
 }
 
 @group(0) @binding(0) 
@@ -6335,53 +6374,60 @@ var<workgroup> scratch_a: array<f32, 64>;
 var<workgroup> scratch_b: array<f32, 64>;
 
 @compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>) {
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var val0_: f32 = 0f;
     var val1_: f32 = 0f;
     var offset: u32 = 32u;
 
-    let idx = global_id.x;
+    let stride_x = (num_workgroups.x * 64u);
+    let idx = ((global_id.y * stride_x) + global_id.x);
     let lid = local_id.x;
-    let _e8 = params.n;
-    if (idx < _e8) {
-        let _e12 = dot_a0_[idx];
-        let _e15 = dot_b0_[idx];
-        val0_ = (_e12 * _e15);
-        let _e20 = dot_a1_[idx];
-        let _e23 = dot_b1_[idx];
-        val1_ = (_e20 * _e23);
+    let _e15 = params.n;
+    if (idx < _e15) {
+        let _e19 = dot_a0_[idx];
+        let _e22 = dot_b0_[idx];
+        val0_ = (_e19 * _e22);
+        let _e27 = dot_a1_[idx];
+        let _e30 = dot_b1_[idx];
+        val1_ = (_e27 * _e30);
     }
-    let _e28 = val0_;
-    scratch_a[lid] = _e28;
-    let _e31 = val1_;
-    scratch_b[lid] = _e31;
+    let _e35 = val0_;
+    scratch_a[lid] = _e35;
+    let _e38 = val1_;
+    scratch_b[lid] = _e38;
     workgroupBarrier();
     loop {
-        let _e33 = offset;
-        if (lid < _e33) {
-            let _e38 = offset;
-            let _e41 = scratch_a[(lid + _e38)];
-            let _e42 = scratch_a[lid];
-            scratch_a[lid] = (_e42 + _e41);
-            let _e47 = offset;
-            let _e50 = scratch_b[(lid + _e47)];
-            let _e51 = scratch_b[lid];
-            scratch_b[lid] = (_e51 + _e50);
+        let _e40 = offset;
+        if (lid < _e40) {
+            let _e45 = offset;
+            let _e48 = scratch_a[(lid + _e45)];
+            let _e49 = scratch_a[lid];
+            scratch_a[lid] = (_e49 + _e48);
+            let _e54 = offset;
+            let _e57 = scratch_b[(lid + _e54)];
+            let _e58 = scratch_b[lid];
+            scratch_b[lid] = (_e58 + _e57);
         }
         workgroupBarrier();
-        let _e53 = offset;
-        if (_e53 == 1u) {
+        let _e60 = offset;
+        if (_e60 == 1u) {
             break;
         }
-        let _e56 = offset;
-        offset = (_e56 >> 1u);
+        let _e63 = offset;
+        offset = (_e63 >> 1u);
     }
     if (lid == 0u) {
-        let _e67 = scratch_a[0];
-        dot_result_a[group_id.x] = _e67;
-        let _e73 = scratch_b[0];
-        dot_result_b[group_id.x] = _e73;
-        return;
+        let group_flat = ((group_id.y * num_workgroups.x) + group_id.x);
+        let _e76 = params.num_groups;
+        if (group_flat < _e76) {
+            let _e82 = scratch_a[0];
+            dot_result_a[group_flat] = _e82;
+            let _e87 = scratch_b[0];
+            dot_result_b[group_flat] = _e87;
+            return;
+        } else {
+            return;
+        }
     } else {
         return;
     }
@@ -61810,120 +61856,126 @@ var<workgroup> sdata: array<f32, 64>;
 var<workgroup> sdata_vec4_: array<vec4<f32>, 64>;
 
 @compute @workgroup_size(64, 1, 1) 
-fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_groups: vec3<u32>) {
+fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var w_val: f32 = 0f;
     var i: u32 = 0u;
     var v: vec4<f32>;
 
-    let idx = global_id.x;
     let j = params.num_iters;
     let n = params.n;
+    let num_groups_n = ((n + 63u) / WORKGROUP_SIZE);
+    let stride_x = (num_workgroups.x * WORKGROUP_SIZE);
+    let idx = ((global_id.y * stride_x) + global_id.x);
+    let group_flat = ((group_id.y * num_workgroups.x) + group_id.x);
+    if (group_flat >= num_groups_n) {
+        return;
+    }
     let stride_bytes = (((n * 4u) + 255u) & 4294967040u);
     let stride_words = (stride_bytes / 4u);
     if (idx < n) {
-        let _e21 = b_w[idx];
-        w_val = _e21;
+        let _e39 = b_w[idx];
+        w_val = _e39;
     }
     loop {
-        let _e24 = i;
-        if (_e24 <= j) {
+        let _e42 = i;
+        if (_e42 <= j) {
         } else {
             break;
         }
         {
             v = vec4(0f);
             if (idx < n) {
-                let _e30 = i;
-                if (_e30 <= j) {
-                    let _e34 = i;
-                    let _e38 = b_basis[((_e34 * stride_words) + idx)];
-                    v.x = _e38;
+                let _e48 = i;
+                if (_e48 <= j) {
+                    let _e52 = i;
+                    let _e56 = b_basis[((_e52 * stride_words) + idx)];
+                    v.x = _e56;
                 }
-                let _e39 = i;
-                if ((_e39 + 1u) <= j) {
-                    let _e44 = i;
-                    let _e51 = b_basis[(((_e44 + 1u) * stride_words) + idx)];
-                    v.y = _e51;
+                let _e57 = i;
+                if ((_e57 + 1u) <= j) {
+                    let _e62 = i;
+                    let _e69 = b_basis[(((_e62 + 1u) * stride_words) + idx)];
+                    v.y = _e69;
                 }
-                let _e52 = i;
-                if ((_e52 + 2u) <= j) {
-                    let _e57 = i;
-                    let _e64 = b_basis[(((_e57 + 2u) * stride_words) + idx)];
-                    v.z = _e64;
+                let _e70 = i;
+                if ((_e70 + 2u) <= j) {
+                    let _e75 = i;
+                    let _e82 = b_basis[(((_e75 + 2u) * stride_words) + idx)];
+                    v.z = _e82;
                 }
-                let _e65 = i;
-                if ((_e65 + 3u) <= j) {
-                    let _e70 = i;
-                    let _e77 = b_basis[(((_e70 + 3u) * stride_words) + idx)];
-                    v.w = _e77;
+                let _e83 = i;
+                if ((_e83 + 3u) <= j) {
+                    let _e88 = i;
+                    let _e95 = b_basis[(((_e88 + 3u) * stride_words) + idx)];
+                    v.w = _e95;
                 }
             }
-            let _e78 = v;
-            let _e79 = w_val;
-            let prod = (_e78 * _e79);
+            let _e96 = v;
+            let _e97 = w_val;
+            let prod = (_e96 * _e97);
             sdata_vec4_[local_id.x] = prod;
             workgroupBarrier();
             if (local_id.x < 32u) {
-                let _e96 = sdata_vec4_[(local_id.x + 32u)];
-                let _e97 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e97 + _e96);
+                let _e114 = sdata_vec4_[(local_id.x + 32u)];
+                let _e115 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e115 + _e114);
             }
             workgroupBarrier();
             if (local_id.x < 16u) {
-                let _e110 = sdata_vec4_[(local_id.x + 16u)];
-                let _e111 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e111 + _e110);
+                let _e128 = sdata_vec4_[(local_id.x + 16u)];
+                let _e129 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e129 + _e128);
             }
             workgroupBarrier();
             if (local_id.x < 8u) {
-                let _e124 = sdata_vec4_[(local_id.x + 8u)];
-                let _e125 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e125 + _e124);
+                let _e142 = sdata_vec4_[(local_id.x + 8u)];
+                let _e143 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e143 + _e142);
             }
             workgroupBarrier();
             if (local_id.x < 4u) {
-                let _e138 = sdata_vec4_[(local_id.x + 4u)];
-                let _e139 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e139 + _e138);
+                let _e156 = sdata_vec4_[(local_id.x + 4u)];
+                let _e157 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e157 + _e156);
             }
             workgroupBarrier();
             if (local_id.x < 2u) {
-                let _e152 = sdata_vec4_[(local_id.x + 2u)];
-                let _e153 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e153 + _e152);
+                let _e170 = sdata_vec4_[(local_id.x + 2u)];
+                let _e171 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e171 + _e170);
             }
             workgroupBarrier();
             if (local_id.x < 1u) {
-                let _e166 = sdata_vec4_[(local_id.x + 1u)];
-                let _e167 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e167 + _e166);
+                let _e184 = sdata_vec4_[(local_id.x + 1u)];
+                let _e185 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e185 + _e184);
                 let sum_1 = sdata_vec4_[0];
-                let _e172 = i;
-                if (_e172 <= j) {
-                    let _e177 = i;
-                    b_dot_partial[((_e177 * num_groups.x) + group_id.x)] = sum_1.x;
-                }
-                let _e184 = i;
-                if ((_e184 + 1u) <= j) {
-                    let _e188 = i;
-                    b_dot_partial[(((_e188 + 1u) * num_groups.x) + group_id.x)] = sum_1.y;
+                let _e190 = i;
+                if (_e190 <= j) {
+                    let _e193 = i;
+                    b_dot_partial[((_e193 * num_groups_n) + group_flat)] = sum_1.x;
                 }
                 let _e198 = i;
-                if ((_e198 + 2u) <= j) {
+                if ((_e198 + 1u) <= j) {
                     let _e202 = i;
-                    b_dot_partial[(((_e202 + 2u) * num_groups.x) + group_id.x)] = sum_1.z;
+                    b_dot_partial[(((_e202 + 1u) * num_groups_n) + group_flat)] = sum_1.y;
                 }
-                let _e212 = i;
-                if ((_e212 + 3u) <= j) {
-                    let _e216 = i;
-                    b_dot_partial[(((_e216 + 3u) * num_groups.x) + group_id.x)] = sum_1.w;
+                let _e210 = i;
+                if ((_e210 + 2u) <= j) {
+                    let _e214 = i;
+                    b_dot_partial[(((_e214 + 2u) * num_groups_n) + group_flat)] = sum_1.z;
+                }
+                let _e222 = i;
+                if ((_e222 + 3u) <= j) {
+                    let _e226 = i;
+                    b_dot_partial[(((_e226 + 3u) * num_groups_n) + group_flat)] = sum_1.w;
                 }
             }
             workgroupBarrier();
         }
         continuing {
-            let _e227 = i;
-            i = (_e227 + 4u);
+            let _e235 = i;
+            i = (_e235 + 4u);
         }
     }
     return;
@@ -61937,17 +61989,17 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
     let i_2 = group_id_1.x;
     let j_1 = params.num_iters;
     let _e8 = params.n;
-    let num_groups_n = ((_e8 + 63u) / 64u);
+    let num_groups_n_1 = ((_e8 + 63u) / 64u);
     k = local_id_1.x;
     loop {
         let _e16 = k;
-        if (_e16 < num_groups_n) {
+        if (_e16 < num_groups_n_1) {
         } else {
             break;
         }
         {
             let _e21 = k;
-            let _e24 = b_dot_partial[((i_2 * num_groups_n) + _e21)];
+            let _e24 = b_dot_partial[((i_2 * num_groups_n_1) + _e21)];
             let _e25 = sum;
             sum = (_e25 + _e24);
         }
@@ -62004,11 +62056,12 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var correction: f32 = 0f;
     var i_1: u32 = 0u;
 
-    let idx_1 = global_id_2.x;
+    let stride_x_1 = (num_workgroups_1.x * WORKGROUP_SIZE);
+    let idx_1 = ((global_id_2.y * stride_x_1) + global_id_2.x);
     let j_2 = params.num_iters;
     let n_1 = params.n;
     let max_restart_1 = params.max_restart;
@@ -62018,57 +62071,57 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
         return;
     }
     loop {
-        let _e23 = i_1;
-        if (_e23 <= j_2) {
+        let _e30 = i_1;
+        if (_e30 <= j_2) {
         } else {
             break;
         }
         {
-            let _e25 = i_1;
-            if (_e25 <= j_2) {
-                let _e31 = i_1;
-                let h_val = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + _e31)];
-                let _e36 = i_1;
-                let v_val = b_basis[((_e36 * stride_words_1) + idx_1)];
-                let _e43 = correction;
-                correction = (_e43 + (h_val * v_val));
+            let _e32 = i_1;
+            if (_e32 <= j_2) {
+                let _e38 = i_1;
+                let h_val = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + _e38)];
+                let _e43 = i_1;
+                let v_val = b_basis[((_e43 * stride_words_1) + idx_1)];
+                let _e50 = correction;
+                correction = (_e50 + (h_val * v_val));
             }
-            let _e45 = i_1;
-            if ((_e45 + 1u) <= j_2) {
-                let _e52 = i_1;
-                let h_val_1 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e52 + 1u))];
+            let _e52 = i_1;
+            if ((_e52 + 1u) <= j_2) {
                 let _e59 = i_1;
-                let v_val_1 = b_basis[(((_e59 + 1u) * stride_words_1) + idx_1)];
-                let _e68 = correction;
-                correction = (_e68 + (h_val_1 * v_val_1));
+                let h_val_1 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e59 + 1u))];
+                let _e66 = i_1;
+                let v_val_1 = b_basis[(((_e66 + 1u) * stride_words_1) + idx_1)];
+                let _e75 = correction;
+                correction = (_e75 + (h_val_1 * v_val_1));
             }
-            let _e70 = i_1;
-            if ((_e70 + 2u) <= j_2) {
-                let _e77 = i_1;
-                let h_val_2 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e77 + 2u))];
+            let _e77 = i_1;
+            if ((_e77 + 2u) <= j_2) {
                 let _e84 = i_1;
-                let v_val_2 = b_basis[(((_e84 + 2u) * stride_words_1) + idx_1)];
-                let _e93 = correction;
-                correction = (_e93 + (h_val_2 * v_val_2));
+                let h_val_2 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e84 + 2u))];
+                let _e91 = i_1;
+                let v_val_2 = b_basis[(((_e91 + 2u) * stride_words_1) + idx_1)];
+                let _e100 = correction;
+                correction = (_e100 + (h_val_2 * v_val_2));
             }
-            let _e95 = i_1;
-            if ((_e95 + 3u) <= j_2) {
-                let _e102 = i_1;
-                let h_val_3 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e102 + 3u))];
+            let _e102 = i_1;
+            if ((_e102 + 3u) <= j_2) {
                 let _e109 = i_1;
-                let v_val_3 = b_basis[(((_e109 + 3u) * stride_words_1) + idx_1)];
-                let _e118 = correction;
-                correction = (_e118 + (h_val_3 * v_val_3));
+                let h_val_3 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e109 + 3u))];
+                let _e116 = i_1;
+                let v_val_3 = b_basis[(((_e116 + 3u) * stride_words_1) + idx_1)];
+                let _e125 = correction;
+                correction = (_e125 + (h_val_3 * v_val_3));
             }
         }
         continuing {
-            let _e121 = i_1;
-            i_1 = (_e121 + 4u);
+            let _e128 = i_1;
+            i_1 = (_e128 + 4u);
         }
     }
-    let _e127 = b_w[idx_1];
-    let _e128 = correction;
-    b_w[idx_1] = (_e127 - _e128);
+    let _e134 = b_w[idx_1];
+    let _e135 = correction;
+    b_w[idx_1] = (_e134 - _e135);
     return;
 }
 "#;
@@ -63691,6 +63744,7 @@ pub mod linear_solver {
             Self { n }
         }
     }
+    pub const WORKGROUP_SIZE: u32 = 64u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const SPMV_P_V_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -64155,6 +64209,8 @@ struct SolverParams {
     n: u32,
 }
 
+const WORKGROUP_SIZE: u32 = 64u;
+
 @group(0) @binding(0) 
 var<storage, read_write> x: array<f32>;
 @group(0) @binding(1) 
@@ -64178,228 +64234,232 @@ var<storage, read_write> scalars: GpuScalars;
 @group(1) @binding(4) 
 var<uniform> params: SolverParams;
 
+fn global_index(global_id_7: vec3<u32>, num_workgroups_7: vec3<u32>) -> u32 {
+    return ((global_id_7.y * (num_workgroups_7.x * WORKGROUP_SIZE)) + global_id_7.x);
+}
+
 @compute @workgroup_size(64, 1, 1) 
-fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sum: f32 = 0f;
     var k: u32;
 
-    let row = global_id.x;
-    let _e5 = params.n;
-    if (row >= _e5) {
+    let _e3 = global_index(global_id, num_workgroups);
+    let _e6 = params.n;
+    if (_e3 >= _e6) {
         return;
     }
-    let start = row_offsets[row];
-    let end = row_offsets[(row + 1u)];
+    let start = row_offsets[_e3];
+    let end = row_offsets[(_e3 + 1u)];
     k = start;
     loop {
-        let _e16 = k;
-        if (_e16 < end) {
+        let _e17 = k;
+        if (_e17 < end) {
         } else {
             break;
         }
         {
-            let _e19 = k;
-            let col = col_indices[_e19];
-            let _e23 = k;
-            let val = matrix_values[_e23];
-            let _e29 = p[col];
-            let _e31 = sum;
-            sum = (_e31 + (val * _e29));
+            let _e20 = k;
+            let col = col_indices[_e20];
+            let _e24 = k;
+            let val = matrix_values[_e24];
+            let _e30 = p[col];
+            let _e32 = sum;
+            sum = (_e32 + (val * _e30));
         }
         continuing {
-            let _e34 = k;
-            k = (_e34 + 1u);
+            let _e35 = k;
+            k = (_e35 + 1u);
         }
     }
-    let _e38 = sum;
-    v[row] = _e38;
+    let _e39 = sum;
+    v[_e3] = _e39;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn spmv_s_t(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+fn spmv_s_t(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var sum_1: f32 = 0f;
     var k_1: u32;
 
-    let row_1 = global_id_1.x;
-    let _e5 = params.n;
-    if (row_1 >= _e5) {
+    let _e3 = global_index(global_id_1, num_workgroups_1);
+    let _e6 = params.n;
+    if (_e3 >= _e6) {
         return;
     }
-    let start_1 = row_offsets[row_1];
-    let end_1 = row_offsets[(row_1 + 1u)];
+    let start_1 = row_offsets[_e3];
+    let end_1 = row_offsets[(_e3 + 1u)];
     k_1 = start_1;
     loop {
-        let _e16 = k_1;
-        if (_e16 < end_1) {
+        let _e17 = k_1;
+        if (_e17 < end_1) {
         } else {
             break;
         }
         {
-            let _e19 = k_1;
-            let col_1 = col_indices[_e19];
-            let _e23 = k_1;
-            let val_1 = matrix_values[_e23];
-            let _e29 = s[col_1];
-            let _e31 = sum_1;
-            sum_1 = (_e31 + (val_1 * _e29));
+            let _e20 = k_1;
+            let col_1 = col_indices[_e20];
+            let _e24 = k_1;
+            let val_1 = matrix_values[_e24];
+            let _e30 = s[col_1];
+            let _e32 = sum_1;
+            sum_1 = (_e32 + (val_1 * _e30));
         }
         continuing {
-            let _e34 = k_1;
-            k_1 = (_e34 + 1u);
+            let _e35 = k_1;
+            k_1 = (_e35 + 1u);
         }
     }
-    let _e38 = sum_1;
-    t[row_1] = _e38;
+    let _e39 = sum_1;
+    t[_e3] = _e39;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn bicgstab_update_p(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn bicgstab_update_p(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var beta: f32 = 0f;
 
-    let idx = global_id_2.x;
-    let _e5 = scalars.omega;
-    let _e11 = scalars.rho_old;
-    if ((abs(_e5) >= 0.00000000000000000001f) && (abs(_e11) >= 0.00000000000000000001f)) {
-        let _e18 = scalars.rho_new;
-        let _e21 = scalars.rho_old;
-        let _e25 = scalars.alpha;
-        let _e28 = scalars.omega;
-        beta = ((_e18 / _e21) * (_e25 / _e28));
+    let _e3 = global_index(global_id_2, num_workgroups_2);
+    let _e6 = scalars.omega;
+    let _e12 = scalars.rho_old;
+    if ((abs(_e6) >= 0.00000000000000000001f) && (abs(_e12) >= 0.00000000000000000001f)) {
+        let _e19 = scalars.rho_new;
+        let _e22 = scalars.rho_old;
+        let _e26 = scalars.alpha;
+        let _e29 = scalars.omega;
+        beta = ((_e19 / _e22) * (_e26 / _e29));
     }
-    if (global_id_2.x == 0u) {
+    if (_e3 == 0u) {
         let _e37 = beta;
         scalars.beta = _e37;
     }
     let _e40 = params.n;
-    if (idx >= _e40) {
+    if (_e3 >= _e40) {
         return;
     }
-    let _e46 = r[idx];
+    let _e46 = r[_e3];
     let _e47 = beta;
-    let _e50 = p[idx];
+    let _e50 = p[_e3];
     let _e53 = scalars.omega;
-    let _e56 = v[idx];
-    p[idx] = (_e46 + (_e47 * (_e50 - (_e53 * _e56))));
+    let _e56 = v[_e3];
+    p[_e3] = (_e46 + (_e47 * (_e50 - (_e53 * _e56))));
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn bicgstab_update_s(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
+fn bicgstab_update_s(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
     var alpha: f32 = 0f;
 
-    let idx_1 = global_id_3.x;
-    let _e5 = scalars.r0_v;
-    if (abs(_e5) >= 0.00000000000000000001f) {
-        let _e11 = scalars.rho_new;
-        let _e14 = scalars.r0_v;
-        alpha = (_e11 / _e14);
+    let _e3 = global_index(global_id_3, num_workgroups_3);
+    let _e6 = scalars.r0_v;
+    if (abs(_e6) >= 0.00000000000000000001f) {
+        let _e12 = scalars.rho_new;
+        let _e15 = scalars.r0_v;
+        alpha = (_e12 / _e15);
     }
-    if (global_id_3.x == 0u) {
+    if (_e3 == 0u) {
         let _e22 = alpha;
         scalars.alpha = _e22;
     }
     let _e25 = params.n;
-    if (idx_1 >= _e25) {
+    if (_e3 >= _e25) {
         return;
     }
-    let _e31 = r[idx_1];
+    let _e31 = r[_e3];
     let _e32 = alpha;
-    let _e35 = v[idx_1];
-    s[idx_1] = (_e31 - (_e32 * _e35));
+    let _e35 = v[_e3];
+    s[_e3] = (_e31 - (_e32 * _e35));
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn bicgstab_update_x_r(@builtin(global_invocation_id) global_id_4: vec3<u32>) {
+fn bicgstab_update_x_r(@builtin(global_invocation_id) global_id_4: vec3<u32>, @builtin(num_workgroups) num_workgroups_4: vec3<u32>) {
     var omega: f32 = 0f;
 
-    let idx_2 = global_id_4.x;
-    let _e5 = scalars.t_t;
-    if (abs(_e5) >= 0.00000000000000000001f) {
-        let _e11 = scalars.t_s;
-        let _e14 = scalars.t_t;
-        omega = (_e11 / _e14);
+    let _e3 = global_index(global_id_4, num_workgroups_4);
+    let _e6 = scalars.t_t;
+    if (abs(_e6) >= 0.00000000000000000001f) {
+        let _e12 = scalars.t_s;
+        let _e15 = scalars.t_t;
+        omega = (_e12 / _e15);
     }
-    if (global_id_4.x == 0u) {
+    if (_e3 == 0u) {
         let _e22 = omega;
         scalars.omega = _e22;
         let _e27 = scalars.rho_new;
         scalars.rho_old = _e27;
     }
     let _e30 = params.n;
-    if (idx_2 >= _e30) {
+    if (_e3 >= _e30) {
         return;
     }
     let alpha_2 = scalars.alpha;
-    let _e39 = p[idx_2];
+    let _e39 = p[_e3];
     let _e41 = omega;
-    let _e44 = s[idx_2];
-    let _e47 = x[idx_2];
-    x[idx_2] = (_e47 + ((alpha_2 * _e39) + (_e41 * _e44)));
-    let _e53 = s[idx_2];
+    let _e44 = s[_e3];
+    let _e47 = x[_e3];
+    x[_e3] = (_e47 + ((alpha_2 * _e39) + (_e41 * _e44)));
+    let _e53 = s[_e3];
     let _e54 = omega;
-    let _e57 = t[idx_2];
-    r[idx_2] = (_e53 - (_e54 * _e57));
+    let _e57 = t[_e3];
+    r[_e3] = (_e53 - (_e54 * _e57));
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn cg_update_x_r(@builtin(global_invocation_id) global_id_5: vec3<u32>) {
+fn cg_update_x_r(@builtin(global_invocation_id) global_id_5: vec3<u32>, @builtin(num_workgroups) num_workgroups_5: vec3<u32>) {
     var alpha_1: f32 = 0f;
 
-    let idx_3 = global_id_5.x;
-    let _e5 = scalars.r0_v;
-    if (abs(_e5) >= 0.00000000000000000001f) {
-        let _e11 = scalars.rho_old;
-        let _e14 = scalars.r0_v;
-        alpha_1 = (_e11 / _e14);
+    let _e3 = global_index(global_id_5, num_workgroups_5);
+    let _e6 = scalars.r0_v;
+    if (abs(_e6) >= 0.00000000000000000001f) {
+        let _e12 = scalars.rho_old;
+        let _e15 = scalars.r0_v;
+        alpha_1 = (_e12 / _e15);
     }
-    if (global_id_5.x == 0u) {
+    if (_e3 == 0u) {
         let _e22 = alpha_1;
         scalars.alpha = _e22;
     }
     let _e25 = params.n;
-    if (idx_3 >= _e25) {
+    if (_e3 >= _e25) {
         return;
     }
     let _e29 = alpha_1;
-    let _e32 = p[idx_3];
-    let _e34 = x[idx_3];
-    x[idx_3] = (_e34 + (_e29 * _e32));
+    let _e32 = p[_e3];
+    let _e34 = x[_e3];
+    x[_e3] = (_e34 + (_e29 * _e32));
     let _e38 = alpha_1;
-    let _e41 = v[idx_3];
-    let _e43 = r[idx_3];
-    r[idx_3] = (_e43 - (_e38 * _e41));
+    let _e41 = v[_e3];
+    let _e43 = r[_e3];
+    r[_e3] = (_e43 - (_e38 * _e41));
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn cg_update_p(@builtin(global_invocation_id) global_id_6: vec3<u32>) {
+fn cg_update_p(@builtin(global_invocation_id) global_id_6: vec3<u32>, @builtin(num_workgroups) num_workgroups_6: vec3<u32>) {
     var beta_1: f32 = 0f;
 
-    let idx_4 = global_id_6.x;
-    let _e5 = scalars.rho_old;
-    if (abs(_e5) >= 0.00000000000000000001f) {
-        let _e11 = scalars.rho_new;
-        let _e14 = scalars.rho_old;
-        beta_1 = (_e11 / _e14);
+    let _e3 = global_index(global_id_6, num_workgroups_6);
+    let _e6 = scalars.rho_old;
+    if (abs(_e6) >= 0.00000000000000000001f) {
+        let _e12 = scalars.rho_new;
+        let _e15 = scalars.rho_old;
+        beta_1 = (_e12 / _e15);
     }
-    if (global_id_6.x == 0u) {
+    if (_e3 == 0u) {
         let _e22 = beta_1;
         scalars.beta = _e22;
         let _e27 = scalars.rho_new;
         scalars.rho_old = _e27;
     }
     let _e30 = params.n;
-    if (idx_4 >= _e30) {
+    if (_e3 >= _e30) {
         return;
     }
-    let _e36 = r[idx_4];
+    let _e36 = r[_e3];
     let _e37 = beta_1;
-    let _e40 = p[idx_4];
-    p[idx_4] = (_e36 + (_e37 * _e40));
+    let _e40 = p[_e3];
+    p[_e3] = (_e36 + (_e37 * _e40));
     return;
 }
 "#;
@@ -64486,6 +64546,7 @@ pub mod preconditioner {
             }
         }
     }
+    pub const WORKGROUP_SIZE: u32 = 64u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const BUILD_SCHUR_RHS_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -65051,6 +65112,8 @@ struct PrecondParams {
     _pad2_: u32,
 }
 
+const WORKGROUP_SIZE: u32 = 64u;
+
 @group(0) @binding(0) 
 var<storage, read_write> x: array<f32>;
 @group(0) @binding(1) 
@@ -65083,6 +65146,10 @@ var<storage, read_write> s_hat: array<f32>;
 var<storage, read_write> precond_rhs: array<f32>;
 @group(2) @binding(4) 
 var<uniform> precond_params: PrecondParams;
+
+fn global_index(global_id_4: vec3<u32>, num_workgroups_4: vec3<u32>) -> u32 {
+    return ((global_id_4.y * (num_workgroups_4.x * WORKGROUP_SIZE)) + global_id_4.x);
+}
 
 fn use_s_mode() -> bool {
     let _e2 = precond_params.mode;
@@ -65169,7 +65236,7 @@ fn safe_inverse(val: f32) -> f32 {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var rhs: f32;
     var k: u32;
 
@@ -65178,48 +65245,48 @@ fn build_schur_rhs(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     let num_cells = (total_unknowns / 3u);
-    let cell = global_id.x;
-    if (cell >= num_cells) {
+    let _e9 = global_index(global_id, num_workgroups);
+    if (_e9 >= num_cells) {
         return;
     }
-    let base = (cell * 3u);
+    let base = (_e9 * 3u);
     let row_1 = (base + 2u);
-    let _e14 = read_search_vector(row_1);
-    rhs = _e14;
+    let _e15 = read_search_vector(row_1);
+    rhs = _e15;
     let start_1 = row_offsets[row_1];
     let end_1 = row_offsets[(row_1 + 1u)];
     k = start_1;
     loop {
-        let _e25 = k;
-        if (_e25 < end_1) {
+        let _e26 = k;
+        if (_e26 < end_1) {
         } else {
             break;
         }
         {
-            let _e28 = k;
-            let col_1 = col_indices[_e28];
+            let _e29 = k;
+            let col_1 = col_indices[_e29];
             if ((col_1 % 3u) != 2u) {
-                let _e36 = k;
-                let _e38 = matrix_values[_e36];
-                let _e39 = read_hat(col_1);
-                let _e41 = rhs;
-                rhs = (_e41 - (_e38 * _e39));
+                let _e37 = k;
+                let _e39 = matrix_values[_e37];
+                let _e40 = read_hat(col_1);
+                let _e42 = rhs;
+                rhs = (_e42 - (_e39 * _e40));
             }
         }
         continuing {
-            let _e44 = k;
-            k = (_e44 + 1u);
+            let _e45 = k;
+            k = (_e45 + 1u);
         }
     }
     write_rhs((base + 0u), 0f);
     write_rhs((base + 1u), 0f);
-    let _e54 = rhs;
-    write_rhs((base + 2u), _e54);
+    let _e55 = rhs;
+    write_rhs((base + 2u), _e55);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn finalize_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+fn finalize_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var vel_u: f32;
     var vel_v: f32;
     var k_1: u32;
@@ -65230,150 +65297,150 @@ fn finalize_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
         return;
     }
     let num_cells_1 = (total_unknowns_1 / 3u);
-    let cell_1 = global_id_1.x;
-    if (cell_1 >= num_cells_1) {
+    let _e9 = global_index(global_id_1, num_workgroups_1);
+    if (_e9 >= num_cells_1) {
         return;
     }
-    let base_1 = (cell_1 * 3u);
-    let offset = (cell_1 * 9u);
+    let base_1 = (_e9 * 3u);
+    let offset = (_e9 * 9u);
     let row_u = (base_1 + 0u);
     let row_v = (base_1 + 1u);
-    let _e18 = read_hat(row_u);
-    vel_u = _e18;
-    let _e20 = read_hat(row_v);
-    vel_v = _e20;
+    let _e19 = read_hat(row_u);
+    vel_u = _e19;
+    let _e21 = read_hat(row_v);
+    vel_v = _e21;
     let inv_u = block_inv[(offset + 0u)];
     let inv_v = block_inv[(offset + 4u)];
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[(row_u + 1u)];
     k_1 = start_u;
     loop {
-        let _e41 = k_1;
-        if (_e41 < end_u) {
+        let _e42 = k_1;
+        if (_e42 < end_u) {
         } else {
             break;
         }
         {
-            let _e44 = k_1;
-            let col_2 = col_indices[_e44];
+            let _e45 = k_1;
+            let col_2 = col_indices[_e45];
             if ((col_2 % 3u) == 2u) {
-                let _e52 = k_1;
-                let _e54 = matrix_values[_e52];
-                let _e56 = read_hat(col_2);
-                let _e58 = vel_u;
-                vel_u = (_e58 - ((inv_u * _e54) * _e56));
+                let _e53 = k_1;
+                let _e55 = matrix_values[_e53];
+                let _e57 = read_hat(col_2);
+                let _e59 = vel_u;
+                vel_u = (_e59 - ((inv_u * _e55) * _e57));
             }
         }
         continuing {
-            let _e61 = k_1;
-            k_1 = (_e61 + 1u);
+            let _e62 = k_1;
+            k_1 = (_e62 + 1u);
         }
     }
     let start_v = row_offsets[row_v];
     let end_v = row_offsets[(row_v + 1u)];
     k_2 = start_v;
     loop {
-        let _e72 = k_2;
-        if (_e72 < end_v) {
+        let _e73 = k_2;
+        if (_e73 < end_v) {
         } else {
             break;
         }
         {
-            let _e75 = k_2;
-            let col_3 = col_indices[_e75];
+            let _e76 = k_2;
+            let col_3 = col_indices[_e76];
             if ((col_3 % 3u) == 2u) {
-                let _e83 = k_2;
-                let _e85 = matrix_values[_e83];
-                let _e87 = read_hat(col_3);
-                let _e89 = vel_v;
-                vel_v = (_e89 - ((inv_v * _e85) * _e87));
+                let _e84 = k_2;
+                let _e86 = matrix_values[_e84];
+                let _e88 = read_hat(col_3);
+                let _e90 = vel_v;
+                vel_v = (_e90 - ((inv_v * _e86) * _e88));
             }
         }
         continuing {
-            let _e92 = k_2;
-            k_2 = (_e92 + 1u);
+            let _e93 = k_2;
+            k_2 = (_e93 + 1u);
         }
     }
-    let _e94 = vel_u;
-    write_hat(row_u, _e94);
-    let _e95 = vel_v;
-    write_hat(row_v, _e95);
+    let _e95 = vel_u;
+    write_hat(row_u, _e95);
+    let _e96 = vel_v;
+    write_hat(row_v, _e96);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn spmv_phat_v(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn spmv_phat_v(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var sum: f32 = 0f;
     var k_3: u32;
 
-    let row_2 = global_id_2.x;
-    let _e5 = params.n;
-    if (row_2 >= _e5) {
+    let _e3 = global_index(global_id_2, num_workgroups_2);
+    let _e6 = params.n;
+    if (_e3 >= _e6) {
         return;
     }
-    let start_2 = row_offsets[row_2];
-    let end_2 = row_offsets[(row_2 + 1u)];
+    let start_2 = row_offsets[_e3];
+    let end_2 = row_offsets[(_e3 + 1u)];
     k_3 = start_2;
     loop {
-        let _e16 = k_3;
-        if (_e16 < end_2) {
+        let _e17 = k_3;
+        if (_e17 < end_2) {
         } else {
             break;
         }
         {
-            let _e19 = k_3;
-            let col_4 = col_indices[_e19];
-            let _e23 = k_3;
-            let val_1 = matrix_values[_e23];
-            let _e29 = p_hat[col_4];
-            let _e31 = sum;
-            sum = (_e31 + (val_1 * _e29));
+            let _e20 = k_3;
+            let col_4 = col_indices[_e20];
+            let _e24 = k_3;
+            let val_1 = matrix_values[_e24];
+            let _e30 = p_hat[col_4];
+            let _e32 = sum;
+            sum = (_e32 + (val_1 * _e30));
         }
         continuing {
-            let _e34 = k_3;
-            k_3 = (_e34 + 1u);
+            let _e35 = k_3;
+            k_3 = (_e35 + 1u);
         }
     }
-    let _e38 = sum;
-    v[row_2] = _e38;
+    let _e39 = sum;
+    v[_e3] = _e39;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn spmv_shat_t(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
+fn spmv_shat_t(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
     var sum_1: f32 = 0f;
     var k_4: u32;
 
-    let row_3 = global_id_3.x;
-    let _e5 = params.n;
-    if (row_3 >= _e5) {
+    let _e3 = global_index(global_id_3, num_workgroups_3);
+    let _e6 = params.n;
+    if (_e3 >= _e6) {
         return;
     }
-    let start_3 = row_offsets[row_3];
-    let end_3 = row_offsets[(row_3 + 1u)];
+    let start_3 = row_offsets[_e3];
+    let end_3 = row_offsets[(_e3 + 1u)];
     k_4 = start_3;
     loop {
-        let _e16 = k_4;
-        if (_e16 < end_3) {
+        let _e17 = k_4;
+        if (_e17 < end_3) {
         } else {
             break;
         }
         {
-            let _e19 = k_4;
-            let col_5 = col_indices[_e19];
-            let _e23 = k_4;
-            let val_2 = matrix_values[_e23];
-            let _e29 = s_hat[col_5];
-            let _e31 = sum_1;
-            sum_1 = (_e31 + (val_2 * _e29));
+            let _e20 = k_4;
+            let col_5 = col_indices[_e20];
+            let _e24 = k_4;
+            let val_2 = matrix_values[_e24];
+            let _e30 = s_hat[col_5];
+            let _e32 = sum_1;
+            sum_1 = (_e32 + (val_2 * _e30));
         }
         continuing {
-            let _e34 = k_4;
-            k_4 = (_e34 + 1u);
+            let _e35 = k_4;
+            k_4 = (_e35 + 1u);
         }
     }
-    let _e38 = sum_1;
-    t[row_3] = _e38;
+    let _e39 = sum_1;
+    t[_e3] = _e39;
     return;
 }
 "#;
@@ -66117,6 +66184,7 @@ pub mod schur_precond {
             }
         }
     }
+    pub const WORKGROUP_SIZE: u32 = 64u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const RELAX_PRESSURE_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -66669,6 +66737,8 @@ struct PrecondParams {
     _pad0_: u32,
 }
 
+const WORKGROUP_SIZE: u32 = 64u;
+
 @group(0) @binding(0) 
 var<storage> r_in: array<f32>;
 @group(0) @binding(1) 
@@ -66707,238 +66777,242 @@ fn safe_inverse(val: f32) -> f32 {
     return 0f;
 }
 
+fn global_cell(global_id_3: vec3<u32>, num_workgroups_3: vec3<u32>) -> u32 {
+    return ((global_id_3.y * (num_workgroups_3.x * WORKGROUP_SIZE)) + global_id_3.x);
+}
+
 @compute @workgroup_size(64, 1, 1) 
-fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sigma: f32 = 0f;
     var k: u32;
 
-    let cell = global_id.x;
-    let _e5 = params.num_cells;
-    if (cell >= _e5) {
+    let _e3 = global_cell(global_id, num_workgroups);
+    let _e6 = params.num_cells;
+    if (_e3 >= _e6) {
         return;
     }
-    let start = p_row_offsets[cell];
-    let end = p_row_offsets[(cell + 1u)];
+    let start = p_row_offsets[_e3];
+    let end = p_row_offsets[(_e3 + 1u)];
     k = start;
     loop {
-        let _e16 = k;
-        if (_e16 < end) {
+        let _e17 = k;
+        if (_e17 < end) {
         } else {
             break;
         }
         {
-            let _e19 = k;
-            let col_cell = p_col_indices[_e19];
-            if (col_cell != cell) {
-                let _e24 = k;
-                let _e26 = p_matrix_values[_e24];
-                let _e30 = p_sol[col_cell];
-                let _e32 = sigma;
-                sigma = (_e32 + (_e26 * _e30));
+            let _e20 = k;
+            let col_cell = p_col_indices[_e20];
+            if (col_cell != _e3) {
+                let _e25 = k;
+                let _e27 = p_matrix_values[_e25];
+                let _e31 = p_sol[col_cell];
+                let _e33 = sigma;
+                sigma = (_e33 + (_e27 * _e31));
             }
         }
         continuing {
-            let _e35 = k;
-            k = (_e35 + 1u);
+            let _e36 = k;
+            k = (_e36 + 1u);
         }
     }
-    let d_inv = diag_p_inv[cell];
-    let rhs = temp_p[cell];
-    let _e43 = sigma;
-    let hat_x = (d_inv * (rhs - _e43));
-    let x_prev = p_prev[cell];
-    let _e51 = params.omega;
-    let x_new = mix(x_prev, hat_x, _e51);
-    p_prev[cell] = x_new;
+    let d_inv = diag_p_inv[_e3];
+    let rhs = temp_p[_e3];
+    let _e44 = sigma;
+    let hat_x = (d_inv * (rhs - _e44));
+    let x_prev = p_prev[_e3];
+    let _e52 = params.omega;
+    let x_new = mix(x_prev, hat_x, _e52);
+    p_prev[_e3] = x_new;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var correction_u: f32 = 0f;
     var k_1: u32;
     var correction_v: f32 = 0f;
     var k_2: u32;
 
-    let cell_1 = global_id_1.x;
-    let _e5 = params.num_cells;
-    if (cell_1 >= _e5) {
+    let _e3 = global_cell(global_id_1, num_workgroups_1);
+    let _e6 = params.num_cells;
+    if (_e3 >= _e6) {
         return;
     }
-    let _e9 = params.unknowns_per_cell;
-    let base = (cell_1 * _e9);
-    let _e13 = params.u0_;
-    let row_u = (base + _e13);
-    let _e17 = params.u1_;
-    let row_v = (base + _e17);
-    let p_val = p_sol[cell_1];
+    let _e10 = params.unknowns_per_cell;
+    let base = (_e3 * _e10);
+    let _e14 = params.u0_;
+    let row_u = (base + _e14);
+    let _e18 = params.u1_;
+    let row_v = (base + _e18);
+    let p_val = p_sol[_e3];
     let start_u = row_offsets[row_u];
     let end_u = row_offsets[(row_u + 1u)];
     k_1 = start_u;
     loop {
-        let _e31 = k_1;
-        if (_e31 < end_u) {
+        let _e32 = k_1;
+        if (_e32 < end_u) {
         } else {
             break;
         }
         {
-            let _e34 = k_1;
-            let col = col_indices[_e34];
-            let _e39 = params.unknowns_per_cell;
-            let _e43 = params.p;
-            if ((col % _e39) == _e43) {
-                let _e47 = params.unknowns_per_cell;
-                let p_cell = (col / _e47);
-                let _e50 = k_1;
-                let _e52 = matrix_values[_e50];
-                let _e56 = p_sol[p_cell];
-                let _e58 = correction_u;
-                correction_u = (_e58 + (_e52 * _e56));
+            let _e35 = k_1;
+            let col = col_indices[_e35];
+            let _e40 = params.unknowns_per_cell;
+            let _e44 = params.p;
+            if ((col % _e40) == _e44) {
+                let _e48 = params.unknowns_per_cell;
+                let p_cell = (col / _e48);
+                let _e51 = k_1;
+                let _e53 = matrix_values[_e51];
+                let _e57 = p_sol[p_cell];
+                let _e59 = correction_u;
+                correction_u = (_e59 + (_e53 * _e57));
             }
         }
         continuing {
-            let _e61 = k_1;
-            k_1 = (_e61 + 1u);
+            let _e62 = k_1;
+            k_1 = (_e62 + 1u);
         }
     }
-    let _e67 = diag_u_inv[cell_1];
-    let _e68 = correction_u;
-    let _e70 = z_out[row_u];
-    z_out[row_u] = (_e70 - (_e67 * _e68));
+    let _e68 = diag_u_inv[_e3];
+    let _e69 = correction_u;
+    let _e71 = z_out[row_u];
+    z_out[row_u] = (_e71 - (_e68 * _e69));
     let start_v = row_offsets[row_v];
     let end_v = row_offsets[(row_v + 1u)];
     k_2 = start_v;
     loop {
-        let _e81 = k_2;
-        if (_e81 < end_v) {
+        let _e82 = k_2;
+        if (_e82 < end_v) {
         } else {
             break;
         }
         {
-            let _e84 = k_2;
-            let col_1 = col_indices[_e84];
-            let _e89 = params.unknowns_per_cell;
-            let _e93 = params.p;
-            if ((col_1 % _e89) == _e93) {
-                let _e97 = params.unknowns_per_cell;
-                let p_cell_1 = (col_1 / _e97);
-                let _e100 = k_2;
-                let _e102 = matrix_values[_e100];
-                let _e106 = p_sol[p_cell_1];
-                let _e108 = correction_v;
-                correction_v = (_e108 + (_e102 * _e106));
+            let _e85 = k_2;
+            let col_1 = col_indices[_e85];
+            let _e90 = params.unknowns_per_cell;
+            let _e94 = params.p;
+            if ((col_1 % _e90) == _e94) {
+                let _e98 = params.unknowns_per_cell;
+                let p_cell_1 = (col_1 / _e98);
+                let _e101 = k_2;
+                let _e103 = matrix_values[_e101];
+                let _e107 = p_sol[p_cell_1];
+                let _e109 = correction_v;
+                correction_v = (_e109 + (_e103 * _e107));
             }
         }
         continuing {
-            let _e111 = k_2;
-            k_2 = (_e111 + 1u);
+            let _e112 = k_2;
+            k_2 = (_e112 + 1u);
         }
     }
-    let _e117 = diag_v_inv[cell_1];
-    let _e118 = correction_v;
-    let _e120 = z_out[row_v];
-    z_out[row_v] = (_e120 - (_e117 * _e118));
-    let _e125 = params.p;
-    z_out[(base + _e125)] = p_val;
+    let _e118 = diag_v_inv[_e3];
+    let _e119 = correction_v;
+    let _e121 = z_out[row_v];
+    z_out[row_v] = (_e121 - (_e118 * _e119));
+    let _e126 = params.p;
+    z_out[(base + _e126)] = p_val;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var c: u32 = 0u;
     var rhs_p: f32;
     var k_3: u32;
     var z_val: f32;
 
-    let cell_2 = global_id_2.x;
-    let _e5 = params.num_cells;
-    if (cell_2 >= _e5) {
+    let _e3 = global_cell(global_id_2, num_workgroups_2);
+    let _e6 = params.num_cells;
+    if (_e3 >= _e6) {
         return;
     }
-    let _e9 = params.unknowns_per_cell;
-    let base_1 = (cell_2 * _e9);
-    let _e13 = params.u0_;
-    let row_u_1 = (base_1 + _e13);
-    let _e17 = params.u1_;
-    let row_v_1 = (base_1 + _e17);
-    let _e21 = params.p;
-    let row_p = (base_1 + _e21);
+    let _e10 = params.unknowns_per_cell;
+    let base_1 = (_e3 * _e10);
+    let _e14 = params.u0_;
+    let row_u_1 = (base_1 + _e14);
+    let _e18 = params.u1_;
+    let row_v_1 = (base_1 + _e18);
+    let _e22 = params.p;
+    let row_p = (base_1 + _e22);
     loop {
-        let _e24 = c;
-        let _e27 = params.unknowns_per_cell;
-        if (_e24 < _e27) {
+        let _e25 = c;
+        let _e28 = params.unknowns_per_cell;
+        if (_e25 < _e28) {
         } else {
             break;
         }
         {
-            let _e30 = c;
-            let _e34 = c;
-            let _e37 = r_in[(base_1 + _e34)];
-            z_out[(base_1 + _e30)] = _e37;
+            let _e31 = c;
+            let _e35 = c;
+            let _e38 = r_in[(base_1 + _e35)];
+            z_out[(base_1 + _e31)] = _e38;
         }
         continuing {
-            let _e39 = c;
-            c = (_e39 + 1u);
+            let _e40 = c;
+            c = (_e40 + 1u);
         }
     }
     let r_u = r_in[row_u_1];
     let r_v = r_in[row_v_1];
-    let _e51 = diag_u_inv[cell_2];
-    z_out[row_u_1] = (_e51 * r_u);
-    let _e57 = diag_v_inv[cell_2];
-    z_out[row_v_1] = (_e57 * r_v);
+    let _e52 = diag_u_inv[_e3];
+    z_out[row_u_1] = (_e52 * r_u);
+    let _e58 = diag_v_inv[_e3];
+    z_out[row_v_1] = (_e58 * r_v);
     z_out[row_p] = 0f;
-    let _e64 = r_in[row_p];
-    rhs_p = _e64;
+    let _e65 = r_in[row_p];
+    rhs_p = _e65;
     let start_1 = row_offsets[row_p];
     let end_1 = row_offsets[(row_p + 1u)];
     k_3 = start_1;
     loop {
-        let _e75 = k_3;
-        if (_e75 < end_1) {
+        let _e76 = k_3;
+        if (_e76 < end_1) {
         } else {
             break;
         }
         {
-            let _e78 = k_3;
-            let col_2 = col_indices[_e78];
-            let _e83 = params.unknowns_per_cell;
-            let rem = (col_2 % _e83);
+            let _e79 = k_3;
+            let col_2 = col_indices[_e79];
+            let _e84 = params.unknowns_per_cell;
+            let rem = (col_2 % _e84);
             z_val = 0f;
-            let _e89 = params.u0_;
-            if (rem == _e89) {
-                let _e93 = params.unknowns_per_cell;
-                let c_1 = (col_2 / _e93);
-                let _e97 = r_in[col_2];
-                let _e100 = diag_u_inv[c_1];
-                z_val = (_e97 * _e100);
+            let _e90 = params.u0_;
+            if (rem == _e90) {
+                let _e94 = params.unknowns_per_cell;
+                let c_1 = (col_2 / _e94);
+                let _e98 = r_in[col_2];
+                let _e101 = diag_u_inv[c_1];
+                z_val = (_e98 * _e101);
             } else {
-                let _e104 = params.u1_;
-                if (rem == _e104) {
-                    let _e108 = params.unknowns_per_cell;
-                    let c_2 = (col_2 / _e108);
-                    let _e112 = r_in[col_2];
-                    let _e115 = diag_v_inv[c_2];
-                    z_val = (_e112 * _e115);
+                let _e105 = params.u1_;
+                if (rem == _e105) {
+                    let _e109 = params.unknowns_per_cell;
+                    let c_2 = (col_2 / _e109);
+                    let _e113 = r_in[col_2];
+                    let _e116 = diag_v_inv[c_2];
+                    z_val = (_e113 * _e116);
                 }
             }
-            let _e118 = k_3;
-            let _e120 = matrix_values[_e118];
-            let _e121 = z_val;
-            let _e123 = rhs_p;
-            rhs_p = (_e123 - (_e120 * _e121));
+            let _e119 = k_3;
+            let _e121 = matrix_values[_e119];
+            let _e122 = z_val;
+            let _e124 = rhs_p;
+            rhs_p = (_e124 - (_e121 * _e122));
         }
         continuing {
-            let _e126 = k_3;
-            k_3 = (_e126 + 1u);
+            let _e127 = k_3;
+            k_3 = (_e127 + 1u);
         }
     }
-    let _e130 = rhs_p;
-    temp_p[cell_2] = _e130;
-    let _e135 = diag_p_inv[cell_2];
-    let _e136 = rhs_p;
-    p_sol[cell_2] = (_e135 * _e136);
-    p_prev[cell_2] = 0f;
+    let _e131 = rhs_p;
+    temp_p[_e3] = _e131;
+    let _e136 = diag_p_inv[_e3];
+    let _e137 = rhs_p;
+    p_sol[_e3] = (_e136 * _e137);
+    p_prev[_e3] = 0f;
     return;
 }
 "#;
@@ -66996,6 +67070,7 @@ pub mod schur_precond_generic {
             }
         }
     }
+    pub const WORKGROUP_SIZE: u32 = 64u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const RELAX_PRESSURE_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -67528,6 +67603,8 @@ struct PrecondParams {
     u4567_: vec4<u32>,
 }
 
+const WORKGROUP_SIZE: u32 = 64u;
+
 @group(0) @binding(0) 
 var<storage> r_in: array<f32>;
 @group(0) @binding(1) 
@@ -67573,126 +67650,130 @@ fn u_index(i_3: u32) -> u32 {
     return _e12;
 }
 
+fn global_cell(global_id_3: vec3<u32>, num_workgroups_3: vec3<u32>) -> u32 {
+    return ((global_id_3.y * (num_workgroups_3.x * WORKGROUP_SIZE)) + global_id_3.x);
+}
+
 @compute @workgroup_size(64, 1, 1) 
-fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sigma: f32 = 0f;
     var k: u32;
 
-    let cell = global_id.x;
-    let _e5 = params.num_cells;
-    if (cell >= _e5) {
+    let _e3 = global_cell(global_id, num_workgroups);
+    let _e6 = params.num_cells;
+    if (_e3 >= _e6) {
         return;
     }
-    let start = p_row_offsets[cell];
-    let end = p_row_offsets[(cell + 1u)];
+    let start = p_row_offsets[_e3];
+    let end = p_row_offsets[(_e3 + 1u)];
     k = start;
     loop {
-        let _e16 = k;
-        if (_e16 < end) {
+        let _e17 = k;
+        if (_e17 < end) {
         } else {
             break;
         }
         {
-            let _e19 = k;
-            let col_cell = p_col_indices[_e19];
-            if (col_cell != cell) {
-                let _e24 = k;
-                let _e26 = p_matrix_values[_e24];
-                let _e30 = p_sol[col_cell];
-                let _e32 = sigma;
-                sigma = (_e32 + (_e26 * _e30));
+            let _e20 = k;
+            let col_cell = p_col_indices[_e20];
+            if (col_cell != _e3) {
+                let _e25 = k;
+                let _e27 = p_matrix_values[_e25];
+                let _e31 = p_sol[col_cell];
+                let _e33 = sigma;
+                sigma = (_e33 + (_e27 * _e31));
             }
         }
         continuing {
-            let _e35 = k;
-            k = (_e35 + 1u);
+            let _e36 = k;
+            k = (_e36 + 1u);
         }
     }
-    let d_inv = diag_p_inv[cell];
-    let rhs = temp_p[cell];
-    let _e43 = sigma;
-    let hat_x = (d_inv * (rhs - _e43));
-    let x_prev = p_prev[cell];
-    let _e51 = params.omega;
-    let x_new = mix(x_prev, hat_x, _e51);
-    p_prev[cell] = x_new;
+    let d_inv = diag_p_inv[_e3];
+    let rhs = temp_p[_e3];
+    let _e44 = sigma;
+    let hat_x = (d_inv * (rhs - _e44));
+    let x_prev = p_prev[_e3];
+    let _e52 = params.omega;
+    let x_new = mix(x_prev, hat_x, _e52);
+    p_prev[_e3] = x_new;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
+fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var i: u32 = 0u;
     var correction_u: f32;
     var k_1: u32;
 
-    let cell_1 = global_id_1.x;
-    let _e5 = params.num_cells;
-    if (cell_1 >= _e5) {
+    let _e3 = global_cell(global_id_1, num_workgroups_1);
+    let _e6 = params.num_cells;
+    if (_e3 >= _e6) {
         return;
     }
-    let _e9 = params.unknowns_per_cell;
-    let base = (cell_1 * _e9);
-    let p_val = p_sol[cell_1];
+    let _e10 = params.unknowns_per_cell;
+    let base = (_e3 * _e10);
+    let p_val = p_sol[_e3];
     loop {
-        let _e15 = i;
-        let _e18 = params.u_len;
-        if (_e15 < _e18) {
+        let _e16 = i;
+        let _e19 = params.u_len;
+        if (_e16 < _e19) {
         } else {
             break;
         }
         {
-            let _e20 = i;
-            let _e21 = u_index(_e20);
-            let row_u = (base + _e21);
+            let _e21 = i;
+            let _e22 = u_index(_e21);
+            let row_u = (base + _e22);
             let start_u = row_offsets[row_u];
             let end_u = row_offsets[(row_u + 1u)];
             correction_u = 0f;
             k_1 = start_u;
             loop {
-                let _e34 = k_1;
-                if (_e34 < end_u) {
+                let _e35 = k_1;
+                if (_e35 < end_u) {
                 } else {
                     break;
                 }
                 {
-                    let _e37 = k_1;
-                    let col = col_indices[_e37];
-                    let _e42 = params.unknowns_per_cell;
-                    let _e46 = params.p;
-                    if ((col % _e42) == _e46) {
-                        let _e50 = params.unknowns_per_cell;
-                        let p_cell = (col / _e50);
-                        let _e53 = k_1;
-                        let _e55 = matrix_values[_e53];
-                        let _e58 = p_sol[p_cell];
-                        let _e60 = correction_u;
-                        correction_u = (_e60 + (_e55 * _e58));
+                    let _e38 = k_1;
+                    let col = col_indices[_e38];
+                    let _e43 = params.unknowns_per_cell;
+                    let _e47 = params.p;
+                    if ((col % _e43) == _e47) {
+                        let _e51 = params.unknowns_per_cell;
+                        let p_cell = (col / _e51);
+                        let _e54 = k_1;
+                        let _e56 = matrix_values[_e54];
+                        let _e59 = p_sol[p_cell];
+                        let _e61 = correction_u;
+                        correction_u = (_e61 + (_e56 * _e59));
                     }
                 }
                 continuing {
-                    let _e63 = k_1;
-                    k_1 = (_e63 + 1u);
+                    let _e64 = k_1;
+                    k_1 = (_e64 + 1u);
                 }
             }
-            let _e70 = params.u_len;
-            let _e72 = i;
-            let _e75 = diag_u_inv[((cell_1 * _e70) + _e72)];
-            let _e76 = correction_u;
-            let _e78 = z_out[row_u];
-            z_out[row_u] = (_e78 - (_e75 * _e76));
+            let _e71 = params.u_len;
+            let _e73 = i;
+            let _e76 = diag_u_inv[((_e3 * _e71) + _e73)];
+            let _e77 = correction_u;
+            let _e79 = z_out[row_u];
+            z_out[row_u] = (_e79 - (_e76 * _e77));
         }
         continuing {
-            let _e81 = i;
-            i = (_e81 + 1u);
+            let _e82 = i;
+            i = (_e82 + 1u);
         }
     }
-    let _e86 = params.p;
-    z_out[(base + _e86)] = p_val;
+    let _e87 = params.p;
+    z_out[(base + _e87)] = p_val;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
+fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var c: u32 = 0u;
     var i_1: u32 = 0u;
     var rhs_p: f32;
@@ -67700,117 +67781,117 @@ fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>)
     var z_val: f32;
     var i_2: u32;
 
-    let cell_2 = global_id_2.x;
-    let _e5 = params.num_cells;
-    if (cell_2 >= _e5) {
+    let _e3 = global_cell(global_id_2, num_workgroups_2);
+    let _e6 = params.num_cells;
+    if (_e3 >= _e6) {
         return;
     }
-    let _e9 = params.unknowns_per_cell;
-    let base_1 = (cell_2 * _e9);
-    let _e13 = params.p;
-    let row_p = (base_1 + _e13);
+    let _e10 = params.unknowns_per_cell;
+    let base_1 = (_e3 * _e10);
+    let _e14 = params.p;
+    let row_p = (base_1 + _e14);
     loop {
-        let _e16 = c;
-        let _e19 = params.unknowns_per_cell;
-        if (_e16 < _e19) {
+        let _e17 = c;
+        let _e20 = params.unknowns_per_cell;
+        if (_e17 < _e20) {
         } else {
             break;
         }
         {
-            let _e22 = c;
-            let _e26 = c;
-            let _e29 = r_in[(base_1 + _e26)];
-            z_out[(base_1 + _e22)] = _e29;
+            let _e23 = c;
+            let _e27 = c;
+            let _e30 = r_in[(base_1 + _e27)];
+            z_out[(base_1 + _e23)] = _e30;
         }
         continuing {
-            let _e31 = c;
-            c = (_e31 + 1u);
+            let _e32 = c;
+            c = (_e32 + 1u);
         }
     }
     loop {
-        let _e34 = i_1;
-        let _e37 = params.u_len;
-        if (_e34 < _e37) {
+        let _e35 = i_1;
+        let _e38 = params.u_len;
+        if (_e35 < _e38) {
         } else {
             break;
         }
         {
-            let _e39 = i_1;
-            let _e40 = u_index(_e39);
-            let row_u_1 = (base_1 + _e40);
-            let _e47 = params.u_len;
-            let _e49 = i_1;
-            let _e52 = diag_u_inv[((cell_2 * _e47) + _e49)];
-            let _e55 = r_in[row_u_1];
-            z_out[row_u_1] = (_e52 * _e55);
+            let _e40 = i_1;
+            let _e41 = u_index(_e40);
+            let row_u_1 = (base_1 + _e41);
+            let _e48 = params.u_len;
+            let _e50 = i_1;
+            let _e53 = diag_u_inv[((_e3 * _e48) + _e50)];
+            let _e56 = r_in[row_u_1];
+            z_out[row_u_1] = (_e53 * _e56);
         }
         continuing {
-            let _e58 = i_1;
-            i_1 = (_e58 + 1u);
+            let _e59 = i_1;
+            i_1 = (_e59 + 1u);
         }
     }
     z_out[row_p] = 0f;
-    let _e65 = r_in[row_p];
-    rhs_p = _e65;
+    let _e66 = r_in[row_p];
+    rhs_p = _e66;
     let start_1 = row_offsets[row_p];
     let end_1 = row_offsets[(row_p + 1u)];
     k_2 = start_1;
     loop {
-        let _e76 = k_2;
-        if (_e76 < end_1) {
+        let _e77 = k_2;
+        if (_e77 < end_1) {
         } else {
             break;
         }
         {
-            let _e79 = k_2;
-            let col_1 = col_indices[_e79];
-            let _e84 = params.unknowns_per_cell;
-            let rem = (col_1 % _e84);
+            let _e80 = k_2;
+            let col_1 = col_indices[_e80];
+            let _e85 = params.unknowns_per_cell;
+            let rem = (col_1 % _e85);
             z_val = 0f;
             i_2 = 0u;
             loop {
-                let _e90 = i_2;
-                let _e93 = params.u_len;
-                if (_e90 < _e93) {
+                let _e91 = i_2;
+                let _e94 = params.u_len;
+                if (_e91 < _e94) {
                 } else {
                     break;
                 }
                 {
-                    let _e95 = i_2;
-                    let _e96 = u_index(_e95);
-                    if (rem == _e96) {
-                        let _e100 = params.unknowns_per_cell;
-                        let c_1 = (col_1 / _e100);
-                        let _e104 = r_in[col_1];
-                        let _e108 = params.u_len;
-                        let _e110 = i_2;
-                        let _e113 = diag_u_inv[((c_1 * _e108) + _e110)];
-                        z_val = (_e104 * _e113);
+                    let _e96 = i_2;
+                    let _e97 = u_index(_e96);
+                    if (rem == _e97) {
+                        let _e101 = params.unknowns_per_cell;
+                        let c_1 = (col_1 / _e101);
+                        let _e105 = r_in[col_1];
+                        let _e109 = params.u_len;
+                        let _e111 = i_2;
+                        let _e114 = diag_u_inv[((c_1 * _e109) + _e111)];
+                        z_val = (_e105 * _e114);
                         break;
                     }
                 }
                 continuing {
-                    let _e116 = i_2;
-                    i_2 = (_e116 + 1u);
+                    let _e117 = i_2;
+                    i_2 = (_e117 + 1u);
                 }
             }
-            let _e119 = k_2;
-            let _e121 = matrix_values[_e119];
-            let _e122 = z_val;
-            let _e124 = rhs_p;
-            rhs_p = (_e124 - (_e121 * _e122));
+            let _e120 = k_2;
+            let _e122 = matrix_values[_e120];
+            let _e123 = z_val;
+            let _e125 = rhs_p;
+            rhs_p = (_e125 - (_e122 * _e123));
         }
         continuing {
-            let _e127 = k_2;
-            k_2 = (_e127 + 1u);
+            let _e128 = k_2;
+            k_2 = (_e128 + 1u);
         }
     }
-    let _e131 = rhs_p;
-    temp_p[cell_2] = _e131;
-    let _e136 = diag_p_inv[cell_2];
-    let _e137 = rhs_p;
-    p_sol[cell_2] = (_e136 * _e137);
-    p_prev[cell_2] = 0f;
+    let _e132 = rhs_p;
+    temp_p[_e3] = _e132;
+    let _e137 = diag_p_inv[_e3];
+    let _e138 = rhs_p;
+    p_sol[_e3] = (_e137 * _e138);
+    p_prev[_e3] = 0f;
     return;
 }
 "#;

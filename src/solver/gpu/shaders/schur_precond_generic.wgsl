@@ -60,12 +60,21 @@ fn u_index(i: u32) -> u32 {
     return params.u4567[i - 4u];
 }
 
+const WORKGROUP_SIZE: u32 = 64u;
+
+fn global_cell(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
+    return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
+}
+
 // Kernel 4: Relax Pressure (Chebyshev / SOR)
 // Reads p_sol (x_k) and p_prev (x_{k-1})
 // Writes x_{k+1} to p_prev (which becomes the new current/next state)
 @compute @workgroup_size(64)
-fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+fn relax_pressure(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let cell = global_cell(global_id, num_workgroups);
     if (cell >= params.num_cells) {
         return;
     }
@@ -105,8 +114,11 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Kernel 5: Correct Velocity
 @compute @workgroup_size(64)
-fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+fn correct_velocity(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let cell = global_cell(global_id, num_workgroups);
     if (cell >= params.num_cells) {
         return;
     }
@@ -140,8 +152,11 @@ fn correct_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Kernel 6: Merged Predict Velocity + Form Schur RHS
 @compute @workgroup_size(64)
-fn predict_and_form_schur(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+fn predict_and_form_schur(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let cell = global_cell(global_id, num_workgroups);
     if (cell >= params.num_cells) {
         return;
     }

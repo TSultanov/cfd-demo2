@@ -65,8 +65,12 @@ fn swap_rows(a: ptr<function, array<array<f32, 4>, 4>>, b: ptr<function, array<a
 }
 
 @compute @workgroup_size(64)
-fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+fn build_block_inv(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let stride_x = num_workgroups.x * 64u;
+    let cell = global_id.y * stride_x + global_id.x;
     if (cell >= params.num_cells) {
         return;
     }
@@ -149,8 +153,12 @@ fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(64)
-fn apply_block_precond(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.x;
+fn apply_block_precond(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let stride_x = num_workgroups.x * 64u;
+    let cell = global_id.y * stride_x + global_id.x;
     if (cell >= params.num_cells) {
         return;
     }

@@ -11,8 +11,12 @@ struct PackParams {
 @group(1) @binding(0) var<uniform> params: PackParams;
 
 @compute @workgroup_size(64)
-fn pack_component(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn pack_component(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let stride_x = num_workgroups.x * 64u;
+    let idx = global_id.y * stride_x + global_id.x;
     if (idx >= params.num_cells) {
         return;
     }
@@ -21,8 +25,12 @@ fn pack_component(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(64)
-fn unpack_component(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn unpack_component(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let stride_x = num_workgroups.x * 64u;
+    let idx = global_id.y * stride_x + global_id.x;
     if (idx >= params.num_cells) {
         return;
     }

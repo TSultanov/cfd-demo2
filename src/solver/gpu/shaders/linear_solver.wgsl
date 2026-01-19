@@ -33,6 +33,12 @@ struct SolverParams {
 }
 @group(1) @binding(4) var<uniform> params: SolverParams;
 
+const WORKGROUP_SIZE: u32 = 64u;
+
+fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
+    return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
+}
+
 // SpMV: v = A * p (or t = A * s)
 // We need to specify which vectors to use.
 // But bindings are fixed.
@@ -48,8 +54,11 @@ struct SolverParams {
 
 // SpMV: v = A * p
 @compute @workgroup_size(64)
-fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = global_id.x;
+fn spmv_p_v(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let row = global_index(global_id, num_workgroups);
     if (row >= params.n) {
         return;
     }
@@ -69,8 +78,11 @@ fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // SpMV: t = A * s
 @compute @workgroup_size(64)
-fn spmv_s_t(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = global_id.x;
+fn spmv_s_t(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let row = global_index(global_id, num_workgroups);
     if (row >= params.n) {
         return;
     }
@@ -90,15 +102,18 @@ fn spmv_s_t(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // BiCGStab Update P: p = r + beta * (p - omega * v)
 @compute @workgroup_size(64)
-fn bicgstab_update_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn bicgstab_update_p(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
 
     var beta = 0.0;
     if (abs(scalars.omega) >= 1e-20 && abs(scalars.rho_old) >= 1e-20) {
         beta = (scalars.rho_new / scalars.rho_old) * (scalars.alpha / scalars.omega);
     }
 
-    if (global_id.x == 0u) {
+    if (idx == 0u) {
         scalars.beta = beta;
     }
 
@@ -111,15 +126,18 @@ fn bicgstab_update_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // BiCGStab Update S: s = r - alpha * v
 @compute @workgroup_size(64)
-fn bicgstab_update_s(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn bicgstab_update_s(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
 
     var alpha = 0.0;
     if (abs(scalars.r0_v) >= 1e-20) {
         alpha = scalars.rho_new / scalars.r0_v;
     }
 
-    if (global_id.x == 0u) {
+    if (idx == 0u) {
         scalars.alpha = alpha;
     }
 
@@ -132,15 +150,18 @@ fn bicgstab_update_s(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // BiCGStab Update X and R: x = x + alpha * p + omega * s, r = s - omega * t
 @compute @workgroup_size(64)
-fn bicgstab_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn bicgstab_update_x_r(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
 
     var omega = 0.0;
     if (abs(scalars.t_t) >= 1e-20) {
         omega = scalars.t_s / scalars.t_t;
     }
 
-    if (global_id.x == 0u) {
+    if (idx == 0u) {
         scalars.omega = omega;
         scalars.rho_old = scalars.rho_new;
     }
@@ -156,15 +177,18 @@ fn bicgstab_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // CG Update X and R: x = x + alpha * p, r = r - alpha * v
 @compute @workgroup_size(64)
-fn cg_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn cg_update_x_r(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
 
     var alpha = 0.0;
     if (abs(scalars.r0_v) >= 1e-20) {
         alpha = scalars.rho_old / scalars.r0_v; // r0_v holds p.v
     }
 
-    if (global_id.x == 0u) {
+    if (idx == 0u) {
         scalars.alpha = alpha;
     }
 
@@ -178,15 +202,18 @@ fn cg_update_x_r(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // CG Update P: p = r + beta * p
 @compute @workgroup_size(64)
-fn cg_update_p(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+fn cg_update_p(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
 
     var beta = 0.0;
     if (abs(scalars.rho_old) >= 1e-20) {
         beta = scalars.rho_new / scalars.rho_old;
     }
 
-    if (global_id.x == 0u) {
+    if (idx == 0u) {
         scalars.beta = beta;
         // Update rho_old for next iteration
         scalars.rho_old = scalars.rho_new;

@@ -68,14 +68,9 @@ pub(crate) fn validate_model_owned_preconditioner_config(
     match solver.preconditioner {
         crate::solver::model::ModelPreconditionerSpec::Default => Ok(()),
         crate::solver::model::ModelPreconditionerSpec::Schur { .. } => {
-            // SolverConfig's `PreconditionerType` is not the same concept as the model-owned
-            // Schur preconditioner. Until we remove SolverConfig-level preconditioners entirely,
-            // disallow non-default values when a model-owned preconditioner is active.
-            if config_preconditioner != crate::solver::gpu::structs::PreconditionerType::Jacobi {
-                return Err(
-                    "preconditioner is model-owned for this model; do not set SolverConfig.preconditioner".to_string(),
-                );
-            }
+            // Model-owned Schur remains authoritative, but we still allow runtime configuration
+            // to select the pressure solve strategy (Chebyshev vs AMG).
+            let _ = config_preconditioner;
             Ok(())
         }
     }
@@ -88,15 +83,14 @@ mod tests {
     use crate::solver::model::{incompressible_momentum_generic_model, ModelPreconditionerSpec};
 
     #[test]
-    fn model_owned_schur_rejects_nondefault_preconditioner_config() {
+    fn model_owned_schur_allows_preconditioner_config() {
         let model = incompressible_momentum_generic_model();
         assert!(matches!(
             model.linear_solver.unwrap().preconditioner,
             ModelPreconditionerSpec::Schur { .. }
         ));
-        assert!(validate_model_owned_preconditioner_config(&model, PreconditionerType::Amg)
-            .unwrap_err()
-            .contains("model-owned"));
+        validate_model_owned_preconditioner_config(&model, PreconditionerType::Amg)
+            .expect("AMG pressure solve should be allowed for model-owned Schur");
     }
 
     #[test]

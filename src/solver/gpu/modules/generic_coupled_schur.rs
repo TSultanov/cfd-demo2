@@ -15,6 +15,10 @@ pub struct GenericCoupledSchurPreconditioner {
     setup_pipeline: wgpu::ComputePipeline,
     setup_bg: wgpu::BindGroup,
     setup_params: wgpu::Buffer,
+    pressure_values: wgpu::Buffer,
+    pressure_row_offsets: Vec<u32>,
+    pressure_col_indices: Vec<u32>,
+    pressure_num_nonzeros: u64,
     num_cells: u32,
     unknowns_per_cell: u32,
     p: u32,
@@ -30,6 +34,9 @@ impl GenericCoupledSchurPreconditioner {
         pressure_row_offsets: &wgpu::Buffer,
         pressure_col_indices: &wgpu::Buffer,
         pressure_values: &wgpu::Buffer,
+        pressure_row_offsets_host: Vec<u32>,
+        pressure_col_indices_host: Vec<u32>,
+        pressure_num_nonzeros: u64,
         diag_u_inv: &wgpu::Buffer,
         diag_p_inv: &wgpu::Buffer,
         precond_params: &wgpu::Buffer,
@@ -41,6 +48,7 @@ impl GenericCoupledSchurPreconditioner {
         u_len: u32,
         u0123: [u32; 4],
         u4567: [u32; 4],
+        pressure_kind: CoupledPressureSolveKind,
     ) -> Self {
         Self {
             schur: CoupledSchurModule::new(
@@ -52,7 +60,7 @@ impl GenericCoupledSchurPreconditioner {
                 diag_u_inv,
                 diag_p_inv,
                 precond_params,
-                CoupledPressureSolveKind::Chebyshev,
+                pressure_kind,
                 CoupledSchurKernelIds {
                     predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
                     relax_pressure: KernelId::SCHUR_GENERIC_PRECOND_RELAX_PRESSURE,
@@ -62,6 +70,10 @@ impl GenericCoupledSchurPreconditioner {
             setup_pipeline,
             setup_bg,
             setup_params,
+            pressure_values: pressure_values.clone(),
+            pressure_row_offsets: pressure_row_offsets_host,
+            pressure_col_indices: pressure_col_indices_host,
+            pressure_num_nonzeros,
             num_cells,
             unknowns_per_cell,
             p,
@@ -123,6 +135,44 @@ impl GenericCoupledSchurPreconditioner {
     pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix) {
         self.schur.ensure_amg_resources(device, matrix);
     }
+
+    fn read_pressure_values(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Vec<f32>, String> {
+        let size = self.pressure_num_nonzeros * 4;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("generic_coupled_schur:pressure_matrix_readback"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("generic_coupled_schur:pressure_matrix_readback_copy"),
+        });
+        encoder.copy_buffer_to_buffer(&self.pressure_values, 0, &staging, 0, size);
+        let submission_index = queue.submit(Some(encoder.finish()));
+
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission_index),
+            timeout: None,
+        });
+        rx.recv()
+            .map_err(|err| format!("pressure matrix readback channel recv failed: {err}"))?
+            .map_err(|err| format!("pressure matrix readback failed: {err}"))?;
+
+        let data = slice.get_mapped_range();
+        let values = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging.unmap();
+
+        Ok(values)
+    }
 }
 
 impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
@@ -157,6 +207,32 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
             pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
         }
         queue.submit(Some(encoder.finish()));
+
+        if self.schur.pressure_kind() == CoupledPressureSolveKind::Amg {
+            if !self.schur.has_amg_resources() {
+                if let Ok(values) = self.read_pressure_values(device, queue) {
+                    self.schur.ensure_amg_resources(
+                        device,
+                        CsrMatrix {
+                            row_offsets: self.pressure_row_offsets.clone(),
+                            col_indices: self.pressure_col_indices.clone(),
+                            values,
+                            num_rows: self.num_cells as usize,
+                            num_cols: self.num_cells as usize,
+                        },
+                    );
+                } else {
+                    self.schur.set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
+                }
+            } else {
+                self.schur.refresh_amg_level0_matrix(
+                    device,
+                    queue,
+                    &self.pressure_values,
+                    self.pressure_num_nonzeros,
+                );
+            }
+        }
     }
 
     fn encode_apply(

@@ -31,7 +31,6 @@ fn gpu_generic_incompressible_schur_smoke() {
         ModelPreconditionerSpec::Schur { .. }
     ));
 
-    // Model-owned Schur requires the config preconditioner to remain default/ignored.
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
@@ -62,6 +61,11 @@ fn gpu_generic_incompressible_schur_smoke() {
     for _ in 0..2 {
         solver.step();
     }
+
+    // Switching the runtime preconditioner should not crash even when the model owns the Schur
+    // block structure (runtime selection only affects the pressure solve strategy).
+    solver.set_preconditioner(PreconditionerType::Amg);
+    solver.step();
 
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());

@@ -3,6 +3,7 @@ use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWor
 use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
+use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
@@ -351,7 +352,9 @@ fn build_generic_schur(
     let b_p_matrix_values = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("GenericCoupled Schur p_matrix_values"),
         size: scalar_nnz * 4,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
 
@@ -410,6 +413,9 @@ fn build_generic_schur(
         scalar_row_offsets,
         scalar_col_indices,
         &b_p_matrix_values,
+        runtime.common.mesh.scalar_row_offsets.clone(),
+        runtime.common.mesh.scalar_col_indices.clone(),
+        scalar_nnz,
         &b_diag_u,
         &b_diag_p,
         &b_precond_params,
@@ -421,6 +427,7 @@ fn build_generic_schur(
         u_len,
         u0123,
         u4567,
+        CoupledPressureSolveKind::from_config(recipe.linear_solver.preconditioner),
     );
 
     let dispatch = DispatchGrids::for_sizes(num_dofs, num_cells);
@@ -1186,23 +1193,19 @@ pub(crate) fn param_preconditioner(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,
 ) -> Result<(), String> {
-    // Generic-coupled currently supports model-owned preconditioners (e.g. Schur).
-    // Do not allow config/runtime to override that choice.
     let PlanParamValue::Preconditioner(preconditioner) = value else {
         return Err("invalid value type".into());
     };
-    if let Some(solver) = plan.model.linear_solver {
-        if matches!(
-            solver.preconditioner,
-            crate::solver::model::ModelPreconditionerSpec::Schur { .. }
-        ) {
-            return Err("preconditioner is model-owned for this model".to_string());
-        }
-    }
 
     let r = res_mut(plan);
     r.linear_solver.preconditioner = preconditioner;
-    if let Some(krylov) = &mut r.krylov {
+
+    if let Some(schur) = &mut r.schur {
+        schur
+            .solver
+            .precond
+            .set_pressure_kind(CoupledPressureSolveKind::from_config(preconditioner));
+    } else if let Some(krylov) = &mut r.krylov {
         krylov.solver.precond.set_kind(preconditioner);
     }
     Ok(())

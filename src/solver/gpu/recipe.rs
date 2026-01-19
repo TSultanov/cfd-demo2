@@ -583,6 +583,67 @@ mod tests {
     };
 
     #[test]
+    fn recipe_derives_linear_solver_defaults_from_model_and_config() {
+        use crate::solver::model::linear_solver::{ModelLinearSolverSettings, ModelLinearSolverType};
+        use crate::solver::model::{ModelLinearSolverSpec, ModelPreconditionerSpec};
+
+        let mut model = generic_diffusion_demo_model();
+        model.linear_solver = Some(ModelLinearSolverSpec {
+            preconditioner: ModelPreconditionerSpec::Default,
+            solver: ModelLinearSolverSettings {
+                solver_type: ModelLinearSolverType::Fgmres { max_restart: 12 },
+                max_iters: 42,
+                tolerance: 1e-5,
+                tolerance_abs: 1e-9,
+            },
+        });
+
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Amg,
+            SteppingMode::Coupled,
+        )
+        .expect("recipe build");
+
+        assert_eq!(recipe.linear_solver.preconditioner, PreconditionerType::Amg);
+        assert_eq!(recipe.linear_solver.max_iters, 42);
+        assert!((recipe.linear_solver.tolerance - 1e-5).abs() < 1e-12);
+        assert!((recipe.linear_solver.tolerance_abs - 1e-9).abs() < 1e-12);
+        assert!(
+            matches!(
+                recipe.linear_solver.solver_type,
+                LinearSolverType::Fgmres { max_restart: 12 }
+            ),
+            "expected recipe to map model solver type to FGMRES(max_restart=12)"
+        );
+    }
+
+    #[test]
+    fn recipe_rejects_schur_preconditioning_without_fgmres_solver_type() {
+        use crate::solver::model::linear_solver::ModelLinearSolverType;
+
+        let mut model = incompressible_momentum_model();
+        let mut spec = model.linear_solver.expect("missing linear_solver spec");
+        spec.solver.solver_type = ModelLinearSolverType::Cg;
+        model.linear_solver = Some(spec);
+
+        let err = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("requires ModelLinearSolverType::Fgmres"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn implicit_recipe_includes_apply_kernel_via_module_composition() {
         let model = generic_diffusion_demo_model();
         let recipe = SolverRecipe::from_model(

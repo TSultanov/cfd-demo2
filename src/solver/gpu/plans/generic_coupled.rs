@@ -8,7 +8,6 @@ use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::gpu::runtime::GpuCsrRuntime;
-use crate::solver::gpu::structs::GpuConstants;
 use crate::solver::mesh::{BoundaryType, Mesh};
 use crate::solver::model::ModelSpec;
 
@@ -26,7 +25,10 @@ pub(crate) async fn build_generic_coupled_backend(
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<GenericCoupledBuilt, String> {
-    let unknowns_per_cell = model.system.unknowns_per_cell();
+    let unknowns_per_cell: u32 = recipe
+        .unknowns_per_cell
+        .try_into()
+        .map_err(|_| "recipe.unknowns_per_cell overflows u32".to_string())?;
     let runtime = GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue).await;
 
     let device = &runtime.common.context.device;
@@ -35,21 +37,13 @@ pub(crate) async fn build_generic_coupled_backend(
     let num_cells = runtime.common.num_cells;
 
     // Create unified field resources from recipe.
-    let eos_params = model.eos().runtime_params();
-    let mut initial_constants = GpuConstants::default();
-    initial_constants.eos_gamma = eos_params.gamma;
-    initial_constants.eos_gm1 = eos_params.gm1;
-    initial_constants.eos_r = eos_params.r;
-    initial_constants.eos_dp_drho = eos_params.dp_drho;
-    initial_constants.eos_p_offset = eos_params.p_offset;
-    initial_constants.eos_theta_ref = eos_params.theta_ref;
     let fields = UnifiedFieldResources::from_recipe(
         device,
         &recipe,
         num_cells,
         runtime.common.num_faces,
         stride,
-        initial_constants,
+        recipe.initial_constants,
     );
 
     // Boundary-condition buffers are stored per-face x unknown-component so flux modules

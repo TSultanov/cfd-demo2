@@ -11,7 +11,7 @@
 
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::modules::graph::DispatchKind;
-use crate::solver::gpu::structs::PreconditionerType;
+use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::linear_solver::ModelLinearSolverType;
 use crate::solver::model::{
@@ -190,6 +190,9 @@ pub struct SolverRecipe {
     /// Whether the model requires a low-mach params uniform buffer.
     pub requires_low_mach_params: bool,
 
+    /// Initial constants derived from the model + configuration.
+    pub initial_constants: GpuConstants,
+
     /// Number of unknowns per cell in the coupled system
     pub unknowns_per_cell: usize,
 }
@@ -259,6 +262,16 @@ impl SolverRecipe {
             crate::solver::model::eos::EosSpec::IdealGas { .. }
                 | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
         );
+
+        // Initialize constants purely from the EOS module (and override only the EOS fields).
+        let eos_params = eos.runtime_params();
+        let mut initial_constants = GpuConstants::default();
+        initial_constants.eos_gamma = eos_params.gamma;
+        initial_constants.eos_gm1 = eos_params.gm1;
+        initial_constants.eos_r = eos_params.r;
+        initial_constants.eos_dp_drho = eos_params.dp_drho;
+        initial_constants.eos_p_offset = eos_params.p_offset;
+        initial_constants.eos_theta_ref = eos_params.theta_ref;
 
         // Emit kernel specs in terms of stable KernelIds.
         //
@@ -375,6 +388,7 @@ impl SolverRecipe {
             gradient_fields,
             flux,
             requires_low_mach_params,
+            initial_constants,
             unknowns_per_cell: model.system.unknowns_per_cell() as usize,
         })
     }
@@ -896,5 +910,26 @@ mod tests {
             .kernels
             .iter()
             .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+    }
+
+    #[test]
+    fn recipe_derives_initial_constants_from_eos_module() {
+        let model = compressible_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("recipe build");
+
+        let eos_params = model.eos_checked().expect("model eos").runtime_params();
+        assert!((recipe.initial_constants.eos_gamma - eos_params.gamma).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_gm1 - eos_params.gm1).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_r - eos_params.r).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_dp_drho - eos_params.dp_drho).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_p_offset - eos_params.p_offset).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_theta_ref - eos_params.theta_ref).abs() < 1e-6);
     }
 }

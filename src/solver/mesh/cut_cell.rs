@@ -1,7 +1,7 @@
 use super::geometry::Geometry;
+use super::meshgen_utils::{compute_normal, intersect_lines};
 use super::quadtree::{collect_leaves, refine_node, QuadNode};
 use super::structs::{BoundaryType, Mesh};
-use super::utils::{compute_normal, intersect_lines};
 use ahash::AHashMap;
 use nalgebra::{Point2, Vector2};
 use std::time::Instant;

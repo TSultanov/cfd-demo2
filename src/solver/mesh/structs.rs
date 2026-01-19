@@ -1,6 +1,8 @@
-use super::geometry::Geometry;
 use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
+
+#[cfg(feature = "meshgen")]
+use super::geometry::Geometry;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BoundaryType {
@@ -157,6 +159,7 @@ impl Mesh {
             });
     }
 
+    #[cfg(feature = "meshgen")]
     pub fn smooth<G: Geometry + Sync>(&mut self, geo: &G, target_skew: f64, max_iterations: usize) {
         let n_verts = self.vx.len();
         let mut adj = vec![Vec::new(); n_verts];

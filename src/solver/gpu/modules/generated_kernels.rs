@@ -15,6 +15,7 @@ struct KernelBindGroups {
 
 pub struct GeneratedKernelsModule {
     state_step_index: Arc<AtomicUsize>,
+    max_compute_workgroups_per_dimension: u32,
     pipelines: HashMap<KernelId, wgpu::ComputePipeline>,
     bind_groups: HashMap<KernelId, KernelBindGroups>,
 }
@@ -27,6 +28,7 @@ impl GeneratedKernelsModule {
         registry: &ResourceRegistry<'_>,
         state_step_index: Arc<AtomicUsize>,
     ) -> Result<Self, String> {
+        let max_compute_workgroups_per_dimension = device.limits().max_compute_workgroups_per_dimension;
         let mut pipelines = HashMap::new();
         let mut bind_groups = HashMap::new();
 
@@ -73,6 +75,7 @@ impl GeneratedKernelsModule {
 
         Ok(Self {
             state_step_index,
+            max_compute_workgroups_per_dimension,
             pipelines,
             bind_groups,
         })
@@ -80,6 +83,23 @@ impl GeneratedKernelsModule {
 
     fn step_index(&self) -> usize {
         self.state_step_index.load(Ordering::Relaxed) % 3
+    }
+
+    fn dispatch_cells_or_faces(&self, items: u32) -> (u32, u32, u32) {
+        const WORKGROUP_SIZE_X: u32 = 64;
+
+        let groups = (items + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        if groups <= self.max_compute_workgroups_per_dimension {
+            return (groups, 1, 1);
+        }
+
+        let x = self.max_compute_workgroups_per_dimension;
+        let y = (groups + x - 1) / x;
+        assert!(
+            y <= self.max_compute_workgroups_per_dimension,
+            "dispatch requires more than 2D grid: groups={groups} max={x}"
+        );
+        (x, y, 1)
     }
 }
 
@@ -110,8 +130,8 @@ impl GpuComputeModule for GeneratedKernelsModule {
 
     fn dispatch(&self, kind: DispatchKind, runtime: RuntimeDims) -> (u32, u32, u32) {
         match kind {
-            DispatchKind::Cells => ((runtime.num_cells + 63) / 64, 1, 1),
-            DispatchKind::Faces => ((runtime.num_faces + 63) / 64, 1, 1),
+            DispatchKind::Cells => self.dispatch_cells_or_faces(runtime.num_cells),
+            DispatchKind::Faces => self.dispatch_cells_or_faces(runtime.num_faces),
             DispatchKind::Custom { x, y, z } => (x, y, z),
         }
     }
@@ -126,4 +146,3 @@ impl UnifiedGraphModule for GeneratedKernelsModule {
         self.bind_groups.contains_key(&id).then_some(id)
     }
 }
-

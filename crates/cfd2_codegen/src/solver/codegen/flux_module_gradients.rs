@@ -190,6 +190,7 @@ fn resolve_base_scalar(layout: &StateLayout, component: &str) -> Result<(String,
 fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
+    items.push(Item::Struct(constants_struct()));
     items.push(Item::Comment("Group 0: Mesh".to_string()));
     items.extend(mesh_bindings());
     items.push(Item::Comment("Group 1: Fields".to_string()));
@@ -211,12 +212,42 @@ fn vector2_struct() -> StructDef {
     )
 }
 
+fn constants_struct() -> StructDef {
+    StructDef::new(
+        "Constants",
+        vec![
+            StructField::new("dt", Type::F32),
+            StructField::new("dt_old", Type::F32),
+            StructField::new("dtau", Type::F32),
+            StructField::new("time", Type::F32),
+            StructField::new("viscosity", Type::F32),
+            StructField::new("density", Type::F32),
+            StructField::new("component", Type::U32),
+            StructField::new("alpha_p", Type::F32),
+            StructField::new("scheme", Type::U32),
+            StructField::new("alpha_u", Type::F32),
+            StructField::new("stride_x", Type::U32),
+            StructField::new("time_scheme", Type::U32),
+        ],
+    )
+}
+
 fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
         name,
         ty,
         StorageClass::Storage,
         Some(access),
+        vec![Attribute::Group(group), Attribute::Binding(binding)],
+    ))
+}
+
+fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
+    Item::GlobalVar(GlobalVar::new(
+        name,
+        ty,
+        StorageClass::Uniform,
+        None,
         vec![Attribute::Group(group), Attribute::Binding(binding)],
     ))
 }
@@ -273,13 +304,16 @@ fn mesh_bindings() -> Vec<Item> {
 }
 
 fn state_bindings() -> Vec<Item> {
-    vec![storage_var(
-        "state",
-        Type::array(Type::F32),
-        1,
-        0,
-        AccessMode::ReadWrite,
-    )]
+    vec![
+        storage_var(
+            "state",
+            Type::array(Type::F32),
+            1,
+            0,
+            AccessMode::ReadWrite,
+        ),
+        uniform_var("constants", Type::Custom("Constants".to_string()), 1, 1),
+    ]
 }
 
 fn boundary_bindings() -> Vec<Item> {
@@ -311,7 +345,11 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
 
     let mut stmts = Vec::new();
 
-    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::let_expr(
+        "idx",
+        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+            + Expr::ident("global_id").field("x"),
+    ));
     stmts.push(dsl::if_block_expr(
         Expr::ident("idx").ge(Expr::call_named(
             "arrayLength",

@@ -34,7 +34,7 @@ pub fn generate_dp_init_wgsl(state_stride: u32, d_p_offset: u32) -> String {
         "@compute\n\
 @workgroup_size(64)\n\
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
-    let idx = global_id.x;\n\
+    let idx = global_id.y * constants.stride_x + global_id.x;\n\
     let num_cells = arrayLength(&state) / max(STATE_STRIDE, 1u);\n\
     if (idx >= num_cells) {\n\
         return;\n\

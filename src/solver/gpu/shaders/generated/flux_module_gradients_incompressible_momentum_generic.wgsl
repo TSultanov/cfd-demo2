@@ -7,6 +7,21 @@ struct Vector2 {
     y: f32,
 }
 
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
 // Group 0: Mesh
 
 @group(0) @binding(0) 
@@ -44,6 +59,9 @@ var<storage, read> face_boundary: array<u32>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 
+@group(1) @binding(1) 
+var<uniform> constants: Constants;
+
 // Group 2: Boundary conditions (per face x unknown)
 
 @group(2) @binding(0) 
@@ -55,7 +73,7 @@ var<storage, read> bc_value: array<f32>;
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = global_id.x;
+    let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= arrayLength(&cell_vols)) {
         return;
     }

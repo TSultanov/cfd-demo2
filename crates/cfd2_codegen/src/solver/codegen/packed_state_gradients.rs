@@ -192,7 +192,11 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
 
     let mut stmts = Vec::new();
 
-    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::let_expr(
+        "idx",
+        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+            + Expr::ident("global_id").field("x"),
+    ));
     stmts.push(dsl::if_block_expr(
         Expr::ident("idx").ge(Expr::call_named(
             "arrayLength",
@@ -431,4 +435,3 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
 
     Block::new(stmts)
 }
-

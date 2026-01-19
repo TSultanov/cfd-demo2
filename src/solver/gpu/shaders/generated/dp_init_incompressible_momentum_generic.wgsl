@@ -32,7 +32,7 @@ var<uniform> constants: Constants;
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-let idx = global_id.x;
+let idx = global_id.y * constants.stride_x + global_id.x;
 let num_cells = arrayLength(&state) / max(STATE_STRIDE, 1u);
 if (idx >= num_cells) {
 return;

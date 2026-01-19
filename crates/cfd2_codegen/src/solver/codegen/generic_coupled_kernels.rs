@@ -291,6 +291,7 @@ fn base_update_items() -> Vec<Item> {
 
 fn base_apply_items() -> Vec<Item> {
     vec![
+        Item::Struct(constants_struct()),
         Item::Comment("Group 0: CSR matrix".to_string()),
         storage_var(
             "row_offsets",
@@ -316,6 +317,12 @@ fn base_apply_items() -> Vec<Item> {
         Item::Comment("Group 1: vectors".to_string()),
         storage_var("x", Type::array(Type::F32), 1, 0, AccessMode::Read),
         storage_var("y", Type::array(Type::F32), 1, 1, AccessMode::ReadWrite),
+        uniform_var(
+            "constants",
+            Type::Custom("Constants".to_string()),
+            1,
+            2,
+        ),
     ]
 }
 
@@ -372,7 +379,11 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
     );
 
     let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::let_expr(
+        "idx",
+        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+            + Expr::ident("global_id").field("x"),
+    ));
     stmts.push(dsl::if_block_expr(
         Expr::ident("idx").ge(Expr::call_named(
             "arrayLength",
@@ -816,7 +827,11 @@ fn main_update_fn(
     )];
 
     let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr("idx", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::let_expr(
+        "idx",
+        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+            + Expr::ident("global_id").field("x"),
+    ));
     stmts.push(dsl::let_expr(
         "num_cells",
         Expr::call_named("arrayLength", vec![Expr::ident("state").addr_of()]) / stride,
@@ -894,7 +909,11 @@ fn main_apply_fn() -> Function {
     )];
 
     let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr("row", Expr::ident("global_id").field("x")));
+    stmts.push(dsl::let_expr(
+        "row",
+        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+            + Expr::ident("global_id").field("x"),
+    ));
     stmts.push(dsl::let_expr(
         "n",
         Expr::call_named("arrayLength", vec![Expr::ident("row_offsets").addr_of()]) - 1u32,

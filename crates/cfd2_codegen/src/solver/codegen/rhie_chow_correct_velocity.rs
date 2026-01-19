@@ -19,16 +19,37 @@ const GRAD_P_X_OFFSET: u32 = {grad_p_x_offset}u;\n\
 const GRAD_P_Y_OFFSET: u32 = {grad_p_y_offset}u;\n\n"
     ));
 
+    // Match the shared `GpuConstants` layout used by generated kernels so we can bind the
+    // common `constants` uniform buffer without a dedicated params struct.
+    out.push_str(
+        "struct Constants {\n\
+    dt: f32,\n\
+    dt_old: f32,\n\
+    dtau: f32,\n\
+    time: f32,\n\
+    viscosity: f32,\n\
+    density: f32,\n\
+    component: u32,\n\
+    alpha_p: f32,\n\
+    scheme: u32,\n\
+    alpha_u: f32,\n\
+    stride_x: u32,\n\
+    time_scheme: u32,\n\
+}\n\n",
+    );
+
     out.push_str(
         "@group(0) @binding(0)\n\
 var<storage, read_write> state: array<f32>;\n\n",
     );
 
+    out.push_str("@group(0) @binding(1)\nvar<uniform> constants: Constants;\n\n");
+
     out.push_str(
         "@compute\n\
 @workgroup_size(64)\n\
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
-    let idx = global_id.x;\n\
+    let idx = global_id.y * constants.stride_x + global_id.x;\n\
     let num_cells = arrayLength(&state) / max(STATE_STRIDE, 1u);\n\
     if (idx >= num_cells) {\n\
         return;\n\
@@ -46,4 +67,3 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
 
     out
 }
-

@@ -159,6 +159,29 @@ fn contract_generic_coupled_graphs_have_no_assembly_fallback() {
     assert_contains(&src, "build_graph_for_phases(", "generic_coupled.rs");
 }
 
+#[test]
+fn contract_generated_wgsl_does_not_assume_1d_dispatch() {
+    let dir = repo_root().join("src/solver/gpu/shaders/generated");
+    let entries = fs::read_dir(&dir)
+        .unwrap_or_else(|err| panic!("failed to read generated WGSL dir {}: {err}", dir.display()));
+
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|err| panic!("failed to read generated WGSL entry: {err}"));
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("wgsl") {
+            continue;
+        }
+
+        let src = read_utf8(&path);
+        let context = path.display().to_string();
+
+        assert_not_contains(&src, "let idx = global_id.x;", &context);
+        assert_not_contains(&src, "let idx=global_id.x;", &context);
+        assert_not_contains(&src, "let row = global_id.x;", &context);
+        assert_not_contains(&src, "let row=global_id.x;", &context);
+    }
+}
+
 fn try_consume_char_literal(bytes: &[u8], start: usize) -> Option<usize> {
     debug_assert_eq!(bytes.get(start), Some(&b'\''));
 

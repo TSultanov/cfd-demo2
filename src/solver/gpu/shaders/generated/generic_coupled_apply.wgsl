@@ -2,6 +2,27 @@
 
 // DO NOT EDIT MANUALLY
 
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
 // Group 0: CSR matrix
 
 @group(0) @binding(0) 
@@ -21,10 +42,13 @@ var<storage, read> x: array<f32>;
 @group(1) @binding(1) 
 var<storage, read_write> y: array<f32>;
 
+@group(1) @binding(2) 
+var<uniform> constants: Constants;
+
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = global_id.x;
+    let row = global_id.y * constants.stride_x + global_id.x;
     let n = arrayLength(&row_offsets) - 1u;
     if (row >= n) {
         return;

@@ -10,6 +10,21 @@ const U_LEN: u32 = 2u;
 const U_0: u32 = 0u;
 const U_1: u32 = 1u;
 
+struct Constants {
+dt: f32,
+dt_old: f32,
+dtau: f32,
+time: f32,
+viscosity: f32,
+density: f32,
+component: u32,
+alpha_p: f32,
+scheme: u32,
+alpha_u: f32,
+stride_x: u32,
+time_scheme: u32,
+}
+
 @group(0) @binding(0)
 var<storage, read> scalar_row_offsets: array<u32>;
 
@@ -22,6 +37,9 @@ var<storage, read> matrix_values: array<f32>;
 @group(0) @binding(3)
 var<storage, read_write> state: array<f32>;
 
+@group(0) @binding(4)
+var<uniform> constants: Constants;
+
 fn safe_inverse(val: f32) -> f32 {
 if (abs(val) > 1e-14) {
 return 1.0 / val;
@@ -32,7 +50,7 @@ return 0.0;
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-let idx = global_id.x;
+let idx = global_id.y * constants.stride_x + global_id.x;
 let num_cells = arrayLength(&scalar_row_offsets) - 1u;
 if (idx >= num_cells) {
 return;

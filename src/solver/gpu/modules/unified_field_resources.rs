@@ -67,8 +67,9 @@ impl UnifiedFieldResources {
         num_cells: u32,
         num_faces: u32,
         state_stride: u32,
-        initial_constants: GpuConstants,
+        mut initial_constants: GpuConstants,
     ) -> Self {
+        initial_constants.stride_x = device.limits().max_compute_workgroups_per_dimension * 64;
         let state_size = num_cells as usize * state_stride as usize;
         let zero_state = vec![0.0f32; state_size];
 

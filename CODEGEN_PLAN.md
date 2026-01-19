@@ -206,6 +206,7 @@ Completed:
 - Gap 0 hardening: Rhie–Chow aux kernel IDs are module-local; plus a contract test proving a module-defined `KernelId("contract/...")` can be scheduled/generated without editing `src/solver/model/kernel.rs`.
 - Gap 0 cleanup: moved `flux_module_module(...)` and `generic_coupled_module(...)` into `src/solver/model/modules/` (call sites updated; no behavior change).
 - Gap 3 follow-up: eliminated centralized named-param handler registration (`all_named_param_handlers`) in favor of module-owned registries.
+- Gap 3 hardening: named-param handler registries are build-time discovered from `src/solver/gpu/lowering/named_params/*.rs` (no central module-name `match`); added contract coverage; OpenFOAM reference tests pass.
 - Gap 4 hardening: added a contract test preventing `include_str!()` WGSL embedding in `src/solver/gpu` (solver runtime must consume registry-provided WGSL).
 - Gap 4 progress: infrastructure bind groups now build from `kernel_registry` binding metadata + pipeline layouts (no direct `crate::solver::gpu::bindings` usage in solver runtime).
 - Gap 4 hardening: added a contract test preventing `crate::solver::gpu::bindings` dependencies in `src/solver/gpu` (runtime wiring must stay metadata-driven).

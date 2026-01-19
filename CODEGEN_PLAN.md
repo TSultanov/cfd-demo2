@@ -233,6 +233,7 @@ Completed:
 - Gap 0 progress: face-flux buffer sizing is derived from the `flux_module` manifest + `system.unknowns_per_cell()`; OpenFOAM reference tests pass.
 - Gap 0 progress: gradient-buffer strategy is derived from method config (`CoupledCapabilities.gradient_storage`) and `ModelSpec` no longer carries a derived `ModelGpuSpec`; OpenFOAM reference tests pass.
 - Gap 0 progress: initial GPU EOS constants are derived from the recipe (which derives them from the EOS module); OpenFOAM reference tests pass.
+- Gap 0 progress: initial advection/time-scheme constants are derived from the recipe/config (no post-build `set_named_param` initialization); OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

@@ -242,6 +242,7 @@ Completed:
 - Preconditioner init: model-driven lowering seeds the `preconditioner` named param only when declared by module manifests (no linear-solver-specific gating in lowering).
 - UI/config alignment: preconditioner selection (Jacobi/BlockJacobi/AMG) is enabled when declared by model manifests, and Schur models can select the pressure solve strategy; OpenFOAM reference tests pass.
 - BlockJacobi hardening: unsupported block sizes (e.g. `unknowns_per_cell > 16`) fall back safely to diagonal Jacobi at runtime, and the UI disables/annotates the option based on model config; OpenFOAM reference tests pass.
+- Solver-core cleanup: removed unused per-family GPU helpers (`gpu::model_defaults`, `modules::compressible_lowering`) so the public surface stays model-agnostic; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

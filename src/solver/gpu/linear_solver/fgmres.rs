@@ -1272,7 +1272,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 });
                 pass.set_pipeline(core.pipeline_calc_dots_cgs);
                 pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups(core.num_dot_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1290,7 +1290,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 });
                 pass.set_pipeline(core.pipeline_update_w_cgs);
                 pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups(core.num_dot_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
             core.queue.submit(Some(encoder.finish()));
         }

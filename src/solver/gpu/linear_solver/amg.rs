@@ -1,4 +1,5 @@
 use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
@@ -581,6 +582,8 @@ impl AmgResources {
 
             let fine_groups = fine.size.div_ceil(64);
             let coarse_groups = coarse.size.div_ceil(64);
+            let (fine_dispatch_x, fine_dispatch_y) = dispatch_2d(fine_groups);
+            let (coarse_dispatch_x, coarse_dispatch_y) = dispatch_2d(coarse_groups);
 
             pass.push_debug_group(&format!("AMG Down L{}->L{}", i, i + 1));
 
@@ -590,7 +593,7 @@ impl AmgResources {
             pass.set_bind_group(1, state_bg(i), &[]);
             pass.set_bind_group(2, &fine.bg_r, &[]);
             pass.set_bind_group(3, fine.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
-            pass.dispatch_workgroups(fine_groups, 1, 1);
+            pass.dispatch_workgroups(fine_dispatch_x, fine_dispatch_y, 1);
 
             // 2. Fused Residual + Restrict (r_fine implicit, r_coarse = R * (b - Ax))
             if let Some(bg_cross) = &fine.bg_restrict {
@@ -604,7 +607,7 @@ impl AmgResources {
                 pass.set_bind_group(1, state_bg(i), &[]);
                 pass.set_bind_group(2, &fine.bg_r, &[]); // bg_r contains R op buffers
                 pass.set_bind_group(3, bg_cross, &[]);
-                pass.dispatch_workgroups(coarse_groups, 1, 1);
+                pass.dispatch_workgroups(coarse_dispatch_x, coarse_dispatch_y, 1);
             }
 
             // Clear coarse solution x (ready for solve at next level)
@@ -613,7 +616,7 @@ impl AmgResources {
             pass.set_bind_group(1, state_bg(i + 1), &[]); // Binds coarse x
             pass.set_bind_group(2, &coarse.bg_r, &[]);
             pass.set_bind_group(3, coarse.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
-            pass.dispatch_workgroups(coarse_groups, 1, 1);
+            pass.dispatch_workgroups(coarse_dispatch_x, coarse_dispatch_y, 1);
 
             pass.pop_debug_group();
         }
@@ -621,6 +624,7 @@ impl AmgResources {
         // Coarsest solve
         let coarsest = &self.levels[num_levels - 1];
         let coarsest_groups = coarsest.size.div_ceil(64);
+        let (coarsest_dispatch_x, coarsest_dispatch_y) = dispatch_2d(coarsest_groups);
         {
             pass.push_debug_group("AMG Coarse Solve");
             pass.set_pipeline(&self.pipeline_smooth);
@@ -629,7 +633,7 @@ impl AmgResources {
             pass.set_bind_group(2, &coarsest.bg_r, &[]);
             pass.set_bind_group(3, &self.bg_cross_dummy, &[]);
             for _ in 0..10 {
-                pass.dispatch_workgroups(coarsest_groups, 1, 1);
+                pass.dispatch_workgroups(coarsest_dispatch_x, coarsest_dispatch_y, 1);
             }
             pass.pop_debug_group();
         }
@@ -639,6 +643,7 @@ impl AmgResources {
             let fine = &self.levels[i];
             let _coarse = &self.levels[i + 1];
             let fine_groups = fine.size.div_ceil(64);
+            let (fine_dispatch_x, fine_dispatch_y) = dispatch_2d(fine_groups);
 
             pass.push_debug_group(&format!("AMG Up L{}->L{}", i + 1, i));
 
@@ -649,7 +654,7 @@ impl AmgResources {
                 pass.set_bind_group(1, state_bg(i), &[]);
                 pass.set_bind_group(2, &fine.bg_p, &[]); // P op
                 pass.set_bind_group(3, bg_cross, &[]); // Coarse x
-                pass.dispatch_workgroups(fine_groups, 1, 1);
+                pass.dispatch_workgroups(fine_dispatch_x, fine_dispatch_y, 1);
             }
 
             // Post-smooth
@@ -658,7 +663,7 @@ impl AmgResources {
             pass.set_bind_group(1, state_bg(i), &[]);
             pass.set_bind_group(2, &fine.bg_p, &[]);
             pass.set_bind_group(3, fine.bg_prolongate.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
-            pass.dispatch_workgroups(fine_groups, 1, 1);
+            pass.dispatch_workgroups(fine_dispatch_x, fine_dispatch_y, 1);
 
             pass.pop_debug_group();
         }

@@ -1,4 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
 use crate::solver::gpu::structs::{LinearSolverStats, SolverParams};
 
 pub struct ScalarCgModule {
@@ -215,6 +216,7 @@ impl ScalarCgModule {
 
         let start = std::time::Instant::now();
         let num_groups = self.update_params(context, n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(num_groups);
         let buffer_size = (n as u64) * 4;
 
         let zeros = vec![0.0_f32; n as usize];
@@ -241,7 +243,7 @@ impl ScalarCgModule {
                 pass.set_pipeline(&self.pipeline_dot);
                 pass.set_bind_group(0, &self.bg_dot_params, &[]);
                 pass.set_bind_group(1, &self.bg_dot_r_r, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -267,7 +269,7 @@ impl ScalarCgModule {
                 pass.set_pipeline(&self.pipeline_spmv_p_v);
                 pass.set_bind_group(0, &self.bg_linear_state, &[]);
                 pass.set_bind_group(1, &self.bg_linear_matrix, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -277,7 +279,7 @@ impl ScalarCgModule {
                 pass.set_pipeline(&self.pipeline_dot);
                 pass.set_bind_group(0, &self.bg_dot_params, &[]);
                 pass.set_bind_group(1, &self.bg_dot_p_v, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -296,7 +298,7 @@ impl ScalarCgModule {
                 pass.set_pipeline(&self.pipeline_cg_update_x_r);
                 pass.set_bind_group(0, &self.bg_linear_state, &[]);
                 pass.set_bind_group(1, &self.bg_linear_matrix, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
 
             encoder.copy_buffer_to_buffer(&self.b_r, 0, &self.b_r0, 0, buffer_size);
@@ -309,7 +311,7 @@ impl ScalarCgModule {
                 pass.set_pipeline(&self.pipeline_dot_pair);
                 pass.set_bind_group(0, &self.bg_dot_params, &[]);
                 pass.set_bind_group(1, &self.bg_dot_pair_r0r_rr, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -328,7 +330,7 @@ impl ScalarCgModule {
                 pass.set_pipeline(&self.pipeline_cg_update_p);
                 pass.set_bind_group(0, &self.bg_linear_state, &[]);
                 pass.set_bind_group(1, &self.bg_linear_matrix, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
 
             context.queue.submit(Some(encoder.finish()));

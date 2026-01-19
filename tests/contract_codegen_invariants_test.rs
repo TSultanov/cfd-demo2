@@ -6,12 +6,8 @@ fn repo_root() -> PathBuf {
 }
 
 fn read_utf8(path: impl AsRef<Path>) -> String {
-    fs::read_to_string(&path).unwrap_or_else(|err| {
-        panic!(
-            "failed to read {}: {err}",
-            path.as_ref().display()
-        )
-    })
+    fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.as_ref().display()))
 }
 
 fn assert_not_contains(haystack: &str, needle: &str, context: &str) {
@@ -38,11 +34,7 @@ fn contract_kernel_registry_has_no_special_case_kernel_matches() {
     let src = read_utf8(&path);
 
     // Kernel registry lookups must go through the generated `(model_id, kernel_id)` mapping.
-    assert_contains(
-        &src,
-        "generated::kernel_entry_by_id",
-        "kernel_registry.rs",
-    );
+    assert_contains(&src, "generated::kernel_entry_by_id", "kernel_registry.rs");
 
     // No KernelId-specific switches in the runtime registry lookup.
     assert_not_contains(&src, "match kernel_id", "kernel_registry.rs");
@@ -222,7 +214,11 @@ fn contract_block_jacobi_preconditioner_is_wired() {
 
     let shader_path = repo_root().join("src/solver/gpu/shaders/block_precond.wgsl");
     let shader_src = read_utf8(&shader_path);
-    assert_contains(&shader_src, "params.n / params.num_cells", "block_precond.wgsl");
+    assert_contains(
+        &shader_src,
+        "params.n / params.num_cells",
+        "block_precond.wgsl",
+    );
 }
 
 #[test]
@@ -235,7 +231,11 @@ fn contract_block_jacobi_preconditioner_falls_back_for_unsupported_block_sizes()
         "fn block_jacobi_block_size",
         "runtime_preconditioner.rs",
     );
-    assert_contains(&runtime_src, "MAX_BLOCK_JACOBI", "runtime_preconditioner.rs");
+    assert_contains(
+        &runtime_src,
+        "MAX_BLOCK_JACOBI",
+        "runtime_preconditioner.rs",
+    );
 
     assert_contains(
         &runtime_src,
@@ -295,7 +295,8 @@ fn contract_generated_wgsl_does_not_assume_1d_dispatch() {
         .unwrap_or_else(|err| panic!("failed to read generated WGSL dir {}: {err}", dir.display()));
 
     for entry in entries {
-        let entry = entry.unwrap_or_else(|err| panic!("failed to read generated WGSL entry: {err}"));
+        let entry =
+            entry.unwrap_or_else(|err| panic!("failed to read generated WGSL entry: {err}"));
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("wgsl") {
             continue;
@@ -794,13 +795,11 @@ fn contract_contains_macro_invocation_detects_include_str_with_static_lifetime()
 }
 
 fn visit_rs_files_recursive<F: FnMut(&Path)>(dir: &Path, f: &mut F) {
-    let entries = fs::read_dir(dir).unwrap_or_else(|err| {
-        panic!("failed to read dir {}: {err}", dir.display())
-    });
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|err| panic!("failed to read dir {}: {err}", dir.display()));
     for entry in entries {
-        let entry = entry.unwrap_or_else(|err| {
-            panic!("failed to read entry in {}: {err}", dir.display())
-        });
+        let entry =
+            entry.unwrap_or_else(|err| panic!("failed to read entry in {}: {err}", dir.display()));
         let path = entry.path();
         if path.is_dir() {
             visit_rs_files_recursive(&path, f);
@@ -927,6 +926,23 @@ fn contract_flux_buffer_allocation_is_binding_driven() {
 }
 
 #[test]
+fn contract_solver_gpu_has_no_low_mach_binding_aliases() {
+    // ResourceRegistry/FieldProvider should resolve binding names exactly as reflected from WGSL;
+    // avoid solver-side aliasing that hides mismatches between generated bindings and runtime.
+    let registry_path = repo_root().join("src/solver/gpu/modules/resource_registry.rs");
+    let registry_src = read_utf8(&registry_path);
+    assert_not_contains(
+        &registry_src,
+        "if name == \"low_mach\"",
+        "resource_registry.rs",
+    );
+
+    let provider_path = repo_root().join("src/solver/gpu/modules/field_provider.rs");
+    let provider_src = read_utf8(&provider_path);
+    assert_not_contains(&provider_src, "\"low_mach\" |", "field_provider.rs");
+}
+
+#[test]
 fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     // Drift guard: ensure unified_assembly and flux-module reconstruction use the same shared
     // epsilon constant (no duplicated numeric literals in separate implementations).
@@ -942,23 +958,13 @@ fn contract_reconstruction_paths_share_vanleer_eps_constant() {
 
     let flux_path = repo_root().join("src/solver/model/flux_schemes.rs");
     let flux_src = read_utf8(&flux_path);
-    let flux_impl = flux_src
-        .split("#[cfg(test)]")
-        .next()
-        .unwrap_or(&flux_src);
+    let flux_impl = flux_src.split("#[cfg(test)]").next().unwrap_or(&flux_src);
     assert_not_contains(&flux_impl, "1e-8", "flux_schemes.rs");
-    assert_contains(
-        &flux_impl,
-        "limited_linear_face_value",
-        "flux_schemes.rs",
-    );
+    assert_contains(&flux_impl, "limited_linear_face_value", "flux_schemes.rs");
 
     let ua_path = repo_root().join("crates/cfd2_codegen/src/solver/codegen/reconstruction.rs");
     let ua_src = read_utf8(&ua_path);
-    let ua_impl = ua_src
-        .split("#[cfg(test)]")
-        .next()
-        .unwrap_or(&ua_src);
+    let ua_impl = ua_src.split("#[cfg(test)]").next().unwrap_or(&ua_src);
     assert_not_contains(&ua_impl, "1e-8", "reconstruction.rs");
     assert_contains(&ua_impl, "limited_linear_face_value", "reconstruction.rs");
 }

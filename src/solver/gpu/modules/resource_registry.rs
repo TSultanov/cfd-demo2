@@ -77,13 +77,6 @@ impl<'a> ResourceRegistry<'a> {
         }
 
         if let Some(fields) = self.unified_fields {
-            if name == "low_mach" {
-                if let Some(buf) = fields.low_mach_params_buffer() {
-                    return Some(wgpu::BindingResource::Buffer(
-                        buf.as_entire_buffer_binding(),
-                    ));
-                }
-            }
             if let Some(buf) = fields.buffer_for_binding(name, self.ping_pong_phase) {
                 return Some(wgpu::BindingResource::Buffer(
                     buf.as_entire_buffer_binding(),

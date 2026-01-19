@@ -66,7 +66,7 @@ pub trait FieldProvider {
             "state_old_old" => Some(&self.state().buffers()[idx_old_old]),
             "state_iter" => self.iteration_buffer(),
             "fluxes" => self.flux_buffer(),
-            "low_mach" | "low_mach_params" => self.low_mach_buffer(),
+            "low_mach_params" => self.low_mach_buffer(),
             "constants" => Some(self.constants().buffer()),
             _ => {
                 // Check for gradient field names (grad_rho, grad_rho_u_x, etc.)

@@ -26,10 +26,12 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - **OpenFOAM reference tests are the primary quality gate** for solver behavior:
   - `bash scripts/run_openfoam_reference_tests.sh`
     - (equivalent to `cargo test -p cfd2 --tests openfoam_ -- --nocapture`, but fails loudly if 0 tests are discovered)
+  - Core-only mode: `CFD2_CORE_ONLY=1 bash scripts/run_openfoam_reference_tests.sh` (runs with `--no-default-features`)
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
 
 ## Current Audit Notes (concrete simplification targets)
-- Many `tests/reproduce_*` and `tests/*profile*` are exploratory/profiling artifacts; keep the knowledge but move them out of the default test suite.
+- `profiling` is still effectively always-on in solver-core; finish feature-gating it (no-op stub in core-only builds) and keep long-running profiling tests behind the `profiling` feature.
+- Many `tests/reproduce_*` are still default test targets; move them to `examples/` or a `docs/repro/` harness (or gate behind a non-default `repro` feature).
 
 ## Remaining Gaps (simplification + pruning plan)
 
@@ -39,15 +41,11 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ### 2) Isolate optional surfaces (UI / meshgen / profiling)
 Prefer **Cargo feature-gating** first; split into new workspace crates only if feature-gating becomes awkward.
-- Add an `ui` feature that gates `src/ui/*` + the GUI binary entrypoint.
-- Add a `meshgen` feature that gates cut-cell/delaunay/voronoi/quadtree generators + geometry helpers used only for mesh generation.
-- Add a `profiling` feature for GPU profiling plumbing and long-running profiling tests.
-- Update scripts so OpenFOAM reference tests can run in “core-only” mode (e.g. `--no-default-features` if `ui` is default).
+- Add a `profiling` feature for GPU profiling plumbing, solver API surface, and long-running profiling tests.
 
 ### 3) Prune / simplify the mesh module
-- Keep a minimal mesh representation + structured mesh constructor(s) needed by OpenFOAM reference tests.
 - Move advanced mesh generation, smoothing, and geometry SDF machinery unless it is part of the “core keep list”.
-- Remove parallel/vectorized dependencies from core mesh if they’re only used for experimental meshgen.
+- Make meshgen-only deps optional (e.g. `wide`) so core-only builds don’t pull them in.
 
 ### 4) Test + bench consolidation (keep signal, drop noise)
 - Keep as default: OpenFOAM reference tests + contract tests + a small set of GPU smoke tests.

@@ -120,135 +120,44 @@ async fn lower_parts_for_model(
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
     // Otherwise, select the runtime backend based on the derived recipe structure.
-    match recipe.stepping {
-        crate::solver::gpu::recipe::SteppingMode::Coupled => {
-            let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
-                mesh,
-                model.clone(),
-                recipe.clone(),
-                device,
-                queue,
-            )
-            .await?;
+    let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
+        mesh,
+        model.clone(),
+        recipe.clone(),
+        device,
+        queue,
+    )
+    .await?;
 
-            let mut ops = ProgramOpRegistry::new();
-            models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
+    let mut ops = ProgramOpRegistry::new();
+    models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
-            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
-                built.backend,
-            ));
+    let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
+    resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
+        built.backend,
+    ));
 
-            let named_params =
-                models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
+    let named_params = models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
 
-            Ok(LoweredProgramParts {
-                model: built.model,
-                context: built.context,
-                profiling_stats: built.profiling_stats,
-                resources,
-                spec: ModelGpuProgramSpecParts {
-                    ops,
-                    num_cells: models::universal::spec_num_cells,
-                    time: models::universal::spec_time,
-                    dt: models::universal::spec_dt,
-                    state_buffer: models::universal::spec_state_buffer,
-                    write_state_bytes: models::universal::spec_write_state_bytes,
-                    set_bc_value: Some(models::universal::spec_set_bc_value),
-                    initialize_history: None,
-                    named_params,
-                    set_named_param_fallback: None,
-                    step_stats: Some(models::universal::step_stats),
-                    step_with_stats: None,
-                    linear_debug: Some(models::universal::linear_debug_provider),
-                },
-            })
-        }
-        crate::solver::gpu::recipe::SteppingMode::Implicit { .. } => {
-            let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
-                mesh,
-                model.clone(),
-                recipe.clone(),
-                device,
-                queue,
-            )
-            .await?;
-
-            let mut ops = ProgramOpRegistry::new();
-            models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
-
-            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
-                built.backend,
-            ));
-
-            let named_params =
-                models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
-
-            Ok(LoweredProgramParts {
-                model: built.model,
-                context: built.context,
-                profiling_stats: built.profiling_stats,
-                resources,
-                spec: ModelGpuProgramSpecParts {
-                    ops,
-                    num_cells: models::universal::spec_num_cells,
-                    time: models::universal::spec_time,
-                    dt: models::universal::spec_dt,
-                    state_buffer: models::universal::spec_state_buffer,
-                    write_state_bytes: models::universal::spec_write_state_bytes,
-                    set_bc_value: Some(models::universal::spec_set_bc_value),
-                    initialize_history: None,
-                    named_params,
-                    set_named_param_fallback: None,
-                    step_stats: Some(models::universal::step_stats),
-                    step_with_stats: None,
-                    linear_debug: Some(models::universal::linear_debug_provider),
-                },
-            })
-        }
-        crate::solver::gpu::recipe::SteppingMode::Explicit => {
-            let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
-                mesh,
-                model.clone(),
-                recipe.clone(),
-                device,
-                queue,
-            )
-            .await?;
-
-            let mut ops = ProgramOpRegistry::new();
-            models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
-
-            let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-            resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
-                built.backend,
-            ));
-
-            let named_params =
-                models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
-
-            Ok(LoweredProgramParts {
-                model: built.model,
-                context: built.context,
-                profiling_stats: built.profiling_stats,
-                resources,
-                spec: ModelGpuProgramSpecParts {
-                    ops,
-                    num_cells: models::universal::spec_num_cells,
-                    time: models::universal::spec_time,
-                    dt: models::universal::spec_dt,
-                    state_buffer: models::universal::spec_state_buffer,
-                    write_state_bytes: models::universal::spec_write_state_bytes,
-                    set_bc_value: Some(models::universal::spec_set_bc_value),
-                    initialize_history: None,
-                    named_params,
-                    set_named_param_fallback: None,
-                    step_stats: Some(models::universal::step_stats),
-                    step_with_stats: None,
-                    linear_debug: Some(models::universal::linear_debug_provider),
-                },
-            })
-        }
-    }
+    Ok(LoweredProgramParts {
+        model: built.model,
+        context: built.context,
+        profiling_stats: built.profiling_stats,
+        resources,
+        spec: ModelGpuProgramSpecParts {
+            ops,
+            num_cells: models::universal::spec_num_cells,
+            time: models::universal::spec_time,
+            dt: models::universal::spec_dt,
+            state_buffer: models::universal::spec_state_buffer,
+            write_state_bytes: models::universal::spec_write_state_bytes,
+            set_bc_value: Some(models::universal::spec_set_bc_value),
+            initialize_history: None,
+            named_params,
+            set_named_param_fallback: None,
+            step_stats: Some(models::universal::step_stats),
+            step_with_stats: None,
+            linear_debug: Some(models::universal::linear_debug_provider),
+        },
+    })
 }

@@ -85,6 +85,17 @@ fn contract_model_driven_lowering_does_not_branch_on_model_identity() {
 }
 
 #[test]
+fn contract_model_driven_lowering_is_single_path_for_stepping_modes() {
+    let path = repo_root().join("src/solver/gpu/lowering/model_driven.rs");
+    let src = read_utf8(&path);
+
+    // Stepping mode is already encoded in the recipe and in the program spec emitted by it.
+    // Avoid duplicating stepping-mode switches in lowering glue.
+    assert_not_contains(&src, "match recipe.stepping", "model_driven.rs");
+    assert_not_contains(&src, "SteppingMode::", "model_driven.rs");
+}
+
+#[test]
 fn contract_build_rs_has_no_per_kernel_prefix_discovery_glue() {
     let path = repo_root().join("build.rs");
     let src = read_utf8(&path);

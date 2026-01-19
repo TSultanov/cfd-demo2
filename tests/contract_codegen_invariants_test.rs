@@ -226,6 +226,40 @@ fn contract_block_jacobi_preconditioner_is_wired() {
 }
 
 #[test]
+fn contract_block_jacobi_preconditioner_falls_back_for_unsupported_block_sizes() {
+    let runtime_path = repo_root().join("src/solver/gpu/modules/runtime_preconditioner.rs");
+    let runtime_src = read_utf8(&runtime_path);
+
+    assert_contains(
+        &runtime_src,
+        "fn block_jacobi_block_size",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(&runtime_src, "MAX_BLOCK_JACOBI", "runtime_preconditioner.rs");
+
+    assert_contains(
+        &runtime_src,
+        "if self.block_jacobi_block_size().is_some()",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(
+        &runtime_src,
+        "self.refresh_jacobi_diag_inv",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(
+        &runtime_src,
+        "block_jacobi_block_size().is_none()",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(
+        &runtime_src,
+        "block_jacobi_fallback_jacobi_apply",
+        "runtime_preconditioner.rs",
+    );
+}
+
+#[test]
 fn contract_named_param_handlers_are_module_discovered() {
     let path = repo_root().join("src/solver/gpu/lowering/named_params/mod.rs");
     let src = read_utf8(&path);

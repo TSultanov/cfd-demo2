@@ -261,22 +261,6 @@ impl CFDApp {
         }
     }
 
-    fn active_model_owns_preconditioner(&self) -> bool {
-        let Some(solver) = &self.gpu_unified_solver else {
-            return false;
-        };
-        let Ok(solver) = solver.lock() else {
-            return false;
-        };
-        let Some(linear_solver) = solver.model().linear_solver else {
-            return false;
-        };
-        matches!(
-            linear_solver.preconditioner,
-            ModelPreconditionerSpec::Schur { .. }
-        )
-    }
-
     fn update_renderer_field(&self) {
         if let (Some(renderer), Some(device)) = (&self.cfd_renderer, &self.wgpu_device) {
             if let Ok(mut renderer) = renderer.lock() {
@@ -319,10 +303,16 @@ impl CFDApp {
             }
         };
 
+        const UI_MAX_BLOCK_JACOBI: u32 = 16;
         let supports_preconditioner = model
             .named_param_keys()
             .into_iter()
             .any(|k| k == "preconditioner");
+        if matches!(self.selected_preconditioner, PreconditionerType::BlockJacobi)
+            && model.system.unknowns_per_cell() > UI_MAX_BLOCK_JACOBI
+        {
+            self.selected_preconditioner = PreconditionerType::Jacobi;
+        }
         let effective_preconditioner = if supports_preconditioner {
             self.selected_preconditioner
         } else {
@@ -689,9 +679,6 @@ impl CFDApp {
     }
 
     fn update_gpu_preconditioner(&self) {
-        if self.active_model_owns_preconditioner() {
-            return;
-        }
         self.with_unified_solver(|solver| solver.set_preconditioner(self.selected_preconditioner));
     }
 }
@@ -961,13 +948,26 @@ impl eframe::App for CFDApp {
 
                         ui.separator();
                         ui.label("Preconditioner");
-                        let model_owns_preconditioner = self.active_model_owns_preconditioner();
-                        let supports_preconditioner = self
-                            .gpu_unified_solver
-                            .as_ref()
-                            .and_then(|s| s.lock().ok())
-                            .map(|s| s.model().named_param_keys().iter().any(|&k| k == "preconditioner"))
-                            .unwrap_or(false);
+                        const UI_MAX_BLOCK_JACOBI: u32 = 16;
+                        let mut model_owns_preconditioner = false;
+                        let mut supports_preconditioner = false;
+                        let mut block_jacobi_supported = false;
+                        if let Some(solver) = &self.gpu_unified_solver {
+                            if let Ok(solver) = solver.lock() {
+                                supports_preconditioner = solver
+                                    .model()
+                                    .named_param_keys()
+                                    .iter()
+                                    .any(|&k| k == "preconditioner");
+                                model_owns_preconditioner = solver
+                                    .model()
+                                    .linear_solver
+                                    .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
+                                    .unwrap_or(false);
+                                block_jacobi_supported =
+                                    solver.model().system.unknowns_per_cell() <= UI_MAX_BLOCK_JACOBI;
+                            }
+                        }
 
                         if model_owns_preconditioner {
                             ui.weak("Model-owned Schur: selector chooses pressure solve (Chebyshev vs AMG).");
@@ -989,18 +989,25 @@ impl eframe::App for CFDApp {
                                 self.selected_preconditioner = PreconditionerType::Jacobi;
                                 self.update_gpu_preconditioner();
                             }
-                            if ui
-                                .radio(
-                                    matches!(
-                                        self.selected_preconditioner,
-                                        PreconditionerType::BlockJacobi
-                                    ),
-                                    "BlockJacobi (cell block)",
-                                )
-                                .clicked()
-                            {
-                                self.selected_preconditioner = PreconditionerType::BlockJacobi;
-                                self.update_gpu_preconditioner();
+                            ui.add_enabled_ui(block_jacobi_supported, |ui| {
+                                if ui
+                                    .radio(
+                                        matches!(
+                                            self.selected_preconditioner,
+                                            PreconditionerType::BlockJacobi
+                                        ),
+                                        "BlockJacobi (cell block)",
+                                    )
+                                    .clicked()
+                                {
+                                    self.selected_preconditioner = PreconditionerType::BlockJacobi;
+                                    self.update_gpu_preconditioner();
+                                }
+                            });
+                            if !block_jacobi_supported {
+                                ui.weak(format!(
+                                    "BlockJacobi requires ≤{UI_MAX_BLOCK_JACOBI} unknowns/cell."
+                                ));
                             }
                             if ui
                                 .radio(

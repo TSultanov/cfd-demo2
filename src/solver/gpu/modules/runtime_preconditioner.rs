@@ -5,6 +5,8 @@ use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPrecondit
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::model::KernelId;
 
+const MAX_BLOCK_JACOBI: u32 = 16;
+
 pub(crate) struct RuntimePreconditionerModule {
     kind: PreconditionerType,
     identity: IdentityPreconditioner,
@@ -68,6 +70,20 @@ impl RuntimePreconditionerModule {
         self.kind = kind;
     }
 
+    fn block_jacobi_block_size(&self) -> Option<u32> {
+        if self.num_cells == 0 {
+            return None;
+        }
+        if self.num_dofs % self.num_cells != 0 {
+            return None;
+        }
+        let unknowns_per_cell = self.num_dofs / self.num_cells;
+        if unknowns_per_cell == 0 || unknowns_per_cell > MAX_BLOCK_JACOBI {
+            return None;
+        }
+        Some(unknowns_per_cell)
+    }
+
     fn ensure_jacobi_pipelines(&mut self, device: &wgpu::Device) {
         const EXTRACT_DIAG_INV: KernelId = KernelId("gmres_ops/extract_diag_inv");
         const APPLY_DIAG_INV: KernelId = KernelId("gmres_ops/apply_diag_inv");
@@ -99,12 +115,11 @@ impl RuntimePreconditionerModule {
 
     fn ensure_block_jacobi_resources(&mut self, device: &wgpu::Device) {
         self.ensure_block_jacobi_pipelines(device);
-        if self.num_cells == 0 {
+        let Some(unknowns_per_cell) = self.block_jacobi_block_size() else {
             return;
-        }
+        };
 
         if self.b_block_inv.is_none() {
-            let unknowns_per_cell = self.num_dofs / self.num_cells;
             let bytes = (self.num_cells as u64)
                 .saturating_mul(unknowns_per_cell as u64)
                 .saturating_mul(unknowns_per_cell as u64)
@@ -313,7 +328,13 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             return;
         }
         if self.kind == PreconditionerType::BlockJacobi {
-            self.build_block_jacobi(device, queue, fgmres, dispatch);
+            if self.block_jacobi_block_size().is_some() {
+                self.build_block_jacobi(device, queue, fgmres, dispatch);
+            } else {
+                // If the system block size is unsupported by the cell-block preconditioner,
+                // fall back to diagonal Jacobi so we never produce an invalid preconditioned vector.
+                self.refresh_jacobi_diag_inv(device, queue, fgmres, dispatch);
+            }
             return;
         }
 
@@ -362,6 +383,36 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         }
 
         if self.kind == PreconditionerType::BlockJacobi {
+            if self.block_jacobi_block_size().is_none() {
+                // Unsupported block size: fall back to diagonal Jacobi application.
+                self.ensure_jacobi_pipelines(device);
+                let Some(pipeline) = self.pipeline_apply_diag_inv.as_ref() else {
+                    return self
+                        .identity
+                        .encode_apply(device, encoder, fgmres, input, output, dispatch);
+                };
+
+                let vector_bg = fgmres.create_vector_bind_group(
+                    device,
+                    input,
+                    output.as_entire_binding(),
+                    output.as_entire_binding(),
+                    "runtime_preconditioner:block_jacobi_fallback_jacobi_apply",
+                );
+
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runtime_preconditioner:block_jacobi_fallback_jacobi_apply"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &vector_bg, &[]);
+                pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+                pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+                pass.set_bind_group(3, fgmres.params_bg(), &[]);
+                pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+                return;
+            }
+
             self.ensure_block_jacobi_resources(device);
             let Some(pipeline) = self.pipeline_block_jacobi_apply.as_ref() else {
                 return self

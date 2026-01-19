@@ -249,6 +249,8 @@ Completed:
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
+2) Low-Mach: either plumb `GpuLowMachParams` into generated kernel bindings + math (default Off so OpenFOAM stays stable) or remove the unused buffer/params to avoid dead knobs.
+3) Continue shifting optional resource allocation/scheduling to binding/manifest metadata (look for remaining solver-side aliases/special-cases).
 
 Status:
 - Shared generated kernels are discovered via module-owned `kernel_generators()` entries scoped as `KernelWgslScope::Shared` (and emitted once at build time).

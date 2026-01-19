@@ -823,7 +823,6 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     let eos = comp.model().eos();
     comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
         .unwrap();
-    comp.set_alpha_u(0.3).unwrap();
     comp.set_precond_model(GpuLowMachPrecondModel::WeissSmith)
         .expect("precond model");
     comp.set_precond_theta_floor(1e-6).expect("theta floor");

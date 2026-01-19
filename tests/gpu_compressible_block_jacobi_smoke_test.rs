@@ -46,7 +46,6 @@ fn gpu_compressible_block_jacobi_smoke() {
     solver
         .set_compressible_inlet_isothermal_x(1.0, 0.5, &eos)
         .unwrap();
-    solver.set_alpha_u(0.5).unwrap();
     solver.set_outer_iters(2).unwrap();
 
     let rho_init = vec![1.0f32; mesh.num_cells()];
@@ -60,4 +59,3 @@ fn gpu_compressible_block_jacobi_smoke() {
     let p = pollster::block_on(solver.get_p());
     assert!(p.iter().all(|v| v.is_finite()));
 }
-

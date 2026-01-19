@@ -43,7 +43,6 @@ fn gpu_compressible_amg_smoke() {
     solver
         .set_compressible_inlet_isothermal_x(1.0, 0.5, &eos)
         .unwrap();
-    solver.set_alpha_u(0.5).unwrap();
     solver.set_outer_iters(2).unwrap();
 
     let rho_init = vec![1.0f32; mesh.num_cells()];

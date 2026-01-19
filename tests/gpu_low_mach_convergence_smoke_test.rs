@@ -129,13 +129,11 @@ fn compressible_low_mach_convergence_smoke() {
     let eos = comp.model().eos();
     comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
         .unwrap();
-    comp.set_alpha_u(alpha_u as f32).unwrap();
     comp.set_precond_model(precond_model)
         .expect("precond model");
     comp.set_precond_theta_floor(precond_theta_floor as f32)
         .expect("theta floor");
-    comp.set_nonconverged_relax(nonconv_relax as f32)
-        .expect("nonconverged relax");
+    let _ = nonconv_relax;
     comp.set_outer_iters(comp_iters).unwrap();
 
     let rho_init = vec![density; mesh.num_cells()];

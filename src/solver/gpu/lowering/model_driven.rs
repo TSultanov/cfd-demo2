@@ -39,12 +39,6 @@ pub(crate) async fn lower_program_model_driven(
         spec,
     );
 
-    plan.set_named_param(
-        "advection_scheme",
-        PlanParamValue::Scheme(config.advection_scheme),
-    )?;
-    plan.set_named_param("time_scheme", PlanParamValue::TimeScheme(config.time_scheme))?;
-
     // If the model owns the preconditioner choice, do not allow runtime/config overrides.
     if should_set_preconditioner_param(model) {
         plan.set_named_param(

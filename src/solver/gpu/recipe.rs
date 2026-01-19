@@ -272,6 +272,8 @@ impl SolverRecipe {
         initial_constants.eos_dp_drho = eos_params.dp_drho;
         initial_constants.eos_p_offset = eos_params.p_offset;
         initial_constants.eos_theta_ref = eos_params.theta_ref;
+        initial_constants.scheme = advection_scheme.gpu_id();
+        initial_constants.time_scheme = time_scheme as u32;
 
         // Emit kernel specs in terms of stable KernelIds.
         //
@@ -917,8 +919,8 @@ mod tests {
         let model = compressible_model();
         let recipe = SolverRecipe::from_model(
             &model,
-            Scheme::Upwind,
-            TimeScheme::Euler,
+            Scheme::QUICK,
+            TimeScheme::BDF2,
             PreconditionerType::Jacobi,
             SteppingMode::Coupled,
         )
@@ -931,5 +933,7 @@ mod tests {
         assert!((recipe.initial_constants.eos_dp_drho - eos_params.dp_drho).abs() < 1e-6);
         assert!((recipe.initial_constants.eos_p_offset - eos_params.p_offset).abs() < 1e-6);
         assert!((recipe.initial_constants.eos_theta_ref - eos_params.theta_ref).abs() < 1e-6);
+        assert_eq!(recipe.initial_constants.scheme, Scheme::QUICK.gpu_id());
+        assert_eq!(recipe.initial_constants.time_scheme, TimeScheme::BDF2 as u32);
     }
 }

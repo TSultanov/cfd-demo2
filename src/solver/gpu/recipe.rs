@@ -15,8 +15,7 @@ use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::linear_solver::ModelLinearSolverType;
 use crate::solver::model::{
-    expand_field_components, FluxSpec, GradientStorage, KernelId, ModelPreconditionerSpec,
-    ModelSpec,
+    expand_field_components, GradientStorage, KernelId, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use std::collections::HashSet;
@@ -96,6 +95,13 @@ pub struct BufferSpec {
     pub name: &'static str,
     pub size_per_cell: usize,
     pub purpose: BufferPurpose,
+}
+
+/// Specification for a face-based flux buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FluxSpec {
+    /// Floats per face.
+    pub stride: u32,
 }
 
 /// Purpose of an auxiliary buffer.
@@ -232,7 +238,16 @@ impl SolverRecipe {
 
         let needs_gradients = !gradient_fields.is_empty();
         let has_grad_state = gradient_fields.iter().any(|field| field == "state");
-        let flux = model.gpu.flux;
+        let flux = model
+            .flux_module()
+            .map_err(|e| e.to_string())?
+            .map(|_| FluxSpec {
+                // Flux modules write into a packed per-unknown-component face flux table.
+                //
+                // Even if the module computes a single scalar face flux (phi), it is replicated
+                // into all coupled unknown-component slots so assembly can remain layout-driven.
+                stride: model.system.unknowns_per_cell(),
+            });
 
         // Low-Mach parameters are currently only used by compressible EOS variants.
         let eos = model.eos_checked()?;

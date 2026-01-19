@@ -20,18 +20,8 @@ impl Default for GradientStorage {
     }
 }
 
-/// Specification for a face-based flux buffer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FluxSpec {
-    /// Floats per face.
-    pub stride: u32,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ModelGpuSpec {
-    /// Optional face-based flux storage requirements.
-    pub flux: Option<FluxSpec>,
-
     /// How gradient buffers are exposed to shaders.
     pub gradient_storage: GradientStorage,
 

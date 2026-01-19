@@ -267,7 +267,7 @@ pub(crate) fn generate_flux_module_kernel_wgsl(
     _schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<String, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-    let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+    let flux_stride = model.system.unknowns_per_cell();
     let prims = model
         .primitives
         .ordered()
@@ -333,7 +333,11 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     // `generic_coupled_assembly` is the no-grad_state variant.
     // The grad_state-binding variant is emitted under `KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE`.
     let needs_gradients = false;
-    let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+    let flux_stride = model
+        .flux_module()
+        .map_err(|e| e.to_string())?
+        .map(|_| model.system.unknowns_per_cell())
+        .unwrap_or(0);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
         &model.state_layout,
@@ -359,7 +363,11 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
         .map_err(|e| e.to_string())?;
 
     let needs_gradients = true;
-    let flux_stride = model.gpu.flux.map(|f| f.stride).unwrap_or(0);
+    let flux_stride = model
+        .flux_module()
+        .map_err(|e| e.to_string())?
+        .map(|_| model.system.unknowns_per_cell())
+        .unwrap_or(0);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
         &model.state_layout,

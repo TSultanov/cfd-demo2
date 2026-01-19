@@ -2,7 +2,7 @@
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::gpu_spec::{FluxSpec, GradientStorage, ModelGpuSpec};
+use crate::solver::model::gpu_spec::{GradientStorage, ModelGpuSpec};
 use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
 
@@ -324,21 +324,6 @@ impl ModelSpec {
             .expect("invalid model module manifests");
 
         let method = self.method().expect("model missing method module");
-        let flux_module = self
-            .flux_module()
-            .expect("invalid model flux_module manifests");
-
-        // Flux storage is model-driven.
-        //
-        // - If the model has an explicit flux module, store face fluxes for each coupled
-        //   unknown component.
-        let flux = flux_module.as_ref().map(|_| FluxSpec {
-            // Flux modules write into a packed per-unknown-component face flux table.
-            //
-            // Even if the module computes a single scalar face flux (phi), it is replicated
-            // into all coupled unknown-component slots so assembly can remain layout-driven.
-            stride: self.system.unknowns_per_cell(),
-        });
 
         let gradient_storage = match method {
             crate::solver::model::method::MethodSpec::Coupled(_) => GradientStorage::PackedState,
@@ -347,7 +332,6 @@ impl ModelSpec {
         let required_gradient_fields = Vec::new();
 
         ModelGpuSpec {
-            flux,
             gradient_storage,
             required_gradient_fields,
         }

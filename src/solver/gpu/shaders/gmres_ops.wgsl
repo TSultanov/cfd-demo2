@@ -19,15 +19,14 @@ struct GmresParams {
     _pad3: u32,
 }
 
-// Compute linear index from potentially 2D dispatch
-fn get_global_index(global_id: vec3<u32>) -> u32 {
-    return global_id.x + global_id.y * params.dispatch_x;
+const WORKGROUP_SIZE: u32 = 64u;
+
+fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
+    return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
 }
 
-// Compute linear workgroup ID from potentially 2D dispatch
-fn get_workgroup_index(wg_id: vec3<u32>) -> u32 {
-    let dispatch_wg_x = params.dispatch_x / 64u;
-    return wg_id.x + wg_id.y * dispatch_wg_x;
+fn workgroup_index(group_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
+    return group_id.y * num_workgroups.x + group_id.x;
 }
 
 // Group 0: Vectors (for AXPY, scale, copy operations)
@@ -61,8 +60,11 @@ struct IterParams {
 
 // SpMV: y = A * x
 @compute @workgroup_size(64)
-fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let row = get_global_index(global_id);
+fn spmv(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let row = global_index(global_id, num_workgroups);
     if (row >= params.n) {
         return;
     }
@@ -82,8 +84,11 @@ fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // AXPY: y = alpha*x + y
 @compute @workgroup_size(64)
-fn axpy(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn axpy(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }
@@ -94,8 +99,11 @@ fn axpy(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // AXPY from Y: y = y_sol[current_idx] * x + y
 @compute @workgroup_size(64)
-fn axpy_from_y(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn axpy_from_y(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }
@@ -106,8 +114,11 @@ fn axpy_from_y(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // AXPBY: z = alpha*x + beta*y
 @compute @workgroup_size(64)
-fn axpby(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn axpby(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }
@@ -119,8 +130,11 @@ fn axpby(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Scale: y = alpha*x (copy with scaling)
 @compute @workgroup_size(64)
-fn scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn scale(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }
@@ -131,8 +145,11 @@ fn scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Scale in place: y = alpha * y
 @compute @workgroup_size(64)
-fn scale_in_place(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn scale_in_place(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }
@@ -143,8 +160,11 @@ fn scale_in_place(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 // Copy: y = x
 @compute @workgroup_size(64)
-fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn copy(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }
@@ -157,12 +177,14 @@ fn copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
 var<workgroup> partial_sums: array<f32, 64>;
 
 @compute @workgroup_size(64)
-fn dot_product_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
-                       @builtin(local_invocation_id) local_id: vec3<u32>,
-                       @builtin(workgroup_id) wg_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn dot_product_partial(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     let lid = local_id.x;
-    let wg_idx = get_workgroup_index(wg_id);
     
     // Each thread computes its contribution
     var local_sum = 0.0;
@@ -183,21 +205,24 @@ fn dot_product_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
     
     // First thread writes workgroup result
     if (lid == 0u) {
-        // Atomic add to global result (stored in scalars[0])
-        // Note: WGSL doesn't have atomicAdd for f32 directly, need to use atomicAdd with i32
-        // For simplicity, write to per-workgroup output and do final reduction on CPU
-        vec_z[wg_idx] = partial_sums[0];
+        let wg_idx = workgroup_index(group_id, num_workgroups);
+        let num_groups_n = (params.n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
+        if (wg_idx < num_groups_n) {
+            vec_z[wg_idx] = partial_sums[0];
+        }
     }
 }
 
 // Norm squared: compute ||x||^2 (partial reduction)
 @compute @workgroup_size(64)
-fn norm_sq_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
-                   @builtin(local_invocation_id) local_id: vec3<u32>,
-                   @builtin(workgroup_id) wg_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn norm_sq_partial(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(workgroup_id) group_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     let lid = local_id.x;
-    let wg_idx = get_workgroup_index(wg_id);
     
     var local_sum = 0.0;
     if (idx < params.n) {
@@ -218,15 +243,22 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id: vec3<u32>,
     
     // First thread writes workgroup result
     if (lid == 0u) {
-        vec_z[wg_idx] = partial_sums[0];
+        let wg_idx = workgroup_index(group_id, num_workgroups);
+        let num_groups_n = (params.n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
+        if (wg_idx < num_groups_n) {
+            vec_z[wg_idx] = partial_sums[0];
+        }
     }
 }
 
 // Gram-Schmidt orthogonalization step: w = w - h*v
 // where h = <w, v> (computed separately)
 @compute @workgroup_size(64) 
-fn orthogonalize(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let idx = get_global_index(global_id);
+fn orthogonalize(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
         return;
     }

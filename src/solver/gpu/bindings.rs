@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 1167ab523d5ccd48f583fb2fabd8f1dfe39e8284af0067850b41a27bca2534e5
+// SourceHash: 17d2d23b398dbde6b7ea02a22740569484180b0b40c644c5f9145d014f4c3bea
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -62553,6 +62553,7 @@ pub mod gmres_ops {
             }
         }
     }
+    pub const WORKGROUP_SIZE: u32 = 64u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const SPMV_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -63234,8 +63235,8 @@ struct IterParams {
     _pad2_: u32,
 }
 
-@group(3) @binding(0) 
-var<uniform> params: GmresParams;
+const WORKGROUP_SIZE: u32 = 64u;
+
 @group(0) @binding(0) 
 var<storage> vec_x: array<f32>;
 @group(0) @binding(1) 
@@ -63254,6 +63255,8 @@ var<storage, read_write> diag_u: array<f32>;
 var<storage, read_write> diag_v: array<f32>;
 @group(2) @binding(2) 
 var<storage, read_write> diag_p: array<f32>;
+@group(3) @binding(0) 
+var<uniform> params: GmresParams;
 @group(3) @binding(1) 
 var<storage, read_write> scalars: array<f32>;
 @group(3) @binding(2) 
@@ -63264,241 +63267,250 @@ var<storage, read_write> hessenberg: array<f32>;
 var<storage> y_sol: array<f32>;
 var<workgroup> partial_sums: array<f32, 64>;
 
-fn get_global_index(global_id_12: vec3<u32>) -> u32 {
-    let _e5 = params.dispatch_x;
-    return (global_id_12.x + (global_id_12.y * _e5));
+fn global_index(global_id_12: vec3<u32>, num_workgroups_10: vec3<u32>) -> u32 {
+    return ((global_id_12.y * (num_workgroups_10.x * WORKGROUP_SIZE)) + global_id_12.x);
 }
 
-fn get_workgroup_index(wg_id_2: vec3<u32>) -> u32 {
-    let _e2 = params.dispatch_x;
-    let dispatch_wg_x = (_e2 / 64u);
-    return (wg_id_2.x + (wg_id_2.y * dispatch_wg_x));
+fn workgroup_index(group_id_2: vec3<u32>, num_workgroups_11: vec3<u32>) -> u32 {
+    return ((group_id_2.y * num_workgroups_11.x) + group_id_2.x);
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>) {
+fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sum: f32 = 0f;
     var k: u32;
 
-    let _e2 = get_global_index(global_id);
+    let _e3 = global_index(global_id, num_workgroups);
+    let _e6 = params.n;
+    if (_e3 >= _e6) {
+        return;
+    }
+    let start = row_offsets[_e3];
+    let end = row_offsets[(_e3 + 1u)];
+    k = start;
+    loop {
+        let _e17 = k;
+        if (_e17 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e20 = k;
+            let col = col_indices[_e20];
+            let _e24 = k;
+            let val = matrix_values[_e24];
+            let _e30 = vec_x[col];
+            let _e32 = sum;
+            sum = (_e32 + (val * _e30));
+        }
+        continuing {
+            let _e35 = k;
+            k = (_e35 + 1u);
+        }
+    }
+    let _e39 = sum;
+    vec_y[_e3] = _e39;
+    return;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn axpy(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
+    let _e2 = global_index(global_id_1, num_workgroups_1);
     let _e5 = params.n;
     if (_e2 >= _e5) {
         return;
     }
-    let start = row_offsets[_e2];
-    let end = row_offsets[(_e2 + 1u)];
-    k = start;
-    loop {
-        let _e16 = k;
-        if (_e16 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e19 = k;
-            let col = col_indices[_e19];
-            let _e23 = k;
-            let val = matrix_values[_e23];
-            let _e29 = vec_x[col];
-            let _e31 = sum;
-            sum = (_e31 + (val * _e29));
-        }
-        continuing {
-            let _e34 = k;
-            k = (_e34 + 1u);
-        }
-    }
-    let _e38 = sum;
-    vec_y[_e2] = _e38;
-    return;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn axpy(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
-    let _e1 = get_global_index(global_id_1);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
-        return;
-    }
     let alpha = scalars[0];
-    let _e13 = vec_x[_e1];
-    let _e17 = vec_y[_e1];
-    vec_y[_e1] = ((alpha * _e13) + _e17);
+    let _e14 = vec_x[_e2];
+    let _e18 = vec_y[_e2];
+    vec_y[_e2] = ((alpha * _e14) + _e18);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn axpy_from_y(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
-    let _e1 = get_global_index(global_id_2);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
+fn axpy_from_y(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
+    let _e2 = global_index(global_id_2, num_workgroups_2);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
         return;
     }
-    let _e9 = iter_params.current_idx;
-    let alpha_1 = y_sol[_e9];
-    let _e16 = vec_x[_e1];
-    let _e20 = vec_y[_e1];
-    vec_y[_e1] = ((alpha_1 * _e16) + _e20);
+    let _e10 = iter_params.current_idx;
+    let alpha_1 = y_sol[_e10];
+    let _e17 = vec_x[_e2];
+    let _e21 = vec_y[_e2];
+    vec_y[_e2] = ((alpha_1 * _e17) + _e21);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn axpby(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
-    let _e1 = get_global_index(global_id_3);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
+fn axpby(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
+    let _e2 = global_index(global_id_3, num_workgroups_3);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
         return;
     }
     let alpha_2 = scalars[0];
     let beta = scalars[1];
-    let _e16 = vec_x[_e1];
-    let _e20 = vec_y[_e1];
-    vec_z[_e1] = ((alpha_2 * _e16) + (beta * _e20));
+    let _e17 = vec_x[_e2];
+    let _e21 = vec_y[_e2];
+    vec_z[_e2] = ((alpha_2 * _e17) + (beta * _e21));
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn scale(@builtin(global_invocation_id) global_id_4: vec3<u32>) {
-    let _e1 = get_global_index(global_id_4);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
+fn scale(@builtin(global_invocation_id) global_id_4: vec3<u32>, @builtin(num_workgroups) num_workgroups_4: vec3<u32>) {
+    let _e2 = global_index(global_id_4, num_workgroups_4);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
         return;
     }
     let alpha_3 = scalars[0];
-    let _e13 = vec_x[_e1];
-    vec_y[_e1] = (alpha_3 * _e13);
+    let _e14 = vec_x[_e2];
+    vec_y[_e2] = (alpha_3 * _e14);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn scale_in_place(@builtin(global_invocation_id) global_id_5: vec3<u32>) {
-    let _e1 = get_global_index(global_id_5);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
+fn scale_in_place(@builtin(global_invocation_id) global_id_5: vec3<u32>, @builtin(num_workgroups) num_workgroups_5: vec3<u32>) {
+    let _e2 = global_index(global_id_5, num_workgroups_5);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
         return;
     }
     let alpha_4 = scalars[0];
-    let _e13 = vec_y[_e1];
-    vec_y[_e1] = (alpha_4 * _e13);
+    let _e14 = vec_y[_e2];
+    vec_y[_e2] = (alpha_4 * _e14);
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn copy(@builtin(global_invocation_id) global_id_6: vec3<u32>) {
-    let _e1 = get_global_index(global_id_6);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
+fn copy(@builtin(global_invocation_id) global_id_6: vec3<u32>, @builtin(num_workgroups) num_workgroups_6: vec3<u32>) {
+    let _e2 = global_index(global_id_6, num_workgroups_6);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
         return;
     }
-    let _e10 = vec_x[_e1];
-    vec_y[_e1] = _e10;
+    let _e11 = vec_x[_e2];
+    vec_y[_e2] = _e11;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn dot_product_partial(@builtin(global_invocation_id) global_id_7: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) wg_id: vec3<u32>) {
+fn dot_product_partial(@builtin(global_invocation_id) global_id_7: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups_7: vec3<u32>) {
     var local_sum: f32 = 0f;
     var stride: u32 = 32u;
 
-    let _e3 = get_global_index(global_id_7);
+    let _e4 = global_index(global_id_7, num_workgroups_7);
     let lid = local_id.x;
-    let _e7 = get_workgroup_index(wg_id);
-    let _e10 = params.n;
-    if (_e3 < _e10) {
-        let _e14 = vec_x[_e3];
-        let _e17 = vec_y[_e3];
-        local_sum = (_e14 * _e17);
+    let _e9 = params.n;
+    if (_e4 < _e9) {
+        let _e13 = vec_x[_e4];
+        let _e16 = vec_y[_e4];
+        local_sum = (_e13 * _e16);
     }
-    let _e22 = local_sum;
-    partial_sums[lid] = _e22;
+    let _e21 = local_sum;
+    partial_sums[lid] = _e21;
     workgroupBarrier();
     loop {
-        let _e24 = stride;
-        if (_e24 > 0u) {
+        let _e23 = stride;
+        if (_e23 > 0u) {
         } else {
             break;
         }
         {
-            let _e27 = stride;
-            if (lid < _e27) {
-                let _e32 = stride;
-                let _e35 = partial_sums[(lid + _e32)];
-                let _e36 = partial_sums[lid];
-                partial_sums[lid] = (_e36 + _e35);
+            let _e26 = stride;
+            if (lid < _e26) {
+                let _e31 = stride;
+                let _e34 = partial_sums[(lid + _e31)];
+                let _e35 = partial_sums[lid];
+                partial_sums[lid] = (_e35 + _e34);
             }
             workgroupBarrier();
         }
         continuing {
-            let _e39 = stride;
-            stride = (_e39 >> 1u);
+            let _e38 = stride;
+            stride = (_e38 >> 1u);
         }
     }
     if (lid == 0u) {
-        let _e47 = partial_sums[0];
-        vec_z[_e7] = _e47;
-        return;
+        let _e43 = workgroup_index(group_id, num_workgroups_7);
+        let _e46 = params.n;
+        let num_groups_n = ((_e46 + 63u) / WORKGROUP_SIZE);
+        if (_e43 < num_groups_n) {
+            let _e56 = partial_sums[0];
+            vec_z[_e43] = _e56;
+            return;
+        } else {
+            return;
+        }
     } else {
         return;
     }
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn norm_sq_partial(@builtin(global_invocation_id) global_id_8: vec3<u32>, @builtin(local_invocation_id) local_id_1: vec3<u32>, @builtin(workgroup_id) wg_id_1: vec3<u32>) {
+fn norm_sq_partial(@builtin(global_invocation_id) global_id_8: vec3<u32>, @builtin(local_invocation_id) local_id_1: vec3<u32>, @builtin(workgroup_id) group_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_8: vec3<u32>) {
     var local_sum_1: f32 = 0f;
     var stride_1: u32 = 32u;
 
-    let _e3 = get_global_index(global_id_8);
+    let _e4 = global_index(global_id_8, num_workgroups_8);
     let lid_1 = local_id_1.x;
-    let _e7 = get_workgroup_index(wg_id_1);
-    let _e10 = params.n;
-    if (_e3 < _e10) {
-        let val_1 = vec_x[_e3];
+    let _e9 = params.n;
+    if (_e4 < _e9) {
+        let val_1 = vec_x[_e4];
         local_sum_1 = (val_1 * val_1);
     }
-    let _e19 = local_sum_1;
-    partial_sums[lid_1] = _e19;
+    let _e18 = local_sum_1;
+    partial_sums[lid_1] = _e18;
     workgroupBarrier();
     loop {
-        let _e21 = stride_1;
-        if (_e21 > 0u) {
+        let _e20 = stride_1;
+        if (_e20 > 0u) {
         } else {
             break;
         }
         {
-            let _e24 = stride_1;
-            if (lid_1 < _e24) {
-                let _e29 = stride_1;
-                let _e32 = partial_sums[(lid_1 + _e29)];
-                let _e33 = partial_sums[lid_1];
-                partial_sums[lid_1] = (_e33 + _e32);
+            let _e23 = stride_1;
+            if (lid_1 < _e23) {
+                let _e28 = stride_1;
+                let _e31 = partial_sums[(lid_1 + _e28)];
+                let _e32 = partial_sums[lid_1];
+                partial_sums[lid_1] = (_e32 + _e31);
             }
             workgroupBarrier();
         }
         continuing {
-            let _e36 = stride_1;
-            stride_1 = (_e36 >> 1u);
+            let _e35 = stride_1;
+            stride_1 = (_e35 >> 1u);
         }
     }
     if (lid_1 == 0u) {
-        let _e44 = partial_sums[0];
-        vec_z[_e7] = _e44;
-        return;
+        let _e40 = workgroup_index(group_id_1, num_workgroups_8);
+        let _e43 = params.n;
+        let num_groups_n_1 = ((_e43 + 63u) / WORKGROUP_SIZE);
+        if (_e40 < num_groups_n_1) {
+            let _e53 = partial_sums[0];
+            vec_z[_e40] = _e53;
+            return;
+        } else {
+            return;
+        }
     } else {
         return;
     }
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn orthogonalize(@builtin(global_invocation_id) global_id_9: vec3<u32>) {
-    let _e1 = get_global_index(global_id_9);
-    let _e4 = params.n;
-    if (_e1 >= _e4) {
+fn orthogonalize(@builtin(global_invocation_id) global_id_9: vec3<u32>, @builtin(num_workgroups) num_workgroups_9: vec3<u32>) {
+    let _e2 = global_index(global_id_9, num_workgroups_9);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
         return;
     }
     let h = scalars[0];
-    let _e13 = vec_y[_e1];
-    let _e16 = vec_x[_e1];
-    vec_y[_e1] = (_e13 - (h * _e16));
+    let _e14 = vec_y[_e2];
+    let _e17 = vec_x[_e2];
+    vec_y[_e2] = (_e14 - (h * _e17));
     return;
 }
 

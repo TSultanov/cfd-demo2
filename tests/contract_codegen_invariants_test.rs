@@ -149,6 +149,26 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
 }
 
 #[test]
+fn contract_preconditioner_named_param_is_not_ignored() {
+    let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let src = read_utf8(&path);
+
+    // Runtime preconditioner selection should be derived from (recipe + config) and the
+    // `preconditioner` named param must update the active resources (not be a no-op).
+    assert_contains(
+        &src,
+        "RuntimePreconditionerModule::new",
+        "generic_coupled.rs",
+    );
+    assert_contains(
+        &src,
+        "linear_solver.preconditioner = preconditioner",
+        "generic_coupled.rs",
+    );
+    assert_contains(&src, "set_kind(preconditioner)", "generic_coupled.rs");
+}
+
+#[test]
 fn contract_named_param_handlers_are_module_discovered() {
     let path = repo_root().join("src/solver/gpu/lowering/named_params/mod.rs");
     let src = read_utf8(&path);

@@ -240,10 +240,11 @@ Completed:
 - Preconditioner follow-up: added `PreconditionerType::BlockJacobi` (per-cell diagonal block inverse, derived from `unknowns_per_cell = n / num_cells`) using `block_precond/{build_block_inv,apply_block_precond}`; added smoke/contract coverage; OpenFOAM reference tests pass.
 - Schur preconditioner: `PreconditionerType` now selects the pressure solve strategy (Chebyshev vs AMG) for model-owned Schur blocks; added smoke coverage; OpenFOAM reference tests pass.
 - Preconditioner init: model-driven lowering seeds the `preconditioner` named param only when declared by module manifests (no linear-solver-specific gating in lowering).
+- UI/config alignment: preconditioner selection (Jacobi/BlockJacobi/AMG) is enabled when declared by model manifests, and Schur models can select the pressure solve strategy; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
-2) UI/config alignment: expose preconditioner selection (Jacobi/BlockJacobi/AMG) based on model-declared named params (and allow Schur models to select the pressure solve strategy without disabling the control).
+2) BlockJacobi hardening: handle unsupported `unknowns_per_cell` (e.g. >16) by falling back safely (and disable/annotate the UI option based on model config).
 
 Status:
 - Shared generated kernels are discovered via module-owned `kernel_generators()` entries scoped as `KernelWgslScope::Shared` (and emitted once at build time).

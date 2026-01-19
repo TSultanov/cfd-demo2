@@ -200,6 +200,32 @@ fn contract_jacobi_preconditioner_is_diagonal_scaled() {
 }
 
 #[test]
+fn contract_block_jacobi_preconditioner_is_wired() {
+    let runtime_path = repo_root().join("src/solver/gpu/modules/runtime_preconditioner.rs");
+    let runtime_src = read_utf8(&runtime_path);
+
+    assert_contains(
+        &runtime_src,
+        "PreconditionerType::BlockJacobi",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(
+        &runtime_src,
+        "BLOCK_PRECOND_BUILD_BLOCK_INV",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(
+        &runtime_src,
+        "BLOCK_PRECOND_APPLY_BLOCK_PRECOND",
+        "runtime_preconditioner.rs",
+    );
+
+    let shader_path = repo_root().join("src/solver/gpu/shaders/block_precond.wgsl");
+    let shader_src = read_utf8(&shader_path);
+    assert_contains(&shader_src, "params.n / params.num_cells", "block_precond.wgsl");
+}
+
+#[test]
 fn contract_named_param_handlers_are_module_discovered() {
     let path = repo_root().join("src/solver/gpu/lowering/named_params/mod.rs");
     let src = read_utf8(&path);

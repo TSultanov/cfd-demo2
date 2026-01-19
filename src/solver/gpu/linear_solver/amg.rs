@@ -292,7 +292,7 @@ impl AmgResources {
             let b_matrix_values = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("AMG L{} Matrix Values", level_idx)),
                 contents: bytemuck::cast_slice(&current_matrix.values),
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
             // Create state buffers

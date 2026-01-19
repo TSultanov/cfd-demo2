@@ -3,12 +3,12 @@ use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWor
 use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
-use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::solve_fgmres;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
+use crate::solver::gpu::modules::runtime_preconditioner::RuntimePreconditionerModule;
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
@@ -59,7 +59,7 @@ struct GenericCoupledSchurResources {
 }
 
 struct GenericCoupledKrylovResources {
-    solver: KrylovSolveModule<IdentityPreconditioner>,
+    solver: KrylovSolveModule<RuntimePreconditionerModule>,
     dispatch: KrylovDispatch,
     _b_diag_u: wgpu::Buffer,
     _b_diag_v: wgpu::Buffer,
@@ -487,7 +487,31 @@ fn build_generic_krylov(
         "generic_coupled",
     );
 
-    let solver = KrylovSolveModule::new(fgmres, IdentityPreconditioner::new());
+    let unknowns_per_cell: u32 = recipe
+        .unknowns_per_cell
+        .try_into()
+        .map_err(|_| "recipe.unknowns_per_cell overflows u32".to_string())?;
+    let (row_offsets, col_indices) = crate::solver::gpu::csr::build_block_csr(
+        &runtime.common.mesh.scalar_row_offsets,
+        &runtime.common.mesh.scalar_col_indices,
+        unknowns_per_cell,
+    );
+
+    let solver = KrylovSolveModule::new(
+        fgmres,
+        RuntimePreconditionerModule::new(
+            device,
+            recipe.linear_solver.preconditioner,
+            n,
+            runtime.num_nonzeros,
+            row_offsets,
+            col_indices,
+            runtime
+                .linear_port_space
+                .buffer(runtime.linear_ports.values)
+                .clone(),
+        ),
+    );
     let dispatch = DispatchGrids::for_sizes(n, num_cells);
 
     Ok(Some(GenericCoupledKrylovResources {
@@ -1164,7 +1188,7 @@ pub(crate) fn param_preconditioner(
 ) -> Result<(), String> {
     // Generic-coupled currently supports model-owned preconditioners (e.g. Schur).
     // Do not allow config/runtime to override that choice.
-    let PlanParamValue::Preconditioner(_preconditioner) = value else {
+    let PlanParamValue::Preconditioner(preconditioner) = value else {
         return Err("invalid value type".into());
     };
     if let Some(solver) = plan.model.linear_solver {
@@ -1174,6 +1198,12 @@ pub(crate) fn param_preconditioner(
         ) {
             return Err("preconditioner is model-owned for this model".to_string());
         }
+    }
+
+    let r = res_mut(plan);
+    r.linear_solver.preconditioner = preconditioner;
+    if let Some(krylov) = &mut r.krylov {
+        krylov.solver.precond.set_kind(preconditioner);
     }
     Ok(())
 }

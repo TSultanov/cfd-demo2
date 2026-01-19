@@ -322,6 +322,7 @@ impl SolverRecipe {
         let mut binds_state_iter = false;
         let mut binds_fluxes = false;
         let mut binds_low_mach_params = false;
+        let mut binds_solution_x = false;
         for kernel in &kernels {
             let src = kernel_registry::kernel_source_by_id(model.id, kernel.id)
                 .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))?;
@@ -330,15 +331,27 @@ impl SolverRecipe {
                     "state_iter" => binds_state_iter = true,
                     "fluxes" => binds_fluxes = true,
                     "low_mach_params" => binds_low_mach_params = true,
+                    "x" => binds_solution_x = true,
                     _ => {}
                 }
             }
-            if binds_fluxes
+            if matches!(stepping, SteppingMode::Explicit) {
+                if binds_solution_x {
+                    break;
+                }
+            } else if binds_fluxes
                 && (!matches!(stepping, SteppingMode::Implicit { .. }) || binds_state_iter)
                 && (!binds_low_mach_params || requires_low_mach_params)
             {
                 break;
             }
+        }
+
+        if matches!(stepping, SteppingMode::Explicit) && binds_solution_x {
+            return Err(
+                "SteppingMode::Explicit is unsupported for models whose kernels bind the solution buffer 'x' (implicit solve output). Use Implicit/Coupled stepping instead."
+                    .to_string(),
+            );
         }
 
         if binds_low_mach_params && !requires_low_mach_params {

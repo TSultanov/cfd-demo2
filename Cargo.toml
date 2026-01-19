@@ -16,7 +16,6 @@ egui = "0.33"
 eframe = { version = "0.33", features = ["wgpu", "default_fonts"] }
 egui_plot = "0.34"
 nalgebra = "0.32"
-geo = "0.26"
 rand = "0.8"
 log = "0.4"
 env_logger = "0.10"
@@ -25,7 +24,6 @@ rayon = "1.8"
 wgpu = "27.0"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
-num-traits = "0.2.19"
 ahash = "0.8.12"
 
 [dev-dependencies]

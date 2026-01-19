@@ -39,8 +39,8 @@ pub(crate) async fn lower_program_model_driven(
         spec,
     );
 
-    // If the model owns the preconditioner choice, do not allow runtime/config overrides.
-    if should_set_preconditioner_param(model) {
+    // Apply the preconditioner config only if the model declares a handler for it.
+    if model.named_param_keys().into_iter().any(|k| k == "preconditioner") {
         plan.set_named_param(
             "preconditioner",
             PlanParamValue::Preconditioner(config.preconditioner),
@@ -48,14 +48,6 @@ pub(crate) async fn lower_program_model_driven(
     }
 
     Ok(plan)
-}
-
-fn should_set_preconditioner_param(model: &ModelSpec) -> bool {
-    let Some(solver) = model.linear_solver else {
-        return true;
-    };
-    // Any explicit model-owned selection disables plan/runtime overrides.
-    !matches!(solver.preconditioner, crate::solver::model::ModelPreconditionerSpec::Schur { .. })
 }
 
 pub(crate) fn validate_model_owned_preconditioner_config(
@@ -93,12 +85,6 @@ mod tests {
         ));
         validate_model_owned_preconditioner_config(&model, PreconditionerType::Amg)
             .expect("AMG pressure solve should be allowed for model-owned Schur");
-    }
-
-    #[test]
-    fn model_owned_schur_skips_setting_plan_preconditioner_param() {
-        let model = incompressible_momentum_generic_model();
-        assert!(!should_set_preconditioner_param(&model));
     }
 }
 

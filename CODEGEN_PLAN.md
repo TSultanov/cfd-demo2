@@ -230,7 +230,7 @@ Completed:
 - Linear solver tuning: `generic_coupled` now declares `linear_solver.*` named params (restart/iters/tolerances) with runtime handlers so solver tuning stays config-driven; OpenFOAM reference tests pass.
 - Linear solver max iters: FGMRES now honors `LinearSolverSpec.max_iters` via multi-restart loops (so the iteration cap is meaningful); OpenFOAM reference tests pass.
 - Gap 0 progress: model kernel generators are closure-capable so modules can derive WGSL from their own configuration (e.g. Rhie–Chow aux kernels honor `dp_field`); added contract coverage; OpenFOAM reference tests pass.
-- Gap 0 progress: low-Mach params buffer allocation is derived from the EOS module config; OpenFOAM reference tests pass.
+- Gap 0 progress: low-Mach params buffer allocation is manifest-driven (derived from EOS module-declared `low_mach.*` named params), not EOS-variant matches in the recipe; OpenFOAM reference tests pass.
 - Gap 0 progress: face-flux buffer sizing is derived from the `flux_module` manifest + `system.unknowns_per_cell()`; OpenFOAM reference tests pass.
 - Gap 0 progress: gradient-buffer strategy is derived from method config (`CoupledCapabilities.gradient_storage`) and `ModelSpec` no longer carries a derived `ModelGpuSpec`; OpenFOAM reference tests pass.
 - Gap 0 progress: initial GPU EOS constants are derived from the recipe (which derives them from the EOS module); OpenFOAM reference tests pass.

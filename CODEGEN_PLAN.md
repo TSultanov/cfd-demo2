@@ -221,9 +221,11 @@ Completed:
 - Made packed `grad_state` allocation/scheduling conditional on `advection_scheme` by emitting both generic-coupled assembly variants (with/without `grad_state`) and selecting via the recipe; OpenFOAM reference tests pass.
 - Removed the handwritten generic-coupled assembly graph fallback so graph construction is fully recipe-driven; added contract coverage.
 - Removed redundant stepping-mode branching in model-driven lowering so all stepping modes share the same recipe-driven backend wiring; added contract coverage.
+- Dispatch scaling: `GeneratedKernelsModule` uses 2D dispatch for `Cells`/`Faces` and `UnifiedFieldResources` derives `constants.stride_x` from device limits; all generated cell/face kernels flatten `global_id` via `global_id.y * constants.stride_x + global_id.x`; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
+2) Audit handwritten solver-infrastructure WGSL kernels (linear solver/AMG/reductions) for 2D dispatch + `global_id` flattening so large meshes don’t hit the 1D workgroup limit.
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

@@ -30,8 +30,7 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
 
 ## Current Audit Notes (concrete simplification targets)
-- `profiling` is still effectively always-on in solver-core; finish feature-gating it (no-op stub in core-only builds) and keep long-running profiling tests behind the `profiling` feature.
-- Many `tests/reproduce_*` are still default test targets; move them to `examples/` or a `docs/repro/` harness (or gate behind a non-default `repro` feature).
+(Empty; add new concrete targets as they’re discovered.)
 
 ## Remaining Gaps (simplification + pruning plan)
 
@@ -39,23 +38,18 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Document the minimal supported product as **core**: model-driven solver + OpenFOAM reference suite + contract tests.
 - Explicitly list which parts are “optional surfaces”: UI, mesh generation experiments, profiling tooling, reproduction harnesses.
 
-### 2) Isolate optional surfaces (UI / meshgen / profiling)
-Prefer **Cargo feature-gating** first; split into new workspace crates only if feature-gating becomes awkward.
-- Add a `profiling` feature for GPU profiling plumbing, solver API surface, and long-running profiling tests.
-
-### 3) Prune / simplify the mesh module
+### 2) Prune / simplify the mesh module
 - Move advanced mesh generation, smoothing, and geometry SDF machinery unless it is part of the “core keep list”.
 
-### 4) Test + bench consolidation (keep signal, drop noise)
+### 3) Test + bench consolidation (keep signal, drop noise)
 - Keep as default: OpenFOAM reference tests + contract tests + a small set of GPU smoke tests.
 - Move profiling workloads out of `tests/` into `benches/` or `examples/` (or mark `#[ignore]` and run only via scripts).
-- Move reproduction tests (`tests/reproduce_*`) into `examples/` or a `docs/repro/` area; keep them runnable but not part of the default suite.
 
-### 5) Structural cleanup (rename and collapse transitional modules)
+### 4) Structural cleanup (rename and collapse transitional modules)
 - Align naming to reflect the “one universal backend” reality (reduce `generic_coupled` vs `universal` vs `plans` confusion).
 - Consider collapsing pure re-export modules (`options.rs`, `profiling.rs`, etc.) if they don’t provide real API value after the crate boundaries are cleaned up.
 
-### 6) Ongoing hardening (evergreen)
+### 5) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

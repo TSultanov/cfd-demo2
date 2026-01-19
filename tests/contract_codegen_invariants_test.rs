@@ -915,6 +915,18 @@ fn contract_iteration_snapshot_allocation_is_recipe_driven() {
 }
 
 #[test]
+fn contract_flux_buffer_allocation_is_binding_driven() {
+    // Flux buffer allocation should follow kernel binding metadata (needs `fluxes`), not ad-hoc
+    // model/module heuristics inside the recipe.
+    let path = repo_root().join("src/solver/gpu/recipe.rs");
+    let src = read_utf8(&path);
+
+    assert_contains(&src, "\"fluxes\"", "recipe.rs");
+    assert_contains(&src, "let flux = if binds_fluxes", "recipe.rs");
+    assert_not_contains(&src, "flux_module(", "recipe.rs");
+}
+
+#[test]
 fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     // Drift guard: ensure unified_assembly and flux-module reconstruction use the same shared
     // epsilon constant (no duplicated numeric literals in separate implementations).

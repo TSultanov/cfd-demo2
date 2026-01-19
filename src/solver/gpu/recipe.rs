@@ -248,16 +248,6 @@ impl SolverRecipe {
 
         let needs_gradients = !gradient_fields.is_empty();
         let has_grad_state = gradient_fields.iter().any(|field| field == "state");
-        let flux = model
-            .flux_module()
-            .map_err(|e| e.to_string())?
-            .map(|_| FluxSpec {
-                // Flux modules write into a packed per-unknown-component face flux table.
-                //
-                // Even if the module computes a single scalar face flux (phi), it is replicated
-                // into all coupled unknown-component slots so assembly can remain layout-driven.
-                stride: model.system.unknowns_per_cell(),
-            });
 
         // Low-Mach parameter resource needs are manifest-driven.
         //
@@ -327,20 +317,49 @@ impl SolverRecipe {
             });
         }
 
-        let requires_iteration_snapshot = if matches!(stepping, SteppingMode::Implicit { .. }) {
-            let mut needs_snapshot = false;
-            for kernel in &kernels {
-                let src = kernel_registry::kernel_source_by_id(model.id, kernel.id)
-                    .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))?;
-                if src.bindings.iter().any(|b| b.name == "state_iter") {
-                    needs_snapshot = true;
-                    break;
+        // Optional resource needs are derived from binding metadata (kernel interface), not from
+        // solver-side assumptions about which modules imply which buffers.
+        let mut binds_state_iter = false;
+        let mut binds_fluxes = false;
+        let mut binds_low_mach_params = false;
+        for kernel in &kernels {
+            let src = kernel_registry::kernel_source_by_id(model.id, kernel.id)
+                .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))?;
+            for binding in src.bindings {
+                match binding.name {
+                    "state_iter" => binds_state_iter = true,
+                    "fluxes" => binds_fluxes = true,
+                    "low_mach_params" => binds_low_mach_params = true,
+                    _ => {}
                 }
             }
-            needs_snapshot
+            if binds_fluxes
+                && (!matches!(stepping, SteppingMode::Implicit { .. }) || binds_state_iter)
+                && (!binds_low_mach_params || requires_low_mach_params)
+            {
+                break;
+            }
+        }
+
+        if binds_low_mach_params && !requires_low_mach_params {
+            return Err(
+                "model kernels bind low_mach_params but no low_mach.* named params are declared"
+                    .to_string(),
+            );
+        }
+
+        let flux = if binds_fluxes {
+            let stride = model.system.unknowns_per_cell();
+            if stride == 0 {
+                return Err("model kernels bind fluxes but model has 0 unknowns per cell".into());
+            }
+            Some(FluxSpec { stride })
         } else {
-            false
+            None
         };
+
+        let requires_iteration_snapshot =
+            matches!(stepping, SteppingMode::Implicit { .. }) && binds_state_iter;
 
         // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();

@@ -234,6 +234,7 @@ Completed:
 - Gap 0 progress: face-flux buffer sizing is derived from the `flux_module` manifest + `system.unknowns_per_cell()`; OpenFOAM reference tests pass.
 - Gap 0 progress: gradient-buffer strategy is derived from method config (`CoupledCapabilities.gradient_storage`) and `ModelSpec` no longer carries a derived `ModelGpuSpec`; OpenFOAM reference tests pass.
 - Gap 0 progress: gradient buffer sizing/allocation is derived from recipe buffer specs (no solver-side special-casing by field name); OpenFOAM reference tests pass.
+- Gap 0 progress: implicit snapshot stage (`state_iter`) is binding-driven (only emitted/allocated when kernels bind `state_iter`), eliminating unused snapshot copies; OpenFOAM reference tests pass.
 - Gap 0 progress: initial GPU EOS constants are derived from the recipe (which derives them from the EOS module); OpenFOAM reference tests pass.
 - Gap 0 progress: initial advection/time-scheme constants are derived from the recipe/config (no post-build `set_named_param` initialization); OpenFOAM reference tests pass.
 - Preconditioner knob: generic-coupled now honors `SolverConfig.preconditioner=Amg` by wiring an AMG V-cycle preconditioner (instead of silently ignoring it); added contract coverage; OpenFOAM reference tests pass.

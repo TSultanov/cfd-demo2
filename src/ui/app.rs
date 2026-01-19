@@ -21,7 +21,7 @@ use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 struct RuntimeParams {
@@ -41,7 +41,7 @@ enum RenderMode {
     GpuDirect,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum GeometryType {
     BackwardsStep,
     ChannelObstacle,
@@ -77,6 +77,43 @@ struct ModelUiCaps {
     unknowns_per_cell: u32,
 }
 
+struct SolverInitRequest {
+    generation: u64,
+    solver_kind: SolverKind,
+    selected_geometry: GeometryType,
+    mesh_type: MeshType,
+    min_cell_size: f64,
+    max_cell_size: f64,
+    growth_rate: f64,
+    timestep: f64,
+    selected_scheme: Scheme,
+    time_scheme: GpuTimeScheme,
+    alpha_u: f64,
+    alpha_p: f64,
+    inlet_velocity: f32,
+    selected_preconditioner: PreconditionerType,
+    current_fluid: Fluid,
+    wgpu_device: Option<wgpu::Device>,
+    wgpu_queue: Option<wgpu::Queue>,
+    target_format: wgpu::TextureFormat,
+}
+
+struct SolverInitOutcome {
+    solver: UnifiedSolver,
+    mesh: Mesh,
+    cached_cells: Vec<Vec<[f64; 2]>>,
+    actual_min_cell_size: f64,
+    cached_u: Vec<(f64, f64)>,
+    cached_p: Vec<f64>,
+    model_caps: ModelUiCaps,
+    renderer: Option<cfd_renderer::CfdRenderResources>,
+}
+
+struct SolverInitResponse {
+    generation: u64,
+    result: Result<SolverInitOutcome, String>,
+}
+
 // Cached GPU solver stats for UI display (avoids lock contention)
 #[allow(dead_code)]
 #[derive(Default, Clone)]
@@ -98,6 +135,10 @@ pub struct CFDApp {
     gpu_unified_solver: Option<Arc<Mutex<UnifiedSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
     gpu_solver_thread: Option<thread::JoinHandle<()>>,
+    pending_init_request: Option<SolverInitRequest>,
+    init_rx: Option<mpsc::Receiver<SolverInitResponse>>,
+    init_in_flight: Option<u64>,
+    next_init_generation: u64,
     shared_results: SharedResults,
     shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
     shared_error: Arc<Mutex<Option<String>>>,
@@ -214,6 +255,10 @@ impl CFDApp {
             gpu_unified_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
             gpu_solver_thread: None,
+            pending_init_request: None,
+            init_rx: None,
+            init_in_flight: None,
+            next_init_generation: 1,
             shared_results: Arc::new(Mutex::new(None)),
             shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
             shared_error: Arc::new(Mutex::new(None)),
@@ -298,6 +343,31 @@ impl CFDApp {
         }
     }
 
+    fn make_init_request(&mut self) -> SolverInitRequest {
+        let generation = self.next_init_generation;
+        self.next_init_generation = self.next_init_generation.wrapping_add(1);
+        SolverInitRequest {
+            generation,
+            solver_kind: self.solver_kind,
+            selected_geometry: self.selected_geometry,
+            mesh_type: self.mesh_type,
+            min_cell_size: self.min_cell_size,
+            max_cell_size: self.max_cell_size,
+            growth_rate: self.growth_rate,
+            timestep: self.timestep,
+            selected_scheme: self.selected_scheme,
+            time_scheme: self.time_scheme,
+            alpha_u: self.alpha_u,
+            alpha_p: self.alpha_p,
+            inlet_velocity: self.inlet_velocity,
+            selected_preconditioner: self.selected_preconditioner,
+            current_fluid: self.current_fluid.clone(),
+            wgpu_device: self.wgpu_device.clone(),
+            wgpu_queue: self.wgpu_queue.clone(),
+            target_format: self.target_format,
+        }
+    }
+
     fn update_renderer_field(&self) {
         if let (Some(renderer), Some(device)) = (&self.cfd_renderer, &self.wgpu_device) {
             if let Ok(mut renderer) = renderer.lock() {
@@ -313,196 +383,29 @@ impl CFDApp {
     fn init_solver(&mut self) {
         self.is_running = false;
         self.gpu_solver_running.store(false, Ordering::Relaxed);
-
-        let mesh = self.build_mesh();
-        let n_cells = mesh.num_cells();
-        let initial_u = self.build_initial_velocity(&mesh);
-        let initial_p = vec![0.0; n_cells];
+        self.refresh_model_caps();
+        self.pending_init_request = Some(self.make_init_request());
         self.gpu_unified_solver = None;
-
-        let (model, initial_u, initial_p, cached_p) = match self.solver_kind {
-            SolverKind::Incompressible => (
-                incompressible_momentum_model(),
-                Some(initial_u),
-                Some(initial_p),
-                None,
-            ),
-            SolverKind::Compressible => {
-                let p_ref = self
-                    .current_fluid
-                    .pressure_for_density(self.current_fluid.density);
-                (
-                    compressible_model_with_eos(self.current_fluid.eos),
-                    None,
-                    None,
-                    Some(p_ref),
-                )
-            }
-        };
-
-        const UI_MAX_BLOCK_JACOBI: u32 = 16;
-        let supports_preconditioner = model
-            .named_param_keys()
-            .into_iter()
-            .any(|k| k == "preconditioner");
-        if matches!(self.selected_preconditioner, PreconditionerType::BlockJacobi)
-            && model.system.unknowns_per_cell() > UI_MAX_BLOCK_JACOBI
-        {
-            self.selected_preconditioner = PreconditionerType::Jacobi;
-        }
-        let effective_preconditioner = if supports_preconditioner {
-            self.selected_preconditioner
-        } else {
-            PreconditionerType::Jacobi
-        };
-
-        self.model_caps = ModelUiCaps {
-            supports_preconditioner,
-            model_owns_preconditioner: model
-                .linear_solver
-                .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
-                .unwrap_or(false),
-            unknowns_per_cell: model.system.unknowns_per_cell(),
-        };
-
-        let config = SolverConfig {
-            advection_scheme: self.selected_scheme,
-            time_scheme: self.time_scheme,
-            preconditioner: effective_preconditioner,
-            stepping: match self.solver_kind {
-                SolverKind::Incompressible => SteppingMode::Coupled,
-                SolverKind::Compressible => SteppingMode::Implicit { outer_iters: 1 },
-            },
-        };
-
-        let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
-            &mesh,
-            model,
-            config,
-            self.wgpu_device.clone(),
-            self.wgpu_queue.clone(),
-        ))
-        .expect("failed to initialize unified GPU solver");
-        // Ensure deterministic initialization for all state fields (not just U/p).
-        let stride = gpu_solver.model().state_layout.stride() as usize;
-        let _ = gpu_solver.write_state_f32(&vec![0.0f32; n_cells * stride]);
-        gpu_solver.set_dt(self.timestep as f32);
-        let _ = gpu_solver.set_viscosity(self.current_fluid.viscosity as f32);
-        gpu_solver.set_advection_scheme(self.selected_scheme);
-        gpu_solver.set_time_scheme(self.time_scheme);
-        let _ = gpu_solver.set_eos(&self.current_fluid.eos);
-        if supports_preconditioner {
-            gpu_solver.set_preconditioner(effective_preconditioner);
-        }
-
-        match self.solver_kind {
-            SolverKind::Incompressible => {
-                let _ = gpu_solver.set_density(self.current_fluid.density as f32);
-                let _ = gpu_solver.set_alpha_u(self.alpha_u as f32);
-                let _ = gpu_solver.set_alpha_p(self.alpha_p as f32);
-                let _ = gpu_solver.set_inlet_velocity(self.inlet_velocity);
-                gpu_solver.set_u(initial_u.as_ref().unwrap());
-                gpu_solver.set_p(initial_p.as_ref().unwrap());
-                self.cached_u = initial_u.unwrap();
-                self.cached_p = initial_p.unwrap();
-            }
-            SolverKind::Compressible => {
-                let p_ref = cached_p.unwrap();
-                let _ = gpu_solver.set_density(self.current_fluid.density as f32);
-                let _ = gpu_solver.set_compressible_inlet_isothermal_x(
-                    self.current_fluid.density as f32,
-                    self.inlet_velocity,
-                    &self.current_fluid.eos,
-                );
-                gpu_solver.set_uniform_state(
-                    self.current_fluid.density as f32,
-                    [0.0, 0.0],
-                    p_ref as f32,
-                );
-                self.cached_u = vec![(0.0, 0.0); n_cells];
-                self.cached_p = vec![p_ref; n_cells];
-            }
-        }
-
-        gpu_solver.initialize_history();
-        self.gpu_unified_solver = Some(Arc::new(Mutex::new(gpu_solver)));
-
-        self.cached_cells = Self::cache_cells(&mesh);
-
-        // Initialize renderer
-        if let Some(device) = &self.wgpu_device {
-            let mut renderer = cfd_renderer::CfdRenderResources::new(
-                device,
-                self.target_format,
-                mesh.num_cells() * 10,
-            );
-
-            let vertices = cfd_renderer::build_mesh_vertices(&self.cached_cells);
-            let line_vertices = cfd_renderer::build_line_vertices(&self.cached_cells);
-
-            // Debug: Check for cells in the step region
-            let mut cells_in_step = 0;
-            for cell in &self.cached_cells {
-                let mut cx = 0.0;
-                let mut cy = 0.0;
-                for p in cell {
-                    cx += p[0];
-                    cy += p[1];
-                }
-                cx /= cell.len() as f64;
-                cy /= cell.len() as f64;
-
-                if cx < 0.5 && cy < 0.5 {
-                    cells_in_step += 1;
-                }
-            }
-            println!(
-                "Init Solver: {} cells, {} vertices. Cells in step (x<0.5, y<0.5): {}",
-                self.cached_cells.len(),
-                vertices.len(),
-                cells_in_step
-            );
-
-            if let Some(queue) = &self.wgpu_queue {
-                renderer.update_mesh(queue, &vertices, &line_vertices);
-                if let Some(gpu_solver) = &self.gpu_unified_solver {
-                    if let Ok(gpu_solver) = gpu_solver.lock() {
-                        renderer.update_bind_group(device, gpu_solver.state_buffer());
-                    }
-                }
-            }
-            self.cfd_renderer = Some(Arc::new(Mutex::new(renderer)));
-        }
-
-        // Compute actual min cell size
-        self.actual_min_cell_size = mesh
-            .cell_vol
-            .iter()
-            .map(|&v| v.sqrt())
-            .fold(f64::INFINITY, f64::min);
-
-        self.mesh = Some(mesh);
-
-        self.shared_results = Arc::new(Mutex::new(None));
-        self.shared_gpu_stats = Arc::new(Mutex::new(CachedGpuStats::default()));
-        self.shared_error = Arc::new(Mutex::new(None));
-        self.shared_params = Arc::new(Mutex::new(RuntimeParams {
-            target_cfl: self.target_cfl,
-            adaptive_dt: self.adaptive_dt,
-            log_convergence: self.log_convergence,
-            log_every_steps: self.log_every_steps,
-            sound_speed: if matches!(self.solver_kind, SolverKind::Compressible) {
-                self.current_fluid.sound_speed()
-            } else {
-                0.0
-            },
-        }));
+        self.mesh = None;
+        self.cached_cells.clear();
+        self.cfd_renderer = None;
+        self.cached_u.clear();
+        self.cached_p.clear();
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
+        if let Ok(mut err) = self.shared_error.lock() {
+            *err = None;
+        }
     }
 
-    fn build_mesh(&self) -> Mesh {
-        match self.selected_geometry {
+    fn build_mesh_with(
+        selected_geometry: GeometryType,
+        mesh_type: MeshType,
+        min_cell_size: f64,
+        max_cell_size: f64,
+        growth_rate: f64,
+    ) -> Mesh {
+        match selected_geometry {
             GeometryType::BackwardsStep => {
                 let length = 3.5;
                 let domain_size = Vector2::new(length, 1.0);
@@ -512,26 +415,26 @@ impl CFDApp {
                     height_outlet: 1.0,
                     step_x: 0.5,
                 };
-                let mut mesh = match self.mesh_type {
+                let mut mesh = match mesh_type {
                     MeshType::CutCell => generate_cut_cell_mesh(
                         &geo,
-                        self.min_cell_size,
-                        self.max_cell_size,
-                        self.growth_rate,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
                         domain_size,
                     ),
                     MeshType::Delaunay => generate_delaunay_mesh(
                         &geo,
-                        self.min_cell_size,
-                        self.max_cell_size,
-                        self.growth_rate,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
                         domain_size,
                     ),
                     MeshType::Voronoi => generate_voronoi_mesh(
                         &geo,
-                        self.min_cell_size,
-                        self.max_cell_size,
-                        self.growth_rate,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
                         domain_size,
                     ),
                 };
@@ -547,13 +450,13 @@ impl CFDApp {
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.1,
                 };
-                let mesh = match self.mesh_type {
+                let mesh = match mesh_type {
                     MeshType::CutCell => {
                         let mut mesh = generate_cut_cell_mesh(
                             &geo,
-                            self.min_cell_size,
-                            self.max_cell_size,
-                            self.growth_rate,
+                            min_cell_size,
+                            max_cell_size,
+                            growth_rate,
                             domain_size,
                         );
                         mesh.smooth(&geo, 0.3, 100);
@@ -562,9 +465,9 @@ impl CFDApp {
                     MeshType::Delaunay => {
                         let mut mesh = generate_delaunay_mesh(
                             &geo,
-                            self.min_cell_size,
-                            self.max_cell_size,
-                            self.growth_rate,
+                            min_cell_size,
+                            max_cell_size,
+                            growth_rate,
                             domain_size,
                         );
                         mesh.smooth(&geo, 0.3, 50);
@@ -573,9 +476,9 @@ impl CFDApp {
                     MeshType::Voronoi => {
                         let mut mesh = generate_voronoi_mesh(
                             &geo,
-                            self.min_cell_size,
-                            self.max_cell_size,
-                            self.growth_rate,
+                            min_cell_size,
+                            max_cell_size,
+                            growth_rate,
                             domain_size,
                         );
                         // Voronoi meshes are usually good quality, but we can smooth them too if needed.
@@ -606,7 +509,11 @@ impl CFDApp {
         cells
     }
 
-    fn build_initial_velocity(&self, mesh: &Mesh) -> Vec<(f64, f64)> {
+    fn build_initial_velocity_with(
+        mesh: &Mesh,
+        selected_geometry: GeometryType,
+        max_cell_size: f64,
+    ) -> Vec<(f64, f64)> {
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
         for (i, _vel) in u.iter_mut().enumerate() {
             let cx = mesh.cell_cx[i];
@@ -616,8 +523,8 @@ impl CFDApp {
             // let perturbation = (rng.gen::<f64>() - 0.5) * 0.01;
             // vel.1 += perturbation;
 
-            if cx < self.max_cell_size {
-                match self.selected_geometry {
+            if cx < max_cell_size {
+                match selected_geometry {
                     GeometryType::BackwardsStep => {
                         if cy > 0.5 {
                             // *vel = (1.0, 0.0); // Removed to match shader ramp
@@ -630,6 +537,265 @@ impl CFDApp {
             }
         }
         u
+    }
+
+    fn spawn_pending_init(&mut self) {
+        if self.init_rx.is_some() {
+            return;
+        }
+        if self.pending_init_request.is_none() {
+            return;
+        }
+        if let Some(handle) = &self.gpu_solver_thread {
+            if !handle.is_finished() {
+                return;
+            }
+        }
+
+        if let Some(handle) = self.gpu_solver_thread.take() {
+            let _ = handle.join();
+        }
+
+        let request = self.pending_init_request.take().unwrap();
+        self.init_in_flight = Some(request.generation);
+        let (tx, rx) = mpsc::channel();
+        self.init_rx = Some(rx);
+
+        thread::spawn(move || {
+            let generation = request.generation;
+            let run = std::panic::AssertUnwindSafe(|| CFDApp::build_init_outcome(request));
+            let result = std::panic::catch_unwind(run)
+                .map_err(|_| "Solver init panicked".to_string())
+                .and_then(|r| r);
+            let _ = tx.send(SolverInitResponse { generation, result });
+        });
+    }
+
+    fn poll_init(&mut self) {
+        let Some(rx) = &self.init_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(resp) => {
+                self.init_rx = None;
+                let in_flight = self.init_in_flight;
+                self.init_in_flight = None;
+                if in_flight.is_some() && in_flight != Some(resp.generation) {
+                    return;
+                }
+                match resp.result {
+                    Ok(outcome) => {
+                        self.apply_init_outcome(outcome);
+                    }
+                    Err(err) => {
+                        self.gpu_unified_solver = None;
+                        self.mesh = None;
+                        self.cached_cells.clear();
+                        self.cfd_renderer = None;
+                        if let Ok(mut e) = self.shared_error.lock() {
+                            *e = Some(err);
+                        }
+                    }
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.init_rx = None;
+                self.init_in_flight = None;
+                if let Ok(mut e) = self.shared_error.lock() {
+                    *e = Some("Solver init thread disconnected".to_string());
+                }
+            }
+        }
+    }
+
+    fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
+        self.is_running = false;
+        self.gpu_solver_running.store(false, Ordering::Relaxed);
+
+        self.model_caps = outcome.model_caps;
+        self.cached_cells = outcome.cached_cells;
+        self.actual_min_cell_size = outcome.actual_min_cell_size;
+        self.cached_u = outcome.cached_u;
+        self.cached_p = outcome.cached_p;
+        self.gpu_unified_solver = Some(Arc::new(Mutex::new(outcome.solver)));
+        self.mesh = Some(outcome.mesh);
+
+        self.cfd_renderer = outcome
+            .renderer
+            .map(|r| Arc::new(Mutex::new(r)));
+
+        self.shared_results = Arc::new(Mutex::new(None));
+        self.shared_gpu_stats = Arc::new(Mutex::new(CachedGpuStats::default()));
+        self.shared_error = Arc::new(Mutex::new(None));
+        self.shared_params = Arc::new(Mutex::new(RuntimeParams {
+            target_cfl: self.target_cfl,
+            adaptive_dt: self.adaptive_dt,
+            log_convergence: self.log_convergence,
+            log_every_steps: self.log_every_steps,
+            sound_speed: if matches!(self.solver_kind, SolverKind::Compressible) {
+                self.current_fluid.sound_speed()
+            } else {
+                0.0
+            },
+        }));
+        self.cached_gpu_stats = CachedGpuStats::default();
+        self.cached_error = None;
+    }
+
+    fn build_init_outcome(request: SolverInitRequest) -> Result<SolverInitOutcome, String> {
+        let mesh = CFDApp::build_mesh_with(
+            request.selected_geometry,
+            request.mesh_type,
+            request.min_cell_size,
+            request.max_cell_size,
+            request.growth_rate,
+        );
+        let n_cells = mesh.num_cells();
+        let initial_u = CFDApp::build_initial_velocity_with(
+            &mesh,
+            request.selected_geometry,
+            request.max_cell_size,
+        );
+        let initial_p = vec![0.0; n_cells];
+
+        let (model, initial_u, initial_p, cached_p) = match request.solver_kind {
+            SolverKind::Incompressible => (
+                incompressible_momentum_model(),
+                Some(initial_u),
+                Some(initial_p),
+                None,
+            ),
+            SolverKind::Compressible => {
+                let p_ref = request
+                    .current_fluid
+                    .pressure_for_density(request.current_fluid.density);
+                (
+                    compressible_model_with_eos(request.current_fluid.eos),
+                    None,
+                    None,
+                    Some(p_ref),
+                )
+            }
+        };
+
+        const UI_MAX_BLOCK_JACOBI: u32 = 16;
+        let supports_preconditioner = model
+            .named_param_keys()
+            .into_iter()
+            .any(|k| k == "preconditioner");
+        let mut selected_preconditioner = request.selected_preconditioner;
+        if matches!(selected_preconditioner, PreconditionerType::BlockJacobi)
+            && model.system.unknowns_per_cell() > UI_MAX_BLOCK_JACOBI
+        {
+            selected_preconditioner = PreconditionerType::Jacobi;
+        }
+        let effective_preconditioner = if supports_preconditioner {
+            selected_preconditioner
+        } else {
+            PreconditionerType::Jacobi
+        };
+
+        let model_caps = ModelUiCaps {
+            supports_preconditioner,
+            model_owns_preconditioner: model
+                .linear_solver
+                .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
+                .unwrap_or(false),
+            unknowns_per_cell: model.system.unknowns_per_cell(),
+        };
+
+        let config = SolverConfig {
+            advection_scheme: request.selected_scheme,
+            time_scheme: request.time_scheme,
+            preconditioner: effective_preconditioner,
+            stepping: match request.solver_kind {
+                SolverKind::Incompressible => SteppingMode::Coupled,
+                SolverKind::Compressible => SteppingMode::Implicit { outer_iters: 1 },
+            },
+        };
+
+        let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
+            &mesh,
+            model,
+            config,
+            request.wgpu_device.clone(),
+            request.wgpu_queue.clone(),
+        ))?;
+        let stride = gpu_solver.model().state_layout.stride() as usize;
+        let _ = gpu_solver.write_state_f32(&vec![0.0f32; n_cells * stride]);
+        gpu_solver.set_dt(request.timestep as f32);
+        let _ = gpu_solver.set_viscosity(request.current_fluid.viscosity as f32);
+        gpu_solver.set_advection_scheme(request.selected_scheme);
+        gpu_solver.set_time_scheme(request.time_scheme);
+        let _ = gpu_solver.set_eos(&request.current_fluid.eos);
+        if supports_preconditioner {
+            gpu_solver.set_preconditioner(effective_preconditioner);
+        }
+
+        let (cached_u, cached_p) = match request.solver_kind {
+            SolverKind::Incompressible => {
+                let _ = gpu_solver.set_density(request.current_fluid.density as f32);
+                let _ = gpu_solver.set_alpha_u(request.alpha_u as f32);
+                let _ = gpu_solver.set_alpha_p(request.alpha_p as f32);
+                let _ = gpu_solver.set_inlet_velocity(request.inlet_velocity);
+                gpu_solver.set_u(initial_u.as_ref().unwrap());
+                gpu_solver.set_p(initial_p.as_ref().unwrap());
+                (initial_u.unwrap(), initial_p.unwrap())
+            }
+            SolverKind::Compressible => {
+                let p_ref = cached_p.unwrap();
+                let _ = gpu_solver.set_density(request.current_fluid.density as f32);
+                let _ = gpu_solver.set_compressible_inlet_isothermal_x(
+                    request.current_fluid.density as f32,
+                    request.inlet_velocity,
+                    &request.current_fluid.eos,
+                );
+                gpu_solver.set_uniform_state(
+                    request.current_fluid.density as f32,
+                    [0.0, 0.0],
+                    p_ref as f32,
+                );
+                (vec![(0.0, 0.0); n_cells], vec![p_ref; n_cells])
+            }
+        };
+
+        gpu_solver.initialize_history();
+
+        let cached_cells = CFDApp::cache_cells(&mesh);
+
+        let renderer = if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue)
+        {
+            let mut renderer = cfd_renderer::CfdRenderResources::new(
+                device,
+                request.target_format,
+                mesh.num_cells() * 10,
+            );
+            let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
+            let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
+            renderer.update_mesh(queue, &vertices, &line_vertices);
+            renderer.update_bind_group(device, gpu_solver.state_buffer());
+            Some(renderer)
+        } else {
+            None
+        };
+
+        let actual_min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
+
+        Ok(SolverInitOutcome {
+            solver: gpu_solver,
+            mesh,
+            cached_cells,
+            actual_min_cell_size,
+            cached_u,
+            cached_p,
+            model_caps,
+            renderer,
+        })
     }
 
     fn render_layout_for_field(&self) -> (u32, u32, u32) {
@@ -731,6 +897,12 @@ impl CFDApp {
 
 impl eframe::App for CFDApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_init();
+        self.spawn_pending_init();
+        let init_in_progress = self.init_rx.is_some();
+        let init_pending = self.pending_init_request.is_some();
+        let is_initializing = init_in_progress || init_pending;
+
         // Sync running state from background thread
         if self.is_running && !self.gpu_solver_running.load(Ordering::Relaxed) {
             self.is_running = false;
@@ -747,13 +919,26 @@ impl eframe::App for CFDApp {
             }
         }
 
+        if self.is_running || is_initializing {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+
         egui::SidePanel::left("controls").show(ctx, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     ui.heading("CFD Controls");
+                    if init_in_progress {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Initializing solver...");
+                        });
+                    } else if init_pending {
+                        ui.label("Initializing solver...");
+                    }
 
-                    ui.group(|ui| {
+                    ui.add_enabled_ui(!is_initializing, |ui| {
+                        ui.group(|ui| {
                         ui.label("Geometry");
                         ui.radio_value(
                             &mut self.selected_geometry,
@@ -765,9 +950,9 @@ impl eframe::App for CFDApp {
                             GeometryType::ChannelObstacle,
                             "Channel w/ Obstacle",
                         );
-                    });
+                        });
 
-                    ui.group(|ui| {
+                        ui.group(|ui| {
                         ui.label("Mesh Parameters");
                         ui.add(
                             egui::Slider::new(&mut self.min_cell_size, 0.001..=self.max_cell_size)
@@ -785,9 +970,9 @@ impl eframe::App for CFDApp {
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
                         ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
-                    });
+                        });
 
-                    ui.group(|ui| {
+                        ui.group(|ui| {
                         ui.label("Fluid Properties");
                         egui::ComboBox::from_label("Preset")
                             .selected_text(&self.current_fluid.name)
@@ -839,9 +1024,9 @@ impl eframe::App for CFDApp {
                             self.current_fluid.name = "Custom".to_string();
                             self.update_gpu_fluid();
                         }
-                    });
+                        });
 
-                    ui.group(|ui| {
+                        ui.group(|ui| {
                         ui.label("Inlet Conditions");
 
                         if ui
@@ -861,9 +1046,9 @@ impl eframe::App for CFDApp {
                             * char_length
                             / self.current_fluid.viscosity;
                         ui.label(format!("Est. Reynolds Number: {:.0}", re));
-                    });
+                        });
 
-                    ui.group(|ui| {
+                        ui.group(|ui| {
                         ui.label("Solver Parameters");
 
                         // SI units:
@@ -1086,67 +1271,74 @@ impl eframe::App for CFDApp {
                                 self.update_gpu_alpha_p();
                             }
                         }
+                        });
+
+                        ui.separator();
+                        ui.label("Time Stepping Scheme");
+                        egui::ComboBox::from_label("Time Scheme")
+                            .selected_text(format!("{:?}", self.time_scheme))
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.time_scheme,
+                                        GpuTimeScheme::Euler,
+                                        "Euler",
+                                    )
+                                    .clicked()
+                                {
+                                    self.update_gpu_time_scheme();
+                                }
+                                if ui
+                                    .selectable_value(
+                                        &mut self.time_scheme,
+                                        GpuTimeScheme::BDF2,
+                                        "BDF2",
+                                    )
+                                    .clicked()
+                                {
+                                    self.update_gpu_time_scheme();
+                                }
+                            });
+
+                        ui.separator();
+                        ui.label("Solver Type");
+                        let prev_solver_kind = self.solver_kind;
+                        egui::ComboBox::from_label("Solver")
+                            .selected_text(format!("{:?}", self.solver_kind))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.solver_kind,
+                                    SolverKind::Incompressible,
+                                    "Incompressible (Coupled)",
+                                );
+                                ui.selectable_value(
+                                    &mut self.solver_kind,
+                                    SolverKind::Compressible,
+                                    "Compressible (KT)",
+                                );
+                            });
+                        if prev_solver_kind != self.solver_kind {
+                            self.refresh_model_caps();
+                            self.init_solver();
+                        }
+
+                        ui.separator();
+                        ui.label("Pressure-Velocity Coupling");
+                        ui.label("Coupled solver (block system)");
+
+                        if ui.button("Initialize / Reset").clicked() {
+                            self.init_solver();
+                        }
                     });
-
-                    ui.separator();
-                    ui.label("Time Stepping Scheme");
-                    egui::ComboBox::from_label("Time Scheme")
-                        .selected_text(format!("{:?}", self.time_scheme))
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_value(
-                                    &mut self.time_scheme,
-                                    GpuTimeScheme::Euler,
-                                    "Euler",
-                                )
-                                .clicked()
-                            {
-                                self.update_gpu_time_scheme();
-                            }
-                            if ui
-                                .selectable_value(&mut self.time_scheme, GpuTimeScheme::BDF2, "BDF2")
-                                .clicked()
-                            {
-                                self.update_gpu_time_scheme();
-                            }
-                        });
-
-                    ui.separator();
-                    ui.label("Solver Type");
-                    let prev_solver_kind = self.solver_kind;
-                    egui::ComboBox::from_label("Solver")
-                        .selected_text(format!("{:?}", self.solver_kind))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.solver_kind,
-                                SolverKind::Incompressible,
-                                "Incompressible (Coupled)",
-                            );
-                            ui.selectable_value(
-                                &mut self.solver_kind,
-                                SolverKind::Compressible,
-                                "Compressible (KT)",
-                            );
-                        });
-                    if prev_solver_kind != self.solver_kind {
-                        self.refresh_model_caps();
-                        self.init_solver();
-                    }
-
-                    ui.separator();
-                    ui.label("Pressure-Velocity Coupling");
-                    ui.label("Coupled solver (block system)");
-
-                    if ui.button("Initialize / Reset").clicked() {
-                        self.init_solver();
-                    }
 
                     let has_solver = self.gpu_unified_solver.is_some();
 
-                    if has_solver
-                        && ui
-                            .button(if self.is_running { "Pause" } else { "Run" })
-                            .clicked()
+                    if ui
+                        .add_enabled(
+                            has_solver && !is_initializing,
+                            egui::Button::new(if self.is_running { "Pause" } else { "Run" }),
+                        )
+                        .clicked()
                     {
                         self.is_running = !self.is_running;
 
@@ -1408,13 +1600,14 @@ impl eframe::App for CFDApp {
 
                     ui.separator();
 
+                    if let Ok(err) = self.shared_error.try_lock() {
+                        self.cached_error = err.clone();
+                    }
+                    if let Some(err) = &self.cached_error {
+                        ui.colored_label(egui::Color32::RED, err);
+                    }
+
                     if has_solver {
-                        if let Ok(err) = self.shared_error.try_lock() {
-                            self.cached_error = err.clone();
-                        }
-                        if let Some(err) = &self.cached_error {
-                            ui.colored_label(egui::Color32::RED, err);
-                        }
                         if let Ok(stats) = self.shared_gpu_stats.try_lock() {
                             self.cached_gpu_stats = stats.clone();
                         }
@@ -1649,7 +1842,14 @@ impl eframe::App for CFDApp {
                 }
             } else {
                 ui.centered_and_justified(|ui| {
-                    ui.label("Press Initialize to start");
+                    if is_initializing {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Initializing solver...");
+                        });
+                    } else {
+                        ui.label("Press Initialize to start");
+                    }
                 });
             }
         });

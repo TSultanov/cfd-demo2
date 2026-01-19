@@ -323,3 +323,59 @@ fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id: vec3<u
         scalars[0] = 0.0;
     }
 }
+
+fn safe_inverse(val: f32) -> f32 {
+    let abs_val = abs(val);
+    if (abs_val > 1e-12) {
+        return 1.0 / val;
+    }
+    if (abs_val > 0.0) {
+        return sign(val) * 1.0e12;
+    }
+    return 0.0;
+}
+
+// Extract inverse diagonal values into diag_u (and mirrors into diag_v/diag_p).
+//
+// This implements a generic Jacobi preconditioner that can be used by model-agnostic
+// solver paths without assuming any particular block structure.
+@compute @workgroup_size(64)
+fn extract_diag_inv(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let row = global_index(global_id, num_workgroups);
+    if (row >= params.n) {
+        return;
+    }
+
+    let start = row_offsets[row];
+    let end = row_offsets[row + 1u];
+
+    var diag = 1.0;
+    for (var k = start; k < end; k = k + 1u) {
+        if (col_indices[k] == row) {
+            diag = matrix_values[k];
+            break;
+        }
+    }
+
+    let inv = safe_inverse(diag);
+    diag_u[row] = inv;
+    diag_v[row] = inv;
+    diag_p[row] = inv;
+}
+
+// Apply Jacobi scaling: y = diag_u * x.
+@compute @workgroup_size(64)
+fn apply_diag_inv(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let idx = global_index(global_id, num_workgroups);
+    if (idx >= params.n) {
+        return;
+    }
+
+    vec_y[idx] = diag_u[idx] * vec_x[idx];
+}

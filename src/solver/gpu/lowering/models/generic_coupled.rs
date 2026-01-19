@@ -454,21 +454,23 @@ fn build_generic_krylov(
     let num_cells = runtime.common.num_cells;
     let n = runtime.num_dofs;
 
+    let diag_bytes = (n.max(1) as u64) * 4;
+
     let b_diag_u = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("generic_coupled:identity_diag_u"),
-        size: 4,
+        label: Some("generic_coupled:jacobi_diag_u_inv"),
+        size: diag_bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     let b_diag_v = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("generic_coupled:identity_diag_v"),
-        size: 4,
+        label: Some("generic_coupled:jacobi_diag_v_inv"),
+        size: diag_bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     let b_diag_p = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("generic_coupled:identity_diag_p"),
-        size: 4,
+        label: Some("generic_coupled:jacobi_diag_p_inv"),
+        size: diag_bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });

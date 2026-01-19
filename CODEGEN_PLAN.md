@@ -236,12 +236,13 @@ Completed:
 - Gap 0 progress: initial GPU EOS constants are derived from the recipe (which derives them from the EOS module); OpenFOAM reference tests pass.
 - Gap 0 progress: initial advection/time-scheme constants are derived from the recipe/config (no post-build `set_named_param` initialization); OpenFOAM reference tests pass.
 - Preconditioner knob: generic-coupled now honors `SolverConfig.preconditioner=Amg` by wiring an AMG V-cycle preconditioner (instead of silently ignoring it); added contract coverage; OpenFOAM reference tests pass.
+- Preconditioner semantics: `PreconditionerType::Jacobi` is now a true diagonal (inv-diag) preconditioner for non-Schur models via `gmres_ops/{extract_diag_inv,apply_diag_inv}`; OpenFOAM reference tests pass.
 - Schur preconditioner: `PreconditionerType` now selects the pressure solve strategy (Chebyshev vs AMG) for model-owned Schur blocks; added smoke coverage; OpenFOAM reference tests pass.
 - Preconditioner init: model-driven lowering seeds the `preconditioner` named param only when declared by module manifests (no linear-solver-specific gating in lowering).
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
-2) Preconditioner semantics: decide whether `PreconditionerType::Jacobi` should remain an identity preconditioner for non-Schur models or become a true Jacobi/block-Jacobi preconditioner (would likely require updating reference datasets).
+2) Preconditioner follow-up: consider a model-driven block-Jacobi option derived from `system.unknowns_per_cell()` (likely new enum case) for better coupling vs diagonal Jacobi.
 
 Status:
 - Shared generated kernels are discovered via module-owned `kernel_generators()` entries scoped as `KernelWgslScope::Shared` (and emitted once at build time).

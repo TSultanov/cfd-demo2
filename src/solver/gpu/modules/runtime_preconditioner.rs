@@ -1,13 +1,17 @@
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::structs::PreconditionerType;
+use crate::solver::model::KernelId;
 
 pub(crate) struct RuntimePreconditionerModule {
     kind: PreconditionerType,
     identity: IdentityPreconditioner,
     amg: Option<AmgResources>,
     amg_init_failed: bool,
+    pipeline_extract_diag_inv: Option<wgpu::ComputePipeline>,
+    pipeline_apply_diag_inv: Option<wgpu::ComputePipeline>,
     b_rhs: wgpu::Buffer,
     num_dofs: u32,
     num_nonzeros: u32,
@@ -38,6 +42,8 @@ impl RuntimePreconditionerModule {
             identity: IdentityPreconditioner::new(),
             amg: None,
             amg_init_failed: false,
+            pipeline_extract_diag_inv: None,
+            pipeline_apply_diag_inv: None,
             b_rhs,
             num_dofs,
             num_nonzeros,
@@ -49,6 +55,61 @@ impl RuntimePreconditionerModule {
 
     pub(crate) fn set_kind(&mut self, kind: PreconditionerType) {
         self.kind = kind;
+    }
+
+    fn ensure_jacobi_pipelines(&mut self, device: &wgpu::Device) {
+        const EXTRACT_DIAG_INV: KernelId = KernelId("gmres_ops/extract_diag_inv");
+        const APPLY_DIAG_INV: KernelId = KernelId("gmres_ops/apply_diag_inv");
+
+        if self.pipeline_extract_diag_inv.is_none() {
+            let src = kernel_registry::kernel_source_by_id("", EXTRACT_DIAG_INV)
+                .expect("gmres_ops/extract_diag_inv shader missing from kernel registry");
+            self.pipeline_extract_diag_inv = Some((src.create_pipeline)(device));
+        }
+        if self.pipeline_apply_diag_inv.is_none() {
+            let src = kernel_registry::kernel_source_by_id("", APPLY_DIAG_INV)
+                .expect("gmres_ops/apply_diag_inv shader missing from kernel registry");
+            self.pipeline_apply_diag_inv = Some((src.create_pipeline)(device));
+        }
+    }
+
+    fn refresh_jacobi_diag_inv(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        dispatch: DispatchGrids,
+    ) {
+        self.ensure_jacobi_pipelines(device);
+
+        let Some(pipeline) = self.pipeline_extract_diag_inv.as_ref() else {
+            return;
+        };
+
+        let vector_bg = fgmres.create_vector_bind_group(
+            device,
+            fgmres.w_buffer().as_entire_binding(),
+            fgmres.temp_buffer().as_entire_binding(),
+            fgmres.z_buffer(0).as_entire_binding(),
+            "runtime_preconditioner:jacobi_diag_inv_vectors",
+        );
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runtime_preconditioner:jacobi_diag_inv"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runtime_preconditioner:jacobi_diag_inv"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 
     fn read_matrix_values(
@@ -138,10 +199,15 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
         _rhs: wgpu::BindingResource<'_>,
         _dispatch: DispatchGrids,
     ) {
+        if self.kind == PreconditionerType::Jacobi {
+            self.refresh_jacobi_diag_inv(device, queue, fgmres, _dispatch);
+            return;
+        }
+
         self.ensure_amg(device, queue);
         if self.kind == PreconditionerType::Amg {
             self.refresh_amg_level0_matrix(device, queue);
@@ -157,6 +223,35 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         output: &wgpu::Buffer,
         dispatch: DispatchGrids,
     ) {
+        if self.kind == PreconditionerType::Jacobi {
+            self.ensure_jacobi_pipelines(device);
+            let Some(pipeline) = self.pipeline_apply_diag_inv.as_ref() else {
+                return self
+                    .identity
+                    .encode_apply(device, encoder, fgmres, input, output, dispatch);
+            };
+
+            let vector_bg = fgmres.create_vector_bind_group(
+                device,
+                input,
+                output.as_entire_binding(),
+                output.as_entire_binding(),
+                "runtime_preconditioner:jacobi_apply_vectors",
+            );
+
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runtime_preconditioner:jacobi_apply"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+            return;
+        }
+
         if self.kind != PreconditionerType::Amg {
             return self
                 .identity

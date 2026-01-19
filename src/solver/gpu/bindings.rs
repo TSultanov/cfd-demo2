@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 17d2d23b398dbde6b7ea02a22740569484180b0b40c644c5f9145d014f4c3bea
+// SourceHash: 1806ca96a4063e5dec1e838a3dc493db223751b85654b21f14ae339ebce8c642
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -62726,6 +62726,36 @@ pub mod gmres_ops {
                 cache: None,
             })
         }
+        pub const EXTRACT_DIAG_INV_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_extract_diag_inv_pipeline_embed_source(
+            device: &wgpu::Device,
+        ) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline extract_diag_inv"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("extract_diag_inv"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+        pub const APPLY_DIAG_INV_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+        pub fn create_apply_diag_inv_pipeline_embed_source(
+            device: &wgpu::Device,
+        ) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline apply_diag_inv"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("apply_diag_inv"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
     }
     pub const ENTRY_SPMV: &str = "spmv";
     pub const ENTRY_AXPY: &str = "axpy";
@@ -62739,6 +62769,8 @@ pub mod gmres_ops {
     pub const ENTRY_ORTHOGONALIZE: &str = "orthogonalize";
     pub const ENTRY_REDUCE_FINAL: &str = "reduce_final";
     pub const ENTRY_REDUCE_FINAL_AND_FINISH_NORM: &str = "reduce_final_and_finish_norm";
+    pub const ENTRY_EXTRACT_DIAG_INV: &str = "extract_diag_inv";
+    pub const ENTRY_APPLY_DIAG_INV: &str = "apply_diag_inv";
     #[derive(Debug)]
     pub struct WgpuBindGroup0EntriesParams<'a> {
         pub vec_x: wgpu::BufferBinding<'a>,
@@ -63267,12 +63299,23 @@ var<storage, read_write> hessenberg: array<f32>;
 var<storage> y_sol: array<f32>;
 var<workgroup> partial_sums: array<f32, 64>;
 
-fn global_index(global_id_12: vec3<u32>, num_workgroups_10: vec3<u32>) -> u32 {
-    return ((global_id_12.y * (num_workgroups_10.x * WORKGROUP_SIZE)) + global_id_12.x);
+fn global_index(global_id_14: vec3<u32>, num_workgroups_12: vec3<u32>) -> u32 {
+    return ((global_id_14.y * (num_workgroups_12.x * WORKGROUP_SIZE)) + global_id_14.x);
 }
 
-fn workgroup_index(group_id_2: vec3<u32>, num_workgroups_11: vec3<u32>) -> u32 {
-    return ((group_id_2.y * num_workgroups_11.x) + group_id_2.x);
+fn workgroup_index(group_id_2: vec3<u32>, num_workgroups_13: vec3<u32>) -> u32 {
+    return ((group_id_2.y * num_workgroups_13.x) + group_id_2.x);
+}
+
+fn safe_inverse(val: f32) -> f32 {
+    let abs_val = abs(val);
+    if (abs_val > 0.000000000001f) {
+        return (1f / val);
+    }
+    if (abs_val > 0f) {
+        return (sign(val) * 1000000000000f);
+    }
+    return 0f;
 }
 
 @compute @workgroup_size(64, 1, 1) 
@@ -63298,10 +63341,10 @@ fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgr
             let _e20 = k;
             let col = col_indices[_e20];
             let _e24 = k;
-            let val = matrix_values[_e24];
+            let val_1 = matrix_values[_e24];
             let _e30 = vec_x[col];
             let _e32 = sum;
-            sum = (_e32 + (val * _e30));
+            sum = (_e32 + (val_1 * _e30));
         }
         continuing {
             let _e35 = k;
@@ -63457,8 +63500,8 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id_8: vec3<u32>, @built
     let lid_1 = local_id_1.x;
     let _e9 = params.n;
     if (_e4 < _e9) {
-        let val_1 = vec_x[_e4];
-        local_sum_1 = (val_1 * val_1);
+        let val_2 = vec_x[_e4];
+        local_sum_1 = (val_2 * val_2);
     }
     let _e18 = local_sum_1;
     partial_sums[lid_1] = _e18;
@@ -63579,6 +63622,61 @@ fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_11: vec
         scalars[0] = 0f;
         return;
     }
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn extract_diag_inv(@builtin(global_invocation_id) global_id_12: vec3<u32>, @builtin(num_workgroups) num_workgroups_10: vec3<u32>) {
+    var diag: f32 = 1f;
+    var k_1: u32;
+
+    let _e3 = global_index(global_id_12, num_workgroups_10);
+    let _e6 = params.n;
+    if (_e3 >= _e6) {
+        return;
+    }
+    let start_1 = row_offsets[_e3];
+    let end_1 = row_offsets[(_e3 + 1u)];
+    k_1 = start_1;
+    loop {
+        let _e17 = k_1;
+        if (_e17 < end_1) {
+        } else {
+            break;
+        }
+        {
+            let _e20 = k_1;
+            let _e22 = col_indices[_e20];
+            if (_e22 == _e3) {
+                let _e25 = k_1;
+                let _e27 = matrix_values[_e25];
+                diag = _e27;
+                break;
+            }
+        }
+        continuing {
+            let _e29 = k_1;
+            k_1 = (_e29 + 1u);
+        }
+    }
+    let _e32 = diag;
+    let _e33 = safe_inverse(_e32);
+    diag_u[_e3] = _e33;
+    diag_v[_e3] = _e33;
+    diag_p[_e3] = _e33;
+    return;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn apply_diag_inv(@builtin(global_invocation_id) global_id_13: vec3<u32>, @builtin(num_workgroups) num_workgroups_11: vec3<u32>) {
+    let _e2 = global_index(global_id_13, num_workgroups_11);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
+        return;
+    }
+    let _e11 = diag_u[_e2];
+    let _e14 = vec_x[_e2];
+    vec_y[_e2] = (_e11 * _e14);
+    return;
 }
 "#;
 }

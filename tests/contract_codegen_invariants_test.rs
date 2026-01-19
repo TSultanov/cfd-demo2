@@ -169,6 +169,37 @@ fn contract_preconditioner_named_param_is_not_ignored() {
 }
 
 #[test]
+fn contract_jacobi_preconditioner_is_diagonal_scaled() {
+    let runtime_path = repo_root().join("src/solver/gpu/modules/runtime_preconditioner.rs");
+    let runtime_src = read_utf8(&runtime_path);
+
+    // `PreconditionerType::Jacobi` should not silently degrade to identity for generic-coupled.
+    assert_contains(
+        &runtime_src,
+        "gmres_ops/extract_diag_inv",
+        "runtime_preconditioner.rs",
+    );
+    assert_contains(
+        &runtime_src,
+        "gmres_ops/apply_diag_inv",
+        "runtime_preconditioner.rs",
+    );
+
+    let shader_path = repo_root().join("src/solver/gpu/shaders/gmres_ops.wgsl");
+    let shader_src = read_utf8(&shader_path);
+    assert_contains(&shader_src, "fn extract_diag_inv", "gmres_ops.wgsl");
+    assert_contains(&shader_src, "fn apply_diag_inv", "gmres_ops.wgsl");
+
+    let coupled_path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let coupled_src = read_utf8(&coupled_path);
+    assert_contains(
+        &coupled_src,
+        "generic_coupled:jacobi_diag_u_inv",
+        "generic_coupled.rs",
+    );
+}
+
+#[test]
 fn contract_named_param_handlers_are_module_discovered() {
     let path = repo_root().join("src/solver/gpu/lowering/named_params/mod.rs");
     let src = read_utf8(&path);

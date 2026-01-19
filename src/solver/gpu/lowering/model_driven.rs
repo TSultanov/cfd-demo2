@@ -70,8 +70,10 @@ pub(crate) fn validate_model_owned_preconditioner_config(
         crate::solver::model::ModelPreconditionerSpec::Schur { .. } => {
             // Model-owned Schur remains authoritative, but we still allow runtime configuration
             // to select the pressure solve strategy (Chebyshev vs AMG).
-            let _ = config_preconditioner;
-            Ok(())
+            match config_preconditioner {
+                crate::solver::gpu::structs::PreconditionerType::Jacobi
+                | crate::solver::gpu::structs::PreconditionerType::Amg => Ok(()),
+            }
         }
     }
 }

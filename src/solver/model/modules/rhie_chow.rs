@@ -35,17 +35,15 @@ pub fn rhie_chow_aux_module(
             },
         ],
         generators: vec![
-            ModelKernelGeneratorSpec::new(
-                kernel_dp_init,
-                crate::solver::model::kernel::generate_dp_init_kernel_wgsl,
-            ),
-            ModelKernelGeneratorSpec::new(
-                kernel_dp_update_from_diag,
-                crate::solver::model::kernel::generate_dp_update_from_diag_kernel_wgsl,
-            ),
+            ModelKernelGeneratorSpec::new(kernel_dp_init, move |model, _schemes| {
+                generate_dp_init_kernel_wgsl(model, dp_field)
+            }),
+            ModelKernelGeneratorSpec::new(kernel_dp_update_from_diag, move |model, _schemes| {
+                generate_dp_update_from_diag_kernel_wgsl(model, dp_field)
+            }),
             ModelKernelGeneratorSpec::new(
                 kernel_rhie_chow_correct_velocity,
-                crate::solver::model::kernel::generate_rhie_chow_correct_velocity_kernel_wgsl,
+                move |model, _schemes| generate_rhie_chow_correct_velocity_kernel_wgsl(model, dp_field),
             ),
         ],
         manifest: ModuleManifest {
@@ -59,5 +57,204 @@ pub fn rhie_chow_aux_module(
             ..Default::default()
         },
         ..Default::default()
+    }
+}
+
+fn generate_dp_init_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    dp_field: &str,
+) -> Result<String, String> {
+    use crate::solver::model::backend::FieldKind;
+
+    let stride = model.state_layout.stride();
+    let Some(d_p) = model.state_layout.field(dp_field) else {
+        return Err(format!(
+            "dp_init requested but model has no '{dp_field}' field in state layout"
+        ));
+    };
+    if d_p.kind() != FieldKind::Scalar {
+        return Err(format!("dp_init requires '{dp_field}' to be a scalar field"));
+    }
+    let d_p_offset = d_p.offset();
+    Ok(cfd2_codegen::solver::codegen::generate_dp_init_wgsl(
+        stride, d_p_offset,
+    ))
+}
+
+fn generate_dp_update_from_diag_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    dp_field: &str,
+) -> Result<String, String> {
+    use crate::solver::model::backend::FieldKind;
+
+    let stride = model.state_layout.stride();
+    let Some(d_p) = model.state_layout.field(dp_field) else {
+        return Err(format!(
+            "dp_update_from_diag requested but model has no '{dp_field}' field in state layout"
+        ));
+    };
+    if d_p.kind() != FieldKind::Scalar {
+        return Err(format!("dp_update_from_diag requires '{dp_field}' to be a scalar field"));
+    }
+    let d_p_offset = d_p.offset();
+
+    let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
+        model,
+        dp_field,
+    )
+    .map_err(|e| format!("dp_update_from_diag {e}"))?;
+    let momentum = coupling.momentum;
+
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+    let mut u_indices = Vec::new();
+    for component in 0..momentum.kind().component_count() as u32 {
+        let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
+            return Err(format!(
+                "dp_update_from_diag: missing unknown offset for momentum field '{}' component {}",
+                momentum.name(),
+                component
+            ));
+        };
+        u_indices.push(offset);
+    }
+
+    cfd2_codegen::solver::codegen::generate_dp_update_from_diag_wgsl(
+        stride,
+        d_p_offset,
+        model.system.unknowns_per_cell(),
+        &u_indices,
+    )
+}
+
+fn generate_rhie_chow_correct_velocity_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    dp_field: &str,
+) -> Result<String, String> {
+    use crate::solver::model::backend::FieldKind;
+
+    let stride = model.state_layout.stride();
+    let d_p = model
+        .state_layout
+        .offset_for(dp_field)
+        .ok_or_else(|| {
+            format!("rhie_chow/correct_velocity requires '{dp_field}' in state layout")
+        })?;
+
+    let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
+        model,
+        dp_field,
+    )
+    .map_err(|e| format!("rhie_chow/correct_velocity {e}"))?;
+    let momentum = coupling.momentum;
+    let pressure = coupling.pressure;
+
+    if momentum.kind() != FieldKind::Vector2 {
+        return Err("rhie_chow/correct_velocity currently supports only Vector2 momentum fields".to_string());
+    }
+
+    let u_x = model.state_layout.component_offset(momentum.name(), 0).ok_or_else(|| {
+        format!(
+            "rhie_chow/correct_velocity requires '{}[0]' in state layout",
+            momentum.name()
+        )
+    })?;
+    let u_y = model.state_layout.component_offset(momentum.name(), 1).ok_or_else(|| {
+        format!(
+            "rhie_chow/correct_velocity requires '{}[1]' in state layout",
+            momentum.name()
+        )
+    })?;
+
+    let grad_name = format!("grad_{}", pressure.name());
+    let grad_p_x = model
+        .state_layout
+        .component_offset(&grad_name, 0)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/correct_velocity requires '{}[0]' in state layout",
+                grad_name
+            )
+        })?;
+    let grad_p_y = model
+        .state_layout
+        .component_offset(&grad_name, 1)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/correct_velocity requires '{}[1]' in state layout",
+                grad_name
+            )
+        })?;
+
+    Ok(cfd2_codegen::solver::codegen::generate_rhie_chow_correct_velocity_wgsl(
+        stride, u_x, u_y, d_p, grad_p_x, grad_p_y,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem};
+    use crate::solver::model::backend::state_layout::StateLayout;
+    use crate::solver::model::{BoundarySpec, ModelGpuSpec, PrimitiveDerivations};
+    use crate::solver::units::si;
+
+    #[test]
+    fn contract_rhie_chow_aux_kernel_generators_honor_dp_field_name() {
+        let u = vol_vector("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let rho = vol_scalar("rho", si::DENSITY);
+        let dp_custom = vol_scalar("dp_custom", si::D_P);
+        let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
+        let grad_component = vol_vector("grad_component", si::INV_TIME);
+
+        let momentum = (fvm::ddt_coeff(
+            Coefficient::field(rho).expect("rho must be scalar"),
+            u,
+        ) + fvm::div(phi, u)
+            + fvm::laplacian(
+                Coefficient::field(mu).expect("mu must be scalar"),
+                u,
+            )
+            + fvm::grad(p))
+        .eqn(u);
+
+        let pressure = (fvm::laplacian(
+            Coefficient::product(
+                Coefficient::field(rho).expect("rho must be scalar"),
+                Coefficient::field(dp_custom).expect("dp_custom must be scalar"),
+            )
+            .expect("pressure coefficient must be scalar"),
+            p,
+        ) + fvm::div_flux(phi, p))
+        .eqn(p);
+
+        let mut system = EquationSystem::new();
+        system.add_equation(momentum);
+        system.add_equation(pressure);
+
+        let layout = StateLayout::new(vec![u, p, dp_custom, grad_p, grad_component]);
+
+        let model = crate::solver::model::ModelSpec {
+            id: "rhie_chow_dp_custom_test",
+            system,
+            state_layout: layout,
+            boundaries: BoundarySpec::default(),
+            modules: vec![rhie_chow_aux_module("dp_custom", true, true)],
+            linear_solver: None,
+            primitives: PrimitiveDerivations::identity(),
+            gpu: ModelGpuSpec::default(),
+        };
+
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+        for kernel_id in [
+            KernelId("dp_init"),
+            KernelId("dp_update_from_diag"),
+            KernelId("rhie_chow/correct_velocity"),
+        ] {
+            crate::solver::model::kernel::generate_kernel_wgsl_for_model_by_id(&model, &schemes, kernel_id)
+                .unwrap_or_else(|e| panic!("generator missing or failed for {}: {e}", kernel_id.as_str()));
+        }
     }
 }

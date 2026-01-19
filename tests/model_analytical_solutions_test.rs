@@ -1,3 +1,5 @@
+#![cfg(feature = "meshgen")]
+
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};
 use cfd2::solver::model::generic_diffusion_demo_model;

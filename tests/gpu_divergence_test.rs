@@ -1,3 +1,5 @@
+#![cfg(feature = "meshgen")]
+
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,

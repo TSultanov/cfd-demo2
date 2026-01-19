@@ -1,3 +1,5 @@
+#![cfg(feature = "meshgen")]
+
 use cfd2::solver::mesh::{generate_delaunay_mesh, BackwardsStep};
 use nalgebra::Vector2;
 

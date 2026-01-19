@@ -1,3 +1,5 @@
+#![cfg(feature = "meshgen")]
+
 #[cfg(test)]
 mod tests {
     use cfd2::solver::mesh::{ChannelWithObstacle, Geometry};

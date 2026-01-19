@@ -1,3 +1,5 @@
+#![cfg(feature = "meshgen")]
+
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;

@@ -1,3 +1,5 @@
+#![cfg(all(feature = "meshgen", feature = "profiling"))]
+
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
 use nalgebra::{Point2, Vector2};
 

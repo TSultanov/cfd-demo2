@@ -112,14 +112,10 @@ pub struct GpuSchurPrecondGenericParams {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct GpuGenericCoupledSchurSetupParams {
-    pub dispatch_x: u32,
     pub num_cells: u32,
     pub unknowns_per_cell: u32,
     pub p: u32,
     pub u_len: u32,
-    pub state_stride: u32,
-    pub d_p_offset: u32,
-    pub _pad0: u32,
     pub u0123: [u32; 4],
     pub u4567: [u32; 4],
 }

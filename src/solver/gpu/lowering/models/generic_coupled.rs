@@ -152,7 +152,6 @@ impl GenericCoupledProgramResources {
             &runtime,
             scalar_row_offsets,
             scalar_col_indices,
-            &fields,
         )?;
         let krylov = if schur.is_some() {
             None
@@ -277,7 +276,6 @@ fn build_generic_schur(
     runtime: &GpuCsrRuntime,
     scalar_row_offsets: &wgpu::Buffer,
     scalar_col_indices: &wgpu::Buffer,
-    fields: &UnifiedFieldResources,
 ) -> Result<Option<GenericCoupledSchurResources>, String> {
     let Some(spec) = model.linear_solver else {
         return Ok(None);
@@ -374,16 +372,6 @@ fn build_generic_schur(
         .buffer_for_binding_name("diagonal_indices")
         .ok_or_else(|| "missing diagonal_indices mesh buffer".to_string())?;
 
-    let cell_vols = runtime
-        .common
-        .mesh
-        .buffer_for_binding_name("cell_vols")
-        .ok_or_else(|| "missing cell_vols mesh buffer".to_string())?;
-
-    let state_stride = model.state_layout.stride();
-    let d_p_offset = model.state_layout.offset_for("d_p").unwrap_or(u32::MAX);
-    let state_step_index = fields.step_handle();
-
     let setup_bg = GenericCoupledSchurPreconditioner::build_setup_bind_group(
         device,
         &setup_pipeline,
@@ -393,8 +381,6 @@ fn build_generic_schur(
         &b_diag_u,
         &b_diag_p,
         &b_p_matrix_values,
-        fields.state_buffers(),
-        cell_vols,
         &b_setup_params,
     )?;
 
@@ -430,9 +416,6 @@ fn build_generic_schur(
         setup_bg,
         setup_pipeline,
         b_setup_params,
-        state_step_index,
-        state_stride,
-        d_p_offset,
         model.system.unknowns_per_cell(),
         layout.p,
         u_len,

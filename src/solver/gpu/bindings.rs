@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: d8b98a3fff2f5e3b9f4630e5b31c9676f7f8a3e541688f20dd127fac681c49f0
+// SourceHash: 1167ab523d5ccd48f583fb2fabd8f1dfe39e8284af0067850b41a27bca2534e5
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -3302,18 +3302,15 @@ pub mod layout_asserts {
         );
     };
     const GENERIC_COUPLED_SCHUR_SETUP_SETUP_PARAMS_ASSERTS: () = {
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, dispatch_x) == 0);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, num_cells) == 4);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, num_cells) == 0);
         assert!(
-            std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, unknowns_per_cell) == 8
+            std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, unknowns_per_cell) == 4
         );
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, p) == 12);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u_len) == 16);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, state_stride) == 20);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, d_p_offset) == 24);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u0123) == 32);
-        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u4567) == 48);
-        assert!(std::mem::size_of::<generic_coupled_schur_setup::SetupParams>() == 64);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, p) == 8);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u_len) == 12);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u0123) == 16);
+        assert!(std::mem::offset_of!(generic_coupled_schur_setup::SetupParams, u4567) == 32);
+        assert!(std::mem::size_of::<generic_coupled_schur_setup::SetupParams>() == 48);
     };
     const GMRES_CGS_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(gmres_cgs::Params, n) == 0);
@@ -61065,83 +61062,35 @@ pub mod generic_coupled_schur_setup {
     #[derive(Debug, PartialEq, Clone, Copy)]
     pub struct SetupParams {
         #[doc = "offset: 0, size: 4, type: `u32`"]
-        pub dispatch_x: u32,
-        #[doc = "offset: 4, size: 4, type: `u32`"]
         pub num_cells: u32,
-        #[doc = "offset: 8, size: 4, type: `u32`"]
+        #[doc = "offset: 4, size: 4, type: `u32`"]
         pub unknowns_per_cell: u32,
-        #[doc = "offset: 12, size: 4, type: `u32`"]
+        #[doc = "offset: 8, size: 4, type: `u32`"]
         pub p: u32,
-        #[doc = "offset: 16, size: 4, type: `u32`"]
+        #[doc = "offset: 12, size: 4, type: `u32`"]
         pub u_len: u32,
-        #[doc = "offset: 20, size: 4, type: `u32`"]
-        pub state_stride: u32,
-        #[doc = "offset: 24, size: 4, type: `u32`"]
-        pub d_p_offset: u32,
-        pub _pad_d_p_offset: [u8; 0x4],
-        #[doc = "offset: 32, size: 16, type: `vec4<u32>`"]
+        #[doc = "offset: 16, size: 16, type: `vec4<u32>`"]
         pub u0123: [u32; 4],
-        #[doc = "offset: 48, size: 16, type: `vec4<u32>`"]
+        #[doc = "offset: 32, size: 16, type: `vec4<u32>`"]
         pub u4567: [u32; 4],
     }
     impl SetupParams {
         pub const fn new(
-            dispatch_x: u32,
             num_cells: u32,
             unknowns_per_cell: u32,
             p: u32,
             u_len: u32,
-            state_stride: u32,
-            d_p_offset: u32,
             u0123: [u32; 4],
             u4567: [u32; 4],
         ) -> Self {
             Self {
-                dispatch_x,
                 num_cells,
                 unknowns_per_cell,
                 p,
                 u_len,
-                state_stride,
-                d_p_offset,
-                _pad_d_p_offset: [0; 0x4],
                 u0123,
                 u4567,
             }
-        }
-    }
-    #[repr(C)]
-    #[derive(Debug, PartialEq, Clone, Copy)]
-    pub struct SetupParamsInit {
-        pub dispatch_x: u32,
-        pub num_cells: u32,
-        pub unknowns_per_cell: u32,
-        pub p: u32,
-        pub u_len: u32,
-        pub state_stride: u32,
-        pub d_p_offset: u32,
-        pub u0123: [u32; 4],
-        pub u4567: [u32; 4],
-    }
-    impl SetupParamsInit {
-        pub fn build(&self) -> SetupParams {
-            SetupParams {
-                dispatch_x: self.dispatch_x,
-                num_cells: self.num_cells,
-                unknowns_per_cell: self.unknowns_per_cell,
-                p: self.p,
-                u_len: self.u_len,
-                state_stride: self.state_stride,
-                d_p_offset: self.d_p_offset,
-                _pad_d_p_offset: [0; 0x4],
-                u0123: self.u0123,
-                u4567: self.u4567,
-            }
-        }
-    }
-    impl From<SetupParamsInit> for SetupParams {
-        fn from(data: SetupParamsInit) -> Self {
-            data.build()
         }
     }
     pub mod compute {
@@ -61171,8 +61120,6 @@ pub mod generic_coupled_schur_setup {
         pub diag_u_inv: wgpu::BufferBinding<'a>,
         pub diag_p_inv: wgpu::BufferBinding<'a>,
         pub p_matrix_values: wgpu::BufferBinding<'a>,
-        pub state: wgpu::BufferBinding<'a>,
-        pub cell_vols: wgpu::BufferBinding<'a>,
         pub params: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
@@ -61183,8 +61130,6 @@ pub mod generic_coupled_schur_setup {
         pub diag_u_inv: wgpu::BindGroupEntry<'a>,
         pub diag_p_inv: wgpu::BindGroupEntry<'a>,
         pub p_matrix_values: wgpu::BindGroupEntry<'a>,
-        pub state: wgpu::BindGroupEntry<'a>,
-        pub cell_vols: wgpu::BindGroupEntry<'a>,
         pub params: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup0Entries<'a> {
@@ -61214,21 +61159,13 @@ pub mod generic_coupled_schur_setup {
                     binding: 5,
                     resource: wgpu::BindingResource::Buffer(params.p_matrix_values),
                 },
-                state: wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Buffer(params.state),
-                },
-                cell_vols: wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                },
                 params: wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::Buffer(params.params),
                 },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 7] {
             [
                 self.scalar_row_offsets,
                 self.diagonal_indices,
@@ -61236,8 +61173,6 @@ pub mod generic_coupled_schur_setup {
                 self.diag_u_inv,
                 self.diag_p_inv,
                 self.p_matrix_values,
-                self.state,
-                self.cell_vols,
                 self.params,
             ]
         }
@@ -61318,28 +61253,6 @@ pub mod generic_coupled_schur_setup {
                         },
                         count: None,
                     },
-                    #[doc = " @binding(7): \"state\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 7,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    #[doc = " @binding(8): \"cell_vols\""]
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 8,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                     #[doc = " @binding(6): \"params\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 6,
@@ -61414,13 +61327,10 @@ pub mod generic_coupled_schur_setup {
     }
     pub const SHADER_STRING: &str = r#"
 struct SetupParams {
-    dispatch_x: u32,
     num_cells: u32,
     unknowns_per_cell: u32,
     p: u32,
     u_len: u32,
-    state_stride: u32,
-    d_p_offset: u32,
     u0123_: vec4<u32>,
     u4567_: vec4<u32>,
 }
@@ -61437,10 +61347,6 @@ var<storage, read_write> diag_u_inv: array<f32>;
 var<storage, read_write> diag_p_inv: array<f32>;
 @group(0) @binding(5) 
 var<storage, read_write> p_matrix_values: array<f32>;
-@group(0) @binding(7) 
-var<storage, read_write> state: array<f32>;
-@group(0) @binding(8) 
-var<storage> cell_vols: array<f32>;
 @group(0) @binding(6) 
 var<uniform> params: SetupParams;
 
@@ -61461,93 +61367,73 @@ fn safe_inverse(val: f32) -> f32 {
 }
 
 @compute @workgroup_size(64, 1, 1) 
-fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var sum_u_inv: f32 = 0f;
+fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var i: u32 = 0u;
-    var d_p: f32 = 0f;
     var rank: u32 = 0u;
 
-    let _e6 = params.dispatch_x;
-    let cell = ((global_id.y * _e6) + global_id.x);
+    let cell = ((global_id.y * (num_workgroups.x * 64u)) + global_id.x);
     let _e12 = params.num_cells;
     if (cell >= _e12) {
         return;
     }
-    let cell_vol = cell_vols[cell];
     let scalar_offset = scalar_row_offsets[cell];
     let scalar_end = scalar_row_offsets[(cell + 1u)];
     let num_neighbors = (scalar_end - scalar_offset);
-    let _e28 = diagonal_indices[cell];
-    let diag_rank = (_e28 - scalar_offset);
+    let _e25 = diagonal_indices[cell];
+    let diag_rank = (_e25 - scalar_offset);
+    let _e29 = params.unknowns_per_cell;
     let _e32 = params.unknowns_per_cell;
-    let _e35 = params.unknowns_per_cell;
-    let block_stride = (_e32 * _e35);
+    let block_stride = (_e29 * _e32);
     let start_row_0_ = (scalar_offset * block_stride);
-    let _e40 = params.unknowns_per_cell;
-    let row_stride = (num_neighbors * _e40);
-    let _e44 = params.p;
-    let start_row_p = (start_row_0_ + (_e44 * row_stride));
-    let _e49 = params.unknowns_per_cell;
-    let _e55 = params.p;
-    let diag_p = matrix_values[((start_row_p + (diag_rank * _e49)) + _e55)];
+    let _e37 = params.unknowns_per_cell;
+    let row_stride = (num_neighbors * _e37);
+    let _e41 = params.p;
+    let start_row_p = (start_row_0_ + (_e41 * row_stride));
+    let _e46 = params.unknowns_per_cell;
+    let _e52 = params.p;
+    let diag_p = matrix_values[((start_row_p + (diag_rank * _e46)) + _e52)];
     loop {
-        let _e60 = i;
-        let _e63 = params.u_len;
-        if (_e60 < _e63) {
+        let _e57 = i;
+        let _e60 = params.u_len;
+        if (_e57 < _e60) {
         } else {
             break;
         }
         {
-            let _e65 = i;
-            let _e66 = u_index(_e65);
-            let start_row_u = (start_row_0_ + (_e66 * row_stride));
-            let _e72 = params.unknowns_per_cell;
-            let diag_u = matrix_values[((start_row_u + (diag_rank * _e72)) + _e66)];
-            let _e78 = safe_inverse(diag_u);
-            let _e82 = params.u_len;
-            let _e84 = i;
-            diag_u_inv[((cell * _e82) + _e84)] = _e78;
-            let _e88 = sum_u_inv;
-            sum_u_inv = (_e88 + _e78);
+            let _e62 = i;
+            let _e63 = u_index(_e62);
+            let start_row_u = (start_row_0_ + (_e63 * row_stride));
+            let _e69 = params.unknowns_per_cell;
+            let diag_u = matrix_values[((start_row_u + (diag_rank * _e69)) + _e63)];
+            let _e75 = safe_inverse(diag_u);
+            let _e79 = params.u_len;
+            let _e81 = i;
+            diag_u_inv[((cell * _e79) + _e81)] = _e75;
         }
         continuing {
-            let _e91 = i;
-            i = (_e91 + 1u);
+            let _e85 = i;
+            i = (_e85 + 1u);
         }
     }
-    let _e95 = safe_inverse(diag_p);
-    diag_p_inv[cell] = _e95;
-    let _e98 = params.d_p_offset;
-    let _e103 = params.state_stride;
-    if ((_e98 != 4294967295u) && (_e103 > 0u)) {
-        let _e109 = params.u_len;
-        if (_e109 > 0u) {
-            let _e112 = sum_u_inv;
-            let _e115 = params.u_len;
-            d_p = (_e112 / f32(_e115));
-        }
-        let _e121 = params.state_stride;
-        let _e126 = params.d_p_offset;
-        let _e129 = d_p;
-        state[((cell * _e121) + _e126)] = _e129;
-    }
+    let _e89 = safe_inverse(diag_p);
+    diag_p_inv[cell] = _e89;
     loop {
-        let _e131 = rank;
-        if (_e131 < num_neighbors) {
+        let _e91 = rank;
+        if (_e91 < num_neighbors) {
         } else {
             break;
         }
         {
-            let _e134 = rank;
-            let _e137 = rank;
-            let _e140 = params.unknowns_per_cell;
-            let _e146 = params.p;
-            let _e149 = matrix_values[((start_row_p + (_e137 * _e140)) + _e146)];
-            p_matrix_values[(scalar_offset + _e134)] = _e149;
+            let _e94 = rank;
+            let _e97 = rank;
+            let _e100 = params.unknowns_per_cell;
+            let _e106 = params.p;
+            let _e109 = matrix_values[((start_row_p + (_e97 * _e100)) + _e106)];
+            p_matrix_values[(scalar_offset + _e94)] = _e109;
         }
         continuing {
-            let _e151 = rank;
-            rank = (_e151 + 1u);
+            let _e111 = rank;
+            rank = (_e111 + 1u);
         }
     }
     return;

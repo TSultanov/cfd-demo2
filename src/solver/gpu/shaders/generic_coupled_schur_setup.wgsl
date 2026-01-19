@@ -12,18 +12,11 @@
 @group(0) @binding(4) var<storage, read_write> diag_p_inv: array<f32>;
 @group(0) @binding(5) var<storage, read_write> p_matrix_values: array<f32>;
 
-// Current ping-pong `state` buffer.
-@group(0) @binding(7) var<storage, read_write> state: array<f32>;
-@group(0) @binding(8) var<storage, read> cell_vols: array<f32>;
-
 struct SetupParams {
-    dispatch_x: u32,
     num_cells: u32,
     unknowns_per_cell: u32,
     p: u32,
     u_len: u32,
-    state_stride: u32,
-    d_p_offset: u32,
     u0123: vec4<u32>,
     u4567: vec4<u32>,
 }
@@ -45,13 +38,15 @@ fn safe_inverse(val: f32) -> f32 {
 
 @compute
 @workgroup_size(64)
-fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let cell = global_id.y * params.dispatch_x + global_id.x;
+fn build_diag_and_pressure(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(num_workgroups) num_workgroups: vec3<u32>,
+) {
+    let cell = global_id.y * (num_workgroups.x * 64u) + global_id.x;
     if (cell >= params.num_cells) {
         return;
     }
 
-    let cell_vol = cell_vols[cell];
     let scalar_offset = scalar_row_offsets[cell];
     let scalar_end = scalar_row_offsets[cell + 1u];
     let num_neighbors = scalar_end - scalar_offset;
@@ -64,29 +59,14 @@ fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>) 
 
     let diag_p = matrix_values[start_row_p + diag_rank * params.unknowns_per_cell + params.p];
 
-    var sum_u_inv: f32 = 0.0;
     for (var i = 0u; i < params.u_len; i++) {
         let u = u_index(i);
         let start_row_u = start_row_0 + u * row_stride;
         let diag_u = matrix_values[start_row_u + diag_rank * params.unknowns_per_cell + u];
         let inv_u = safe_inverse(diag_u);
         diag_u_inv[cell * params.u_len + i] = inv_u;
-        sum_u_inv += inv_u;
     }
     diag_p_inv[cell] = safe_inverse(diag_p);
-
-    // Update Rhie–Chow pressure mobility d_p ≈ 1 / A_U, where A_U is the assembled
-    // momentum diagonal (integrated over the cell volume).
-    //
-    // For vector velocities we use the mean of the per-component diagonal inverses.
-    if (params.d_p_offset != 0xffffffffu && params.state_stride > 0u) {
-        var d_p: f32 = 0.0;
-        if (params.u_len > 0u) {
-            // Mean diagonal inverse across velocity components.
-            d_p = sum_u_inv / f32(params.u_len);
-        }
-        state[cell * params.state_stride + params.d_p_offset] = d_p;
-    }
 
     for (var rank = 0u; rank < num_neighbors; rank++) {
         p_matrix_values[scalar_offset + rank] =

@@ -3,9 +3,11 @@ pub mod delaunay;
 pub mod geometry;
 pub mod quadtree;
 pub mod structs;
-pub mod tests;
 pub mod utils;
 pub mod voronoi;
+
+#[cfg(test)]
+mod tests;
 
 pub use cut_cell::generate_cut_cell_mesh;
 pub use delaunay::{generate_delaunay_mesh, Edge, Triangle};

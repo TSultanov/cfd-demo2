@@ -233,7 +233,14 @@ impl SolverRecipe {
         let needs_gradients = !gradient_fields.is_empty();
         let has_grad_state = gradient_fields.iter().any(|field| field == "state");
         let flux = model.gpu.flux;
-        let requires_low_mach_params = model.gpu.requires_low_mach_params;
+
+        // Low-Mach parameters are currently only used by compressible EOS variants.
+        let eos = model.eos_checked()?;
+        let requires_low_mach_params = matches!(
+            eos,
+            crate::solver::model::eos::EosSpec::IdealGas { .. }
+                | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
+        );
 
         // Emit kernel specs in terms of stable KernelIds.
         //

@@ -32,9 +32,6 @@ pub struct ModelGpuSpec {
     /// Optional face-based flux storage requirements.
     pub flux: Option<FluxSpec>,
 
-    /// Whether the model requires a low-mach params uniform buffer.
-    pub requires_low_mach_params: bool,
-
     /// How gradient buffers are exposed to shaders.
     pub gradient_storage: GradientStorage,
 

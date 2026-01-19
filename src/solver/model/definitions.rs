@@ -340,13 +340,6 @@ impl ModelSpec {
             stride: self.system.unknowns_per_cell(),
         });
 
-        // Low-Mach parameters are currently only used by compressible EOS variants.
-        let requires_low_mach_params = matches!(
-            self.eos(),
-            crate::solver::model::eos::EosSpec::IdealGas { .. }
-                | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
-        );
-
         let gradient_storage = match method {
             crate::solver::model::method::MethodSpec::Coupled(_) => GradientStorage::PackedState,
         };
@@ -355,7 +348,6 @@ impl ModelSpec {
 
         ModelGpuSpec {
             flux,
-            requires_low_mach_params,
             gradient_storage,
             required_gradient_fields,
         }

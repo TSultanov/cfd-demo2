@@ -100,7 +100,7 @@ Progress (partial):
   - named parameter keys accepted by the runtime plan
 - typed invariants validated early (e.g. Rhie–Chow dp coupling requirements)
 - Extracted Rhie–Chow aux bundle into a dedicated module factory (`src/solver/model/modules/rhie_chow.rs`), eliminating per-model inline `KernelBundleModule` literals for this pass.
-- Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; EOS/low-mach named keys are now purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
+- Formalized EOS as a module (`src/solver/model/modules/eos.rs`) and removed `ModelSpec.eos` entirely; low-Mach params allocation is derived from EOS config (no `ModelGpuSpec.requires_low_mach_params`), and EOS/low-mach named keys are purely manifest-driven (no solver-core injection in `ModelSpec::named_param_keys`).
 - Build-script stability for modules: `build.rs` includes `src/solver/model/modules/mod.rs`, so adding a new module file under `src/solver/model/modules/` does not require editing `build.rs` (validated on 2026-01-18).
 - Rhie–Chow module-specific kernel IDs (`dp_init`, `dp_update_from_diag`, `rhie_chow/correct_velocity`) are now module-local (no longer central `KernelId` constants), so adding similar auxiliary modules does not require editing `src/solver/model/kernel.rs` (validated on 2026-01-18).
 - Contract hardening: `contract_gap0_module_defined_kernel_id_is_module_driven` ensures a locally-defined `KernelId("contract/...")` (not a builtin kernel id) can still be scheduled and generated via module wiring (`src/solver/model/kernel.rs`), so future re-centralization breaks the test (added on 2026-01-18).
@@ -229,6 +229,7 @@ Completed:
 - Linear solver tuning: `generic_coupled` now declares `linear_solver.*` named params (restart/iters/tolerances) with runtime handlers so solver tuning stays config-driven; OpenFOAM reference tests pass.
 - Linear solver max iters: FGMRES now honors `LinearSolverSpec.max_iters` via multi-restart loops (so the iteration cap is meaningful); OpenFOAM reference tests pass.
 - Gap 0 progress: model kernel generators are closure-capable so modules can derive WGSL from their own configuration (e.g. Rhie–Chow aux kernels honor `dp_field`); added contract coverage; OpenFOAM reference tests pass.
+- Gap 0 progress: low-Mach params buffer allocation is derived from the EOS module config (removed `ModelGpuSpec.requires_low_mach_params`); OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

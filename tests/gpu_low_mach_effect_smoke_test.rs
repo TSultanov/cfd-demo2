@@ -40,7 +40,7 @@ fn low_mach_knob_changes_compressible_implicit_update() {
     solver.set_dtau(5e-5).expect("dtau");
     solver.set_viscosity(0.0).expect("viscosity");
     solver
-        .set_precond_theta_floor(1e-6)
+        .set_precond_theta_floor(1e-2)
         .expect("theta floor");
 
     let rho = vec![1.0f32; mesh.num_cells()];
@@ -64,13 +64,29 @@ fn low_mach_knob_changes_compressible_implicit_update() {
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
     solver.step();
-    let rho_e_on = pollster::block_on(solver.get_field_scalar("rho_e")).expect("rho_e on");
+    let rho_e_legacy =
+        pollster::block_on(solver.get_field_scalar("rho_e")).expect("rho_e legacy");
+
+    solver
+        .set_precond_model(GpuLowMachPrecondModel::WeissSmith)
+        .expect("precond model weiss-smith");
+    solver.set_state_fields(&rho, &u, &p);
+    solver.initialize_history();
+    solver.step();
+    let rho_e_weiss =
+        pollster::block_on(solver.get_field_scalar("rho_e")).expect("rho_e weiss-smith");
 
     let delta_off = (rho_e_off[0] - rho_e_off[1]).abs();
-    let delta_on = (rho_e_on[0] - rho_e_on[1]).abs();
+    let delta_legacy = (rho_e_legacy[0] - rho_e_legacy[1]).abs();
+    let delta_weiss = (rho_e_weiss[0] - rho_e_weiss[1]).abs();
 
     assert!(
-        delta_on > delta_off * 1.01,
-        "expected low-mach preconditioning to reduce numerical diffusion (delta_on={delta_on:.6}, delta_off={delta_off:.6})"
+        delta_legacy > delta_off * 1.01,
+        "expected low-mach preconditioning to reduce numerical diffusion (delta_legacy={delta_legacy:.6}, delta_off={delta_off:.6})"
+    );
+
+    assert!(
+        delta_weiss > delta_off * 1.001 && delta_legacy > delta_weiss * 1.001,
+        "expected low-mach model variants to differ (delta_off={delta_off:.6}, delta_weiss={delta_weiss:.6}, delta_legacy={delta_legacy:.6})"
     );
 }

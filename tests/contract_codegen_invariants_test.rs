@@ -149,6 +149,24 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
 }
 
 #[test]
+fn contract_named_param_handlers_are_module_discovered() {
+    let path = repo_root().join("src/solver/gpu/lowering/named_params/mod.rs");
+    let src = read_utf8(&path);
+
+    // Named-param handler registries should be discovered automatically so adding a module does
+    // not require editing a centralized module-name `match` table.
+    assert_contains(
+        &src,
+        "include!(concat!(env!(\"OUT_DIR\"), \"/named_params_registry.rs\"));",
+        "named_params/mod.rs",
+    );
+
+    assert_not_contains(&src, "match module.name", "named_params/mod.rs");
+    assert_not_contains(&src, "mod eos;", "named_params/mod.rs");
+    assert_not_contains(&src, "mod generic_coupled;", "named_params/mod.rs");
+}
+
+#[test]
 fn contract_generic_coupled_graphs_have_no_assembly_fallback() {
     let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
     let src = read_utf8(&path);

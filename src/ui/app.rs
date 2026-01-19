@@ -24,12 +24,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
+#[derive(Clone, Copy)]
 struct RuntimeParams {
-    target_cfl: f64,
     adaptive_dt: bool,
+    target_cfl: f64,
+    requested_dt: f32,
     log_convergence: bool,
     log_every_steps: u32,
-    sound_speed: f64,
+    advection_scheme: Scheme,
+    time_scheme: GpuTimeScheme,
+    preconditioner: PreconditionerType,
+    alpha_u: f32,
+    alpha_p: f32,
+    inlet_velocity: f32,
+    density: f32,
+    viscosity: f32,
+    eos: crate::solver::model::eos::EosSpec,
+    solver_params_revision: u64,
 }
 
 /// Rendering mode for the mesh visualization
@@ -251,6 +262,8 @@ impl CFDApp {
                 (None, None, wgpu::TextureFormat::Bgra8Unorm)
             };
 
+        let default_fluid = Fluid::presets()[1].clone();
+
         let mut app = Self {
             gpu_unified_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
@@ -263,11 +276,21 @@ impl CFDApp {
             shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
             shared_error: Arc::new(Mutex::new(None)),
             shared_params: Arc::new(Mutex::new(RuntimeParams {
-                target_cfl: 0.95,
                 adaptive_dt: true,
+                target_cfl: 0.95,
+                requested_dt: 0.001,
                 log_convergence: false,
                 log_every_steps: 25,
-                sound_speed: 0.0,
+                advection_scheme: Scheme::Upwind,
+                time_scheme: GpuTimeScheme::Euler,
+                preconditioner: PreconditionerType::Jacobi,
+                alpha_u: 0.7,
+                alpha_p: 0.3,
+                inlet_velocity: 1.0,
+                density: default_fluid.density as f32,
+                viscosity: default_fluid.viscosity as f32,
+                eos: default_fluid.eos,
+                solver_params_revision: 0,
             })),
             cached_u: Vec::new(),
             cached_p: Vec::new(),
@@ -285,7 +308,7 @@ impl CFDApp {
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
-            current_fluid: Fluid::presets()[1].clone(),
+            current_fluid: default_fluid,
             show_mesh_lines: true,
             adaptive_dt: true,
             target_cfl: 0.95,
@@ -629,15 +652,21 @@ impl CFDApp {
         self.shared_gpu_stats = Arc::new(Mutex::new(CachedGpuStats::default()));
         self.shared_error = Arc::new(Mutex::new(None));
         self.shared_params = Arc::new(Mutex::new(RuntimeParams {
-            target_cfl: self.target_cfl,
             adaptive_dt: self.adaptive_dt,
+            target_cfl: self.target_cfl,
+            requested_dt: self.timestep as f32,
             log_convergence: self.log_convergence,
             log_every_steps: self.log_every_steps,
-            sound_speed: if matches!(self.solver_kind, SolverKind::Compressible) {
-                self.current_fluid.sound_speed()
-            } else {
-                0.0
-            },
+            advection_scheme: self.selected_scheme,
+            time_scheme: self.time_scheme,
+            preconditioner: self.selected_preconditioner,
+            alpha_u: self.alpha_u as f32,
+            alpha_p: self.alpha_p as f32,
+            inlet_velocity: self.inlet_velocity,
+            density: self.current_fluid.density as f32,
+            viscosity: self.current_fluid.viscosity as f32,
+            eos: self.current_fluid.eos,
+            solver_params_revision: 0,
         }));
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
@@ -842,26 +871,37 @@ impl CFDApp {
         });
 
         if let Ok(mut params) = self.shared_params.lock() {
-            params.sound_speed = if matches!(self.solver_kind, SolverKind::Compressible) {
-                self.current_fluid.sound_speed()
-            } else {
-                0.0
-            };
+            params.density = self.current_fluid.density as f32;
+            params.viscosity = self.current_fluid.viscosity as f32;
+            params.eos = self.current_fluid.eos;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
         }
     }
 
     fn update_gpu_dt(&self) {
         self.with_unified_solver(|solver| solver.set_dt(self.timestep as f32));
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.requested_dt = self.timestep as f32;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 
     fn update_gpu_scheme(&self) {
         self.with_unified_solver(|solver| solver.set_advection_scheme(self.selected_scheme));
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.advection_scheme = self.selected_scheme;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 
     fn update_gpu_alpha_u(&self) {
         self.with_unified_solver(|solver| {
             let _ = solver.set_alpha_u(self.alpha_u as f32);
         });
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.alpha_u = self.alpha_u as f32;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 
     fn update_gpu_alpha_p(&self) {
@@ -870,10 +910,18 @@ impl CFDApp {
                 let _ = solver.set_alpha_p(self.alpha_p as f32);
             });
         }
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.alpha_p = self.alpha_p as f32;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 
     fn update_gpu_time_scheme(&self) {
         self.with_unified_solver(|solver| solver.set_time_scheme(self.time_scheme));
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.time_scheme = self.time_scheme;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 
     fn update_gpu_inlet_velocity(&self) {
@@ -888,10 +936,18 @@ impl CFDApp {
                 let _ = solver.set_inlet_velocity(self.inlet_velocity);
             }
         });
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.inlet_velocity = self.inlet_velocity;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 
     fn update_gpu_preconditioner(&self) {
         self.with_unified_solver(|solver| solver.set_preconditioner(self.selected_preconditioner));
+        if let Ok(mut params) = self.shared_params.lock() {
+            params.preconditioner = self.selected_preconditioner;
+            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
+        }
     }
 }
 
@@ -1363,6 +1419,7 @@ impl eframe::App for CFDApp {
                                     let run_loop = std::panic::AssertUnwindSafe(|| {
                                         let mut step_idx: u64 = 0;
                                         let mut prev_max_vel = 0.0f64;
+                                        let mut last_params_revision: u64 = 0;
                                         while running_flag.load(Ordering::Relaxed) {
                                             let mut solver = match solver_arc.lock() {
                                                 Ok(guard) => guard,
@@ -1379,25 +1436,64 @@ impl eframe::App for CFDApp {
                                                 }
                                             };
 
-                                            let (
-                                                adaptive_dt,
-                                                target_cfl,
-                                                log_convergence,
-                                                log_every_steps,
-                                                sound_speed,
-                                            ) = if let Ok(params) = shared_params.lock() {
-                                                (
-                                                    params.adaptive_dt,
-                                                    params.target_cfl,
-                                                    params.log_convergence,
-                                                    params.log_every_steps.max(1),
-                                                    params.sound_speed,
-                                                )
+                                            let params = if let Ok(params) = shared_params.lock() {
+                                                *params
                                             } else {
-                                                (false, 0.9, false, 50, 0.0)
+                                                RuntimeParams {
+                                                    adaptive_dt: false,
+                                                    target_cfl: 0.9,
+                                                    requested_dt: solver.dt(),
+                                                    log_convergence: false,
+                                                    log_every_steps: 50,
+                                                    advection_scheme: Scheme::Upwind,
+                                                    time_scheme: GpuTimeScheme::Euler,
+                                                    preconditioner: PreconditionerType::Jacobi,
+                                                    alpha_u: 1.0,
+                                                    alpha_p: 1.0,
+                                                    inlet_velocity: 0.0,
+                                                    density: 1.0,
+                                                    viscosity: 0.0,
+                                                    eos: crate::solver::model::eos::EosSpec::Constant,
+                                                    solver_params_revision: last_params_revision,
+                                                }
                                             };
 
-                                            if adaptive_dt {
+                                            if params.solver_params_revision != last_params_revision {
+                                                solver.set_dt(params.requested_dt);
+                                                let _ = solver.set_density(params.density);
+                                                let _ = solver.set_viscosity(params.viscosity);
+                                                let _ = solver.set_eos(&params.eos);
+                                                solver.set_advection_scheme(params.advection_scheme);
+                                                solver.set_time_scheme(params.time_scheme);
+                                                solver.set_preconditioner(params.preconditioner);
+
+                                                match solver_kind {
+                                                    SolverKind::Incompressible => {
+                                                        let _ = solver.set_alpha_u(params.alpha_u);
+                                                        let _ = solver.set_alpha_p(params.alpha_p);
+                                                        let _ = solver.set_inlet_velocity(
+                                                            params.inlet_velocity,
+                                                        );
+                                                    }
+                                                    SolverKind::Compressible => {
+                                                        let _ = solver.set_compressible_inlet_isothermal_x(
+                                                            params.density,
+                                                            params.inlet_velocity,
+                                                            &params.eos,
+                                                        );
+                                                    }
+                                                }
+
+                                                last_params_revision = params.solver_params_revision;
+                                            }
+
+                                            if params.adaptive_dt {
+                                                let sound_speed = match solver_kind {
+                                                    SolverKind::Compressible => {
+                                                        params.eos.sound_speed(params.density as f64)
+                                                    }
+                                                    SolverKind::Incompressible => 0.0,
+                                                };
                                                 let wave_speed = match solver_kind {
                                                     SolverKind::Compressible => {
                                                         prev_max_vel + sound_speed
@@ -1410,7 +1506,7 @@ impl eframe::App for CFDApp {
                                                 {
                                                     let current_dt = solver.dt() as f64;
                                                     let mut next_dt =
-                                                        target_cfl * min_cell_size_clone / wave_speed;
+                                                        params.target_cfl * min_cell_size_clone / wave_speed;
 
                                                     if next_dt > current_dt * 1.2 {
                                                         next_dt = current_dt * 1.2;
@@ -1419,6 +1515,8 @@ impl eframe::App for CFDApp {
                                                     next_dt = next_dt.clamp(1e-9, 100.0);
                                                     solver.set_dt(next_dt as f32);
                                                 }
+                                            } else {
+                                                solver.set_dt(params.requested_dt);
                                             }
 
                                             let start = std::time::Instant::now();
@@ -1479,7 +1577,8 @@ impl eframe::App for CFDApp {
                                                 s.diverged || !s.residual.is_finite() || s.residual > 1e12
                                             });
 
-                                            let should_log = log_convergence
+                                            let log_every_steps = params.log_every_steps.max(1);
+                                            let should_log = params.log_convergence
                                                 && step_idx % (log_every_steps as u64) == 0;
 
                                             if should_log || nonfinite_u > 0 || nonfinite_p > 0 || linear_diverged {
@@ -1648,7 +1747,7 @@ impl eframe::App for CFDApp {
         let has_solver = self.gpu_unified_solver.is_some();
 
         let (min_val, max_val, values) = if has_solver {
-            if let Ok(mut results) = self.shared_results.lock() {
+            if let Ok(mut results) = self.shared_results.try_lock() {
                 if let Some((u, p)) = results.take() {
                     self.cached_u = u;
                     self.cached_p = p;

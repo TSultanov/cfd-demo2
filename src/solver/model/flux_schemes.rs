@@ -257,19 +257,29 @@ fn euler_central_upwind(
     let low_mach_model = S::low_mach_model();
     let low_mach_theta_floor = S::low_mach_theta_floor();
 
-    let w_off = S::Max(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Sub(
-            Box::new(S::lit(1.0)),
-            Box::new(S::Abs(Box::new(S::Sub(
-                Box::new(low_mach_model),
-                Box::new(S::lit(2.0)),
-            )))),
-        )),
-    );
-    let w_on = S::Sub(Box::new(S::lit(1.0)), Box::new(w_off.clone()));
+    let weight_for = |value: f32| {
+        S::Max(
+            Box::new(S::lit(0.0)),
+            Box::new(S::Sub(
+                Box::new(S::lit(1.0)),
+                Box::new(S::Abs(Box::new(S::Sub(
+                    Box::new(low_mach_model.clone()),
+                    Box::new(S::lit(value)),
+                )))),
+            )),
+        )
+    };
 
-    let c_eff2_on = |side: FaceSide| {
+    let w_legacy = weight_for(0.0);
+    let w_weiss_smith = weight_for(1.0);
+    let w_off = weight_for(2.0);
+
+    let c_eff2_legacy = |side: FaceSide| {
+        let c2_side = c2(side);
+        S::Min(Box::new(u_n2(side)), Box::new(c2_side))
+    };
+
+    let c_eff2_weiss_smith = |side: FaceSide| {
         let c2_side = c2(side);
         let floor = S::Mul(Box::new(low_mach_theta_floor.clone()), Box::new(c2_side.clone()));
         S::Min(
@@ -281,8 +291,17 @@ fn euler_central_upwind(
     let c_eff2 = |side: FaceSide| {
         let c2_side = c2(side);
         S::Add(
-            Box::new(S::Mul(Box::new(w_off.clone()), Box::new(c2_side.clone()))),
-            Box::new(S::Mul(Box::new(w_on.clone()), Box::new(c_eff2_on(side)))),
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(w_off.clone()), Box::new(c2_side))),
+                Box::new(S::Mul(
+                    Box::new(w_legacy.clone()),
+                    Box::new(c_eff2_legacy(side)),
+                )),
+            )),
+            Box::new(S::Mul(
+                Box::new(w_weiss_smith.clone()),
+                Box::new(c_eff2_weiss_smith(side)),
+            )),
         )
     };
 

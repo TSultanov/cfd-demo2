@@ -1,5 +1,4 @@
 pub mod bind_group_builder;
-pub mod compressible_lowering;
 pub mod constants;
 pub mod coupled_schur;
 pub mod field_provider;

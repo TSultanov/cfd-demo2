@@ -227,10 +227,10 @@ Completed:
 - Dispatch hardening: GMRES ops kernels no longer use `params.dispatch_x` for indexing (derive flattening from `@builtin(num_workgroups)`), and a contract test prevents reintroducing it; OpenFOAM reference tests pass.
 - Linear solver defaults: `ModelLinearSolverSpec` now owns Krylov defaults (solver type/restart/tolerances), and `SolverRecipe::from_model` derives the runtime `LinearSolverSpec` from `(model + config)` instead of hard-coding FGMRES params; OpenFOAM reference tests pass.
 - Linear solver tuning: `generic_coupled` now declares `linear_solver.*` named params (restart/iters/tolerances) with runtime handlers so solver tuning stays config-driven; OpenFOAM reference tests pass.
+- Linear solver max iters: FGMRES now honors `LinearSolverSpec.max_iters` via multi-restart loops (so the iteration cap is meaningful); OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
-2) Make FGMRES honor `LinearSolverSpec.max_iters` (multi-restart loop) so “max iters” is meaningful for Krylov solves (and keep results validated by OpenFOAM).
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

@@ -228,6 +228,7 @@ Completed:
 - Linear solver defaults: `ModelLinearSolverSpec` now owns Krylov defaults (solver type/restart/tolerances), and `SolverRecipe::from_model` derives the runtime `LinearSolverSpec` from `(model + config)` instead of hard-coding FGMRES params; OpenFOAM reference tests pass.
 - Linear solver tuning: `generic_coupled` now declares `linear_solver.*` named params (restart/iters/tolerances) with runtime handlers so solver tuning stays config-driven; OpenFOAM reference tests pass.
 - Linear solver max iters: FGMRES now honors `LinearSolverSpec.max_iters` via multi-restart loops (so the iteration cap is meaningful); OpenFOAM reference tests pass.
+- Gap 0 progress: model kernel generators are closure-capable so modules can derive WGSL from their own configuration (e.g. Rhie–Chow aux kernels honor `dp_field`); added contract coverage; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

@@ -1281,6 +1281,7 @@ mod tests {
                     omega: 1.0,
                     layout: SchurBlockLayout::from_u_p(&[0, 1, 2], 3).expect("layout build failed"),
                 },
+                ..Default::default()
             }),
             primitives: primitives::PrimitiveDerivations::default(),
             gpu: ModelGpuSpec::default(),

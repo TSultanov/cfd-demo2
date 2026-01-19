@@ -13,8 +13,10 @@ use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
+use crate::solver::model::linear_solver::ModelLinearSolverType;
 use crate::solver::model::{
-    expand_field_components, FluxSpec, GradientStorage, KernelId, ModelSpec,
+    expand_field_components, FluxSpec, GradientStorage, KernelId, ModelPreconditionerSpec,
+    ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use std::collections::HashSet;
@@ -310,13 +312,32 @@ impl SolverRecipe {
         }
 
         // Linear solver spec
-        let max_restart = 30;
+        let model_solver = model.linear_solver.unwrap_or_default();
+        if matches!(
+            model_solver.preconditioner,
+            ModelPreconditionerSpec::Schur { .. }
+        ) && !matches!(
+            model_solver.solver.solver_type,
+            ModelLinearSolverType::Fgmres { .. }
+        ) {
+            return Err(
+                "model Schur preconditioning requires ModelLinearSolverType::Fgmres".to_string(),
+            );
+        }
+
+        let solver_type = match model_solver.solver.solver_type {
+            ModelLinearSolverType::Fgmres { max_restart } => LinearSolverType::Fgmres {
+                max_restart,
+            },
+            ModelLinearSolverType::Cg => LinearSolverType::Cg,
+        };
+
         let linear_solver = LinearSolverSpec {
-            solver_type: LinearSolverType::Fgmres { max_restart },
+            solver_type,
             preconditioner,
-            max_iters: 100,
-            tolerance: 1e-6,
-            tolerance_abs: 1e-10,
+            max_iters: model_solver.solver.max_iters,
+            tolerance: model_solver.solver.tolerance,
+            tolerance_abs: model_solver.solver.tolerance_abs,
         };
 
         Ok(SolverRecipe {

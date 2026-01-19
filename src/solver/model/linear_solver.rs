@@ -113,15 +113,45 @@ impl Default for ModelPreconditionerSpec {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelLinearSolverType {
+    /// FGMRES with flexible preconditioning.
+    Fgmres { max_restart: usize },
+
+    /// Conjugate Gradient (for SPD systems).
+    Cg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelLinearSolverSettings {
+    pub solver_type: ModelLinearSolverType,
+    pub max_iters: u32,
+    pub tolerance: f32,
+    pub tolerance_abs: f32,
+}
+
+impl Default for ModelLinearSolverSettings {
+    fn default() -> Self {
+        Self {
+            solver_type: ModelLinearSolverType::Fgmres { max_restart: 30 },
+            max_iters: 100,
+            tolerance: 1e-6,
+            tolerance_abs: 1e-10,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelLinearSolverSpec {
     pub preconditioner: ModelPreconditionerSpec,
+    pub solver: ModelLinearSolverSettings,
 }
 
 impl Default for ModelLinearSolverSpec {
     fn default() -> Self {
         Self {
             preconditioner: ModelPreconditionerSpec::Default,
+            solver: ModelLinearSolverSettings::default(),
         }
     }
 }

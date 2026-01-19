@@ -190,6 +190,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
                 layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[u0, u1], p)
                     .expect("invalid SchurBlockLayout"),
             },
+            ..Default::default()
         }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
         gpu: ModelGpuSpec::default(),

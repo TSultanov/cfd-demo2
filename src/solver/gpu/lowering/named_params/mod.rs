@@ -36,3 +36,26 @@ pub(crate) fn named_params_for_model(
 
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_coupled_named_params_include_linear_solver_tuning_keys() {
+        let model = crate::solver::model::generic_diffusion_demo_model();
+        let params = named_params_for_model(&model).expect("named params");
+
+        for key in [
+            "linear_solver.max_restart",
+            "linear_solver.max_iters",
+            "linear_solver.tolerance",
+            "linear_solver.tolerance_abs",
+        ] {
+            assert!(
+                params.contains_key(key),
+                "missing named param handler for '{key}'"
+            );
+        }
+    }
+}

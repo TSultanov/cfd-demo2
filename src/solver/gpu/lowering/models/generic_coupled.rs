@@ -718,6 +718,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
             LinearSolverType::Fgmres { max_restart } => max_restart,
             _ => 30,
         };
+        let max_restart = max_restart.max(1);
 
         let stats = solve_fgmres(
             &context,
@@ -1170,6 +1171,70 @@ pub(crate) fn param_preconditioner(
             return Err("preconditioner is model-owned for this model".to_string());
         }
     }
+    Ok(())
+}
+
+pub(crate) fn param_linear_solver_max_restart(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::Usize(max_restart) = value else {
+        return Err("linear_solver.max_restart expects Usize".to_string());
+    };
+
+    let r = res_mut(plan);
+    let max_restart = max_restart.max(1);
+
+    let capacity = if let Some(schur) = &r.schur {
+        schur.solver.fgmres.max_restart()
+    } else if let Some(krylov) = &r.krylov {
+        krylov.solver.fgmres.max_restart()
+    } else {
+        return Err("linear_solver.max_restart requires an FGMRES workspace".to_string());
+    };
+
+    let LinearSolverType::Fgmres { .. } = r.linear_solver.solver_type else {
+        return Err("linear_solver.max_restart requires LinearSolverType::Fgmres".to_string());
+    };
+    r.linear_solver.solver_type = LinearSolverType::Fgmres {
+        max_restart: max_restart.min(capacity).max(1),
+    };
+    Ok(())
+}
+
+pub(crate) fn param_linear_solver_max_iters(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::U32(max_iters) = value else {
+        return Err("linear_solver.max_iters expects U32".to_string());
+    };
+
+    res_mut(plan).linear_solver.max_iters = max_iters.max(1);
+    Ok(())
+}
+
+pub(crate) fn param_linear_solver_tolerance(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(tol) = value else {
+        return Err("linear_solver.tolerance expects F32".to_string());
+    };
+
+    res_mut(plan).linear_solver.tolerance = tol.max(0.0);
+    Ok(())
+}
+
+pub(crate) fn param_linear_solver_tolerance_abs(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(tol_abs) = value else {
+        return Err("linear_solver.tolerance_abs expects F32".to_string());
+    };
+
+    res_mut(plan).linear_solver.tolerance_abs = tol_abs.max(0.0);
     Ok(())
 }
 

@@ -42,23 +42,22 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
             },
         ],
         generators: vec![
-            ModelKernelGeneratorSpec {
-                id: PACKED_STATE_GRADIENTS,
-                generator: crate::solver::model::kernel::generate_packed_state_gradients_kernel_wgsl,
-            },
-            ModelKernelGeneratorSpec {
-                id: KernelId::GENERIC_COUPLED_ASSEMBLY,
-                generator: crate::solver::model::kernel::generate_generic_coupled_assembly_kernel_wgsl,
-            },
-            ModelKernelGeneratorSpec {
-                id: KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
-                generator:
-                    crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_wgsl,
-            },
-            ModelKernelGeneratorSpec {
-                id: KernelId::GENERIC_COUPLED_UPDATE,
-                generator: crate::solver::model::kernel::generate_generic_coupled_update_kernel_wgsl,
-            },
+            ModelKernelGeneratorSpec::new(
+                PACKED_STATE_GRADIENTS,
+                crate::solver::model::kernel::generate_packed_state_gradients_kernel_wgsl,
+            ),
+            ModelKernelGeneratorSpec::new(
+                KernelId::GENERIC_COUPLED_ASSEMBLY,
+                crate::solver::model::kernel::generate_generic_coupled_assembly_kernel_wgsl,
+            ),
+            ModelKernelGeneratorSpec::new(
+                KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
+                crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_wgsl,
+            ),
+            ModelKernelGeneratorSpec::new(
+                KernelId::GENERIC_COUPLED_UPDATE,
+                crate::solver::model::kernel::generate_generic_coupled_update_kernel_wgsl,
+            ),
         ],
         manifest: ModuleManifest {
             method: Some(method),

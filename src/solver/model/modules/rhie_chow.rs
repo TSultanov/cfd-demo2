@@ -35,18 +35,18 @@ pub fn rhie_chow_aux_module(
             },
         ],
         generators: vec![
-            ModelKernelGeneratorSpec {
-                id: kernel_dp_init,
-                generator: crate::solver::model::kernel::generate_dp_init_kernel_wgsl,
-            },
-            ModelKernelGeneratorSpec {
-                id: kernel_dp_update_from_diag,
-                generator: crate::solver::model::kernel::generate_dp_update_from_diag_kernel_wgsl,
-            },
-            ModelKernelGeneratorSpec {
-                id: kernel_rhie_chow_correct_velocity,
-                generator: crate::solver::model::kernel::generate_rhie_chow_correct_velocity_kernel_wgsl,
-            },
+            ModelKernelGeneratorSpec::new(
+                kernel_dp_init,
+                crate::solver::model::kernel::generate_dp_init_kernel_wgsl,
+            ),
+            ModelKernelGeneratorSpec::new(
+                kernel_dp_update_from_diag,
+                crate::solver::model::kernel::generate_dp_update_from_diag_kernel_wgsl,
+            ),
+            ModelKernelGeneratorSpec::new(
+                kernel_rhie_chow_correct_velocity,
+                crate::solver::model::kernel::generate_rhie_chow_correct_velocity_kernel_wgsl,
+            ),
         ],
         manifest: ModuleManifest {
             invariants: vec![

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /// Stable identifier for a compute kernel.
 ///
 /// This is used by the unified solver orchestration to decouple scheduling and lookup
@@ -152,15 +154,32 @@ pub struct ModelKernelSpec {
     pub condition: KernelConditionId,
 }
 
-pub(crate) type ModelKernelWgslGenerator = fn(
-    &crate::solver::model::ModelSpec,
-    &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String>;
+pub(crate) type ModelKernelWgslGenerator = Arc<
+    dyn Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<String, String>
+        + Send
+        + Sync
+        + 'static,
+>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ModelKernelGeneratorSpec {
     pub id: KernelId,
     pub generator: ModelKernelWgslGenerator,
+}
+
+impl ModelKernelGeneratorSpec {
+    pub fn new(
+        id: KernelId,
+        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<String, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            id,
+            generator: Arc::new(generator),
+        }
+    }
 }
 
 impl std::fmt::Debug for ModelKernelGeneratorSpec {
@@ -490,11 +509,11 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
 fn kernel_generator_for_model_by_id(
     model: &crate::solver::model::ModelSpec,
     kernel_id: KernelId,
-) -> Option<ModelKernelWgslGenerator> {
+) -> Option<&ModelKernelWgslGenerator> {
     for module in &model.modules {
         let module: &dyn crate::solver::model::module::ModelModule = module;
         if let Some(spec) = module.kernel_generators().iter().find(|s| s.id == kernel_id) {
-            return Some(spec.generator);
+            return Some(&spec.generator);
         }
     }
 
@@ -507,7 +526,7 @@ pub fn generate_kernel_wgsl_for_model_by_id(
     kernel_id: KernelId,
 ) -> Result<String, String> {
     if let Some(gen) = kernel_generator_for_model_by_id(model, kernel_id) {
-        return gen(model, schemes);
+        return gen.as_ref()(model, schemes);
     }
 
     Err(format!(
@@ -659,10 +678,7 @@ mod contract_tests {
                 dispatch: DispatchKindId::Cells,
                 condition: KernelConditionId::Always,
             }],
-            generators: vec![ModelKernelGeneratorSpec {
-                id: contract_id,
-                generator: contract_kernel_generator,
-            }],
+            generators: vec![ModelKernelGeneratorSpec::new(contract_id, contract_kernel_generator)],
             ..Default::default()
         };
 

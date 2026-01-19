@@ -29,10 +29,10 @@ pub fn flux_module_module(flux: FluxModuleSpec) -> Result<KernelBundleModule, St
             dispatch: DispatchKindId::Cells,
             condition: KernelConditionId::Always,
         });
-        out.generators.push(ModelKernelGeneratorSpec {
-            id: KernelId::FLUX_MODULE_GRADIENTS,
-            generator: crate::solver::model::kernel::generate_flux_module_gradients_kernel_wgsl,
-        });
+        out.generators.push(ModelKernelGeneratorSpec::new(
+            KernelId::FLUX_MODULE_GRADIENTS,
+            crate::solver::model::kernel::generate_flux_module_gradients_kernel_wgsl,
+        ));
     }
 
     out.kernels.push(ModelKernelSpec {
@@ -41,10 +41,10 @@ pub fn flux_module_module(flux: FluxModuleSpec) -> Result<KernelBundleModule, St
         dispatch: DispatchKindId::Faces,
         condition: KernelConditionId::Always,
     });
-    out.generators.push(ModelKernelGeneratorSpec {
-        id: KernelId::FLUX_MODULE,
-        generator: crate::solver::model::kernel::generate_flux_module_kernel_wgsl,
-    });
+    out.generators.push(ModelKernelGeneratorSpec::new(
+        KernelId::FLUX_MODULE,
+        crate::solver::model::kernel::generate_flux_module_kernel_wgsl,
+    ));
 
     Ok(out)
 }

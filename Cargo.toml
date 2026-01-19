@@ -12,19 +12,25 @@ inherits = "release"
 [dependencies]
 cfd2_ir = { path = "crates/cfd2_ir" }
 cfd2_codegen = { path = "crates/cfd2_codegen" }
-egui = "0.33"
-eframe = { version = "0.33", features = ["wgpu", "default_fonts"] }
-egui_plot = "0.34"
+egui = { version = "0.33", optional = true }
+eframe = { version = "0.33", features = ["wgpu", "default_fonts"], optional = true }
+egui_plot = { version = "0.34", optional = true }
 nalgebra = "0.32"
 rand = "0.8"
 log = "0.4"
-env_logger = "0.10"
+env_logger = { version = "0.10", optional = true }
 wide = "0.8.3"
 rayon = "1.8"
 wgpu = "27.0"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
 ahash = "0.8.12"
+
+[features]
+default = ["ui", "meshgen"]
+ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
+meshgen = []
+profiling = []
 
 [dev-dependencies]
 criterion = "0.5"
@@ -35,6 +41,11 @@ cfd2_ir = { path = "crates/cfd2_ir" }
 cfd2_codegen = { path = "crates/cfd2_codegen" }
 wgsl_bindgen = "0.21.2"
 glob = "0.3"
+
+[[bin]]
+name = "cfd2"
+path = "src/main.rs"
+required-features = ["ui"]
 
 [[bench]]
 name = "mesh_benchmark"

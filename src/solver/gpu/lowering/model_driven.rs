@@ -64,7 +64,8 @@ pub(crate) fn validate_model_owned_preconditioner_config(
             // to select the pressure solve strategy (Chebyshev vs AMG).
             match config_preconditioner {
                 crate::solver::gpu::structs::PreconditionerType::Jacobi
-                | crate::solver::gpu::structs::PreconditionerType::Amg => Ok(()),
+                | crate::solver::gpu::structs::PreconditionerType::Amg
+                | crate::solver::gpu::structs::PreconditionerType::BlockJacobi => Ok(()),
             }
         }
     }

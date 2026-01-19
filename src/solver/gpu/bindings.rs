@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 1806ca96a4063e5dec1e838a3dc493db223751b85654b21f14ae339ebce8c642
+// SourceHash: 7fbb811795b8fd2acae57d1c77d91dc6778f5701779bfbd36a018e531980c25e
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -4807,6 +4807,7 @@ pub mod block_precond {
             }
         }
     }
+    pub const MAX_BLOCK: u32 = 16u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const BUILD_BLOCK_INV_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -5304,6 +5305,8 @@ struct IterParams {
     _pad2_: u32,
 }
 
+const MAX_BLOCK: u32 = 16u;
+
 @group(0) @binding(0) 
 var<storage> vec_x: array<f32>;
 @group(0) @binding(1) 
@@ -5340,39 +5343,39 @@ fn safe_inverse(val: f32) -> f32 {
     return 0f;
 }
 
-fn swap_rows(a_1: ptr<function, array<array<f32, 4>, 4>>, b: ptr<function, array<array<f32, 4>, 4>>, r0_: u32, r1_: u32) {
-    var c_5: u32 = 0u;
+fn swap_rows(a_1: ptr<function, array<array<f32, 16>, 16>>, b: ptr<function, array<array<f32, 16>, 16>>, r0_: u32, r1_: u32, n: u32) {
+    var c_6: u32 = 0u;
 
     if (r0_ == r1_) {
         return;
     }
     loop {
-        let _e5 = c_5;
-        if (_e5 < 4u) {
+        let _e6 = c_6;
+        if (_e6 < n) {
         } else {
             break;
         }
         {
-            let _e10 = c_5;
+            let _e10 = c_6;
             let tmp = (*a_1)[r0_][_e10];
-            let _e14 = c_5;
-            let _e17 = c_5;
+            let _e14 = c_6;
+            let _e17 = c_6;
             let _e19 = (*a_1)[r1_][_e17];
             (*a_1)[r0_][_e14] = _e19;
-            let _e21 = c_5;
+            let _e21 = c_6;
             (*a_1)[r1_][_e21] = tmp;
-            let _e25 = c_5;
+            let _e25 = c_6;
             let tmp_b = (*b)[r0_][_e25];
-            let _e29 = c_5;
-            let _e32 = c_5;
+            let _e29 = c_6;
+            let _e32 = c_6;
             let _e34 = (*b)[r1_][_e32];
             (*b)[r0_][_e29] = _e34;
-            let _e36 = c_5;
+            let _e36 = c_6;
             (*b)[r1_][_e36] = tmp_b;
         }
         continuing {
-            let _e38 = c_5;
-            c_5 = (_e38 + 1u);
+            let _e38 = c_6;
+            c_6 = (_e38 + 1u);
         }
     }
     return;
@@ -5380,9 +5383,9 @@ fn swap_rows(a_1: ptr<function, array<array<f32, 4>, 4>>, b: ptr<function, array
 
 @compute @workgroup_size(64, 1, 1) 
 fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
-    var a: array<array<f32, 4>, 4>;
-    var inv: array<array<f32, 4>, 4>;
-    var diag_orig: array<f32, 4>;
+    var a: array<array<f32, 16>, 16>;
+    var inv: array<array<f32, 16>, 16>;
+    var diag_orig: array<f32, 16>;
     var r: u32 = 0u;
     var c: u32;
     var k: u32;
@@ -5406,288 +5409,298 @@ fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin
     if (cell >= _e13) {
         return;
     }
-    let base = (cell * 4u);
+    let _e17 = params.num_cells;
+    if (_e17 == 0u) {
+        return;
+    }
+    let _e22 = params.n;
+    let _e25 = params.num_cells;
+    let b_1 = (_e22 / _e25);
+    if ((b_1 == 0u) || (b_1 > MAX_BLOCK)) {
+        return;
+    }
+    let base = (cell * b_1);
     loop {
-        let _e18 = r;
-        if (_e18 < 4u) {
+        let _e34 = r;
+        if (_e34 < b_1) {
         } else {
             break;
         }
         {
             c = 0u;
             loop {
-                let _e23 = c;
-                if (_e23 < 4u) {
+                let _e38 = c;
+                if (_e38 < b_1) {
                 } else {
                     break;
                 }
                 {
-                    let _e27 = r;
-                    let _e29 = c;
-                    a[_e27][_e29] = 0f;
-                    let _e33 = r;
-                    let _e35 = c;
-                    inv[_e33][_e35] = 0f;
+                    let _e41 = r;
+                    let _e43 = c;
+                    a[_e41][_e43] = 0f;
+                    let _e47 = r;
+                    let _e49 = c;
+                    inv[_e47][_e49] = 0f;
                 }
                 continuing {
-                    let _e38 = c;
-                    c = (_e38 + 1u);
+                    let _e52 = c;
+                    c = (_e52 + 1u);
                 }
             }
-            let _e41 = r;
-            let row = (base + _e41);
+            let _e55 = r;
+            let row = (base + _e55);
             let start = row_offsets[row];
             let end = row_offsets[(row + 1u)];
             k = start;
             loop {
-                let _e52 = k;
-                if (_e52 < end) {
+                let _e66 = k;
+                if (_e66 < end) {
                 } else {
                     break;
                 }
                 {
-                    let _e55 = k;
-                    let col = col_indices[_e55];
-                    if ((col >= base) && (col < (base + 4u))) {
+                    let _e69 = k;
+                    let col = col_indices[_e69];
+                    if ((col >= base) && (col < (base + b_1))) {
                         let local = (col - base);
-                        let _e64 = r;
-                        let _e68 = k;
-                        let _e70 = matrix_values[_e68];
-                        a[_e64][local] = _e70;
+                        let _e77 = r;
+                        let _e81 = k;
+                        let _e83 = matrix_values[_e81];
+                        a[_e77][local] = _e83;
                     }
                 }
                 continuing {
-                    let _e71 = k;
-                    k = (_e71 + 1u);
+                    let _e84 = k;
+                    k = (_e84 + 1u);
                 }
             }
-            let _e74 = r;
-            let _e76 = r;
-            inv[_e74][_e76] = 1f;
-            let _e80 = r;
-            let _e82 = r;
-            let _e84 = r;
-            let _e86 = a[_e82][_e84];
-            diag_orig[_e80] = _e86;
+            let _e87 = r;
+            let _e89 = r;
+            inv[_e87][_e89] = 1f;
+            let _e93 = r;
+            let _e95 = r;
+            let _e97 = r;
+            let _e99 = a[_e95][_e97];
+            diag_orig[_e93] = _e99;
         }
         continuing {
-            let _e87 = r;
-            r = (_e87 + 1u);
+            let _e100 = r;
+            r = (_e100 + 1u);
         }
     }
     loop {
-        let _e91 = i;
-        if (_e91 < 4u) {
+        let _e104 = i;
+        if (_e104 < b_1) {
         } else {
             break;
         }
         {
-            let _e94 = i;
-            pivot = _e94;
-            let _e96 = i;
-            let _e98 = i;
-            let _e100 = a[_e96][_e98];
-            pivot_val = abs(_e100);
-            let _e103 = i;
-            r_1 = (_e103 + 1u);
+            let _e106 = i;
+            pivot = _e106;
+            let _e108 = i;
+            let _e110 = i;
+            let _e112 = a[_e108][_e110];
+            pivot_val = abs(_e112);
+            let _e115 = i;
+            r_1 = (_e115 + 1u);
             loop {
-                let _e107 = r_1;
-                if (_e107 < 4u) {
+                let _e119 = r_1;
+                if (_e119 < b_1) {
                 } else {
                     break;
                 }
                 {
-                    let _e110 = r_1;
-                    let _e112 = i;
-                    let _e114 = a[_e110][_e112];
-                    let val_1 = abs(_e114);
-                    let _e116 = pivot_val;
-                    if (val_1 > _e116) {
+                    let _e121 = r_1;
+                    let _e123 = i;
+                    let _e125 = a[_e121][_e123];
+                    let val_1 = abs(_e125);
+                    let _e127 = pivot_val;
+                    if (val_1 > _e127) {
                         pivot_val = val_1;
-                        let _e118 = r_1;
-                        pivot = _e118;
+                        let _e129 = r_1;
+                        pivot = _e129;
                     }
                 }
                 continuing {
-                    let _e119 = r_1;
-                    r_1 = (_e119 + 1u);
+                    let _e130 = r_1;
+                    r_1 = (_e130 + 1u);
                 }
             }
-            let _e122 = pivot_val;
-            if (_e122 < 0.000000000001f) {
+            let _e133 = pivot_val;
+            if (_e133 < 0.000000000001f) {
                 singular = true;
             }
-            let _e127 = i;
-            let _e128 = pivot;
-            swap_rows((&a), (&inv), _e127, _e128);
-            let _e129 = i;
-            let _e131 = i;
-            let _e133 = a[_e129][_e131];
-            piv = _e133;
-            let _e135 = piv;
-            if (abs(_e135) < 0.000000000001f) {
-                let _e139 = piv;
-                piv = select(0.000000000001f, -0.000000000001f, (_e139 < 0f));
+            let _e138 = i;
+            let _e139 = pivot;
+            swap_rows((&a), (&inv), _e138, _e139, b_1);
+            let _e140 = i;
+            let _e142 = i;
+            let _e144 = a[_e140][_e142];
+            piv = _e144;
+            let _e146 = piv;
+            if (abs(_e146) < 0.000000000001f) {
+                let _e150 = piv;
+                piv = select(0.000000000001f, -0.000000000001f, (_e150 < 0f));
             }
-            let _e145 = piv;
-            let inv_piv = (1f / _e145);
+            let _e156 = piv;
+            let inv_piv = (1f / _e156);
             c_1 = 0u;
             loop {
-                let _e150 = c_1;
-                if (_e150 < 4u) {
+                let _e161 = c_1;
+                if (_e161 < b_1) {
                 } else {
                     break;
                 }
                 {
-                    let _e153 = i;
-                    let _e155 = c_1;
-                    let _e157 = i;
-                    let _e159 = c_1;
-                    let _e161 = a[_e157][_e159];
-                    a[_e153][_e155] = (_e161 * inv_piv);
                     let _e163 = i;
                     let _e165 = c_1;
                     let _e167 = i;
                     let _e169 = c_1;
-                    let _e171 = inv[_e167][_e169];
-                    inv[_e163][_e165] = (_e171 * inv_piv);
+                    let _e171 = a[_e167][_e169];
+                    a[_e163][_e165] = (_e171 * inv_piv);
+                    let _e173 = i;
+                    let _e175 = c_1;
+                    let _e177 = i;
+                    let _e179 = c_1;
+                    let _e181 = inv[_e177][_e179];
+                    inv[_e173][_e175] = (_e181 * inv_piv);
                 }
                 continuing {
-                    let _e173 = c_1;
-                    c_1 = (_e173 + 1u);
+                    let _e183 = c_1;
+                    c_1 = (_e183 + 1u);
                 }
             }
             r_2 = 0u;
             loop {
-                let _e178 = r_2;
-                if (_e178 < 4u) {
+                let _e188 = r_2;
+                if (_e188 < b_1) {
                 } else {
                     break;
                 }
                 {
-                    let _e181 = r_2;
-                    let _e182 = i;
-                    if (_e181 == _e182) {
+                    let _e190 = r_2;
+                    let _e191 = i;
+                    if (_e190 == _e191) {
                         continue;
                     }
-                    let _e184 = r_2;
-                    let _e186 = i;
-                    let factor = a[_e184][_e186];
+                    let _e193 = r_2;
+                    let _e195 = i;
+                    let factor = a[_e193][_e195];
                     c_2 = 0u;
                     loop {
-                        let _e191 = c_2;
-                        if (_e191 < 4u) {
+                        let _e200 = c_2;
+                        if (_e200 < b_1) {
                         } else {
                             break;
                         }
                         {
-                            let _e194 = r_2;
-                            let _e196 = c_2;
-                            let _e198 = r_2;
-                            let _e200 = c_2;
-                            let _e202 = a[_e198][_e200];
-                            let _e203 = i;
-                            let _e205 = c_2;
-                            let _e207 = a[_e203][_e205];
-                            a[_e194][_e196] = (_e202 - (factor * _e207));
-                            let _e210 = r_2;
-                            let _e212 = c_2;
-                            let _e214 = r_2;
-                            let _e216 = c_2;
-                            let _e218 = inv[_e214][_e216];
-                            let _e219 = i;
-                            let _e221 = c_2;
-                            let _e223 = inv[_e219][_e221];
-                            inv[_e210][_e212] = (_e218 - (factor * _e223));
+                            let _e202 = r_2;
+                            let _e204 = c_2;
+                            let _e206 = r_2;
+                            let _e208 = c_2;
+                            let _e210 = a[_e206][_e208];
+                            let _e211 = i;
+                            let _e213 = c_2;
+                            let _e215 = a[_e211][_e213];
+                            a[_e202][_e204] = (_e210 - (factor * _e215));
+                            let _e218 = r_2;
+                            let _e220 = c_2;
+                            let _e222 = r_2;
+                            let _e224 = c_2;
+                            let _e226 = inv[_e222][_e224];
+                            let _e227 = i;
+                            let _e229 = c_2;
+                            let _e231 = inv[_e227][_e229];
+                            inv[_e218][_e220] = (_e226 - (factor * _e231));
                         }
                         continuing {
-                            let _e226 = c_2;
-                            c_2 = (_e226 + 1u);
+                            let _e234 = c_2;
+                            c_2 = (_e234 + 1u);
                         }
                     }
                 }
                 continuing {
-                    let _e229 = r_2;
-                    r_2 = (_e229 + 1u);
+                    let _e237 = r_2;
+                    r_2 = (_e237 + 1u);
                 }
             }
         }
         continuing {
-            let _e232 = i;
-            i = (_e232 + 1u);
+            let _e240 = i;
+            i = (_e240 + 1u);
         }
     }
-    let _e235 = singular;
-    if _e235 {
+    let _e243 = singular;
+    if _e243 {
         loop {
-            let _e237 = r_3;
-            if (_e237 < 4u) {
+            let _e245 = r_3;
+            if (_e245 < b_1) {
             } else {
                 break;
             }
             {
                 c_3 = 0u;
                 loop {
-                    let _e242 = c_3;
-                    if (_e242 < 4u) {
+                    let _e249 = c_3;
+                    if (_e249 < b_1) {
                     } else {
                         break;
                     }
                     {
-                        let _e245 = r_3;
-                        let _e247 = c_3;
-                        inv[_e245][_e247] = 0f;
+                        let _e251 = r_3;
+                        let _e253 = c_3;
+                        inv[_e251][_e253] = 0f;
                     }
                     continuing {
-                        let _e250 = c_3;
-                        c_3 = (_e250 + 1u);
+                        let _e256 = c_3;
+                        c_3 = (_e256 + 1u);
                     }
                 }
-                let _e253 = r_3;
-                let _e255 = r_3;
-                let _e257 = r_3;
-                let _e259 = diag_orig[_e257];
-                let _e260 = safe_inverse(_e259);
-                inv[_e253][_e255] = _e260;
+                let _e259 = r_3;
+                let _e261 = r_3;
+                let _e263 = r_3;
+                let _e265 = diag_orig[_e263];
+                let _e266 = safe_inverse(_e265);
+                inv[_e259][_e261] = _e266;
             }
             continuing {
-                let _e261 = r_3;
-                r_3 = (_e261 + 1u);
+                let _e267 = r_3;
+                r_3 = (_e267 + 1u);
             }
         }
     }
-    let offset = (cell * 16u);
+    let offset = (cell * (b_1 * b_1));
     loop {
-        let _e267 = r_4;
-        if (_e267 < 4u) {
+        let _e273 = r_4;
+        if (_e273 < b_1) {
         } else {
             break;
         }
         {
             c_4 = 0u;
             loop {
-                let _e272 = c_4;
-                if (_e272 < 4u) {
+                let _e277 = c_4;
+                if (_e277 < b_1) {
                 } else {
                     break;
                 }
                 {
-                    let _e275 = r_4;
-                    let _e280 = c_4;
-                    let _e283 = r_4;
-                    let _e285 = c_4;
-                    let _e287 = inv[_e283][_e285];
-                    block_inv[((offset + (_e275 * 4u)) + _e280)] = _e287;
+                    let _e280 = r_4;
+                    let _e283 = c_4;
+                    let _e286 = r_4;
+                    let _e288 = c_4;
+                    let _e290 = inv[_e286][_e288];
+                    block_inv[((offset + (_e280 * b_1)) + _e283)] = _e290;
                 }
                 continuing {
-                    let _e288 = c_4;
-                    c_4 = (_e288 + 1u);
+                    let _e291 = c_4;
+                    c_4 = (_e291 + 1u);
                 }
             }
         }
         continuing {
-            let _e291 = r_4;
-            r_4 = (_e291 + 1u);
+            let _e294 = r_4;
+            r_4 = (_e294 + 1u);
         }
     }
     return;
@@ -5695,42 +5708,66 @@ fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin
 
 @compute @workgroup_size(64, 1, 1) 
 fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
+    var r_5: u32 = 0u;
+    var sum: f32;
+    var c_5: u32;
+
     let stride_x_1 = (num_workgroups_1.x * 64u);
     let cell_1 = ((global_id_1.y * stride_x_1) + global_id_1.x);
-    let _e11 = params.num_cells;
-    if (cell_1 >= _e11) {
+    let _e12 = params.num_cells;
+    if (cell_1 >= _e12) {
         return;
     }
-    let base_1 = (cell_1 * 4u);
-    let offset_1 = (cell_1 * 16u);
-    let x0_ = vec_x[(base_1 + 0u)];
-    let x1_ = vec_x[(base_1 + 1u)];
-    let x2_ = vec_x[(base_1 + 2u)];
-    let x3_ = vec_x[(base_1 + 3u)];
-    let _e41 = block_inv[(offset_1 + 0u)];
-    let _e47 = block_inv[(offset_1 + 1u)];
-    let _e54 = block_inv[(offset_1 + 2u)];
-    let _e61 = block_inv[(offset_1 + 3u)];
-    let y0_ = ((((_e41 * x0_) + (_e47 * x1_)) + (_e54 * x2_)) + (_e61 * x3_));
-    let _e68 = block_inv[(offset_1 + 4u)];
-    let _e74 = block_inv[(offset_1 + 5u)];
-    let _e81 = block_inv[(offset_1 + 6u)];
-    let _e88 = block_inv[(offset_1 + 7u)];
-    let y1_ = ((((_e68 * x0_) + (_e74 * x1_)) + (_e81 * x2_)) + (_e88 * x3_));
-    let _e95 = block_inv[(offset_1 + 8u)];
-    let _e101 = block_inv[(offset_1 + 9u)];
-    let _e108 = block_inv[(offset_1 + 10u)];
-    let _e115 = block_inv[(offset_1 + 11u)];
-    let y2_ = ((((_e95 * x0_) + (_e101 * x1_)) + (_e108 * x2_)) + (_e115 * x3_));
-    let _e122 = block_inv[(offset_1 + 12u)];
-    let _e128 = block_inv[(offset_1 + 13u)];
-    let _e135 = block_inv[(offset_1 + 14u)];
-    let _e142 = block_inv[(offset_1 + 15u)];
-    let y3_ = ((((_e122 * x0_) + (_e128 * x1_)) + (_e135 * x2_)) + (_e142 * x3_));
-    vec_y[(base_1 + 0u)] = y0_;
-    vec_y[(base_1 + 1u)] = y1_;
-    vec_y[(base_1 + 2u)] = y2_;
-    vec_y[(base_1 + 3u)] = y3_;
+    let _e16 = params.num_cells;
+    if (_e16 == 0u) {
+        return;
+    }
+    let _e21 = params.n;
+    let _e24 = params.num_cells;
+    let b_2 = (_e21 / _e24);
+    if ((b_2 == 0u) || (b_2 > MAX_BLOCK)) {
+        return;
+    }
+    let base_1 = (cell_1 * b_2);
+    let offset_1 = (cell_1 * (b_2 * b_2));
+    loop {
+        let _e35 = r_5;
+        if (_e35 < b_2) {
+        } else {
+            break;
+        }
+        {
+            sum = 0f;
+            c_5 = 0u;
+            loop {
+                let _e41 = c_5;
+                if (_e41 < b_2) {
+                } else {
+                    break;
+                }
+                {
+                    let _e44 = r_5;
+                    let _e47 = c_5;
+                    let _e50 = block_inv[((offset_1 + (_e44 * b_2)) + _e47)];
+                    let _e52 = c_5;
+                    let _e55 = vec_x[(base_1 + _e52)];
+                    let _e57 = sum;
+                    sum = (_e57 + (_e50 * _e55));
+                }
+                continuing {
+                    let _e59 = c_5;
+                    c_5 = (_e59 + 1u);
+                }
+            }
+            let _e63 = r_5;
+            let _e66 = sum;
+            vec_y[(base_1 + _e63)] = _e66;
+        }
+        continuing {
+            let _e67 = r_5;
+            r_5 = (_e67 + 1u);
+        }
+    }
     return;
 }
 "#;

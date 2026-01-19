@@ -1,4 +1,10 @@
-// Block-Jacobi preconditioner for compressible FGMRES (4x4 per cell).
+// Cell-block Jacobi preconditioner for generic-coupled FGMRES.
+//
+// The block size is derived from the runtime linear system shape:
+//   unknowns_per_cell = params.n / params.num_cells
+//
+// The solver is model-agnostic: unknown ordering is model-defined, but the CSR is built
+// with per-cell blocks contiguous in DOF space so we can invert diagonal blocks per cell.
 
 struct GmresParams {
     n: u32,
@@ -49,11 +55,19 @@ fn safe_inverse(val: f32) -> f32 {
     return 0.0;
 }
 
-fn swap_rows(a: ptr<function, array<array<f32, 4>, 4>>, b: ptr<function, array<array<f32, 4>, 4>>, r0: u32, r1: u32) {
+const MAX_BLOCK: u32 = 16u;
+
+fn swap_rows(
+    a: ptr<function, array<array<f32, MAX_BLOCK>, MAX_BLOCK>>,
+    b: ptr<function, array<array<f32, MAX_BLOCK>, MAX_BLOCK>>,
+    r0: u32,
+    r1: u32,
+    n: u32,
+) {
     if (r0 == r1) {
         return;
     }
-    for (var c = 0u; c < 4u; c = c + 1u) {
+    for (var c = 0u; c < n; c = c + 1u) {
         let tmp = (*a)[r0][c];
         (*a)[r0][c] = (*a)[r1][c];
         (*a)[r1][c] = tmp;
@@ -75,13 +89,22 @@ fn build_block_inv(
         return;
     }
 
-    let base = cell * 4u;
-    var a: array<array<f32, 4>, 4>;
-    var inv: array<array<f32, 4>, 4>;
-    var diag_orig: array<f32, 4>;
+    if (params.num_cells == 0u) {
+        return;
+    }
 
-    for (var r = 0u; r < 4u; r = r + 1u) {
-        for (var c = 0u; c < 4u; c = c + 1u) {
+    let b = params.n / params.num_cells;
+    if (b == 0u || b > MAX_BLOCK) {
+        return;
+    }
+
+    let base = cell * b;
+    var a: array<array<f32, MAX_BLOCK>, MAX_BLOCK>;
+    var inv: array<array<f32, MAX_BLOCK>, MAX_BLOCK>;
+    var diag_orig: array<f32, MAX_BLOCK>;
+
+    for (var r = 0u; r < b; r = r + 1u) {
+        for (var c = 0u; c < b; c = c + 1u) {
             a[r][c] = 0.0;
             inv[r][c] = 0.0;
         }
@@ -90,7 +113,7 @@ fn build_block_inv(
         let end = row_offsets[row + 1u];
         for (var k = start; k < end; k = k + 1u) {
             let col = col_indices[k];
-            if (col >= base && col < base + 4u) {
+            if (col >= base && col < base + b) {
                 let local = col - base;
                 a[r][local] = matrix_values[k];
             }
@@ -100,10 +123,10 @@ fn build_block_inv(
     }
 
     var singular = false;
-    for (var i = 0u; i < 4u; i = i + 1u) {
+    for (var i = 0u; i < b; i = i + 1u) {
         var pivot = i;
         var pivot_val = abs(a[i][i]);
-        for (var r = i + 1u; r < 4u; r = r + 1u) {
+        for (var r = i + 1u; r < b; r = r + 1u) {
             let val = abs(a[r][i]);
             if (val > pivot_val) {
                 pivot_val = val;
@@ -113,22 +136,22 @@ fn build_block_inv(
         if (pivot_val < 1e-12) {
             singular = true;
         }
-        swap_rows(&a, &inv, i, pivot);
+        swap_rows(&a, &inv, i, pivot, b);
         var piv = a[i][i];
         if (abs(piv) < 1e-12) {
             piv = select(1e-12, -1e-12, piv < 0.0);
         }
         let inv_piv = 1.0 / piv;
-        for (var c = 0u; c < 4u; c = c + 1u) {
+        for (var c = 0u; c < b; c = c + 1u) {
             a[i][c] = a[i][c] * inv_piv;
             inv[i][c] = inv[i][c] * inv_piv;
         }
-        for (var r = 0u; r < 4u; r = r + 1u) {
+        for (var r = 0u; r < b; r = r + 1u) {
             if (r == i) {
                 continue;
             }
             let factor = a[r][i];
-            for (var c = 0u; c < 4u; c = c + 1u) {
+            for (var c = 0u; c < b; c = c + 1u) {
                 a[r][c] = a[r][c] - factor * a[i][c];
                 inv[r][c] = inv[r][c] - factor * inv[i][c];
             }
@@ -136,18 +159,18 @@ fn build_block_inv(
     }
 
     if (singular) {
-        for (var r = 0u; r < 4u; r = r + 1u) {
-            for (var c = 0u; c < 4u; c = c + 1u) {
+        for (var r = 0u; r < b; r = r + 1u) {
+            for (var c = 0u; c < b; c = c + 1u) {
                 inv[r][c] = 0.0;
             }
             inv[r][r] = safe_inverse(diag_orig[r]);
         }
     }
 
-    let offset = cell * 16u;
-    for (var r = 0u; r < 4u; r = r + 1u) {
-        for (var c = 0u; c < 4u; c = c + 1u) {
-            block_inv[offset + r * 4u + c] = inv[r][c];
+    let offset = cell * (b * b);
+    for (var r = 0u; r < b; r = r + 1u) {
+        for (var c = 0u; c < b; c = c + 1u) {
+            block_inv[offset + r * b + c] = inv[r][c];
         }
     }
 }
@@ -163,33 +186,23 @@ fn apply_block_precond(
         return;
     }
 
-    let base = cell * 4u;
-    let offset = cell * 16u;
+    if (params.num_cells == 0u) {
+        return;
+    }
 
-    let x0 = vec_x[base + 0u];
-    let x1 = vec_x[base + 1u];
-    let x2 = vec_x[base + 2u];
-    let x3 = vec_x[base + 3u];
+    let b = params.n / params.num_cells;
+    if (b == 0u || b > MAX_BLOCK) {
+        return;
+    }
 
-    let y0 = block_inv[offset + 0u] * x0
-        + block_inv[offset + 1u] * x1
-        + block_inv[offset + 2u] * x2
-        + block_inv[offset + 3u] * x3;
-    let y1 = block_inv[offset + 4u] * x0
-        + block_inv[offset + 5u] * x1
-        + block_inv[offset + 6u] * x2
-        + block_inv[offset + 7u] * x3;
-    let y2 = block_inv[offset + 8u] * x0
-        + block_inv[offset + 9u] * x1
-        + block_inv[offset + 10u] * x2
-        + block_inv[offset + 11u] * x3;
-    let y3 = block_inv[offset + 12u] * x0
-        + block_inv[offset + 13u] * x1
-        + block_inv[offset + 14u] * x2
-        + block_inv[offset + 15u] * x3;
+    let base = cell * b;
+    let offset = cell * (b * b);
 
-    vec_y[base + 0u] = y0;
-    vec_y[base + 1u] = y1;
-    vec_y[base + 2u] = y2;
-    vec_y[base + 3u] = y3;
+    for (var r = 0u; r < b; r = r + 1u) {
+        var sum = 0.0;
+        for (var c = 0u; c < b; c = c + 1u) {
+            sum += block_inv[offset + r * b + c] * vec_x[base + c];
+        }
+        vec_y[base + r] = sum;
+    }
 }

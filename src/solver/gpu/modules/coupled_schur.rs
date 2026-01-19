@@ -18,6 +18,7 @@ impl CoupledPressureSolveKind {
         match preconditioner {
             PreconditionerType::Jacobi => Self::Chebyshev,
             PreconditionerType::Amg => Self::Amg,
+            PreconditionerType::BlockJacobi => Self::Chebyshev,
         }
     }
 }

@@ -12,7 +12,12 @@ pub(crate) struct RuntimePreconditionerModule {
     amg_init_failed: bool,
     pipeline_extract_diag_inv: Option<wgpu::ComputePipeline>,
     pipeline_apply_diag_inv: Option<wgpu::ComputePipeline>,
+    pipeline_block_jacobi_build: Option<wgpu::ComputePipeline>,
+    pipeline_block_jacobi_apply: Option<wgpu::ComputePipeline>,
+    b_block_inv: Option<wgpu::Buffer>,
+    bg_block_inv: Option<wgpu::BindGroup>,
     b_rhs: wgpu::Buffer,
+    num_cells: u32,
     num_dofs: u32,
     num_nonzeros: u32,
     row_offsets: Vec<u32>,
@@ -24,6 +29,7 @@ impl RuntimePreconditionerModule {
     pub(crate) fn new(
         device: &wgpu::Device,
         kind: PreconditionerType,
+        num_cells: u32,
         num_dofs: u32,
         num_nonzeros: u32,
         row_offsets: Vec<u32>,
@@ -44,7 +50,12 @@ impl RuntimePreconditionerModule {
             amg_init_failed: false,
             pipeline_extract_diag_inv: None,
             pipeline_apply_diag_inv: None,
+            pipeline_block_jacobi_build: None,
+            pipeline_block_jacobi_apply: None,
+            b_block_inv: None,
+            bg_block_inv: None,
             b_rhs,
+            num_cells,
             num_dofs,
             num_nonzeros,
             row_offsets,
@@ -71,6 +82,100 @@ impl RuntimePreconditionerModule {
                 .expect("gmres_ops/apply_diag_inv shader missing from kernel registry");
             self.pipeline_apply_diag_inv = Some((src.create_pipeline)(device));
         }
+    }
+
+    fn ensure_block_jacobi_pipelines(&mut self, device: &wgpu::Device) {
+        if self.pipeline_block_jacobi_build.is_none() {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV)
+                .expect("block_precond/build_block_inv shader missing from kernel registry");
+            self.pipeline_block_jacobi_build = Some((src.create_pipeline)(device));
+        }
+        if self.pipeline_block_jacobi_apply.is_none() {
+            let src = kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_APPLY_BLOCK_PRECOND)
+                .expect("block_precond/apply_block_precond shader missing from kernel registry");
+            self.pipeline_block_jacobi_apply = Some((src.create_pipeline)(device));
+        }
+    }
+
+    fn ensure_block_jacobi_resources(&mut self, device: &wgpu::Device) {
+        self.ensure_block_jacobi_pipelines(device);
+        if self.num_cells == 0 {
+            return;
+        }
+
+        if self.b_block_inv.is_none() {
+            let unknowns_per_cell = self.num_dofs / self.num_cells;
+            let bytes = (self.num_cells as u64)
+                .saturating_mul(unknowns_per_cell as u64)
+                .saturating_mul(unknowns_per_cell as u64)
+                .saturating_mul(4);
+            self.b_block_inv = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runtime_preconditioner:block_inv"),
+                size: bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+
+        if self.bg_block_inv.is_none() {
+            let Some(pipeline) = self.pipeline_block_jacobi_build.as_ref() else {
+                return;
+            };
+            let Some(block_inv) = self.b_block_inv.as_ref() else {
+                return;
+            };
+            let bgl = pipeline.get_bind_group_layout(2);
+            self.bg_block_inv = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runtime_preconditioner:block_inv_bg"),
+                layout: &bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: block_inv.as_entire_binding(),
+                }],
+            }));
+        }
+    }
+
+    fn build_block_jacobi(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        dispatch: DispatchGrids,
+    ) {
+        self.ensure_block_jacobi_resources(device);
+
+        let Some(pipeline) = self.pipeline_block_jacobi_build.as_ref() else {
+            return;
+        };
+        let Some(bg_block_inv) = self.bg_block_inv.as_ref() else {
+            return;
+        };
+
+        let vector_bg = fgmres.create_vector_bind_group(
+            device,
+            fgmres.w_buffer().as_entire_binding(),
+            fgmres.temp_buffer().as_entire_binding(),
+            fgmres.z_buffer(0).as_entire_binding(),
+            "runtime_preconditioner:block_jacobi_build_vectors",
+        );
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runtime_preconditioner:block_jacobi_build"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runtime_preconditioner:block_jacobi_build"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, bg_block_inv, &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 
     fn refresh_jacobi_diag_inv(
@@ -201,10 +306,14 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         queue: &wgpu::Queue,
         fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
         _rhs: wgpu::BindingResource<'_>,
-        _dispatch: DispatchGrids,
+        dispatch: DispatchGrids,
     ) {
         if self.kind == PreconditionerType::Jacobi {
-            self.refresh_jacobi_diag_inv(device, queue, fgmres, _dispatch);
+            self.refresh_jacobi_diag_inv(device, queue, fgmres, dispatch);
+            return;
+        }
+        if self.kind == PreconditionerType::BlockJacobi {
+            self.build_block_jacobi(device, queue, fgmres, dispatch);
             return;
         }
 
@@ -249,6 +358,54 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             pass.set_bind_group(2, fgmres.precond_bg(), &[]);
             pass.set_bind_group(3, fgmres.params_bg(), &[]);
             pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+            return;
+        }
+
+        if self.kind == PreconditionerType::BlockJacobi {
+            self.ensure_block_jacobi_resources(device);
+            let Some(pipeline) = self.pipeline_block_jacobi_apply.as_ref() else {
+                return self
+                    .identity
+                    .encode_apply(device, encoder, fgmres, input, output, dispatch);
+            };
+            let Some(bg_block_inv) = self.bg_block_inv.as_ref() else {
+                return self
+                    .identity
+                    .encode_apply(device, encoder, fgmres, input, output, dispatch);
+            };
+
+            let wgpu::BindingResource::Buffer(input_binding) = &input else {
+                return self
+                    .identity
+                    .encode_apply(device, encoder, fgmres, input, output, dispatch);
+            };
+
+            let expected_bytes = (self.num_dofs as u64) * 4;
+            let available = input_binding.size.map(|s| s.get()).unwrap_or(expected_bytes);
+            if available < expected_bytes {
+                return self
+                    .identity
+                    .encode_apply(device, encoder, fgmres, input, output, dispatch);
+            }
+
+            let vector_bg = fgmres.create_vector_bind_group(
+                device,
+                input,
+                output.as_entire_binding(),
+                fgmres.temp_buffer().as_entire_binding(),
+                "runtime_preconditioner:block_jacobi_apply_vectors",
+            );
+
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runtime_preconditioner:block_jacobi_apply"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, bg_block_inv, &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
             return;
         }
 

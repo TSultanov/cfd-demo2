@@ -13,6 +13,7 @@ pub struct LinearSolverStats {
 pub enum PreconditionerType {
     Jacobi = 0,
     Amg = 1,
+    BlockJacobi = 2,
 }
 
 #[repr(C)]

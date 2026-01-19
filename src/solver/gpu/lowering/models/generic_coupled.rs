@@ -511,6 +511,7 @@ fn build_generic_krylov(
         RuntimePreconditionerModule::new(
             device,
             recipe.linear_solver.preconditioner,
+            num_cells,
             n,
             runtime.num_nonzeros,
             row_offsets,

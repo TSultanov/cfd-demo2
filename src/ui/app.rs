@@ -319,20 +319,14 @@ impl CFDApp {
             }
         };
 
-        let model_owns_preconditioner = model
-            .linear_solver
-            .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
-            .unwrap_or(false);
-
-        if model_owns_preconditioner {
-            // Keep UI state consistent with model-owned preconditioners (e.g. Schur).
-            self.selected_preconditioner = PreconditionerType::Jacobi;
-        }
-
-        let effective_preconditioner = if model_owns_preconditioner {
-            PreconditionerType::Jacobi
-        } else {
+        let supports_preconditioner = model
+            .named_param_keys()
+            .into_iter()
+            .any(|k| k == "preconditioner");
+        let effective_preconditioner = if supports_preconditioner {
             self.selected_preconditioner
+        } else {
+            PreconditionerType::Jacobi
         };
 
         let config = SolverConfig {
@@ -361,8 +355,8 @@ impl CFDApp {
         gpu_solver.set_advection_scheme(self.selected_scheme);
         gpu_solver.set_time_scheme(self.time_scheme);
         let _ = gpu_solver.set_eos(&self.current_fluid.eos);
-        if !model_owns_preconditioner {
-            gpu_solver.set_preconditioner(self.selected_preconditioner);
+        if supports_preconditioner {
+            gpu_solver.set_preconditioner(effective_preconditioner);
         }
 
         match self.solver_kind {
@@ -966,42 +960,61 @@ impl eframe::App for CFDApp {
                         }
 
                         ui.separator();
+                        ui.label("Preconditioner");
+                        let model_owns_preconditioner = self.active_model_owns_preconditioner();
+                        let supports_preconditioner = self
+                            .gpu_unified_solver
+                            .as_ref()
+                            .and_then(|s| s.lock().ok())
+                            .map(|s| s.model().named_param_keys().iter().any(|&k| k == "preconditioner"))
+                            .unwrap_or(false);
+
+                        if model_owns_preconditioner {
+                            ui.weak("Model-owned Schur: selector chooses pressure solve (Chebyshev vs AMG).");
+                        } else {
+                            ui.weak("Krylov preconditioner for the coupled linear solve.");
+                        }
+                        if !supports_preconditioner {
+                            ui.weak("(not declared by model)");
+                        }
+
+                        ui.add_enabled_ui(supports_preconditioner, |ui| {
+                            if ui
+                                .radio(
+                                    matches!(self.selected_preconditioner, PreconditionerType::Jacobi),
+                                    "Jacobi (diag)",
+                                )
+                                .clicked()
+                            {
+                                self.selected_preconditioner = PreconditionerType::Jacobi;
+                                self.update_gpu_preconditioner();
+                            }
+                            if ui
+                                .radio(
+                                    matches!(
+                                        self.selected_preconditioner,
+                                        PreconditionerType::BlockJacobi
+                                    ),
+                                    "BlockJacobi (cell block)",
+                                )
+                                .clicked()
+                            {
+                                self.selected_preconditioner = PreconditionerType::BlockJacobi;
+                                self.update_gpu_preconditioner();
+                            }
+                            if ui
+                                .radio(
+                                    matches!(self.selected_preconditioner, PreconditionerType::Amg),
+                                    "AMG (Multigrid)",
+                                )
+                                .clicked()
+                            {
+                                self.selected_preconditioner = PreconditionerType::Amg;
+                                self.update_gpu_preconditioner();
+                            }
+                        });
+
                         if matches!(self.solver_kind, SolverKind::Incompressible) {
-                            ui.label("Preconditioner");
-                            let model_owns_preconditioner = self.active_model_owns_preconditioner();
-                            if model_owns_preconditioner {
-                                ui.weak("(model-owned; overrides disabled)");
-                            }
-
-                            ui.add_enabled_ui(!model_owns_preconditioner, |ui| {
-                                if ui
-                                    .radio(
-                                        matches!(
-                                            self.selected_preconditioner,
-                                            PreconditionerType::Jacobi
-                                        ),
-                                        "Jacobi",
-                                    )
-                                    .clicked()
-                                {
-                                    self.selected_preconditioner = PreconditionerType::Jacobi;
-                                    self.update_gpu_preconditioner();
-                                }
-                                if ui
-                                    .radio(
-                                        matches!(self.selected_preconditioner, PreconditionerType::Amg),
-                                        "AMG (Multigrid)",
-                                    )
-                                    .clicked()
-                                {
-                                    self.selected_preconditioner = PreconditionerType::Amg;
-                                    self.update_gpu_preconditioner();
-                                }
-                            });
-                            if model_owns_preconditioner {
-                                ui.label("(Model-owned: Schur)");
-                            }
-
                             ui.separator();
                             ui.label("Under-Relaxation Factors");
                             ui.weak("Tip: start with α_U≈0.7 and α_P≈0.3; α=1 can diverge at high Re.");

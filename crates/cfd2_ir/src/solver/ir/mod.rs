@@ -156,6 +156,14 @@ pub enum FaceScalarBuiltin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LowMachParam {
+    /// Low-Mach preconditioning model selector (cast from `u32` in codegen).
+    Model,
+    ThetaFloor,
+    PressureCouplingAlpha,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FaceVec2Builtin {
     Normal,
     /// Vector from the given side's cell center to the face center.
@@ -182,6 +190,11 @@ pub enum FaceScalarExpr {
     Builtin(FaceScalarBuiltin),
     /// Read a scalar from the shared `Constants` uniform buffer (e.g. `dt`, `density`).
     Constant { name: String },
+    /// Read a scalar from the optional `LowMachParams` uniform buffer.
+    ///
+    /// Note: `LowMachParam::Model` is stored as `u32` but is exposed to IR as an `f32`
+    /// (codegen inserts the cast).
+    LowMachParam(LowMachParam),
     State { side: FaceSide, name: String },
     Primitive { side: FaceSide, name: String },
     Add(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
@@ -227,6 +240,18 @@ impl FaceScalarExpr {
 
     pub fn constant(name: impl Into<String>) -> Self {
         FaceScalarExpr::Constant { name: name.into() }
+    }
+
+    pub fn low_mach_model() -> Self {
+        FaceScalarExpr::LowMachParam(LowMachParam::Model)
+    }
+
+    pub fn low_mach_theta_floor() -> Self {
+        FaceScalarExpr::LowMachParam(LowMachParam::ThetaFloor)
+    }
+
+    pub fn low_mach_pressure_coupling_alpha() -> Self {
+        FaceScalarExpr::LowMachParam(LowMachParam::PressureCouplingAlpha)
     }
 
     pub fn primitive(side: FaceSide, name: impl Into<String>) -> Self {

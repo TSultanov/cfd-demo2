@@ -64,7 +64,11 @@ mod tests {
                 }
                 S::Neg(x) | S::Abs(x) | S::Sqrt(x) => walk(x, f),
                 S::Dot(_, _) => {}
-                S::Literal(_) | S::Builtin(_) | S::Constant { .. } | S::State { .. }
+                S::Literal(_)
+                | S::Builtin(_)
+                | S::Constant { .. }
+                | S::LowMachParam(_)
+                | S::State { .. }
                 | S::Primitive { .. } => {}
             }
         }
@@ -229,11 +233,11 @@ fn euler_central_upwind(
     let u_vec = |side: FaceSide| V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho(side)));
     let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
 
-    let c = |side: FaceSide| {
+    let c2 = |side: FaceSide| {
         // Generalized wave speed:
         //   c^2 = gamma * p / rho + dp_drho
         // where dp_drho is nonzero for barotropic closures (e.g. linear compressibility).
-        S::Sqrt(Box::new(S::Add(
+        S::Add(
             Box::new(S::Div(
                 Box::new(S::Mul(
                     Box::new(S::constant("eos_gamma")),
@@ -242,8 +246,47 @@ fn euler_central_upwind(
                 Box::new(rho(side)),
             )),
             Box::new(S::constant("eos_dp_drho")),
-        )))
+        )
     };
+
+    let u_n2 = |side: FaceSide| {
+        let un = u_n(side);
+        S::Mul(Box::new(un.clone()), Box::new(un))
+    };
+
+    let low_mach_model = S::low_mach_model();
+    let low_mach_theta_floor = S::low_mach_theta_floor();
+
+    let w_off = S::Max(
+        Box::new(S::lit(0.0)),
+        Box::new(S::Sub(
+            Box::new(S::lit(1.0)),
+            Box::new(S::Abs(Box::new(S::Sub(
+                Box::new(low_mach_model),
+                Box::new(S::lit(2.0)),
+            )))),
+        )),
+    );
+    let w_on = S::Sub(Box::new(S::lit(1.0)), Box::new(w_off.clone()));
+
+    let c_eff2_on = |side: FaceSide| {
+        let c2_side = c2(side);
+        let floor = S::Mul(Box::new(low_mach_theta_floor.clone()), Box::new(c2_side.clone()));
+        S::Min(
+            Box::new(S::Max(Box::new(u_n2(side)), Box::new(floor))),
+            Box::new(c2_side),
+        )
+    };
+
+    let c_eff2 = |side: FaceSide| {
+        let c2_side = c2(side);
+        S::Add(
+            Box::new(S::Mul(Box::new(w_off.clone()), Box::new(c2_side.clone()))),
+            Box::new(S::Mul(Box::new(w_on.clone()), Box::new(c_eff2_on(side)))),
+        )
+    };
+
+    let c_eff = |side: FaceSide| S::Sqrt(Box::new(c_eff2(side)));
 
     let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
     let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
@@ -309,11 +352,11 @@ fn euler_central_upwind(
         Box::new(S::Max(
             Box::new(S::Add(
                 Box::new(u_n(FaceSide::Owner)),
-                Box::new(c(FaceSide::Owner)),
+                Box::new(c_eff(FaceSide::Owner)),
             )),
             Box::new(S::Add(
                 Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c(FaceSide::Neighbor)),
+                Box::new(c_eff(FaceSide::Neighbor)),
             )),
         )),
     );
@@ -322,11 +365,11 @@ fn euler_central_upwind(
         Box::new(S::Min(
             Box::new(S::Sub(
                 Box::new(u_n(FaceSide::Owner)),
-                Box::new(c(FaceSide::Owner)),
+                Box::new(c_eff(FaceSide::Owner)),
             )),
             Box::new(S::Sub(
                 Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c(FaceSide::Neighbor)),
+                Box::new(c_eff(FaceSide::Neighbor)),
             )),
         )),
     );

@@ -344,15 +344,7 @@ impl SolverRecipe {
             }
         }
 
-        // Time integration buffers
         let time_integration = TimeIntegrationSpec::for_scheme(time_scheme);
-        if time_integration.history_levels > 1 {
-            aux_buffers.push(BufferSpec {
-                name: "state_old2",
-                size_per_cell: model.state_layout.stride() as usize,
-                purpose: BufferPurpose::History,
-            });
-        }
 
         // Linear solver spec
         let model_solver = model.linear_solver.unwrap_or_default();

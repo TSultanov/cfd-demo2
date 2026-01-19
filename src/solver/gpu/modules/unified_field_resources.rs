@@ -6,7 +6,7 @@
 
 use crate::solver::gpu::modules::constants::ConstantsModule;
 use crate::solver::gpu::modules::state::PingPongState;
-use crate::solver::gpu::recipe::SolverRecipe;
+use crate::solver::gpu::recipe::{BufferPurpose, SolverRecipe};
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams};
 use bytemuck::cast_slice;
 use std::collections::HashMap;
@@ -81,13 +81,24 @@ impl UnifiedFieldResources {
 
         let constants = ConstantsModule::new(device, initial_constants, "UnifiedField constants");
 
+        let mut gradient_sizes = HashMap::<&str, usize>::new();
+        for spec in &recipe.aux_buffers {
+            if spec.purpose != BufferPurpose::Gradient {
+                continue;
+            }
+            let Some(field) = spec.name.strip_prefix("grad_") else {
+                continue;
+            };
+            gradient_sizes.insert(field, spec.size_per_cell);
+        }
+
         let mut gradients = HashMap::new();
         for field_name in &recipe.gradient_fields {
-            let size_per_cell = if field_name == "state" {
-                state_stride as usize * 2
-            } else {
-                2
-            };
+            let size_per_cell = *gradient_sizes
+                .get(field_name.as_str())
+                .unwrap_or_else(|| {
+                    panic!("missing gradient buffer spec for field '{field_name}'")
+                });
             let grad_size = num_cells as usize * size_per_cell;
             let zero_grad = vec![0.0f32; grad_size];
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

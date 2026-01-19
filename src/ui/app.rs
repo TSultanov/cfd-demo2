@@ -70,6 +70,13 @@ enum SolverKind {
 
 type SharedResults = Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>;
 
+#[derive(Default, Clone)]
+struct ModelUiCaps {
+    supports_preconditioner: bool,
+    model_owns_preconditioner: bool,
+    unknowns_per_cell: u32,
+}
+
 // Cached GPU solver stats for UI display (avoids lock contention)
 #[allow(dead_code)]
 #[derive(Default, Clone)]
@@ -90,6 +97,7 @@ struct CachedGpuStats {
 pub struct CFDApp {
     gpu_unified_solver: Option<Arc<Mutex<UnifiedSolver>>>,
     gpu_solver_running: Arc<AtomicBool>,
+    gpu_solver_thread: Option<thread::JoinHandle<()>>,
     shared_results: SharedResults,
     shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
     shared_error: Arc<Mutex<Option<String>>>,
@@ -123,6 +131,7 @@ pub struct CFDApp {
     inlet_velocity: f32,
     selected_preconditioner: PreconditionerType,
     solver_kind: SolverKind,
+    model_caps: ModelUiCaps,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -201,9 +210,10 @@ impl CFDApp {
                 (None, None, wgpu::TextureFormat::Bgra8Unorm)
             };
 
-        Self {
+        let mut app = Self {
             gpu_unified_solver: None,
             gpu_solver_running: Arc::new(AtomicBool::new(false)),
+            gpu_solver_thread: None,
             shared_results: Arc::new(Mutex::new(None)),
             shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
             shared_error: Arc::new(Mutex::new(None)),
@@ -243,11 +253,14 @@ impl CFDApp {
             inlet_velocity: 1.0,
             selected_preconditioner: PreconditionerType::Jacobi,
             solver_kind: SolverKind::Incompressible,
+            model_caps: ModelUiCaps::default(),
             wgpu_device,
             wgpu_queue,
             target_format,
             cfd_renderer: None,
-        }
+        };
+        app.refresh_model_caps();
+        app
     }
 
     fn with_unified_solver<F>(&self, f: F)
@@ -255,9 +268,33 @@ impl CFDApp {
         F: FnOnce(&mut UnifiedSolver),
     {
         if let Some(solver) = &self.gpu_unified_solver {
-            if let Ok(mut guard) = solver.lock() {
+            if let Ok(mut guard) = solver.try_lock() {
                 f(&mut guard);
             }
+        }
+    }
+
+    fn refresh_model_caps(&mut self) {
+        let model = match self.solver_kind {
+            SolverKind::Incompressible => incompressible_momentum_model(),
+            SolverKind::Compressible => compressible_model_with_eos(self.current_fluid.eos),
+        };
+
+        self.model_caps.supports_preconditioner = model
+            .named_param_keys()
+            .into_iter()
+            .any(|k| k == "preconditioner");
+        self.model_caps.model_owns_preconditioner = model
+            .linear_solver
+            .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
+            .unwrap_or(false);
+        self.model_caps.unknowns_per_cell = model.system.unknowns_per_cell();
+
+        const UI_MAX_BLOCK_JACOBI: u32 = 16;
+        if matches!(self.selected_preconditioner, PreconditionerType::BlockJacobi)
+            && self.model_caps.unknowns_per_cell > UI_MAX_BLOCK_JACOBI
+        {
+            self.selected_preconditioner = PreconditionerType::Jacobi;
         }
     }
 
@@ -265,7 +302,7 @@ impl CFDApp {
         if let (Some(renderer), Some(device)) = (&self.cfd_renderer, &self.wgpu_device) {
             if let Ok(mut renderer) = renderer.lock() {
                 if let Some(solver) = &self.gpu_unified_solver {
-                    if let Ok(solver) = solver.lock() {
+                    if let Ok(solver) = solver.try_lock() {
                         renderer.update_bind_group(device, solver.state_buffer());
                     }
                 }
@@ -317,6 +354,15 @@ impl CFDApp {
             self.selected_preconditioner
         } else {
             PreconditionerType::Jacobi
+        };
+
+        self.model_caps = ModelUiCaps {
+            supports_preconditioner,
+            model_owns_preconditioner: model
+                .linear_solver
+                .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
+                .unwrap_or(false),
+            unknowns_per_cell: model.system.unknowns_per_cell(),
         };
 
         let config = SolverConfig {
@@ -689,6 +735,17 @@ impl eframe::App for CFDApp {
         if self.is_running && !self.gpu_solver_running.load(Ordering::Relaxed) {
             self.is_running = false;
         }
+        if let Some(handle) = &self.gpu_solver_thread {
+            if handle.is_finished() {
+                if let Some(handle) = self.gpu_solver_thread.take() {
+                    if handle.join().is_err() {
+                        if let Ok(mut err) = self.shared_error.lock() {
+                            *err = Some("Solver thread panicked".to_string());
+                        }
+                    }
+                }
+            }
+        }
 
         egui::SidePanel::left("controls").show(ctx, |ui| {
             egui::ScrollArea::vertical()
@@ -949,25 +1006,10 @@ impl eframe::App for CFDApp {
                         ui.separator();
                         ui.label("Preconditioner");
                         const UI_MAX_BLOCK_JACOBI: u32 = 16;
-                        let mut model_owns_preconditioner = false;
-                        let mut supports_preconditioner = false;
-                        let mut block_jacobi_supported = false;
-                        if let Some(solver) = &self.gpu_unified_solver {
-                            if let Ok(solver) = solver.lock() {
-                                supports_preconditioner = solver
-                                    .model()
-                                    .named_param_keys()
-                                    .iter()
-                                    .any(|&k| k == "preconditioner");
-                                model_owns_preconditioner = solver
-                                    .model()
-                                    .linear_solver
-                                    .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
-                                    .unwrap_or(false);
-                                block_jacobi_supported =
-                                    solver.model().system.unknowns_per_cell() <= UI_MAX_BLOCK_JACOBI;
-                            }
-                        }
+                        let supports_preconditioner = self.model_caps.supports_preconditioner;
+                        let model_owns_preconditioner = self.model_caps.model_owns_preconditioner;
+                        let block_jacobi_supported =
+                            self.model_caps.unknowns_per_cell <= UI_MAX_BLOCK_JACOBI;
 
                         if model_owns_preconditioner {
                             ui.weak("Model-owned Schur: selector chooses pressure solve (Chebyshev vs AMG).");
@@ -1087,6 +1129,7 @@ impl eframe::App for CFDApp {
                             );
                         });
                     if prev_solver_kind != self.solver_kind {
+                        self.refresh_model_caps();
                         self.init_solver();
                     }
 
@@ -1124,7 +1167,7 @@ impl eframe::App for CFDApp {
 
                                 let solver_arc = gpu_solver.clone();
                                 let solver_kind = self.solver_kind;
-                                thread::spawn(move || {
+                                let handle = thread::spawn(move || {
                                     let run_loop = std::panic::AssertUnwindSafe(|| {
                                         let mut step_idx: u64 = 0;
                                         let mut prev_max_vel = 0.0f64;
@@ -1356,6 +1399,7 @@ impl eframe::App for CFDApp {
                                         ctx_clone.request_repaint();
                                     }
                                 });
+                                self.gpu_solver_thread = Some(handle);
                             }
                         } else {
                             self.gpu_solver_running.store(false, Ordering::Relaxed);

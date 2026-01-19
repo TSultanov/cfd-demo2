@@ -206,14 +206,20 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    let shared_kernels = solver::model::kernel::emit_shared_kernels_wgsl_with_ids(&manifest_dir)
-        .unwrap_or_else(|err| panic!("codegen failed for shared kernels: {err}"));
+    let models = solver::model::all_models();
+
+    let shared_kernels = solver::model::kernel::emit_shared_kernels_wgsl_with_ids_for_models(
+        &manifest_dir,
+        &models,
+        &schemes,
+    )
+    .unwrap_or_else(|err| panic!("codegen failed for shared kernels: {err}"));
 
     let mut per_model_kernels: Vec<(String, solver::model::KernelId, PathBuf)> = Vec::new();
-    for model in solver::model::all_models() {
+    for model in &models {
         let emitted = solver::model::kernel::emit_model_kernels_wgsl_with_ids(
             &manifest_dir,
-            &model,
+            model,
             &schemes,
         )
         .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));

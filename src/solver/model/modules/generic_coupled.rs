@@ -54,6 +54,12 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
                 crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_wgsl,
             ),
+            ModelKernelGeneratorSpec::new_shared(
+                KernelId::GENERIC_COUPLED_APPLY,
+                |_model, _schemes| {
+                    Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl())
+                },
+            ),
             ModelKernelGeneratorSpec::new(
                 KernelId::GENERIC_COUPLED_UPDATE,
                 crate::solver::model::kernel::generate_generic_coupled_update_kernel_wgsl,

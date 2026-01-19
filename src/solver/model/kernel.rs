@@ -161,9 +161,16 @@ pub(crate) type ModelKernelWgslGenerator = Arc<
         + 'static,
 >;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelWgslScope {
+    PerModel,
+    Shared,
+}
+
 #[derive(Clone)]
 pub struct ModelKernelGeneratorSpec {
     pub id: KernelId,
+    pub scope: KernelWgslScope,
     pub generator: ModelKernelWgslGenerator,
 }
 
@@ -177,6 +184,21 @@ impl ModelKernelGeneratorSpec {
     ) -> Self {
         Self {
             id,
+            scope: KernelWgslScope::PerModel,
+            generator: Arc::new(generator),
+        }
+    }
+
+    pub fn new_shared(
+        id: KernelId,
+        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<String, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            id,
+            scope: KernelWgslScope::Shared,
             generator: Arc::new(generator),
         }
     }
@@ -381,11 +403,11 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
 fn kernel_generator_for_model_by_id(
     model: &crate::solver::model::ModelSpec,
     kernel_id: KernelId,
-) -> Option<&ModelKernelWgslGenerator> {
+) -> Option<&ModelKernelGeneratorSpec> {
     for module in &model.modules {
         let module: &dyn crate::solver::model::module::ModelModule = module;
         if let Some(spec) = module.kernel_generators().iter().find(|s| s.id == kernel_id) {
-            return Some(&spec.generator);
+            return Some(spec);
         }
     }
 
@@ -398,47 +420,13 @@ pub fn generate_kernel_wgsl_for_model_by_id(
     kernel_id: KernelId,
 ) -> Result<String, String> {
     if let Some(gen) = kernel_generator_for_model_by_id(model, kernel_id) {
-        return gen.as_ref()(model, schemes);
+        return gen.generator.as_ref()(model, schemes);
     }
 
     Err(format!(
         "KernelId '{}' is not a build-time generated per-model kernel",
         kernel_id.as_str()
     ))
-}
-
-pub fn generate_shared_kernel_wgsl_by_id(kernel_id: KernelId) -> Result<String, String> {
-    let Some(spec) = shared_kernel_generator_specs()
-        .iter()
-        .find(|spec| spec.id == kernel_id)
-        .copied()
-    else {
-        return Err(format!(
-            "KernelId '{}' is not a build-time generated shared kernel",
-            kernel_id.as_str()
-        ));
-    };
-    Ok((spec.generator)())
-}
-
-type SharedKernelWgslGenerator = fn() -> String;
-
-#[derive(Clone, Copy)]
-struct SharedKernelGeneratorSpec {
-    id: KernelId,
-    generator: SharedKernelWgslGenerator,
-}
-
-fn generate_generic_coupled_apply_wgsl() -> String {
-    cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl()
-}
-
-fn shared_kernel_generator_specs() -> &'static [SharedKernelGeneratorSpec] {
-    const SPECS: &[SharedKernelGeneratorSpec] = &[SharedKernelGeneratorSpec {
-        id: KernelId::GENERIC_COUPLED_APPLY,
-        generator: generate_generic_coupled_apply_wgsl,
-    }];
-    SPECS
 }
 
 pub fn emit_shared_kernels_wgsl(
@@ -453,19 +441,63 @@ pub fn emit_shared_kernels_wgsl(
 pub fn emit_shared_kernels_wgsl_with_ids(
     base_dir: impl AsRef<std::path::Path>,
 ) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
+    emit_shared_kernels_wgsl_with_ids_for_models(
+        base_dir,
+        &crate::solver::model::all_models(),
+        &crate::solver::ir::SchemeRegistry::default(),
+    )
+}
+
+pub fn emit_shared_kernels_wgsl_with_ids_for_models(
+    base_dir: impl AsRef<std::path::Path>,
+    models: &[crate::solver::model::ModelSpec],
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
     let base_dir = base_dir.as_ref();
     let mut outputs = Vec::new();
 
-    // Shared kernels are emitted once and keyed by kernel id only.
-    for spec in shared_kernel_generator_specs() {
-        let kernel_id = spec.id;
+    let mut wgsl_by_id: std::collections::HashMap<KernelId, String> = std::collections::HashMap::new();
+    for model in models {
+        for module in &model.modules {
+            let module: &dyn crate::solver::model::module::ModelModule = module;
+            for spec in module.kernel_generators() {
+                if spec.scope != KernelWgslScope::Shared {
+                    continue;
+                }
+
+                let wgsl = spec
+                    .generator
+                    .as_ref()(model, schemes)
+                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+
+                if let Some(prev) = wgsl_by_id.insert(spec.id, wgsl.clone()) {
+                    if prev != wgsl {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!(
+                                "shared kernel '{}' generated different WGSL across models (latest from model '{}' module '{}')",
+                                spec.id.as_str(),
+                                model.id,
+                                module.name()
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut shared_ids: Vec<KernelId> = wgsl_by_id.keys().copied().collect();
+    shared_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
+    for kernel_id in shared_ids {
         let filename = kernel_output_name_for_model("", kernel_id)
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-        let wgsl = generate_shared_kernel_wgsl_by_id(kernel_id)
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-        let path = cfd2_codegen::compiler::write_generated_wgsl(
-            base_dir, filename, &wgsl,
-        )?;
+        let wgsl = wgsl_by_id
+            .get(&kernel_id)
+            .expect("shared kernel id disappeared from table");
+        let path =
+            cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, wgsl)?;
         outputs.push((kernel_id, path));
     }
 
@@ -499,8 +531,10 @@ pub fn emit_model_kernels_wgsl_with_ids(
             continue;
         }
 
-        let has_generator = kernel_generator_for_model_by_id(model, spec.id).is_some();
-        if !has_generator {
+        let Some(generator) = kernel_generator_for_model_by_id(model, spec.id) else {
+            continue;
+        };
+        if generator.scope == KernelWgslScope::Shared {
             continue;
         }
 

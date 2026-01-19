@@ -227,6 +227,7 @@ Completed:
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
+2) Remove remaining handwritten infrastructure reliance on host-written dispatch widths (e.g. `params.dispatch_x` in GMRES ops) by deriving flattening from `@builtin(num_workgroups)` so dispatch metadata can’t drift.
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

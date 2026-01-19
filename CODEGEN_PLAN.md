@@ -230,6 +230,7 @@ Completed:
 - Linear solver max iters: FGMRES now honors `LinearSolverSpec.max_iters` via multi-restart loops (so the iteration cap is meaningful); OpenFOAM reference tests pass.
 - Gap 0 progress: model kernel generators are closure-capable so modules can derive WGSL from their own configuration (e.g. Rhie–Chow aux kernels honor `dp_field`); added contract coverage; OpenFOAM reference tests pass.
 - Gap 0 progress: low-Mach params buffer allocation is derived from the EOS module config (removed `ModelGpuSpec.requires_low_mach_params`); OpenFOAM reference tests pass.
+- Gap 0 progress: face-flux buffer sizing is derived from the `flux_module` manifest + `system.unknowns_per_cell()` (removed `ModelGpuSpec.flux`); OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).

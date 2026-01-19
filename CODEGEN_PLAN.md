@@ -235,9 +235,11 @@ Completed:
 - Gap 0 progress: gradient-buffer strategy is derived from method config (`CoupledCapabilities.gradient_storage`) and `ModelSpec` no longer carries a derived `ModelGpuSpec`; OpenFOAM reference tests pass.
 - Gap 0 progress: initial GPU EOS constants are derived from the recipe (which derives them from the EOS module); OpenFOAM reference tests pass.
 - Gap 0 progress: initial advection/time-scheme constants are derived from the recipe/config (no post-build `set_named_param` initialization); OpenFOAM reference tests pass.
+- Preconditioner knob: generic-coupled now honors `SolverConfig.preconditioner=Amg` by wiring an AMG V-cycle preconditioner (instead of silently ignoring it); added contract coverage; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
+2) Preconditioner semantics: decide whether `PreconditionerType::Jacobi` should remain an identity preconditioner for non-Schur models or become a true Jacobi/block-Jacobi preconditioner (would likely require updating reference datasets).
 
 Status:
 - Shared generated kernels are discovered via module-owned `kernel_generators()` entries scoped as `KernelWgslScope::Shared` (and emitted once at build time).

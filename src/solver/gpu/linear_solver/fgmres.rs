@@ -1218,6 +1218,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
     let dispatch_x_threads = dispatch_x_threads(workgroups);
 
+    let max_restart = iter_params
+        .max_restart
+        .max(1)
+        .min(core.max_restart as u32) as usize;
+    iter_params.max_restart = max_restart as u32;
+
     let tol_abs = config.tol_abs;
 
     let mut basis_size = 0usize;
@@ -1227,10 +1233,10 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     // Ensure vector ops see correct dispatch width and problem size.
     params.n = n;
     params.dispatch_x = dispatch_x_threads;
-    params.max_restart = core.max_restart as u32;
+    params.max_restart = max_restart as u32;
     write_params(core, &params);
 
-    for j in 0..core.max_restart {
+    for j in 0..max_restart {
         basis_size = j + 1;
 
         let z_buf = &core.z_vectors[j];
@@ -1300,7 +1306,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         write_params(core, &params);
 
         // Compute norm of w and write H[j+1,j] plus scalars[0]=1/norm.
-        let h_idx = (j as u32) * (core.max_restart as u32 + 1) + (j as u32 + 1);
+        let h_idx = (j as u32) * (max_restart as u32 + 1) + (j as u32 + 1);
         iter_params.current_idx = h_idx;
         write_iter_params(core, &iter_params);
 

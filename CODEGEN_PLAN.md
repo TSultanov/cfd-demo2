@@ -224,10 +224,11 @@ Completed:
 - Dispatch scaling: `GeneratedKernelsModule` uses 2D dispatch for `Cells`/`Faces` and `UnifiedFieldResources` derives `constants.stride_x` from device limits; all generated cell/face kernels flatten `global_id` via `global_id.y * constants.stride_x + global_id.x`; OpenFOAM reference tests pass.
 - Dispatch scaling: audited handwritten solver-infrastructure WGSL kernels (linear solver/AMG/reductions) for 2D dispatch by flattening `global_id`/`workgroup_id` and updating remaining 1D dispatch sites; added contract coverage; OpenFOAM reference tests pass.
 - Schur setup hardening: `generic_coupled_schur_setup` no longer writes Rhie–Chow `d_p`; `d_p` updates remain module-owned via the model-generated `dp_update_from_diag` kernel; OpenFOAM reference tests pass.
+- Dispatch hardening: GMRES ops kernels no longer use `params.dispatch_x` for indexing (derive flattening from `@builtin(num_workgroups)`), and a contract test prevents reintroducing it; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
-2) Remove remaining handwritten infrastructure reliance on host-written dispatch widths (e.g. `params.dispatch_x` in GMRES ops) by deriving flattening from `@builtin(num_workgroups)` so dispatch metadata can’t drift.
+2) Remove remaining recipe-builder kernel injections (e.g. implicit apply) by expressing config-dependent inclusion as model module conditions, keeping scheduling fully module-driven.
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

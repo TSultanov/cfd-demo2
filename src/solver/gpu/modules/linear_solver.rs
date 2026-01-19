@@ -16,6 +16,7 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
     num_cells: u32,
     dispatch: KrylovDispatch,
     max_restart: usize,
+    max_iters: u32,
     tol: f32,
     tol_abs: f32,
     precond_label: &str,
@@ -49,23 +50,26 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         return stats;
     }
 
-    let capacity = krylov.fgmres.max_restart() as u32;
-    let iterations_per_cycle = (max_restart as u32).min(capacity);
+    let max_iters = max_iters.max(1);
+    let capacity = krylov.fgmres.max_restart();
+    let restart_len = max_restart.max(1).min(capacity);
 
-    let params = RawFgmresParams {
+    let mut params = RawFgmresParams {
         n,
         num_cells,
         num_iters: 0,
         omega: 1.0,
         dispatch_x: dispatch.dofs_dispatch_x_threads,
-        max_restart: iterations_per_cycle,
+        max_restart: restart_len as u32,
         column_offset: 0,
         _pad3: 0,
     };
-    let core = krylov.fgmres.core(&context.device, &context.queue);
 
-    // Initial parameter write
-    write_params(&core, &params);
+    // Initial parameter write (required for vector ops used before the first solve_once call).
+    {
+        let core = krylov.fgmres.core(&context.device, &context.queue);
+        write_params(&core, &params);
+    }
 
     // Preconditioner setup
     krylov.precond.prepare(
@@ -76,43 +80,102 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         dispatch.grids,
     );
 
-    let iter_params = IterParams {
-        current_idx: 0,
-        max_restart: iterations_per_cycle,
-        _pad1: 0,
-        _pad2: 0,
-    };
+    let mut total_iters: u32 = 0;
+    let mut residual = rhs_norm;
+    let mut converged = false;
 
-    // FGMRES initialization
-    krylov.fgmres.clear_restart_aux(&core);
-    krylov.fgmres.write_g0(&context.queue, rhs_norm);
-    krylov.fgmres.init_basis0_from_vector_normalized(
-        &core,
-        system.rhs().as_entire_binding(),
-        1.0 / rhs_norm,
-        "Generic FGMRES",
-    );
+    while total_iters < max_iters {
+        // Seed basis0 with the current residual (rhs - A*x).
+        residual = {
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            krylov.fgmres.compute_residual_norm_into(
+                &core,
+                system,
+                krylov.fgmres.basis_binding(0),
+                "Generic FGMRES",
+            )
+        };
+        if !residual.is_finite() {
+            let stats = LinearSolverStats {
+                iterations: total_iters,
+                residual,
+                converged: false,
+                diverged: true,
+                time: start.elapsed(),
+            };
+            debug_log(total_iters, rhs_norm, residual, false);
+            return stats;
+        }
+        if residual <= tol * rhs_norm || residual <= tol_abs {
+            converged = true;
+            break;
+        }
 
-    // Solve (single restart)
-    let solve = krylov.solve_once(
-        context,
-        system,
-        rhs_norm,
-        params,
-        iter_params,
-        FgmresSolveOnceConfig {
-            tol_rel: tol,
-            tol_abs,
-            reset_x_before_update: true,
-        },
-        dispatch.grids,
-        precond_label,
-    );
+        let remaining = (max_iters - total_iters) as usize;
+        let iter_restart = restart_len.min(remaining).max(1);
+        params.max_restart = iter_restart as u32;
+
+        // Normalize basis0 and initialize restart-local aux buffers.
+        {
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            write_params(&core, &params);
+            krylov.fgmres.scale_in_place(
+                &core,
+                krylov.fgmres.basis_binding(0),
+                1.0 / residual,
+                "Generic FGMRES basis0 normalize",
+            );
+            krylov.fgmres.clear_restart_aux(&core);
+        }
+        krylov.fgmres.write_g0(&context.queue, residual);
+
+        let iter_params = IterParams {
+            current_idx: 0,
+            max_restart: iter_restart as u32,
+            _pad1: 0,
+            _pad2: 0,
+        };
+
+        let solve = krylov.solve_once(
+            context,
+            system,
+            rhs_norm,
+            params,
+            iter_params,
+            FgmresSolveOnceConfig {
+                tol_rel: tol,
+                tol_abs,
+                reset_x_before_update: false,
+            },
+            dispatch.grids,
+            precond_label,
+        );
+
+        total_iters = total_iters.saturating_add(solve.basis_size as u32);
+        residual = solve.residual_est;
+        if solve.converged {
+            converged = true;
+            break;
+        }
+    }
+
+    if !converged {
+        // Provide an accurate residual for reporting when the iteration cap is hit.
+        residual = {
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            krylov.fgmres.compute_residual_norm_into(
+                &core,
+                system,
+                krylov.fgmres.basis_binding(0),
+                "Generic FGMRES final",
+            )
+        };
+    }
 
     let stats = LinearSolverStats {
-        iterations: solve.basis_size as u32,
-        residual: solve.residual_est,
-        converged: solve.converged,
+        iterations: total_iters,
+        residual,
+        converged,
         diverged: false,
         time: start.elapsed(),
     };

@@ -255,13 +255,16 @@ impl SolverRecipe {
                 stride: model.system.unknowns_per_cell(),
             });
 
-        // Low-Mach parameters are currently only used by compressible EOS variants.
+        // Low-Mach parameter resource needs are manifest-driven.
+        //
+        // The EOS module declares `low_mach.*` named params only when the model/config requires
+        // the auxiliary uniform buffer, so allocation should follow the declared interface rather
+        // than branching on EOS variants here.
         let eos = model.eos_checked()?;
-        let requires_low_mach_params = matches!(
-            eos,
-            crate::solver::model::eos::EosSpec::IdealGas { .. }
-                | crate::solver::model::eos::EosSpec::LinearCompressibility { .. }
-        );
+        let requires_low_mach_params = model
+            .named_param_keys()
+            .into_iter()
+            .any(|k| k.starts_with("low_mach."));
 
         // Initialize constants purely from the EOS module (and override only the EOS fields).
         let eos_params = eos.runtime_params();

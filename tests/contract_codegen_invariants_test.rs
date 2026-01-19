@@ -880,6 +880,18 @@ fn contract_recipe_does_not_inject_generic_coupled_apply_kernel_by_id() {
 }
 
 #[test]
+fn contract_recipe_low_mach_buffer_is_manifest_driven() {
+    // Low-Mach buffer allocation should follow model-declared module manifests (named params),
+    // not hard-coded EOS-variant matches inside the recipe.
+    let path = repo_root().join("src/solver/gpu/recipe.rs");
+    let src = read_utf8(&path);
+
+    assert_contains(&src, "low_mach.", "recipe.rs");
+    assert_not_contains(&src, "EosSpec::IdealGas", "recipe.rs");
+    assert_not_contains(&src, "EosSpec::LinearCompressibility", "recipe.rs");
+}
+
+#[test]
 fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     // Drift guard: ensure unified_assembly and flux-module reconstruction use the same shared
     // epsilon constant (no duplicated numeric literals in separate implementations).

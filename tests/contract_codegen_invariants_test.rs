@@ -892,6 +892,29 @@ fn contract_recipe_low_mach_buffer_is_manifest_driven() {
 }
 
 #[test]
+fn contract_iteration_snapshot_stage_is_binding_driven() {
+    // Implicit stepping should only include the snapshot stage when kernels actually bind `state_iter`.
+    let path = repo_root().join("src/solver/gpu/recipe.rs");
+    let src = read_utf8(&path);
+
+    assert_contains_ident(&src, "requires_iteration_snapshot", "recipe.rs");
+    assert_contains(&src, "if self.requires_iteration_snapshot", "recipe.rs");
+    assert_contains(&src, "implicit:snapshot", "recipe.rs");
+}
+
+#[test]
+fn contract_iteration_snapshot_allocation_is_recipe_driven() {
+    let path = repo_root().join("src/solver/gpu/modules/unified_field_resources.rs");
+    let src = read_utf8(&path);
+
+    assert_contains(
+        &src,
+        "iteration_snapshot = if recipe.requires_iteration_snapshot",
+        "unified_field_resources.rs",
+    );
+}
+
+#[test]
 fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     // Drift guard: ensure unified_assembly and flux-module reconstruction use the same shared
     // epsilon constant (no duplicated numeric literals in separate implementations).

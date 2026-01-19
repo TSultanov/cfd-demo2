@@ -126,7 +126,7 @@ impl UnifiedFieldResources {
             }
         }
 
-        let iteration_snapshot = if recipe.is_implicit() {
+        let iteration_snapshot = if recipe.requires_iteration_snapshot {
             Some(
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("UnifiedField iteration snapshot"),

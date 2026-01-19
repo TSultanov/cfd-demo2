@@ -10,6 +10,7 @@
 //! single source of truth for resource allocation and program construction.
 
 use crate::solver::gpu::enums::TimeScheme;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
@@ -195,6 +196,9 @@ pub struct SolverRecipe {
 
     /// Number of unknowns per cell in the coupled system
     pub unknowns_per_cell: usize,
+
+    /// Whether the implicit stepping program requires an iteration snapshot buffer (`state_iter`).
+    pub requires_iteration_snapshot: bool,
 }
 
 impl SolverRecipe {
@@ -323,6 +327,21 @@ impl SolverRecipe {
             });
         }
 
+        let requires_iteration_snapshot = if matches!(stepping, SteppingMode::Implicit { .. }) {
+            let mut needs_snapshot = false;
+            for kernel in &kernels {
+                let src = kernel_registry::kernel_source_by_id(model.id, kernel.id)
+                    .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))?;
+                if src.bindings.iter().any(|b| b.name == "state_iter") {
+                    needs_snapshot = true;
+                    break;
+                }
+            }
+            needs_snapshot
+        } else {
+            false
+        };
+
         // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();
 
@@ -387,6 +406,7 @@ impl SolverRecipe {
             requires_low_mach_params,
             initial_constants,
             unknowns_per_cell: model.system.unknowns_per_cell() as usize,
+            requires_iteration_snapshot,
         })
     }
 
@@ -449,7 +469,7 @@ impl SolverRecipe {
             }
 
             SteppingMode::Implicit { outer_iters: _ } => {
-                // Implicit: prepare → outer loop (before_iter → assembly → solve → after_solve → snapshot → before_apply → apply → after_apply → advance_outer_idx) → update → finalize
+                // Implicit: prepare → outer loop (before_iter → assembly → solve → after_solve → snapshot? → before_apply → apply → after_apply → advance_outer_idx) → update → finalize
                 let iter_block = program.new_block();
 
                 program.push(
@@ -460,49 +480,74 @@ impl SolverRecipe {
                     },
                 );
 
-                for node in [
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Host {
                         label: "implicit:before_iter",
                         kind: HostOpKind("implicit:before_iter"),
                     },
+                );
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Graph {
                         label: "implicit:assembly",
                         kind: GraphOpKind("implicit:assembly"),
                         mode: GraphExecMode::SplitTimed,
                     },
+                );
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Host {
                         label: "implicit:solve",
                         kind: HostOpKind("implicit:solve"),
                     },
+                );
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Host {
                         label: "implicit:after_solve",
                         kind: HostOpKind("implicit:after_solve"),
                     },
-                    ProgramSpecNode::Graph {
+                );
+                if self.requires_iteration_snapshot {
+                    program.push(
+                        iter_block,
+                        ProgramSpecNode::Graph {
                         label: "implicit:snapshot",
                         kind: GraphOpKind("implicit:snapshot"),
                         mode: GraphExecMode::SingleSubmit,
-                    },
+                        },
+                    );
+                }
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Host {
                         label: "implicit:before_apply",
                         kind: HostOpKind("implicit:before_apply"),
                     },
+                );
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Graph {
                         label: "implicit:apply",
                         kind: GraphOpKind("implicit:apply"),
                         mode: GraphExecMode::SingleSubmit,
                     },
+                );
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Host {
                         label: "implicit:after_apply",
                         kind: HostOpKind("implicit:after_apply"),
                     },
+                );
+                program.push(
+                    iter_block,
                     ProgramSpecNode::Host {
                         label: "implicit:advance_outer_idx",
                         kind: HostOpKind("implicit:advance_outer_idx"),
                     },
-                ] {
-                    program.push(iter_block, node);
-                }
+                );
 
                 program.push(
                     root,

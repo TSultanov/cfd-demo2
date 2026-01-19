@@ -1,14 +1,16 @@
-#![cfg(feature = "meshgen")]
+#[cfg(not(feature = "meshgen"))]
+fn main() {
+    eprintln!("This example requires the `meshgen` feature.");
+    eprintln!(
+        "Try: cargo run --no-default-features --features meshgen --example reproduce_chamfer"
+    );
+}
 
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Geometry};
-use nalgebra::{Point2, Vector2};
+#[cfg(feature = "meshgen")]
+fn main() {
+    use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Geometry};
+    use nalgebra::{Point2, Vector2};
 
-#[test]
-fn test_reproduce_chamfer() {
-    // Step corner at (0.501, 0.501)
-    // Grid size 0.1
-    // Cell containing corner is [0.5, 0.6] x [0.5, 0.6]
-    // Corner is inside.
     let geo = BackwardsStep {
         length: 2.0,
         height_inlet: 0.501,
@@ -18,7 +20,6 @@ fn test_reproduce_chamfer() {
 
     let domain_size = Vector2::new(2.0, 1.0);
 
-    // Debug SDF
     let p00 = Point2::new(0.5, 0.5);
     println!("SDF at (0.5, 0.5): {}", geo.sdf(&p00));
     let p10 = Point2::new(0.6, 0.5);
@@ -30,16 +31,11 @@ fn test_reproduce_chamfer() {
 
     println!("Generated mesh with {} cells", mesh.num_cells());
 
-    // Find the cell containing the corner (slightly offset to be inside fluid)
-    // The corner is at (0.501, 0.499).
-    // Cell [0.5, 0.6] x [0.4, 0.5] contains it.
-    // Probe (0.55, 0.45).
     let p_probe = Point2::new(0.55, 0.45);
     let cell_idx = mesh
         .get_cell_at_pos(p_probe)
         .expect("Should find a cell at probe position");
 
-    // Count vertices of this cell
     let start = mesh.cell_vertex_offsets[cell_idx];
     let end = mesh.cell_vertex_offsets[cell_idx + 1];
     let num_vertices = end - start;
@@ -50,9 +46,6 @@ fn test_reproduce_chamfer() {
         println!("v{}: ({}, {})", k, mesh.vx[idx], mesh.vy[idx]);
     }
 
-    // Current behavior (Chamfer): 5 vertices
-    // Desired behavior (Sharp): 6 vertices
-    // We assert the current behavior to confirm reproduction, then we will change it.
     assert!(
         num_vertices == 5 || num_vertices == 6,
         "Unexpected vertex count: {}",
@@ -65,3 +58,4 @@ fn test_reproduce_chamfer() {
         println!("Issue not reproduced? Cell has 6 vertices.");
     }
 }
+

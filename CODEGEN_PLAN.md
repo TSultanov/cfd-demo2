@@ -225,10 +225,11 @@ Completed:
 - Dispatch scaling: audited handwritten solver-infrastructure WGSL kernels (linear solver/AMG/reductions) for 2D dispatch by flattening `global_id`/`workgroup_id` and updating remaining 1D dispatch sites; added contract coverage; OpenFOAM reference tests pass.
 - Schur setup hardening: `generic_coupled_schur_setup` no longer writes Rhie–Chow `d_p`; `d_p` updates remain module-owned via the model-generated `dp_update_from_diag` kernel; OpenFOAM reference tests pass.
 - Dispatch hardening: GMRES ops kernels no longer use `params.dispatch_x` for indexing (derive flattening from `@builtin(num_workgroups)`), and a contract test prevents reintroducing it; OpenFOAM reference tests pass.
+- Linear solver defaults: `ModelLinearSolverSpec` now owns Krylov defaults (solver type/restart/tolerances), and `SolverRecipe::from_model` derives the runtime `LinearSolverSpec` from `(model + config)` instead of hard-coding FGMRES params; OpenFOAM reference tests pass.
 
 Next:
 1) Add/expand contract tests as new invariants are introduced (keep Gap 4 closed as refactors continue).
-2) Derive linear solver defaults from model/method + runtime config (stop hard-coding FGMRES params/tolerances in `SolverRecipe::from_model`).
+2) Expose linear-solver tuning as module-declared named params (e.g. `linear_solver.max_restart`, tolerances) so solver tuning stays config-driven without editing solver internals.
 
 Status:
 - Shared-kernel generation is now centralized behind `shared_kernel_generator_specs` (no duplicated special-casing between lookup and emission).

@@ -11,11 +11,6 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "${ROOT_DIR}"
 
-feature_args=()
-if [[ "${CFD2_CORE_ONLY:-0}" == "1" ]]; then
-  feature_args+=(--no-default-features)
-fi
-
 test_targets=()
 while IFS= read -r t; do
   test_targets+=("${t}")
@@ -31,7 +26,10 @@ if [[ "${#test_targets[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-cmd=(cargo test -p cfd2 "${feature_args[@]}")
+cmd=(cargo test -p cfd2)
+if [[ "${CFD2_CORE_ONLY:-0}" == "1" ]]; then
+  cmd+=(--no-default-features)
+fi
 for t in "${test_targets[@]}"; do
   cmd+=(--test "${t}")
 done

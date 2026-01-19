@@ -45,7 +45,6 @@ Prefer **Cargo feature-gating** first; split into new workspace crates only if f
 
 ### 3) Prune / simplify the mesh module
 - Move advanced mesh generation, smoothing, and geometry SDF machinery unless it is part of the “core keep list”.
-- Make meshgen-only deps optional (e.g. `wide`) so core-only builds don’t pull them in.
 
 ### 4) Test + bench consolidation (keep signal, drop noise)
 - Keep as default: OpenFOAM reference tests + contract tests + a small set of GPU smoke tests.

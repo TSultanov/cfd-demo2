@@ -38,7 +38,7 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Model-owned modules + manifests drive kernel scheduling, named params, and optional passes (contract tests protect against re-centralization).
 - Runtime wiring is metadata-driven (no kernel-id switches for bind groups/pipeline layouts; registry provides bindings + pipelines).
 - A single model-driven lowering path is used across stepping modes (explicit/implicit/coupled share the universal backend wiring).
-- Low-Mach preconditioning parameters are consumed by generated compressible flux wave-speed bounds (default Off; contract + OpenFOAM coverage).
+- Low-Mach preconditioning parameters and model variants are consumed by generated compressible flux wave-speed bounds (Off/Legacy/WeissSmith distinct; default Off; contract + OpenFOAM coverage).
 - Explicit stepping rejects recipes that bind the implicit solution buffer `x` (regression test prevents silent state clobbering).
 
 ## Remaining Gaps (current blockers)
@@ -47,9 +47,16 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 
+### 2) `dtau` is a dead knob (currently unused by kernels)
+`dtau` is exposed as a `generic_coupled` named parameter and is written into `GpuConstants`, but no generated WGSL consumes it (so changing it cannot affect results).
+
+Done when:
+- A kernel/phase uses `dtau` in a clearly defined way (ideally recipe/module-driven, not solver-family special casing).
+- A small regression test proves that varying `dtau` changes behavior for at least one model that declares it.
+
 ## Next
 1) Keep hardening contracts + metadata-driven derivation as new gaps are discovered.
-2) Close the next “dead knob” / missing config-to-kernel wiring with a targeted regression + OpenFOAM coverage.
+2) Make `dtau` meaningful (define semantics + regression coverage), then run OpenFOAM.
 
 ## Notes / Constraints
 - `build.rs` uses `include!()`; model modules are wired for build-time use via `src/solver/model/modules/mod.rs`.

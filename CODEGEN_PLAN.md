@@ -21,6 +21,17 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - **Codegen is PDE-agnostic:** `crates/cfd2_codegen/src/solver/codegen` must not depend on `src/solver/model` (enforced by `build.rs:enforce_codegen_ir_boundary`).
 - **Commit generated WGSL remains policy:** do not move runtime-critical shader sources to runtime generation.
 
+## Core Keep List (reference)
+- **Core (must keep):**
+  - Model-driven GPU solver pipeline (`src/solver/model/*`, `src/solver/gpu/*`, `crates/cfd2_ir`, `crates/cfd2_codegen`).
+  - Minimal mesh + structured mesh constructors used by OpenFOAM reference tests (`src/solver/mesh/structs.rs`, `src/solver/mesh/structured.rs`).
+  - Validation signal: OpenFOAM reference tests + contract tests under `tests/` (and the `scripts/run_openfoam_reference_tests.sh` gate).
+- **Optional surfaces (may be feature-gated / moved / deleted):**
+  - UI (`src/ui/*`, binary entrypoint).
+  - Mesh generation experiments (`meshgen` feature: cut-cell/delaunay/voronoi/quadtree/geometry + smoothing).
+  - Profiling (`profiling` feature: profiling plumbing + long-running profiling workloads).
+  - Reproduction harnesses (`examples/reproduce_*` and any future repro utilities).
+
 ## Development Cadence (required)
 - **test → patch → test → commit** (small, frequent commits)
 - **OpenFOAM reference tests are the primary quality gate** for solver behavior:
@@ -34,22 +45,18 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Define the “core keep list” (what must remain)
-- Document the minimal supported product as **core**: model-driven solver + OpenFOAM reference suite + contract tests.
-- Explicitly list which parts are “optional surfaces”: UI, mesh generation experiments, profiling tooling, reproduction harnesses.
-
-### 2) Prune / simplify the mesh module
+### 1) Prune / simplify the mesh module
 - Move advanced mesh generation, smoothing, and geometry SDF machinery unless it is part of the “core keep list”.
 
-### 3) Test + bench consolidation (keep signal, drop noise)
+### 2) Test + bench consolidation (keep signal, drop noise)
 - Keep as default: OpenFOAM reference tests + contract tests + a small set of GPU smoke tests.
 - Move profiling workloads out of `tests/` into `benches/` or `examples/` (or mark `#[ignore]` and run only via scripts).
 
-### 4) Structural cleanup (rename and collapse transitional modules)
+### 3) Structural cleanup (rename and collapse transitional modules)
 - Align naming to reflect the “one universal backend” reality (reduce `generic_coupled` vs `universal` vs `plans` confusion).
 - Consider collapsing pure re-export modules (`options.rs`, `profiling.rs`, etc.) if they don’t provide real API value after the crate boundaries are cleaned up.
 
-### 5) Ongoing hardening (evergreen)
+### 4) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

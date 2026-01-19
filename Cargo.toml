@@ -16,20 +16,20 @@ egui = { version = "0.33", optional = true }
 eframe = { version = "0.33", features = ["wgpu", "default_fonts"], optional = true }
 egui_plot = { version = "0.34", optional = true }
 nalgebra = "0.32"
-rand = "0.8"
+rand = { version = "0.8", optional = true }
 log = "0.4"
 env_logger = { version = "0.10", optional = true }
-wide = "0.8.3"
+wide = { version = "0.8.3", optional = true }
 rayon = "1.8"
 wgpu = "27.0"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
-ahash = "0.8.12"
+ahash = { version = "0.8.12", optional = true }
 
 [features]
 default = ["ui"]
 ui = ["meshgen", "dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
-meshgen = []
+meshgen = ["dep:ahash", "dep:rand", "dep:wide"]
 profiling = []
 
 [dev-dependencies]

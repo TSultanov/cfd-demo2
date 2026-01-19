@@ -2,6 +2,8 @@ pub mod structs;
 pub mod structured;
 
 #[cfg(feature = "meshgen")]
+mod meshgen_ext;
+#[cfg(feature = "meshgen")]
 pub mod cut_cell;
 #[cfg(feature = "meshgen")]
 pub mod delaunay;

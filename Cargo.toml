@@ -20,7 +20,7 @@ rand = { version = "0.8", optional = true }
 log = "0.4"
 env_logger = { version = "0.10", optional = true }
 wide = { version = "0.8.3", optional = true }
-rayon = "1.8"
+rayon = { version = "1.8", optional = true }
 wgpu = "27.0"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
@@ -29,7 +29,7 @@ ahash = { version = "0.8.12", optional = true }
 [features]
 default = ["ui"]
 ui = ["meshgen", "dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
-meshgen = ["dep:ahash", "dep:rand", "dep:wide"]
+meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 
 [dev-dependencies]

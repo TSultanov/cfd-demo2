@@ -38,25 +38,17 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Model-owned modules + manifests drive kernel scheduling, named params, and optional passes (contract tests protect against re-centralization).
 - Runtime wiring is metadata-driven (no kernel-id switches for bind groups/pipeline layouts; registry provides bindings + pipelines).
 - A single model-driven lowering path is used across stepping modes (explicit/implicit/coupled share the universal backend wiring).
+- Low-Mach preconditioning parameters are consumed by generated compressible flux wave-speed bounds (default Off; contract + OpenFOAM coverage).
 
 ## Remaining Gaps (current blockers)
 
-### 1) Low-Mach preconditioning is still a dead knob
-Today the runtime exposes `low_mach.*` named parameters and allocates/updates a low-Mach params buffer, but generated kernels do not consume those values, so toggling low-Mach has no effect.
-
-Done when:
-- Low-Mach settings influence **generated** compressible kernels (starting with `EulerCentralUpwind` wave-speed bounds) in a way that is derived from model/module configuration.
-- Default behavior remains unchanged for the OpenFOAM reference suite.
-- Contract coverage prevents regressing to a “declared but unused” runtime knob.
-
-### 2) Ongoing hardening (evergreen)
+### 1) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 
 ## Next
-1) Wire Low-Mach params into compressible flux wave speeds (default Off).
-2) Remove/retire unused low-Mach buffer plumbing once kernels consume the values.
-3) Expand low-Mach regression coverage (at least one non-ignored smoke test runnable by default, if feasible).
+1) Add a small non-ignored low-Mach *behavioral* smoke test (can be much smaller than the existing ignored suites).
+2) Keep hardening contracts + metadata-driven derivation as new gaps are discovered.
 
 ## Notes / Constraints
 - `build.rs` uses `include!()`; model modules are wired for build-time use via `src/solver/model/modules/mod.rs`.

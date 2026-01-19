@@ -2,7 +2,6 @@
 pub mod backend;
 mod definitions;
 pub mod eos;
-pub mod fluid;
 pub mod flux_layout;
 pub mod flux_module;
 pub mod flux_schemes;
@@ -24,7 +23,6 @@ pub use definitions::{
     FieldBoundarySpec, GenericCoupledFields, IncompressibleMomentumFields, ModelSpec,
 };
 pub use eos::EosSpec;
-pub use fluid::Fluid;
 pub use flux_layout::{FluxComponent, FluxLayout};
 pub use crate::solver::ir::LimiterSpec;
 pub use flux_module::FluxModuleSpec;

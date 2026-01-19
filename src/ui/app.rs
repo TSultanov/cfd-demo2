@@ -8,7 +8,7 @@ use crate::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use crate::solver::model::{
-    compressible_model, compressible_model_with_eos, incompressible_momentum_model, Fluid,
+    compressible_model, compressible_model_with_eos, incompressible_momentum_model,
     ModelPreconditionerSpec,
 };
 use crate::solver::options::{
@@ -16,7 +16,7 @@ use crate::solver::options::{
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{SolverConfig, UnifiedSolver};
-use crate::ui::cfd_renderer;
+use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};

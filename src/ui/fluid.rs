@@ -1,4 +1,4 @@
-use crate::solver::model::eos::EosSpec;
+use crate::solver::model::EosSpec;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Fluid {
@@ -82,3 +82,4 @@ impl Fluid {
         self.eos.sound_speed(self.density)
     }
 }
+

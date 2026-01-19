@@ -40,6 +40,7 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - A single model-driven lowering path is used across stepping modes (explicit/implicit/coupled share the universal backend wiring).
 - Low-Mach preconditioning parameters and model variants are consumed by generated compressible flux wave-speed bounds (Off/Legacy/WeissSmith distinct; default Off; contract + OpenFOAM coverage).
 - Explicit stepping rejects recipes that bind the implicit solution buffer `x` (regression test prevents silent state clobbering).
+- `dtau` now drives the model-declared `inv_dt` coefficient in generated WGSL (dtau>0 => inv_dt=1/dtau), so compressible algebraic constraints can tune conditioning independently of physical `dt` (contract + OpenFOAM coverage).
 
 ## Remaining Gaps (current blockers)
 
@@ -47,16 +48,8 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 
-### 2) `dtau` is a dead knob (currently unused by kernels)
-`dtau` is exposed as a `generic_coupled` named parameter and is written into `GpuConstants`, but no generated WGSL consumes it (so changing it cannot affect results).
-
-Done when:
-- A kernel/phase uses `dtau` in a clearly defined way (ideally recipe/module-driven, not solver-family special casing).
-- A small regression test proves that varying `dtau` changes behavior for at least one model that declares it.
-
 ## Next
 1) Keep hardening contracts + metadata-driven derivation as new gaps are discovered.
-2) Make `dtau` meaningful (define semantics + regression coverage), then run OpenFOAM.
 
 ## Notes / Constraints
 - `build.rs` uses `include!()`; model modules are wired for build-time use via `src/solver/model/modules/mod.rs`.

@@ -46,9 +46,8 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) CG-only scalar linear solver cleanup
-- Remove unused BiCGStab kernels/entrypoints and CG-only state buffers (`s`, `t`) from the scalar linear solver path.
-- Trim `scalars.wgsl` + `linear_solver.wgsl` + `src/solver/model/kernel.rs` accordingly and regenerate `src/solver/gpu/bindings.rs`.
+### 1) Prune unused `preconditioner.wgsl` path
+- Remove the unused `src/solver/gpu/shaders/preconditioner.wgsl` kernels + matching `KernelId` constants and regenerate `src/solver/gpu/bindings.rs`.
 
 ### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).

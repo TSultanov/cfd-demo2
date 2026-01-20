@@ -47,7 +47,6 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ### 1) Test + bench consolidation (keep signal, drop noise)
 - Keep as default: OpenFOAM reference tests + contract tests + a small set of GPU smoke tests.
-- Move profiling workloads out of `tests/` into `benches/` or `examples/` (or mark `#[ignore]` and run only via scripts).
 
 ### 2) Structural cleanup (rename and collapse transitional modules)
 - Align naming to reflect the “one universal backend” reality (reduce `generic_coupled` vs `universal` vs `plans` confusion).

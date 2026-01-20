@@ -179,6 +179,7 @@ enum SolverWorkerCommand {
 }
 
 enum SolverWorkerEvent {
+    Stats { stats: CachedGpuStats },
     Snapshot {
         u: Vec<(f64, f64)>,
         p: Vec<f64>,
@@ -771,6 +772,10 @@ impl CFDApp {
     fn poll_solver_worker(&mut self) {
         while let Ok(evt) = self.solver_worker.rx.try_recv() {
             match evt {
+                SolverWorkerEvent::Stats { stats } => {
+                    self.cached_gpu_stats = stats;
+                    self.cached_error = None;
+                }
                 SolverWorkerEvent::Snapshot { u, p, stats } => {
                     self.cached_u = u;
                     self.cached_p = p;
@@ -1790,8 +1795,10 @@ fn solver_worker_main(
     let mut running = false;
     let mut step_idx: u64 = 0;
     let mut prev_max_vel = 0.0_f64;
-    let mut last_publish = std::time::Instant::now();
-    let publish_interval = std::time::Duration::from_millis(16);
+    let mut last_stats_publish = std::time::Instant::now();
+    let mut last_snapshot_publish = std::time::Instant::now();
+    let stats_publish_interval = std::time::Duration::from_millis(33);
+    let snapshot_publish_interval = std::time::Duration::from_millis(100);
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
@@ -1805,7 +1812,8 @@ fn solver_worker_main(
                 &mut running,
                 &mut step_idx,
                 &mut prev_max_vel,
-                &mut last_publish,
+                &mut last_stats_publish,
+                &mut last_snapshot_publish,
                 &evt_tx,
             ) {
                 return;
@@ -1825,7 +1833,8 @@ fn solver_worker_main(
                         &mut running,
                         &mut step_idx,
                         &mut prev_max_vel,
-                        &mut last_publish,
+                        &mut last_stats_publish,
+                        &mut last_snapshot_publish,
                         &evt_tx,
                     ) {
                         return;
@@ -1924,11 +1933,14 @@ fn solver_worker_main(
         let log_every_steps = params.log_every_steps.max(1) as u64;
         let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
 
-        let should_readback =
-            step_idx == 0 || last_publish.elapsed() >= publish_interval || should_log;
+        let should_readback = step_idx == 0
+            || last_snapshot_publish.elapsed() >= snapshot_publish_interval
+            || should_log;
 
         if should_readback {
-            last_publish = std::time::Instant::now();
+            let now = std::time::Instant::now();
+            last_snapshot_publish = now;
+            last_stats_publish = now;
             let u = pollster::block_on(solver.get_u());
             let p = pollster::block_on(solver.get_p());
 
@@ -1996,6 +2008,9 @@ fn solver_worker_main(
             }
 
             let _ = evt_tx.send(SolverWorkerEvent::Snapshot { u, p, stats });
+        } else if step_idx == 0 || last_stats_publish.elapsed() >= stats_publish_interval {
+            last_stats_publish = std::time::Instant::now();
+            let _ = evt_tx.send(SolverWorkerEvent::Stats { stats });
         }
 
         step_idx = step_idx.wrapping_add(1);
@@ -2013,7 +2028,8 @@ fn solver_worker_handle_cmd(
     running: &mut bool,
     step_idx: &mut u64,
     prev_max_vel: &mut f64,
-    last_publish: &mut std::time::Instant,
+    last_stats_publish: &mut std::time::Instant,
+    last_snapshot_publish: &mut std::time::Instant,
     evt_tx: &mpsc::Sender<SolverWorkerEvent>,
 ) -> bool {
     match cmd {
@@ -2032,7 +2048,9 @@ fn solver_worker_handle_cmd(
             *running = false;
             *step_idx = 0;
             *prev_max_vel = 0.0;
-            *last_publish = std::time::Instant::now();
+            let now = std::time::Instant::now();
+            *last_stats_publish = now;
+            *last_snapshot_publish = now;
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
 
             if let Some(s) = solver.as_mut() {
@@ -2046,6 +2064,9 @@ fn solver_worker_handle_cmd(
             *running = false;
             *step_idx = 0;
             *prev_max_vel = 0.0;
+            let now = std::time::Instant::now();
+            *last_stats_publish = now;
+            *last_snapshot_publish = now;
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
         }
         SolverWorkerCommand::SetRunning(next_running) => {
@@ -2059,7 +2080,9 @@ fn solver_worker_handle_cmd(
             }
             if next_running {
                 *step_idx = 0;
-                *last_publish = std::time::Instant::now();
+                let now = std::time::Instant::now();
+                *last_stats_publish = now;
+                *last_snapshot_publish = now;
             }
             *running = next_running;
             let _ = evt_tx.send(SolverWorkerEvent::Running(*running));

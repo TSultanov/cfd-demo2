@@ -10,8 +10,7 @@ use crate::solver::model::helpers::{
     SolverRuntimeParamsExt,
 };
 use crate::solver::model::{
-    compressible_model, compressible_model_with_eos, incompressible_momentum_model,
-    ModelPreconditionerSpec,
+    compressible_model_with_eos, incompressible_momentum_model, ModelPreconditionerSpec,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
@@ -106,9 +105,19 @@ enum SolverKind {
 
 #[derive(Default, Clone)]
 struct ModelUiCaps {
+    plot_stride: u32,
+    plot_u_offset: u32,
+    plot_p_offset: u32,
+    plot_has_u: bool,
+    plot_has_p: bool,
+
     supports_preconditioner: bool,
     model_owns_preconditioner: bool,
     unknowns_per_cell: u32,
+
+    supports_alpha_u: bool,
+    supports_alpha_p: bool,
+    supports_eos_tuning: bool,
 }
 
 struct SolverInitRequest {
@@ -414,15 +423,27 @@ impl CFDApp {
             SolverKind::Compressible => compressible_model_with_eos(self.current_fluid.eos),
         };
 
-        self.model_caps.supports_preconditioner = model
-            .named_param_keys()
-            .into_iter()
-            .any(|k| k == "preconditioner");
+        let named_params = model.named_param_keys();
+        self.model_caps.supports_preconditioner =
+            named_params.iter().any(|&k| k == "preconditioner");
         self.model_caps.model_owns_preconditioner = model
             .linear_solver
             .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
             .unwrap_or(false);
         self.model_caps.unknowns_per_cell = model.system.unknowns_per_cell();
+
+        self.model_caps.supports_alpha_u = named_params.iter().any(|&k| k == "alpha_u");
+        self.model_caps.supports_alpha_p = named_params.iter().any(|&k| k == "alpha_p");
+        self.model_caps.supports_eos_tuning = named_params.iter().any(|&k| k == "eos.gamma");
+
+        let layout = model.state_layout;
+        self.model_caps.plot_stride = layout.stride();
+        let u_off = layout.offset_for("U").or_else(|| layout.offset_for("u"));
+        self.model_caps.plot_has_u = u_off.is_some();
+        self.model_caps.plot_u_offset = u_off.unwrap_or(0);
+        let p_off = layout.offset_for("p");
+        self.model_caps.plot_has_p = p_off.is_some();
+        self.model_caps.plot_p_offset = p_off.unwrap_or(0);
 
         const UI_MAX_BLOCK_JACOBI: u32 = 16;
         if matches!(self.selected_preconditioner, PreconditionerType::BlockJacobi)
@@ -802,10 +823,8 @@ impl CFDApp {
         };
 
         const UI_MAX_BLOCK_JACOBI: u32 = 16;
-        let supports_preconditioner = model
-            .named_param_keys()
-            .into_iter()
-            .any(|k| k == "preconditioner");
+        let named_params = model.named_param_keys();
+        let supports_preconditioner = named_params.iter().any(|&k| k == "preconditioner");
         let mut selected_preconditioner = request.selected_preconditioner;
         if matches!(selected_preconditioner, PreconditionerType::BlockJacobi)
             && model.system.unknowns_per_cell() > UI_MAX_BLOCK_JACOBI
@@ -818,13 +837,25 @@ impl CFDApp {
             PreconditionerType::Jacobi
         };
 
+        let layout = &model.state_layout;
+        let u_off = layout.offset_for("U").or_else(|| layout.offset_for("u"));
+        let p_off = layout.offset_for("p");
+
         let model_caps = ModelUiCaps {
+            plot_stride: layout.stride(),
+            plot_u_offset: u_off.unwrap_or(0),
+            plot_p_offset: p_off.unwrap_or(0),
+            plot_has_u: u_off.is_some(),
+            plot_has_p: p_off.is_some(),
             supports_preconditioner,
             model_owns_preconditioner: model
                 .linear_solver
                 .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
                 .unwrap_or(false),
             unknowns_per_cell: model.system.unknowns_per_cell(),
+            supports_alpha_u: named_params.iter().any(|&k| k == "alpha_u"),
+            supports_alpha_p: named_params.iter().any(|&k| k == "alpha_p"),
+            supports_eos_tuning: named_params.iter().any(|&k| k == "eos.gamma"),
         };
 
         let config = SolverConfig {
@@ -921,24 +952,9 @@ impl CFDApp {
     }
 
     fn render_layout_for_field(&self) -> (u32, u32, u32) {
-        let (stride, u_offset, p_offset) = match self.solver_kind {
-            SolverKind::Incompressible => {
-                let model = incompressible_momentum_model();
-                let layout = model.state_layout;
-                let stride = layout.stride();
-                let u_offset = layout.offset_for("U").unwrap_or(0);
-                let p_offset = layout.offset_for("p").unwrap_or(0);
-                (stride, u_offset, p_offset)
-            }
-            SolverKind::Compressible => {
-                let model = compressible_model();
-                let layout = model.state_layout;
-                let stride = layout.stride();
-                let u_offset = layout.offset_for("u").unwrap_or(0);
-                let p_offset = layout.offset_for("p").unwrap_or(0);
-                (stride, u_offset, p_offset)
-            }
-        };
+        let stride = self.model_caps.plot_stride;
+        let u_offset = self.model_caps.plot_u_offset;
+        let p_offset = self.model_caps.plot_p_offset;
 
         match self.plot_field {
             PlotField::Pressure => (stride, p_offset, 0),
@@ -1147,7 +1163,7 @@ impl eframe::App for CFDApp {
                             .map(|(vx, vy)| (vx * vx + vy * vy).sqrt())
                             .fold(0.0_f64, f64::max);
                         let adv_speed = max_vel.max(self.inlet_velocity.abs() as f64);
-                        let sound_speed = if matches!(self.solver_kind, SolverKind::Compressible) {
+                        let sound_speed = if self.model_caps.supports_eos_tuning {
                             self.current_fluid.sound_speed()
                         } else {
                             0.0
@@ -1254,7 +1270,7 @@ impl eframe::App for CFDApp {
                             self.update_gpu_scheme();
                         }
 
-                        if matches!(self.solver_kind, SolverKind::Compressible) {
+                        if self.model_caps.supports_eos_tuning {
                             ui.label("Compressible solver uses this for KT flux reconstruction + deferred-correction advection.");
                         }
 
@@ -1271,11 +1287,7 @@ impl eframe::App for CFDApp {
                         } else {
                             ui.weak("Krylov preconditioner for the coupled linear solve.");
                         }
-                        if !supports_preconditioner {
-                            ui.weak("(not declared by model)");
-                        }
-
-                        ui.add_enabled_ui(supports_preconditioner, |ui| {
+                        if supports_preconditioner {
                             if ui
                                 .radio(
                                     matches!(self.selected_preconditioner, PreconditionerType::Jacobi),
@@ -1316,27 +1328,31 @@ impl eframe::App for CFDApp {
                                 self.selected_preconditioner = PreconditionerType::Amg;
                                 self.update_gpu_preconditioner();
                             }
-                        });
+                        } else {
+                            ui.weak("(not declared by model)");
+                        }
 
-                        if matches!(self.solver_kind, SolverKind::Incompressible) {
+                        if self.model_caps.supports_alpha_u || self.model_caps.supports_alpha_p {
                             ui.separator();
                             ui.label("Under-Relaxation Factors");
                             ui.weak("Tip: start with α_U≈0.7 and α_P≈0.3; α=1 can diverge at high Re.");
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut self.alpha_u, 0.1..=1.0)
-                                        .text("α_U (Velocity)"),
-                                )
-                                .changed()
+                            if self.model_caps.supports_alpha_u
+                                && ui
+                                    .add(
+                                        egui::Slider::new(&mut self.alpha_u, 0.1..=1.0)
+                                            .text("α_U (Velocity)"),
+                                    )
+                                    .changed()
                             {
                                 self.update_gpu_alpha_u();
                             }
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut self.alpha_p, 0.1..=1.0)
-                                        .text("α_P (Pressure)"),
-                                )
-                                .changed()
+                            if self.model_caps.supports_alpha_p
+                                && ui
+                                    .add(
+                                        egui::Slider::new(&mut self.alpha_p, 0.1..=1.0)
+                                            .text("α_P (Pressure)"),
+                                    )
+                                    .changed()
                             {
                                 self.update_gpu_alpha_p();
                             }
@@ -1665,28 +1681,61 @@ impl eframe::App for CFDApp {
     }
 }
 
-fn solver_worker_apply_params(solver: &mut UnifiedSolver, solver_kind: SolverKind, params: RuntimeParams) {
+fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams) {
     solver.set_dt(params.requested_dt);
-    let _ = solver.set_density(params.density);
-    let _ = solver.set_viscosity(params.viscosity);
-    let _ = solver.set_eos(&params.eos);
-    solver.set_advection_scheme(params.advection_scheme);
-    solver.set_time_scheme(params.time_scheme);
-    solver.set_preconditioner(params.preconditioner);
+    let named_params = solver.model().named_param_keys();
+    let has_param = |key: &str| named_params.iter().any(|&k| k == key);
 
-    match solver_kind {
-        SolverKind::Incompressible => {
-            let _ = solver.set_alpha_u(params.alpha_u);
-            let _ = solver.set_alpha_p(params.alpha_p);
-            let _ = solver.set_inlet_velocity(params.inlet_velocity);
+    if has_param("density") {
+        let _ = solver.set_density(params.density);
+    }
+    if has_param("viscosity") {
+        let _ = solver.set_viscosity(params.viscosity);
+    }
+    if has_param("eos.gamma") {
+        let _ = solver.set_eos(&params.eos);
+    }
+
+    if has_param("advection_scheme") {
+        solver.set_advection_scheme(params.advection_scheme);
+    }
+    if has_param("time_scheme") {
+        solver.set_time_scheme(params.time_scheme);
+    }
+    if has_param("preconditioner") {
+        solver.set_preconditioner(params.preconditioner);
+    }
+
+    if has_param("alpha_u") {
+        let _ = solver.set_alpha_u(params.alpha_u);
+    }
+    if has_param("alpha_p") {
+        let _ = solver.set_alpha_p(params.alpha_p);
+    }
+
+    let model = solver.model();
+    let mut has_rho = false;
+    let mut has_rho_u = false;
+    let mut has_rho_e = false;
+    let mut has_u = false;
+    for eqn in model.system.equations() {
+        match eqn.target().name() {
+            "rho" => has_rho = true,
+            "rho_u" => has_rho_u = true,
+            "rho_e" => has_rho_e = true,
+            "u" => has_u = true,
+            _ => {}
         }
-        SolverKind::Compressible => {
-            let _ = solver.set_compressible_inlet_isothermal_x(
-                params.density,
-                params.inlet_velocity,
-                &params.eos,
-            );
-        }
+    }
+
+    if has_rho && has_rho_u && has_rho_e && has_u {
+        let _ = solver.set_compressible_inlet_isothermal_x(
+            params.density,
+            params.inlet_velocity,
+            &params.eos,
+        );
+    } else {
+        let _ = solver.set_inlet_velocity(params.inlet_velocity);
     }
 }
 
@@ -1738,7 +1787,7 @@ fn solver_worker_main(
                     let _ = evt_tx.send(SolverWorkerEvent::Running(false));
 
                     if let Some(s) = solver.as_mut() {
-                        solver_worker_apply_params(s, solver_kind, params);
+                        solver_worker_apply_params(s, params);
                     }
                 }
                 SolverWorkerCommand::ClearSolver => {
@@ -1768,7 +1817,7 @@ fn solver_worker_main(
                 SolverWorkerCommand::UpdateParams(next_params) => {
                     params = next_params;
                     if let Some(s) = solver.as_mut() {
-                        solver_worker_apply_params(s, solver_kind, params);
+                        solver_worker_apply_params(s, params);
                     }
                 }
                 SolverWorkerCommand::Shutdown => {
@@ -1801,7 +1850,7 @@ fn solver_worker_main(
                                     let _ = evt_tx.send(SolverWorkerEvent::Running(false));
 
                                     if let Some(s) = solver.as_mut() {
-                                        solver_worker_apply_params(s, solver_kind, params);
+                                        solver_worker_apply_params(s, params);
                                     }
                                 }
                                 SolverWorkerCommand::ClearSolver => {
@@ -1832,7 +1881,7 @@ fn solver_worker_main(
                                 SolverWorkerCommand::UpdateParams(next_params) => {
                                     params = next_params;
                                     if let Some(s) = solver.as_mut() {
-                                        solver_worker_apply_params(s, solver_kind, params);
+                                        solver_worker_apply_params(s, params);
                                     }
                                 }
                                 SolverWorkerCommand::Shutdown => return,

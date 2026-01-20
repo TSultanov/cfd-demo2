@@ -41,24 +41,20 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
 
 ## Current Audit Notes (concrete simplification targets)
-- `Cargo.toml` defaults to `ui` (which pulls in `meshgen`): consider a core-first default so core/OpenFOAM runs don’t compile UI + meshgen by default.
+- `ui` currently pulls in `meshgen`: consider splitting so the UI can build without meshgen algorithms unless explicitly enabled.
 - The recipe-driven solver path now only uses `Host | Graph | Repeat` nodes (no conditional/while orchestration surface).
 - `meshgen` contains many experimental algorithms; core behavior gates (OpenFOAM) only require structured meshes + minimal mesh structs.
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Core-first feature layout
-- Change default features to core-only (`default = []`), and keep the UI binary behind `--features ui`.
-- Ensure `bash scripts/run_openfoam_reference_tests.sh` remains a reliable gate in both default and `CFD2_CORE_ONLY=1` modes.
-
-### 2) Meshgen quarantine (optional surface)
+### 1) Meshgen quarantine (optional surface)
 - Keep only structured meshes + minimal mesh structs in core; isolate meshgen algorithms so core builds don’t compile them.
 - Move meshgen-heavy tests/benches behind `meshgen + dev-tests` (or delete if unused).
 
-### 3) UI surface pruning (optional surface)
+### 2) UI surface pruning (optional surface)
 - Remove always-disabled controls and derive enabled/disabled state from `ModelSpec` (named params + boundary fields), not solver-family switches.
 
-### 4) Ongoing hardening (evergreen)
+### 3) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

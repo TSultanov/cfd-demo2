@@ -27,7 +27,7 @@ pollster = "0.3"
 ahash = { version = "0.8.12", optional = true }
 
 [features]
-default = ["ui"]
+default = []
 ui = ["meshgen", "dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []

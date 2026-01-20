@@ -12,5 +12,5 @@
 1. Ensure you have Rust installed.
 2. Run the application:
    ```bash
-   cargo run --release
+   cargo run --release --features ui
    ```

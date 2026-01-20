@@ -1409,10 +1409,6 @@ impl eframe::App for CFDApp {
                             let min_cell_size_clone = self.actual_min_cell_size;
 
                             if let Some(gpu_solver) = &self.gpu_unified_solver {
-                                if let Ok(mut solver) = gpu_solver.lock() {
-                                    solver.incompressible_set_should_stop(false);
-                                }
-
                                 let solver_arc = gpu_solver.clone();
                                 let solver_kind = self.solver_kind;
                                 let handle = thread::spawn(move || {
@@ -1420,6 +1416,9 @@ impl eframe::App for CFDApp {
                                         let mut step_idx: u64 = 0;
                                         let mut prev_max_vel = 0.0f64;
                                         let mut last_params_revision: u64 = 0;
+                                        let mut last_publish = std::time::Instant::now();
+                                        let publish_interval =
+                                            std::time::Duration::from_millis(16);
                                         while running_flag.load(Ordering::Relaxed) {
                                             let mut solver = match solver_arc.lock() {
                                                 Ok(guard) => guard,
@@ -1435,6 +1434,10 @@ impl eframe::App for CFDApp {
                                                     break;
                                                 }
                                             };
+
+                                            if step_idx == 0 {
+                                                solver.incompressible_set_should_stop(false);
+                                            }
 
                                             let params = if let Ok(params) = shared_params.lock() {
                                                 *params
@@ -1658,17 +1661,22 @@ impl eframe::App for CFDApp {
                                                 }
                                             }
 
-                                            if let Ok(mut results) = shared_results.lock() {
-                                                *results = Some((u, p));
-                                            }
-                                            if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
-                                                *gpu_stats = stats;
-                                            }
-                                            if let Ok(mut err) = shared_error.lock() {
-                                                *err = None;
-                                            }
+                                            let should_publish = step_idx == 0
+                                                || last_publish.elapsed() >= publish_interval;
+                                            if should_publish {
+                                                last_publish = std::time::Instant::now();
+                                                if let Ok(mut results) = shared_results.lock() {
+                                                    *results = Some((u, p));
+                                                }
+                                                if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
+                                                    *gpu_stats = stats;
+                                                }
+                                                if let Ok(mut err) = shared_error.lock() {
+                                                    *err = None;
+                                                }
 
-                                            ctx_clone.request_repaint();
+                                                ctx_clone.request_repaint();
+                                            }
                                             thread::sleep(std::time::Duration::from_millis(1));
                                             step_idx = step_idx.wrapping_add(1);
                                         }

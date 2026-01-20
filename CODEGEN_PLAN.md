@@ -45,14 +45,11 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Test + bench consolidation (keep signal, drop noise)
-- Keep as default: OpenFOAM reference tests + contract tests + a small set of GPU smoke tests.
-
-### 2) Structural cleanup (rename and collapse transitional modules)
+### 1) Structural cleanup (rename and collapse transitional modules)
 - Align naming to reflect the “one universal backend” reality (reduce `generic_coupled` vs `universal` vs `plans` confusion).
 - Consider collapsing pure re-export modules (`options.rs`, `profiling.rs`, etc.) if they don’t provide real API value after the crate boundaries are cleaned up.
 
-### 3) Ongoing hardening (evergreen)
+### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

@@ -158,6 +158,7 @@ enum SolverWorkerEvent {
     },
     Error(String),
     Running(bool),
+    Cleared,
 }
 
 struct SolverWorkerHandle {
@@ -198,6 +199,7 @@ pub struct CFDApp {
     init_rx: Option<mpsc::Receiver<SolverInitResponse>>,
     init_in_flight: Option<u64>,
     next_init_generation: u64,
+    init_waiting_for_worker_clear: bool,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
     cached_gpu_stats: CachedGpuStats,
@@ -314,6 +316,7 @@ impl CFDApp {
             init_rx: None,
             init_in_flight: None,
             next_init_generation: 1,
+            init_waiting_for_worker_clear: false,
             cached_u: Vec::new(),
             cached_p: Vec::new(),
             cached_gpu_stats: CachedGpuStats::default(),
@@ -438,6 +441,7 @@ impl CFDApp {
         self.solver_worker.send(SolverWorkerCommand::ClearSolver);
         self.refresh_model_caps();
         self.pending_init_request = Some(self.make_init_request());
+        self.init_waiting_for_worker_clear = true;
         self.mesh = None;
         self.cached_cells.clear();
         self.cfd_renderer = None;
@@ -595,6 +599,9 @@ impl CFDApp {
         if self.pending_init_request.is_none() {
             return;
         }
+        if self.init_waiting_for_worker_clear {
+            return;
+        }
 
         let request = self.pending_init_request.take().unwrap();
         self.init_in_flight = Some(request.generation);
@@ -662,6 +669,9 @@ impl CFDApp {
                 }
                 SolverWorkerEvent::Running(running) => {
                     self.is_running = running;
+                }
+                SolverWorkerEvent::Cleared => {
+                    self.init_waiting_for_worker_clear = false;
                 }
             }
         }
@@ -1668,6 +1678,7 @@ fn solver_worker_main(
                     step_idx = 0;
                     prev_max_vel = 0.0;
                     let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                    let _ = evt_tx.send(SolverWorkerEvent::Cleared);
                 }
                 SolverWorkerCommand::SetRunning(next_running) => {
                     if next_running && solver.is_none() {
@@ -1730,6 +1741,7 @@ fn solver_worker_main(
                                     step_idx = 0;
                                     prev_max_vel = 0.0;
                                     let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                                    let _ = evt_tx.send(SolverWorkerEvent::Cleared);
                                 }
                                 SolverWorkerCommand::SetRunning(next_running) => {
                                     if next_running && solver.is_none() {

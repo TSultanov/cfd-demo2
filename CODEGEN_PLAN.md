@@ -46,16 +46,11 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) UI: fix responsiveness + state correctness (optional surface)
-- Run compute off the UI thread and push progress snapshots over a channel (UI should repaint on updates, not on log frequency).
-- Ensure changing solver type cancels in-flight work and never hangs.
-- Remove/repair controls that are permanently disabled by stale state or mismatched `enabled` conditions.
-
-### 2) Optional-surface pruning (meshgen/profiling/repro)
+### 1) Optional-surface pruning (meshgen/profiling/repro)
 - Keep `src/solver/mesh/*` core-only; move or delete `src/meshgen/*`, profiling examples, and reproduction harnesses once they stop paying for themselves.
 - Prefer moving optional surfaces into separate workspace crates to shrink the main crate’s module graph.
 
-### 3) Ongoing hardening (evergreen)
+### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

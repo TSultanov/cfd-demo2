@@ -96,6 +96,14 @@ enum PlotField {
     VelocityMag,
 }
 
+struct PlotCache {
+    snapshot_seq: u64,
+    field: PlotField,
+    min: f64,
+    max: f64,
+    values: Option<Vec<f64>>,
+}
+
 #[derive(Default, Clone)]
 struct ModelUiCaps {
     plot_stride: u32,
@@ -229,6 +237,8 @@ pub struct CFDApp {
     next_init_generation: u64,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
+    snapshot_seq: u64,
+    plot_cache: Option<PlotCache>,
     cached_gpu_stats: CachedGpuStats,
     cached_error: Option<String>,
     mesh: Option<Mesh>,
@@ -345,6 +355,8 @@ impl CFDApp {
             next_init_generation: 1,
             cached_u: Vec::new(),
             cached_p: Vec::new(),
+            snapshot_seq: 0,
+            plot_cache: None,
             cached_gpu_stats: CachedGpuStats::default(),
             cached_error: None,
             mesh: None,
@@ -529,6 +541,8 @@ impl CFDApp {
         self.cfd_renderer = None;
         self.cached_u.clear();
         self.cached_p.clear();
+        self.snapshot_seq = 0;
+        self.invalidate_plot_cache();
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
     }
@@ -755,6 +769,8 @@ impl CFDApp {
                         self.cfd_renderer = None;
                         self.cached_u.clear();
                         self.cached_p.clear();
+                        self.snapshot_seq = 0;
+                        self.invalidate_plot_cache();
                         self.cached_gpu_stats = CachedGpuStats::default();
                         self.cached_error = Some(err);
                     }
@@ -779,6 +795,8 @@ impl CFDApp {
                 SolverWorkerEvent::Snapshot { u, p, stats } => {
                     self.cached_u = u;
                     self.cached_p = p;
+                    self.snapshot_seq = self.snapshot_seq.wrapping_add(1);
+                    self.invalidate_plot_cache();
                     self.cached_gpu_stats = stats;
                     self.cached_error = None;
                 }
@@ -803,6 +821,8 @@ impl CFDApp {
         self.actual_min_cell_size = outcome.actual_min_cell_size;
         self.cached_u = outcome.cached_u;
         self.cached_p = outcome.cached_p;
+        self.snapshot_seq = self.snapshot_seq.wrapping_add(1);
+        self.invalidate_plot_cache();
         self.mesh = Some(outcome.mesh);
 
         self.cfd_renderer = outcome.renderer.map(|r| Arc::new(Mutex::new(r)));
@@ -984,6 +1004,79 @@ impl CFDApp {
             model_caps,
             renderer,
         })
+    }
+
+    fn invalidate_plot_cache(&mut self) {
+        self.plot_cache = None;
+    }
+
+    fn ensure_plot_cache(&mut self, want_values: bool) {
+        let snapshot_seq = self.snapshot_seq;
+        let field = self.plot_field;
+
+        let cache_ok = self.plot_cache.as_ref().map_or(false, |cache| {
+            cache.snapshot_seq == snapshot_seq
+                && cache.field == field
+                && (!want_values || cache.values.is_some())
+        });
+        if cache_ok {
+            return;
+        }
+
+        let (len, has_data) = match field {
+            PlotField::Pressure => (self.cached_p.len(), !self.cached_p.is_empty()),
+            PlotField::VelocityX | PlotField::VelocityY | PlotField::VelocityMag => {
+                (self.cached_u.len(), !self.cached_u.is_empty())
+            }
+        };
+
+        if !has_data || len == 0 {
+            self.plot_cache = Some(PlotCache {
+                snapshot_seq,
+                field,
+                min: 0.0,
+                max: 1.0,
+                values: None,
+            });
+            return;
+        }
+
+        let mut min_val = f64::INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
+        let mut values = want_values.then(|| Vec::with_capacity(len));
+
+        for i in 0..len {
+            let val = match field {
+                PlotField::Pressure => self.cached_p[i],
+                PlotField::VelocityX => self.cached_u[i].0,
+                PlotField::VelocityY => self.cached_u[i].1,
+                PlotField::VelocityMag => {
+                    let (vx, vy) = self.cached_u[i];
+                    (vx * vx + vy * vy).sqrt()
+                }
+            };
+            min_val = min_val.min(val);
+            max_val = max_val.max(val);
+            if let Some(values) = values.as_mut() {
+                values.push(val);
+            }
+        }
+
+        if !(min_val.is_finite() && max_val.is_finite()) || min_val > max_val {
+            min_val = 0.0;
+            max_val = 1.0;
+            values = None;
+        } else if (max_val - min_val).abs() < 1e-12 {
+            max_val = min_val + 1.0;
+        }
+
+        self.plot_cache = Some(PlotCache {
+            snapshot_seq,
+            field,
+            min: min_val,
+            max: max_val,
+            values,
+        });
     }
 
     fn render_layout_for_field(&self) -> (u32, u32, u32) {
@@ -1507,37 +1600,15 @@ impl eframe::App for CFDApp {
 
         let has_solver = self.mesh.is_some();
 
-        let (min_val, max_val, values) = if has_solver {
-            let u = &self.cached_u;
-            let p = &self.cached_p;
+        if has_solver {
+            self.ensure_plot_cache(matches!(self.render_mode, RenderMode::EguiPlot));
+        }
 
-            if !u.is_empty() {
-                let mut min_val = f64::MAX;
-                let mut max_val = f64::MIN;
-                let mut values = Vec::with_capacity(u.len());
-
-                for i in 0..u.len() {
-                    let val = match self.plot_field {
-                        PlotField::Pressure => p[i],
-                        PlotField::VelocityX => u[i].0,
-                        PlotField::VelocityY => u[i].1,
-                        PlotField::VelocityMag => (u[i].0.powi(2) + u[i].1.powi(2)).sqrt(),
-                    };
-                    min_val = min_val.min(val);
-                    max_val = max_val.max(val);
-                    values.push(val);
-                }
-
-                if (max_val - min_val).abs() < 1e-6 {
-                    max_val = min_val + 1.0;
-                }
-                (min_val, max_val, Some(values))
-            } else {
-                (0.0, 1.0, None)
-            }
-        } else {
-            (0.0, 1.0, None)
-        };
+        let (min_val, max_val) = self
+            .plot_cache
+            .as_ref()
+            .map(|cache| (cache.min, cache.max))
+            .unwrap_or((0.0, 1.0));
 
         egui::SidePanel::right("legend").show(ctx, |ui| {
             if let Some(mesh) = &self.mesh {
@@ -1597,6 +1668,7 @@ impl eframe::App for CFDApp {
                 ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
                 if old_field != self.plot_field {
                     self.update_renderer_field();
+                    self.invalidate_plot_cache();
                 }
 
                 ui.separator();
@@ -1620,7 +1692,7 @@ impl eframe::App for CFDApp {
                 None
             };
 
-            if let (Some(cells), Some(vals)) = (cells, &values) {
+            if let Some(cells) = cells {
                 match self.render_mode {
                     RenderMode::GpuDirect => {
                         let rect = ui.available_rect_before_wrap();
@@ -1674,9 +1746,20 @@ impl eframe::App for CFDApp {
                         }
                     }
                     RenderMode::EguiPlot => {
+                        let Some(vals) = self
+                            .plot_cache
+                            .as_ref()
+                            .and_then(|cache| cache.values.as_deref())
+                        else {
+                            ui.centered_and_justified(|ui| {
+                                ui.label("Waiting for field snapshot...");
+                            });
+                            return;
+                        };
+
                         Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
                             for (i, polygon_points) in cells.iter().enumerate() {
-                                let val = vals[i];
+                                let val = vals.get(i).copied().unwrap_or_default();
                                 let t = (val - min_val) / (max_val - min_val);
                                 let color = get_color(t);
 

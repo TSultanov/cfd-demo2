@@ -1,12 +1,3 @@
-#[cfg(not(feature = "meshgen"))]
-fn main() {
-    eprintln!("This example requires the `meshgen` feature.");
-    eprintln!(
-        "Try: cargo run --no-default-features --features meshgen --example reproduce_divergence"
-    );
-}
-
-#[cfg(feature = "meshgen")]
 fn main() {
     use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
     use cfd2::solver::model::helpers::{

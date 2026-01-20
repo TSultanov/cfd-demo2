@@ -1,14 +1,3 @@
-#[cfg(not(all(feature = "meshgen", feature = "profiling")))]
-fn main() {
-    eprintln!("This example requires the `meshgen` + `profiling` features.");
-    eprintln!("Try one of:");
-    eprintln!("  cargo run --features profiling --example profile_gpu_transfer");
-    eprintln!(
-        "  cargo run --no-default-features --features \"meshgen profiling\" --example profile_gpu_transfer"
-    );
-}
-
-#[cfg(all(feature = "meshgen", feature = "profiling"))]
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -29,7 +18,6 @@ fn main() {
     }
 }
 
-#[cfg(all(feature = "meshgen", feature = "profiling"))]
 fn print_help() {
     println!("Usage: cargo run --features profiling --example profile_gpu_transfer [--all|--scaling]");
     println!();
@@ -46,7 +34,6 @@ fn print_help() {
 /// - GPU synchronization waits
 /// - GPU compute dispatch overhead
 /// - CPU-side computation that could be offloaded to GPU
-#[cfg(all(feature = "meshgen", feature = "profiling"))]
 fn run_transfer_profile() {
     use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
     use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
@@ -304,7 +291,6 @@ fn run_transfer_profile() {
 }
 
 /// Profile with different mesh sizes to understand scaling.
-#[cfg(all(feature = "meshgen", feature = "profiling"))]
 fn run_scaling_profile() {
     use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
     use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};

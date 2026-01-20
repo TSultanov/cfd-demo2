@@ -1,12 +1,3 @@
-#[cfg(not(feature = "meshgen"))]
-fn main() {
-    eprintln!("This example requires the `meshgen` feature.");
-    eprintln!(
-        "Try: cargo run --no-default-features --features meshgen --example reproduce_chamfer"
-    );
-}
-
-#[cfg(feature = "meshgen")]
 fn main() {
     use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, Geometry};
     use nalgebra::{Point2, Vector2};
@@ -58,4 +49,3 @@ fn main() {
         println!("Issue not reproduced? Cell has 6 vertices.");
     }
 }
-

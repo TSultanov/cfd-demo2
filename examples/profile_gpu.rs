@@ -1,12 +1,3 @@
-#[cfg(not(all(feature = "meshgen", feature = "profiling")))]
-fn main() {
-    eprintln!("This example requires the `meshgen` + `profiling` features.");
-    eprintln!("Try one of:");
-    eprintln!("  cargo run --features profiling --example profile_gpu");
-    eprintln!("  cargo run --no-default-features --features \"meshgen profiling\" --example profile_gpu");
-}
-
-#[cfg(all(feature = "meshgen", feature = "profiling"))]
 fn main() {
     use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
     use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};

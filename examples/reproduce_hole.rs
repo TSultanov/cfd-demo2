@@ -1,10 +1,3 @@
-#[cfg(not(feature = "meshgen"))]
-fn main() {
-    eprintln!("This example requires the `meshgen` feature.");
-    eprintln!("Try: cargo run --no-default-features --features meshgen --example reproduce_hole");
-}
-
-#[cfg(feature = "meshgen")]
 fn main() {
     use cfd2::solver::mesh::{generate_delaunay_mesh, ChannelWithObstacle, Geometry};
     use nalgebra::{Point2, Vector2};
@@ -58,4 +51,3 @@ fn main() {
 
     assert!(!hole_found, "Holes detected in the mesh!");
 }
-

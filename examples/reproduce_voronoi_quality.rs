@@ -1,12 +1,3 @@
-#[cfg(not(feature = "meshgen"))]
-fn main() {
-    eprintln!("This example requires the `meshgen` feature.");
-    eprintln!(
-        "Try: cargo run --no-default-features --features meshgen --example reproduce_voronoi_quality"
-    );
-}
-
-#[cfg(feature = "meshgen")]
 fn main() {
     use cfd2::solver::mesh::{generate_voronoi_mesh, BackwardsStep, Geometry};
     use nalgebra::{Point2, Vector2};
@@ -100,4 +91,3 @@ fn main() {
         );
     }
 }
-

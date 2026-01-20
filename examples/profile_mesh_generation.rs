@@ -1,10 +1,18 @@
-#![cfg(all(feature = "meshgen", feature = "profiling"))]
+#[cfg(not(all(feature = "meshgen", feature = "profiling")))]
+fn main() {
+    eprintln!("This example requires the `meshgen` + `profiling` features.");
+    eprintln!("Try one of:");
+    eprintln!("  cargo run --features profiling --example profile_mesh_generation");
+    eprintln!(
+        "  cargo run --no-default-features --features \"meshgen profiling\" --example profile_mesh_generation"
+    );
+}
 
-use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
-use nalgebra::{Point2, Vector2};
+#[cfg(all(feature = "meshgen", feature = "profiling"))]
+fn main() {
+    use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle};
+    use nalgebra::{Point2, Vector2};
 
-#[test]
-fn test_mesh_generation_profile_0_00175() {
     let geo = ChannelWithObstacle {
         length: 2.0,
         height: 1.0,
@@ -32,3 +40,4 @@ fn test_mesh_generation_profile_0_00175() {
     // Just ensuring it doesn't crash and produces something valid.
     assert!(max_skew < 1.0, "Skewness too high: {}", max_skew);
 }
+

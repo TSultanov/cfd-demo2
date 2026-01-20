@@ -1,31 +1,66 @@
-#![cfg(all(feature = "meshgen", feature = "profiling"))]
+#[cfg(not(all(feature = "meshgen", feature = "profiling")))]
+fn main() {
+    eprintln!("This example requires the `meshgen` + `profiling` features.");
+    eprintln!("Try one of:");
+    eprintln!("  cargo run --features profiling --example profile_gpu_transfer");
+    eprintln!(
+        "  cargo run --no-default-features --features \"meshgen profiling\" --example profile_gpu_transfer"
+    );
+}
 
-use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
-use cfd2::solver::model::incompressible_momentum_model;
-/// Comprehensive GPU-CPU Communication Profiling Test
+#[cfg(all(feature = "meshgen", feature = "profiling"))]
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return;
+    }
+
+    let run_all = args.iter().any(|a| a == "--all");
+    let run_scaling = args.iter().any(|a| a == "--scaling");
+
+    if run_all {
+        run_transfer_profile();
+        run_scaling_profile();
+    } else if run_scaling {
+        run_scaling_profile();
+    } else {
+        run_transfer_profile();
+    }
+}
+
+#[cfg(all(feature = "meshgen", feature = "profiling"))]
+fn print_help() {
+    println!("Usage: cargo run --features profiling --example profile_gpu_transfer [--all|--scaling]");
+    println!();
+    println!("  (default)  Run the detailed GPU<->CPU transfer profile");
+    println!("  --scaling  Run scaling analysis across mesh sizes");
+    println!("  --all      Run both");
+}
+
+/// Comprehensive GPU-CPU Communication Profiling
 ///
-/// This test measures where time is spent during GPU solver execution, specifically:
+/// This measures where time is spent during GPU solver execution, specifically:
 /// - GPU -> CPU data transfers (buffer reads)
 /// - CPU -> GPU data transfers (buffer writes)
 /// - GPU synchronization waits
 /// - GPU compute dispatch overhead
 /// - CPU-side computation that could be offloaded to GPU
-///
-/// The goal is to identify bottlenecks and opportunities for GPU offloading.
-use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
-use cfd2::solver::profiling::ProfileCategory;
-use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
-use nalgebra::Vector2;
-use std::time::Instant;
+#[cfg(all(feature = "meshgen", feature = "profiling"))]
+fn run_transfer_profile() {
+    use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+    use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
+    use cfd2::solver::model::incompressible_momentum_model;
+    use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
+    use cfd2::solver::profiling::ProfileCategory;
+    use cfd2::solver::scheme::Scheme;
+    use cfd2::solver::{SolverConfig, UnifiedSolver};
+    use nalgebra::Vector2;
+    use std::time::Instant;
 
-/// Run a profiling session and print detailed results
-#[test]
-fn test_gpu_transfer_profile() {
     println!("\n");
     println!("{}", "=".repeat(80));
-    println!("GPU-CPU Communication Profiling Test");
+    println!("GPU-CPU Communication Profiling");
     println!("{}", "=".repeat(80));
 
     let length = 3.5;
@@ -205,10 +240,7 @@ fn test_gpu_transfer_profile() {
         }
 
         // Check for debug reads
-        let debug_reads: Vec<_> = location_stats
-            .iter()
-            .filter(|(k, _)| k.contains("debug"))
-            .collect();
+        let debug_reads: Vec<_> = location_stats.iter().filter(|(k, _)| k.contains("debug")).collect();
         if !debug_reads.is_empty() {
             let total_debug_time: std::time::Duration =
                 debug_reads.iter().map(|(_, s)| s.total_time).sum();
@@ -251,12 +283,8 @@ fn test_gpu_transfer_profile() {
         }
 
         let session_total = stats.get_session_total();
-        let gpu_read_time = gpu_read_stats
-            .map(|(_, s)| s.total_time)
-            .unwrap_or_default();
-        let cpu_time = cpu_compute_stats
-            .map(|(_, s)| s.total_time)
-            .unwrap_or_default();
+        let gpu_read_time = gpu_read_stats.map(|(_, s)| s.total_time).unwrap_or_default();
+        let cpu_time = cpu_compute_stats.map(|(_, s)| s.total_time).unwrap_or_default();
         let overhead = gpu_read_time + cpu_time;
         let overhead_pct = if session_total.as_nanos() > 0 {
             (overhead.as_nanos() as f64 / session_total.as_nanos() as f64) * 100.0
@@ -275,9 +303,18 @@ fn test_gpu_transfer_profile() {
     });
 }
 
-/// Profile with different mesh sizes to understand scaling
-#[test]
-fn test_gpu_transfer_profile_scaling() {
+/// Profile with different mesh sizes to understand scaling.
+#[cfg(all(feature = "meshgen", feature = "profiling"))]
+fn run_scaling_profile() {
+    use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+    use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
+    use cfd2::solver::model::incompressible_momentum_model;
+    use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
+    use cfd2::solver::profiling::ProfileCategory;
+    use cfd2::solver::scheme::Scheme;
+    use cfd2::solver::{SolverConfig, UnifiedSolver};
+    use nalgebra::Vector2;
+
     println!("\n");
     println!("{}", "=".repeat(80));
     println!("GPU-CPU Communication Scaling Analysis");
@@ -384,12 +421,10 @@ fn test_gpu_transfer_profile_scaling() {
                     let time_per_byte =
                         read_stats.total_time.as_nanos() as f64 / read_stats.total_bytes as f64;
                     println!("\n  GPU Read efficiency: {:.2} ns/byte", time_per_byte);
-                    println!(
-                        "  Throughput: {:.1} MB/s",
-                        read_stats.throughput_mb_per_sec()
-                    );
+                    println!("  Throughput: {:.1} MB/s", read_stats.throughput_mb_per_sec());
                 }
             }
         });
     }
 }
+

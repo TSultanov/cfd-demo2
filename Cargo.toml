@@ -49,6 +49,41 @@ name = "cfd2"
 path = "src/main.rs"
 required-features = ["ui"]
 
+[[example]]
+name = "profile_gpu"
+path = "examples/profile_gpu.rs"
+required-features = ["meshgen", "profiling"]
+
+[[example]]
+name = "profile_gpu_transfer"
+path = "examples/profile_gpu_transfer.rs"
+required-features = ["meshgen", "profiling"]
+
+[[example]]
+name = "profile_mesh_generation"
+path = "examples/profile_mesh_generation.rs"
+required-features = ["meshgen", "profiling"]
+
+[[example]]
+name = "reproduce_chamfer"
+path = "examples/reproduce_chamfer.rs"
+required-features = ["meshgen"]
+
+[[example]]
+name = "reproduce_divergence"
+path = "examples/reproduce_divergence.rs"
+required-features = ["meshgen"]
+
+[[example]]
+name = "reproduce_hole"
+path = "examples/reproduce_hole.rs"
+required-features = ["meshgen"]
+
+[[example]]
+name = "reproduce_voronoi_quality"
+path = "examples/reproduce_voronoi_quality.rs"
+required-features = ["meshgen"]
+
 [[test]]
 name = "amg_test"
 path = "tests/amg_test.rs"

@@ -36,9 +36,6 @@ pub(crate) struct GraphOpKind(pub &'static str);
 pub(crate) struct HostOpKind(pub &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct CondOpKind(pub &'static str);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CountOpKind(pub &'static str);
 
 pub(crate) trait ProgramOpDispatcher {
@@ -52,22 +49,18 @@ pub(crate) trait ProgramOpDispatcher {
 
     fn run_host(&self, kind: HostOpKind, plan: &mut GpuProgramPlan);
 
-    fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool;
-
     fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize;
 }
 
 pub(crate) type GraphOpHandler =
     fn(&GpuProgramPlan, &GpuContext, GraphExecMode) -> (f64, Option<GraphDetail>);
 pub(crate) type HostOpHandler = fn(&mut GpuProgramPlan);
-pub(crate) type CondOpHandler = fn(&GpuProgramPlan) -> bool;
 pub(crate) type CountOpHandler = fn(&GpuProgramPlan) -> usize;
 
 #[derive(Default)]
 pub(crate) struct ProgramOpRegistry {
     graph: HashMap<GraphOpKind, GraphOpHandler>,
     host: HashMap<HostOpKind, HostOpHandler>,
-    cond: HashMap<CondOpKind, CondOpHandler>,
     count: HashMap<CountOpKind, CountOpHandler>,
 }
 
@@ -100,56 +93,10 @@ impl ProgramOpRegistry {
                             ));
                         }
                     }
-                    ProgramSpecNode::If {
-                        label,
-                        cond,
-                        then_block,
-                        else_block,
-                    } => {
-                        if !self.cond.contains_key(&cond) {
-                            missing.insert(format!(
-                                "missing cond op handler: {cond:?} (node '{label}', block {block_idx})"
-                            ));
-                        }
-                        if program.blocks.get(then_block.0 as usize).is_none() {
-                            missing.insert(format!(
-                                "missing ProgramSpec block referenced by node '{label}': then_block={then_block:?}"
-                            ));
-                        }
-                        if let Some(else_block) = else_block {
-                            if program.blocks.get(else_block.0 as usize).is_none() {
-                                missing.insert(format!(
-                                    "missing ProgramSpec block referenced by node '{label}': else_block={else_block:?}"
-                                ));
-                            }
-                        }
-                    }
                     ProgramSpecNode::Repeat { label, times, body } => {
                         if !self.count.contains_key(&times) {
                             missing.insert(format!(
                                 "missing count op handler: {times:?} (node '{label}', block {block_idx})"
-                            ));
-                        }
-                        if program.blocks.get(body.0 as usize).is_none() {
-                            missing.insert(format!(
-                                "missing ProgramSpec block referenced by node '{label}': body={body:?}"
-                            ));
-                        }
-                    }
-                    ProgramSpecNode::While {
-                        label,
-                        max_iters,
-                        cond,
-                        body,
-                    } => {
-                        if !self.count.contains_key(&max_iters) {
-                            missing.insert(format!(
-                                "missing count op handler: {max_iters:?} (node '{label}', block {block_idx})"
-                            ));
-                        }
-                        if !self.cond.contains_key(&cond) {
-                            missing.insert(format!(
-                                "missing cond op handler: {cond:?} (node '{label}', block {block_idx})"
                             ));
                         }
                         if program.blocks.get(body.0 as usize).is_none() {
@@ -193,17 +140,6 @@ impl ProgramOpRegistry {
         Ok(())
     }
 
-    pub fn register_cond(
-        &mut self,
-        kind: CondOpKind,
-        handler: CondOpHandler,
-    ) -> Result<(), String> {
-        if self.cond.insert(kind, handler).is_some() {
-            return Err(format!("cond op already registered: {kind:?}"));
-        }
-        Ok(())
-    }
-
     pub fn register_count(
         &mut self,
         kind: CountOpKind,
@@ -227,12 +163,6 @@ impl ProgramOpRegistry {
         self.graph.contains_key(kind)
     }
 
-    /// Check if a cond op is registered.
-    #[cfg(test)]
-    pub fn has_cond(&self, kind: &CondOpKind) -> bool {
-        self.cond.contains_key(kind)
-    }
-
     /// Check if a count op is registered.
     #[cfg(test)]
     pub fn has_count(&self, kind: &CountOpKind) -> bool {
@@ -247,9 +177,6 @@ impl ProgramOpRegistry {
         }
         for (kind, handler) in other.host {
             self.register_host(kind, handler)?;
-        }
-        for (kind, handler) in other.cond {
-            self.register_cond(kind, handler)?;
         }
         for (kind, handler) in other.count {
             self.register_count(kind, handler)?;
@@ -283,15 +210,6 @@ impl ProgramOpDispatcher for ProgramOpRegistry {
         handler(plan);
     }
 
-    fn eval_cond(&self, kind: CondOpKind, plan: &GpuProgramPlan) -> bool {
-        let handler = self
-            .cond
-            .get(&kind)
-            .copied()
-            .unwrap_or_else(|| panic!("missing cond op handler registration: {kind:?}"));
-        handler(plan)
-    }
-
     fn eval_count(&self, kind: CountOpKind, plan: &GpuProgramPlan) -> usize {
         let handler = self
             .count
@@ -316,21 +234,9 @@ pub(crate) enum ProgramSpecNode {
         label: &'static str,
         kind: HostOpKind,
     },
-    If {
-        label: &'static str,
-        cond: CondOpKind,
-        then_block: ProgramBlockId,
-        else_block: Option<ProgramBlockId>,
-    },
     Repeat {
         label: &'static str,
         times: CountOpKind,
-        body: ProgramBlockId,
-    },
-    While {
-        label: &'static str,
-        max_iters: CountOpKind,
-        cond: CondOpKind,
         body: ProgramBlockId,
     },
 }
@@ -612,35 +518,9 @@ impl GpuProgramPlan {
                     let ops = Arc::clone(&self.spec.ops);
                     ops.run_host(kind, self);
                 }
-                ProgramSpecNode::If {
-                    cond,
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    if self.spec.ops.eval_cond(cond, &*self) {
-                        self.execute_block(then_block);
-                    } else if let Some(else_block) = else_block {
-                        self.execute_block(else_block);
-                    }
-                }
                 ProgramSpecNode::Repeat { times, body, .. } => {
                     let times = self.spec.ops.eval_count(times, &*self);
                     for _ in 0..times {
-                        self.execute_block(body);
-                    }
-                }
-                ProgramSpecNode::While {
-                    max_iters,
-                    cond,
-                    body,
-                    ..
-                } => {
-                    let max_iters = self.spec.ops.eval_count(max_iters, &*self);
-                    for _ in 0..max_iters {
-                        if !self.spec.ops.eval_cond(cond, &*self) {
-                            break;
-                        }
                         self.execute_block(body);
                     }
                 }
@@ -663,10 +543,6 @@ mod tests {
 
     fn dummy_host(_plan: &mut GpuProgramPlan) {}
 
-    fn dummy_cond(_plan: &GpuProgramPlan) -> bool {
-        false
-    }
-
     fn dummy_count(_plan: &GpuProgramPlan) -> usize {
         0
     }
@@ -675,7 +551,6 @@ mod tests {
     fn validate_program_spec_reports_missing_handlers() {
         let mut builder = ProgramSpecBuilder::new();
         let root = builder.root();
-        let then_block = builder.new_block();
         let repeat_block = builder.new_block();
 
         builder.push(
@@ -695,36 +570,10 @@ mod tests {
         );
         builder.push(
             root,
-            ProgramSpecNode::If {
-                label: "t:if",
-                cond: CondOpKind("CompressibleShouldUseExplicit"),
-                then_block,
-                else_block: None,
-            },
-        );
-        builder.push(
-            root,
             ProgramSpecNode::Repeat {
                 label: "t:repeat",
                 times: CountOpKind("CompressibleImplicitOuterIters"),
                 body: repeat_block,
-            },
-        );
-        builder.push(
-            root,
-            ProgramSpecNode::While {
-                label: "t:while",
-                max_iters: CountOpKind("IncompressibleCoupledMaxIters"),
-                cond: CondOpKind("IncompressibleCoupledShouldContinue"),
-                body: repeat_block,
-            },
-        );
-
-        builder.push(
-            then_block,
-            ProgramSpecNode::Host {
-                label: "t:then:h",
-                kind: HostOpKind("CompressibleExplicitFinalize"),
             },
         );
 
@@ -744,17 +593,14 @@ mod tests {
             .expect_err("expected missing handler validation to fail");
         assert!(err.contains("CompressibleExplicitGraph"));
         assert!(err.contains("CompressibleExplicitPrepare"));
-        assert!(err.contains("CompressibleShouldUseExplicit"));
         assert!(err.contains("CompressibleImplicitOuterIters"));
-        assert!(err.contains("IncompressibleCoupledMaxIters"));
-        assert!(err.contains("IncompressibleCoupledShouldContinue"));
+        assert!(err.contains("IncompressibleCoupledBeginStep"));
     }
 
     #[test]
     fn validate_program_spec_passes_with_complete_registry() -> Result<(), String> {
         let mut builder = ProgramSpecBuilder::new();
         let root = builder.root();
-        let then_block = builder.new_block();
         let repeat_block = builder.new_block();
 
         builder.push(
@@ -774,36 +620,10 @@ mod tests {
         );
         builder.push(
             root,
-            ProgramSpecNode::If {
-                label: "t:if",
-                cond: CondOpKind("CompressibleShouldUseExplicit"),
-                then_block,
-                else_block: None,
-            },
-        );
-        builder.push(
-            root,
             ProgramSpecNode::Repeat {
                 label: "t:repeat",
                 times: CountOpKind("CompressibleImplicitOuterIters"),
                 body: repeat_block,
-            },
-        );
-        builder.push(
-            root,
-            ProgramSpecNode::While {
-                label: "t:while",
-                max_iters: CountOpKind("IncompressibleCoupledMaxIters"),
-                cond: CondOpKind("IncompressibleCoupledShouldContinue"),
-                body: repeat_block,
-            },
-        );
-
-        builder.push(
-            then_block,
-            ProgramSpecNode::Host {
-                label: "t:then:h",
-                kind: HostOpKind("CompressibleExplicitFinalize"),
             },
         );
 
@@ -820,15 +640,8 @@ mod tests {
         let mut registry = ProgramOpRegistry::new();
         registry.register_graph(GraphOpKind("CompressibleExplicitGraph"), dummy_graph)?;
         registry.register_host(HostOpKind("CompressibleExplicitPrepare"), dummy_host)?;
-        registry.register_host(HostOpKind("CompressibleExplicitFinalize"), dummy_host)?;
         registry.register_host(HostOpKind("IncompressibleCoupledBeginStep"), dummy_host)?;
-        registry.register_cond(CondOpKind("CompressibleShouldUseExplicit"), dummy_cond)?;
-        registry.register_cond(
-            CondOpKind("IncompressibleCoupledShouldContinue"),
-            dummy_cond,
-        )?;
         registry.register_count(CountOpKind("CompressibleImplicitOuterIters"), dummy_count)?;
-        registry.register_count(CountOpKind("IncompressibleCoupledMaxIters"), dummy_count)?;
 
         registry.validate_program_spec(&program)
     }

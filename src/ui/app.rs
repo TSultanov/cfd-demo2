@@ -1,6 +1,8 @@
+use crate::solver::mesh::{generate_structured_backwards_step_mesh, Mesh};
+#[cfg(feature = "meshgen")]
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
-    ChannelWithObstacle, Mesh,
+    ChannelWithObstacle,
 };
 use crate::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
@@ -19,6 +21,7 @@ use crate::solver::{
 use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
+#[cfg(feature = "meshgen")]
 use nalgebra::{Point2, Vector2};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -53,14 +56,38 @@ enum RenderMode {
 #[derive(PartialEq, Clone, Copy)]
 enum GeometryType {
     BackwardsStep,
+    #[cfg(feature = "meshgen")]
     ChannelObstacle,
+}
+
+impl Default for GeometryType {
+    fn default() -> Self {
+        Self::BackwardsStep
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum MeshType {
+    Structured,
+    #[cfg(feature = "meshgen")]
     CutCell,
+    #[cfg(feature = "meshgen")]
     Delaunay,
+    #[cfg(feature = "meshgen")]
     Voronoi,
+}
+
+impl Default for MeshType {
+    fn default() -> Self {
+        #[cfg(feature = "meshgen")]
+        {
+            Self::CutCell
+        }
+        #[cfg(not(feature = "meshgen"))]
+        {
+            Self::Structured
+        }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -328,8 +355,8 @@ impl CFDApp {
             max_cell_size: 0.025,
             growth_rate: 1.2,
             timestep: 0.001,
-            selected_geometry: GeometryType::BackwardsStep,
-            mesh_type: MeshType::CutCell,
+            selected_geometry: GeometryType::default(),
+            mesh_type: MeshType::default(),
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
@@ -458,42 +485,73 @@ impl CFDApp {
         max_cell_size: f64,
         growth_rate: f64,
     ) -> Mesh {
+        let _ = (max_cell_size, growth_rate);
         match selected_geometry {
             GeometryType::BackwardsStep => {
                 let length = 3.5;
-                let domain_size = Vector2::new(length, 1.0);
-                let geo = BackwardsStep {
-                    length,
-                    height_inlet: 0.5,
-                    height_outlet: 1.0,
-                    step_x: 0.5,
-                };
-                let mut mesh = match mesh_type {
-                    MeshType::CutCell => generate_cut_cell_mesh(
-                        &geo,
-                        min_cell_size,
-                        max_cell_size,
-                        growth_rate,
-                        domain_size,
-                    ),
-                    MeshType::Delaunay => generate_delaunay_mesh(
-                        &geo,
-                        min_cell_size,
-                        max_cell_size,
-                        growth_rate,
-                        domain_size,
-                    ),
-                    MeshType::Voronoi => generate_voronoi_mesh(
-                        &geo,
-                        min_cell_size,
-                        max_cell_size,
-                        growth_rate,
-                        domain_size,
-                    ),
-                };
-                mesh.smooth(&geo, 0.3, 50);
-                mesh
+                let height_outlet = 1.0;
+                let height_inlet = 0.5;
+                let step_x = 0.5;
+
+                match mesh_type {
+                    MeshType::Structured => {
+                        let target = min_cell_size.clamp(1e-6, 1e3);
+                        let mut nx = ((length / target).round() as i64).max(1) as usize;
+                        nx = ((nx + 6) / 7).max(1) * 7;
+                        let mut ny =
+                            ((height_outlet / target).round() as i64).max(1) as usize;
+                        if ny % 2 != 0 {
+                            ny += 1;
+                        }
+                        ny = ny.max(2);
+                        generate_structured_backwards_step_mesh(
+                            nx,
+                            ny,
+                            length,
+                            height_outlet,
+                            height_inlet,
+                            step_x,
+                        )
+                    }
+                    #[cfg(feature = "meshgen")]
+                    MeshType::CutCell | MeshType::Delaunay | MeshType::Voronoi => {
+                        let domain_size = Vector2::new(length, height_outlet);
+                        let geo = BackwardsStep {
+                            length,
+                            height_inlet,
+                            height_outlet,
+                            step_x,
+                        };
+                        let mut mesh = match mesh_type {
+                            MeshType::CutCell => generate_cut_cell_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                            ),
+                            MeshType::Delaunay => generate_delaunay_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                            ),
+                            MeshType::Voronoi => generate_voronoi_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                            ),
+                            MeshType::Structured => unreachable!("handled above"),
+                        };
+                        mesh.smooth(&geo, 0.3, 50);
+                        mesh
+                    }
+                }
             }
+            #[cfg(feature = "meshgen")]
             GeometryType::ChannelObstacle => {
                 let length = 3.0;
                 let domain_size = Vector2::new(length, 1.0);
@@ -502,6 +560,10 @@ impl CFDApp {
                     height: 1.0,
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.1,
+                };
+                let mesh_type = match mesh_type {
+                    MeshType::Structured => MeshType::CutCell,
+                    other => other,
                 };
                 let mesh = match mesh_type {
                     MeshType::CutCell => {
@@ -534,11 +596,10 @@ impl CFDApp {
                             growth_rate,
                             domain_size,
                         );
-                        // Voronoi meshes are usually good quality, but we can smooth them too if needed.
-                        // For now, let's just return it.
                         mesh.smooth(&geo, 0.3, 50);
                         mesh
                     }
+                    MeshType::Structured => unreachable!("mapped above"),
                 };
 
                 mesh
@@ -583,6 +644,7 @@ impl CFDApp {
                             // *vel = (1.0, 0.0); // Removed to match shader ramp
                         }
                     }
+                    #[cfg(feature = "meshgen")]
                     GeometryType::ChannelObstacle => {
                         // *vel = (1.0, 0.0);
                     }
@@ -947,21 +1009,22 @@ impl eframe::App for CFDApp {
                     }
 
                     ui.add_enabled_ui(!is_initializing, |ui| {
-                        ui.group(|ui| {
+                    ui.group(|ui| {
                         ui.label("Geometry");
                         ui.radio_value(
                             &mut self.selected_geometry,
                             GeometryType::BackwardsStep,
                             "Backwards Step",
                         );
+                        #[cfg(feature = "meshgen")]
                         ui.radio_value(
                             &mut self.selected_geometry,
                             GeometryType::ChannelObstacle,
                             "Channel w/ Obstacle",
                         );
-                        });
+                    });
 
-                        ui.group(|ui| {
+                    ui.group(|ui| {
                         ui.label("Mesh Parameters");
                         ui.add(
                             egui::Slider::new(&mut self.min_cell_size, 0.001..=self.max_cell_size)
@@ -976,10 +1039,16 @@ impl eframe::App for CFDApp {
                         );
                         ui.separator();
                         ui.label("Mesh Type");
+                        ui.radio_value(&mut self.mesh_type, MeshType::Structured, "Structured");
+                        #[cfg(feature = "meshgen")]
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
+                        #[cfg(feature = "meshgen")]
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
+                        #[cfg(feature = "meshgen")]
                         ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
-                        });
+                        #[cfg(not(feature = "meshgen"))]
+                        ui.label("Enable `--features ui_meshgen` for meshgen options.");
+                    });
 
                         ui.group(|ui| {
                         ui.label("Fluid Properties");

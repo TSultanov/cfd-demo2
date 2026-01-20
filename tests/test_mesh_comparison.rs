@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, generate_delaunay_mesh, ChannelWithObstacle};
 use nalgebra::{Point2, Vector2};

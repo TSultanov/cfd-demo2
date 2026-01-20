@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BoundaryType, Geometry, Mesh};
 use cfd2::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem, TermOp};

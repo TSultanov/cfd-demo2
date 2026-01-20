@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};

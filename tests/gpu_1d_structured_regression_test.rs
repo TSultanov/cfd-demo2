@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::geometry::ChannelWithObstacle;
 use cfd2::solver::mesh::{

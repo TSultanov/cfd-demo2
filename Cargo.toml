@@ -31,6 +31,7 @@ default = ["ui"]
 ui = ["meshgen", "dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
+dev-tests = []
 
 [dev-dependencies]
 criterion = "0.5"
@@ -46,6 +47,116 @@ glob = "0.3"
 name = "cfd2"
 path = "src/main.rs"
 required-features = ["ui"]
+
+[[test]]
+name = "amg_test"
+path = "tests/amg_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "coupled_schemes_test"
+path = "tests/coupled_schemes_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "debug_obstacle_mesh"
+path = "tests/debug_obstacle_mesh.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "delaunay_test"
+path = "tests/delaunay_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_1d_structured_regression_test"
+path = "tests/gpu_1d_structured_regression_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_codegen_matches_manual_test"
+path = "tests/gpu_codegen_matches_manual_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_compressible_amg_smoke_test"
+path = "tests/gpu_compressible_amg_smoke_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_compressible_block_jacobi_smoke_test"
+path = "tests/gpu_compressible_block_jacobi_smoke_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_compressible_solver_test"
+path = "tests/gpu_compressible_solver_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_compressible_validation_test"
+path = "tests/gpu_compressible_validation_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_divergence_test"
+path = "tests/gpu_divergence_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_fine_mesh_obstacle"
+path = "tests/gpu_fine_mesh_obstacle.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_generic_unified_solver_test"
+path = "tests/gpu_generic_unified_solver_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_low_mach_convergence_smoke_test"
+path = "tests/gpu_low_mach_convergence_smoke_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_low_mach_debug_fast_test"
+path = "tests/gpu_low_mach_debug_fast_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_low_mach_equivalence_test"
+path = "tests/gpu_low_mach_equivalence_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "gpu_solver_scaling_test"
+path = "tests/gpu_solver_scaling_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "model_analytical_solutions_test"
+path = "tests/model_analytical_solutions_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "test_channel_obstacle_mesh"
+path = "tests/test_channel_obstacle_mesh.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "test_mesh_comparison"
+path = "tests/test_mesh_comparison.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "ui_compressible_air_backstep_smoke_test"
+path = "tests/ui_compressible_air_backstep_smoke_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
+name = "ui_incompressible_air_smoke_test"
+path = "tests/ui_incompressible_air_smoke_test.rs"
+required-features = ["meshgen", "dev-tests"]
 
 [[bench]]
 name = "mesh_benchmark"

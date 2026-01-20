@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};

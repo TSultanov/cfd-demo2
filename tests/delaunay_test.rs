@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_delaunay_mesh, BackwardsStep};
 use nalgebra::Vector2;

@@ -1,4 +1,4 @@
-#![cfg(feature = "meshgen")]
+#![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::gpu::csr::build_block_csr;

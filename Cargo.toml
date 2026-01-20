@@ -28,7 +28,8 @@ ahash = { version = "0.8.12", optional = true }
 
 [features]
 default = []
-ui = ["meshgen", "dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
+ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
+ui_meshgen = ["ui", "meshgen"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 dev-tests = []
@@ -161,35 +162,44 @@ required-features = ["meshgen", "dev-tests"]
 [[bench]]
 name = "mesh_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "large_mesh_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "gpu_solver_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "delaunay_voronoi_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "gpu_dispatch_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "mesh_profile"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "mesh_smoothing_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "delaunay_benchmark"
 harness = false
+required-features = ["meshgen"]
 
 [[bench]]
 name = "voronoi_benchmark"
 harness = false
+required-features = ["meshgen"]

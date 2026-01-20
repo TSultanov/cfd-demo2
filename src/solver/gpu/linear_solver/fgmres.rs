@@ -59,7 +59,7 @@ pub struct FgmresCore<'a> {
     pub bg_cgs: &'a wgpu::BindGroup,
 
     pub bgl_vectors: &'a wgpu::BindGroupLayout,
-    pub vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
+    vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
 
     pub pipeline_spmv: &'a wgpu::ComputePipeline,
     pub pipeline_scale: &'a wgpu::ComputePipeline,
@@ -1086,7 +1086,7 @@ pub fn basis_binding<'a>(
     })
 }
 
-pub fn create_vector_bind_group<'a>(
+fn create_vector_bind_group<'a>(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     bindings: &[wgsl_reflect::WgslBindingDesc],

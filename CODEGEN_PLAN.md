@@ -46,8 +46,9 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Repro / profiling harness quarantine (optional surface)
-- Move `examples/reproduce_*` and long-running profiling entrypoints behind explicit features (or into a separate crate) so core builds stay fast and uncluttered.
+### 1) Bind groups: metadata-driven host binding (core)
+- Replace remaining `KernelId`/pipeline-specific bind-group wiring with a single bind-group builder driven by generated binding metadata + a uniform resource registry.
+- Adding a new kernel/module must not require new host-side bind-group glue (beyond declaring resources/params in manifests/metadata).
 
 ### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).

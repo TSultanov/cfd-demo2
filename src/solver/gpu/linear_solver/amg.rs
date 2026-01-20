@@ -83,6 +83,7 @@ pub struct AmgResources {
     pub bgl_state: wgpu::BindGroupLayout,
     pub bgl_cross: wgpu::BindGroupLayout,
     bg_cross_dummy: wgpu::BindGroup,
+    bindings: &'static [wgsl_reflect::WgslBindingDesc],
 }
 
 // Simple greedy aggregation
@@ -548,7 +549,31 @@ impl AmgResources {
             bgl_state,
             bgl_cross,
             bg_cross_dummy,
+            bindings,
         }
+    }
+
+    pub(crate) fn create_state_override_bind_group(
+        &self,
+        device: &wgpu::Device,
+        x: &wgpu::Buffer,
+        b: &wgpu::Buffer,
+        params: &wgpu::Buffer,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        let registry = ResourceRegistry::new()
+            .with_buffer("x", x)
+            .with_buffer("b", b)
+            .with_buffer("params", params);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            label,
+            &self.bgl_state,
+            self.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
     }
 
     pub fn v_cycle(

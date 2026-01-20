@@ -28,8 +28,7 @@ ahash = { version = "0.8.12", optional = true }
 
 [features]
 default = []
-ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger"]
-ui_meshgen = ["ui", "meshgen"]
+ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger", "meshgen"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 dev-tests = []

@@ -1,9 +1,7 @@
-#[cfg(feature = "meshgen")]
 use crate::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
-    ChannelWithObstacle,
+    generate_cut_cell_mesh, generate_delaunay_mesh, generate_structured_backwards_step_mesh,
+    generate_voronoi_mesh, BackwardsStep, ChannelWithObstacle, Mesh,
 };
-use crate::solver::mesh::{generate_structured_backwards_step_mesh, Mesh};
 use crate::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
     SolverIncompressibleStatsExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
@@ -19,7 +17,6 @@ use crate::solver::{
 use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
-#[cfg(feature = "meshgen")]
 use nalgebra::{Point2, Vector2};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -54,7 +51,6 @@ enum RenderMode {
 #[derive(PartialEq, Clone, Copy)]
 enum GeometryType {
     BackwardsStep,
-    #[cfg(feature = "meshgen")]
     ChannelObstacle,
 }
 
@@ -67,24 +63,14 @@ impl Default for GeometryType {
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum MeshType {
     Structured,
-    #[cfg(feature = "meshgen")]
     CutCell,
-    #[cfg(feature = "meshgen")]
     Delaunay,
-    #[cfg(feature = "meshgen")]
     Voronoi,
 }
 
 impl Default for MeshType {
     fn default() -> Self {
-        #[cfg(feature = "meshgen")]
-        {
-            Self::CutCell
-        }
-        #[cfg(not(feature = "meshgen"))]
-        {
-            Self::Structured
-        }
+        Self::CutCell
     }
 }
 
@@ -581,7 +567,6 @@ impl CFDApp {
                             step_x,
                         )
                     }
-                    #[cfg(feature = "meshgen")]
                     MeshType::CutCell | MeshType::Delaunay | MeshType::Voronoi => {
                         let domain_size = Vector2::new(length, height_outlet);
                         let geo = BackwardsStep {
@@ -619,7 +604,6 @@ impl CFDApp {
                     }
                 }
             }
-            #[cfg(feature = "meshgen")]
             GeometryType::ChannelObstacle => {
                 let length = 3.0;
                 let domain_size = Vector2::new(length, 1.0);
@@ -712,7 +696,6 @@ impl CFDApp {
                             // *vel = (1.0, 0.0); // Removed to match shader ramp
                         }
                     }
-                    #[cfg(feature = "meshgen")]
                     GeometryType::ChannelObstacle => {
                         // *vel = (1.0, 0.0);
                     }
@@ -1160,7 +1143,6 @@ impl eframe::App for CFDApp {
                             GeometryType::BackwardsStep,
                             "Backwards Step",
                         );
-                        #[cfg(feature = "meshgen")]
                         ui.radio_value(
                             &mut self.selected_geometry,
                             GeometryType::ChannelObstacle,
@@ -1183,15 +1165,21 @@ impl eframe::App for CFDApp {
                         );
                         ui.separator();
                         ui.label("Mesh Type");
-                        ui.radio_value(&mut self.mesh_type, MeshType::Structured, "Structured");
-                        #[cfg(feature = "meshgen")]
+                        let structured_enabled =
+                            matches!(self.selected_geometry, GeometryType::BackwardsStep);
+                        ui.add_enabled_ui(structured_enabled, |ui| {
+                            ui.radio_value(
+                                &mut self.mesh_type,
+                                MeshType::Structured,
+                                "Structured (BackwardsStep only)",
+                            );
+                        });
+                        if !structured_enabled && matches!(self.mesh_type, MeshType::Structured) {
+                            self.mesh_type = MeshType::CutCell;
+                        }
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
-                        #[cfg(feature = "meshgen")]
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
-                        #[cfg(feature = "meshgen")]
                         ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
-                        #[cfg(not(feature = "meshgen"))]
-                        ui.label("Enable `--features ui_meshgen` for meshgen options.");
                     });
 
                         ui.group(|ui| {

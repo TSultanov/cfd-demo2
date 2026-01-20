@@ -46,8 +46,8 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 ## Remaining Gaps (simplification + pruning plan)
 
 ### 1) UI responsiveness (optional surface)
-- Eliminate UI-thread blocking while the solver is running (no blocking `Mutex` waits in the UI thread).
-- Decouple visualization/readback cadence from console logging cadence.
+- Move solver ownership into a worker thread (UI→command channel; worker→snapshot channel) to eliminate `Arc<Mutex<UnifiedSolver>>` lock contention.
+- Throttle GPU state readback/publish to a fixed UI cadence (avoid per-step readbacks on fast loops).
 - Make solver re-init / solver-kind switching reliable (stop current worker, then init) without appearing to hang.
 
 ### 2) Ongoing hardening (evergreen)

@@ -1,6 +1,10 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::{LinearSolverStats, SolverParams};
+use crate::solver::gpu::wgsl_reflect;
+use crate::solver::model::KernelId;
 
 pub struct ScalarCgModule {
     capacity: u32,
@@ -79,36 +83,24 @@ impl ScalarCgModule {
         pipeline_reduce_rho_new_r_r: &wgpu::ComputePipeline,
         device: &wgpu::Device,
     ) -> Self {
-        let bg_dot_pair_r0r_rr = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Dot Pair R0R RR Bind Group (CG module)"),
-            layout: bgl_dot_pair_inputs,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: b_dot_result.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: b_dot_result_2.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: b_r0.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: b_r.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: b_r.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: b_r.as_entire_binding(),
-                },
-            ],
-        });
+        let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
+            .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
+        let registry = ResourceRegistry::new()
+            .with_buffer("dot_result_a", b_dot_result)
+            .with_buffer("dot_result_b", b_dot_result_2)
+            .with_buffer("dot_a0", b_r0)
+            .with_buffer("dot_b0", b_r)
+            .with_buffer("dot_a1", b_r)
+            .with_buffer("dot_b1", b_r);
+        let bg_dot_pair_r0r_rr = wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            "Dot Pair R0R RR Bind Group (CG module)",
+            bgl_dot_pair_inputs,
+            dot_pair_src.bindings,
+            1,
+            |name| registry.resolve(name),
+        )
+        .unwrap_or_else(|err| panic!("CG dot pair BG creation failed: {err}"));
 
         Self {
             capacity,

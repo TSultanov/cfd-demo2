@@ -2,7 +2,9 @@ use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::PreconditionerType;
+use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
 const MAX_BLOCK_JACOBI: u32 = 16;
@@ -139,15 +141,24 @@ impl RuntimePreconditionerModule {
             let Some(block_inv) = self.b_block_inv.as_ref() else {
                 return;
             };
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV)
+                    .expect("block_precond/build_block_inv shader missing from kernel registry");
             let bgl = pipeline.get_bind_group_layout(2);
-            self.bg_block_inv = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runtime_preconditioner:block_inv_bg"),
-                layout: &bgl,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: block_inv.as_entire_binding(),
-                }],
-            }));
+            let registry = ResourceRegistry::new().with_buffer("block_inv", block_inv);
+            self.bg_block_inv = Some(
+                wgsl_reflect::create_bind_group_from_bindings(
+                    device,
+                    "runtime_preconditioner:block_inv_bg",
+                    &bgl,
+                    src.bindings,
+                    2,
+                    |name| registry.resolve(name),
+                )
+                .unwrap_or_else(|err| {
+                    panic!("runtime_preconditioner:block_inv_bg creation failed: {err}")
+                }),
+            );
         }
     }
 
@@ -501,24 +512,13 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
                 .encode_apply(device, encoder, fgmres, input, output, dispatch);
         };
 
-        let override_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runtime_preconditioner:amg_level0_state_override"),
-            layout: &amg.bgl_state,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: output.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.b_rhs.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: level0.b_params.as_entire_binding(),
-                },
-            ],
-        });
+        let override_bg = amg.create_state_override_bind_group(
+            device,
+            output,
+            &self.b_rhs,
+            &level0.b_params,
+            "runtime_preconditioner:amg_level0_state_override",
+        );
 
         amg.v_cycle(encoder, Some(&override_bg));
     }

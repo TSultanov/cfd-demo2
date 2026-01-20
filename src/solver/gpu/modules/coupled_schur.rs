@@ -186,27 +186,14 @@ impl CoupledSchurModule {
         }
         let amg = AmgResources::new(device, &matrix, 20);
 
-        let override_bg = {
-            let level0 = &amg.levels[0];
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Schur AMG Level0 State Override"),
-                layout: &amg.bgl_state,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.b_p_sol.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self.b_temp_p.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: level0.b_params.as_entire_binding(),
-                    },
-                ],
-            })
-        };
+        let level0 = &amg.levels[0];
+        let override_bg = amg.create_state_override_bind_group(
+            device,
+            &self.b_p_sol,
+            &self.b_temp_p,
+            &level0.b_params,
+            "Schur AMG Level0 State Override",
+        );
 
         self.amg = Some(amg);
         self.amg_level0_state_override = Some(override_bg);

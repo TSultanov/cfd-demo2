@@ -1,11 +1,11 @@
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverRuntimeParamsExt};
-use cfd2::solver::options::{
-    GpuLowMachPrecondModel, PreconditionerType, SteppingMode, TimeScheme,
-};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{
+    GpuLowMachPrecondModel, PreconditionerType, SolverConfig, SteppingMode, TimeScheme,
+    UnifiedSolver,
+};
 
 #[test]
 fn low_mach_knob_changes_compressible_implicit_update() {

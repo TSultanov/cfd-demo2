@@ -11,11 +11,11 @@ use crate::solver::model::{
     compressible_model, compressible_model_with_eos, incompressible_momentum_model,
     ModelPreconditionerSpec,
 };
-use crate::solver::options::{
-    LinearSolverStats, PreconditionerType, SteppingMode, TimeScheme as GpuTimeScheme,
-};
 use crate::solver::scheme::Scheme;
-use crate::solver::{SolverConfig, UnifiedSolver};
+use crate::solver::{
+    LinearSolverStats, PreconditionerType, SolverConfig, SteppingMode, TimeScheme as GpuTimeScheme,
+    UnifiedSolver,
+};
 use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};

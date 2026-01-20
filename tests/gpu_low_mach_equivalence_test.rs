@@ -7,11 +7,11 @@ use cfd2::solver::model::helpers::{
     SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
-use cfd2::solver::options::{
-    GpuLowMachPrecondModel, PreconditionerType, SteppingMode, TimeScheme,
-};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{
+    GpuLowMachPrecondModel, PreconditionerType, SolverConfig, SteppingMode, TimeScheme,
+    UnifiedSolver,
+};
 use image::{Rgb, RgbImage};
 use nalgebra::{Point2, Vector2};
 use std::env;

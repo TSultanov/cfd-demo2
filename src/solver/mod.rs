@@ -6,10 +6,12 @@ pub(crate) mod ir;
 pub mod kernels;
 pub mod mesh;
 pub mod model;
-pub mod options;
-pub mod profiling;
 pub mod scheme;
 pub mod shared;
 pub mod units;
 
 pub use backend::{FgmresSizing, SolverConfig, UnifiedSolver};
+pub use gpu::enums::{GpuBcKind, GpuBoundaryType, GpuLowMachPrecondModel, TimeScheme};
+pub use gpu::profiling::{ProfileCategory, ProfilingStats};
+pub use gpu::recipe::SteppingMode;
+pub use gpu::structs::{LinearSolverStats, PreconditionerType};

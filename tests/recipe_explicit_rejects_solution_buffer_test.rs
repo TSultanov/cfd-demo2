@@ -1,7 +1,7 @@
 use cfd2::solver::gpu::recipe::SolverRecipe;
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{PreconditionerType, SteppingMode, TimeScheme};
 
 #[test]
 fn explicit_recipes_reject_models_that_bind_solution_x() {
@@ -24,4 +24,3 @@ fn explicit_recipes_reject_models_that_bind_solution_x() {
         "unexpected error: {err}"
     );
 }
-

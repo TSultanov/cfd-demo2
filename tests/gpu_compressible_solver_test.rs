@@ -5,9 +5,8 @@ use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
 };
 use cfd2::solver::model::compressible_model;
-use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 fn build_mesh() -> Mesh {

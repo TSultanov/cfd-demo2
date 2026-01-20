@@ -6,9 +6,8 @@ use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
 #[test]
 fn openfoam_incompressible_backwards_step_matches_reference_field() {

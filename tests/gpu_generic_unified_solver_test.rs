@@ -2,9 +2,8 @@
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, Geometry, Mesh};
 use cfd2::solver::model::{generic_diffusion_demo_model, generic_diffusion_demo_neumann_model};
-use cfd2::solver::options::{SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 use nalgebra::{Point2, Vector2};
 
 struct RectGeometry {
@@ -65,7 +64,7 @@ fn gpu_unified_solver_runs_generic_heat_step() {
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
-        preconditioner: cfd2::solver::options::PreconditionerType::Jacobi,
+        preconditioner: PreconditionerType::Jacobi,
         stepping: SteppingMode::Coupled,
     };
 
@@ -118,7 +117,7 @@ fn gpu_unified_solver_runs_generic_heat_step_neumann() {
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::Euler,
-        preconditioner: cfd2::solver::options::PreconditionerType::Jacobi,
+        preconditioner: PreconditionerType::Jacobi,
         stepping: SteppingMode::Coupled,
     };
 

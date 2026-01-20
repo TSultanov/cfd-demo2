@@ -8,9 +8,8 @@ use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverInletVelocityExt,
     SolverRuntimeParamsExt,
 };
-use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
 #[test]
 fn openfoam_compressible_acoustic_matches_reference_profile() {

@@ -13,9 +13,8 @@ fn main() {
         SolverFieldAliasesExt, SolverIncompressibleStatsExt, SolverRuntimeParamsExt,
     };
     use cfd2::solver::model::incompressible_momentum_model;
-    use cfd2::solver::options::{PreconditionerType, SteppingMode, TimeScheme};
     use cfd2::solver::scheme::Scheme;
-    use cfd2::solver::{SolverConfig, UnifiedSolver};
+    use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
     use nalgebra::Vector2;
 
     let length = 3.5;
@@ -130,4 +129,3 @@ fn main() {
 
     println!("Completed {} steps without divergence.", max_steps);
 }
-

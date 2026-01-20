@@ -6,9 +6,8 @@ use cfd2::solver::model::helpers::{
     SolverInletVelocityExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
-use cfd2::solver::options::TimeScheme;
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, UnifiedSolver};
+use cfd2::solver::{SolverConfig, TimeScheme, UnifiedSolver};
 use nalgebra::Vector2;
 
 #[test]

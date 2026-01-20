@@ -42,18 +42,14 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Current Audit Notes (concrete simplification targets)
 - The recipe-driven solver path now only uses `Host | Graph | Repeat` nodes (no conditional/while orchestration surface).
-- `meshgen` contains many experimental algorithms; consider moving them out of `src/solver/mesh/*` (or deleting) once core/UI no longer depend on them.
+- `meshgen` is quarantined under `src/meshgen/*` (keep `src/solver/mesh/*` core-only).
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Meshgen: move experiments out of the core tree (optional surface)
-- Keep `src/solver/mesh/*` minimal (core structs + structured mesh constructors used by OpenFOAM reference tests).
-- Move the experimental `meshgen` algorithms out of `src/solver/mesh/*` into a separate crate or a dedicated `src/meshgen/*` module, and delete anything not referenced by `ui_meshgen`, benches, or `dev-tests`.
-
-### 2) Repro / profiling harness quarantine (optional surface)
+### 1) Repro / profiling harness quarantine (optional surface)
 - Move `examples/reproduce_*` and long-running profiling entrypoints behind explicit features (or into a separate crate) so core builds stay fast and uncluttered.
 
-### 3) Ongoing hardening (evergreen)
+### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

@@ -93,14 +93,9 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
                 prepare: Some(host_coupled_begin_step),
                 finalize: Some(host_coupled_finalize_step),
                 solve: Some(host_coupled_solve),
-
-                coupled_enabled: Some(has_coupled_resources),
                 coupled_init_prepare_graph: Some(coupled_graph_init_prepare_run),
                 coupled_before_iter: Some(host_coupled_before_iter),
-                coupled_clear_max_diff: Some(host_coupled_clear_max_diff),
-                coupled_convergence_advance: Some(host_coupled_convergence_and_advance),
-                coupled_should_continue: Some(coupled_should_continue),
-                coupled_max_iters: Some(coupled_max_iters),
+                coupled_outer_iters: Some(coupled_outer_iters),
 
                 assembly_graph: Some(generic_coupled_program::assembly_graph_run),
                 update_graph: Some(generic_coupled_program::update_graph_run),
@@ -241,11 +236,6 @@ fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
 
 // --- Coupled handlers ---
 
-fn has_coupled_resources(_plan: &GpuProgramPlan) -> bool {
-    // Coupled stepping is implemented on top of the generic coupled backend.
-    true
-}
-
 fn coupled_graph_init_prepare_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
@@ -254,15 +244,10 @@ fn coupled_graph_init_prepare_run(
     generic_coupled_program::init_prepare_graph_run(plan, context, mode)
 }
 
-fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
+fn coupled_outer_iters(plan: &GpuProgramPlan) -> usize {
     // Use the same `OuterIters` knob as the implicit path so tests/UI can control the number of
     // nonlinear corrector iterations per step for coupled methods (e.g. incompressible SIMPLE).
     generic_coupled_program::count_outer_iters(plan)
-}
-
-fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
-    let _ = plan;
-    true
 }
 
 fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
@@ -278,14 +263,6 @@ fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
     generic_coupled_program::host_solve_linear_system(plan);
-}
-
-fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
-    let _ = plan;
-}
-
-fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
-    let _ = plan;
 }
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {

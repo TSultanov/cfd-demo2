@@ -50,8 +50,6 @@ pub enum LinearSolverType {
     Fgmres { max_restart: usize },
     /// Conjugate Gradient (for SPD systems)
     Cg,
-    /// BiCGSTAB
-    BiCgStab,
 }
 
 impl LinearSolverSpec {
@@ -467,7 +465,7 @@ impl SolverRecipe {
     pub(crate) fn build_program_spec(&self) -> crate::solver::gpu::program::plan::ProgramSpec {
         use crate::solver::gpu::execution_plan::GraphExecMode;
         use crate::solver::gpu::program::plan::{
-            CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
+            CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
         };
 
         let mut program = ProgramSpecBuilder::new();
@@ -609,8 +607,6 @@ impl SolverRecipe {
             }
 
             SteppingMode::Coupled => {
-                // Coupled: if enabled → begin_step → init_prepare → while (before_iter → assembly → solve → clear_max_diff → update → convergence_advance) → finalize_step
-                let step_block = program.new_block();
                 let iter_block = program.new_block();
 
                 for node in [
@@ -623,10 +619,9 @@ impl SolverRecipe {
                         kind: GraphOpKind("coupled:init_prepare"),
                         mode: GraphExecMode::SingleSubmit,
                     },
-                    ProgramSpecNode::While {
+                    ProgramSpecNode::Repeat {
                         label: "coupled:outer_loop",
-                        max_iters: CountOpKind("coupled:max_iters"),
-                        cond: CondOpKind("coupled:should_continue"),
+                        times: CountOpKind("coupled:outer_iters"),
                         body: iter_block,
                     },
                     ProgramSpecNode::Host {
@@ -634,7 +629,7 @@ impl SolverRecipe {
                         kind: HostOpKind("coupled:finalize_step"),
                     },
                 ] {
-                    program.push(step_block, node);
+                    program.push(root, node);
                 }
 
                 for node in [
@@ -651,32 +646,14 @@ impl SolverRecipe {
                         label: "coupled:solve",
                         kind: HostOpKind("coupled:solve"),
                     },
-                    ProgramSpecNode::Host {
-                        label: "coupled:clear_max_diff",
-                        kind: HostOpKind("coupled:clear_max_diff"),
-                    },
                     ProgramSpecNode::Graph {
                         label: "coupled:update",
                         kind: GraphOpKind("coupled:update"),
                         mode: GraphExecMode::SingleSubmit,
                     },
-                    ProgramSpecNode::Host {
-                        label: "coupled:convergence_advance",
-                        kind: HostOpKind("coupled:convergence_advance"),
-                    },
                 ] {
                     program.push(iter_block, node);
                 }
-
-                program.push(
-                    root,
-                    ProgramSpecNode::If {
-                        label: "coupled:step_if_enabled",
-                        cond: CondOpKind("coupled:enabled"),
-                        then_block: step_block,
-                        else_block: None,
-                    },
-                );
             }
         }
 
@@ -946,15 +923,15 @@ mod tests {
 
         let spec = recipe.build_program_spec();
 
-        // Find a While node (outer corrector loop) anywhere in the program blocks.
-        let has_while = spec
+        // Find a Repeat node (outer corrector loop) anywhere in the program blocks.
+        let has_repeat = spec
             .blocks
             .iter()
             .flat_map(|b| b.nodes.iter())
-            .any(|n| matches!(n, ProgramSpecNode::While { .. }));
+            .any(|n| matches!(n, ProgramSpecNode::Repeat { .. }));
         assert!(
-            has_while,
-            "incompressible coupled spec should have a While loop"
+            has_repeat,
+            "incompressible coupled spec should have a Repeat loop"
         );
     }
 

@@ -6,8 +6,8 @@
 
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::program::plan::{
-    CondOpHandler, CondOpKind, CountOpHandler, CountOpKind, GpuProgramPlan, GraphOpHandler,
-    GraphOpKind, HostOpHandler, HostOpKind, ProgramOpRegistry,
+    CountOpHandler, CountOpKind, GpuProgramPlan, GraphOpHandler, GraphOpKind, HostOpHandler,
+    HostOpKind, ProgramOpRegistry,
 };
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 
@@ -34,13 +34,9 @@ pub struct UnifiedOpRegistryConfig {
     pub implicit_advance_outer_idx: Option<HostOpHandler>,
     pub implicit_outer_iters: Option<CountOpHandler>,
 
-    pub coupled_enabled: Option<CondOpHandler>,
     pub coupled_init_prepare_graph: Option<GraphOpHandler>,
     pub coupled_before_iter: Option<HostOpHandler>,
-    pub coupled_clear_max_diff: Option<HostOpHandler>,
-    pub coupled_convergence_advance: Option<HostOpHandler>,
-    pub coupled_should_continue: Option<CondOpHandler>,
-    pub coupled_max_iters: Option<CountOpHandler>,
+    pub coupled_outer_iters: Option<CountOpHandler>,
 }
 
 impl Default for UnifiedOpRegistryConfig {
@@ -61,13 +57,9 @@ impl Default for UnifiedOpRegistryConfig {
             implicit_after_apply: None,
             implicit_advance_outer_idx: None,
             implicit_outer_iters: None,
-            coupled_enabled: None,
             coupled_init_prepare_graph: None,
             coupled_before_iter: None,
-            coupled_clear_max_diff: None,
-            coupled_convergence_advance: None,
-            coupled_should_continue: None,
-            coupled_max_iters: None,
+            coupled_outer_iters: None,
         }
     }
 }
@@ -80,10 +72,6 @@ fn noop_graph(
     _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     (0.0, None)
-}
-
-fn cond_true(_plan: &GpuProgramPlan) -> bool {
-    true
 }
 
 fn count_one(_plan: &GpuProgramPlan) -> usize {
@@ -183,17 +171,9 @@ pub fn build_unified_registry(
         }
 
         SteppingMode::Coupled => {
-            registry.register_cond(
-                CondOpKind("coupled:enabled"),
-                config.coupled_enabled.unwrap_or(cond_true),
-            )?;
             registry.register_count(
-                CountOpKind("coupled:max_iters"),
-                config.coupled_max_iters.unwrap_or(count_one),
-            )?;
-            registry.register_cond(
-                CondOpKind("coupled:should_continue"),
-                config.coupled_should_continue.unwrap_or(cond_true),
+                CountOpKind("coupled:outer_iters"),
+                config.coupled_outer_iters.unwrap_or(count_one),
             )?;
 
             registry.register_host(
@@ -217,17 +197,9 @@ pub fn build_unified_registry(
                 HostOpKind("coupled:solve"),
                 config.solve.unwrap_or(noop_host),
             )?;
-            registry.register_host(
-                HostOpKind("coupled:clear_max_diff"),
-                config.coupled_clear_max_diff.unwrap_or(noop_host),
-            )?;
             registry.register_graph(
                 GraphOpKind("coupled:update"),
                 config.update_graph.unwrap_or(noop_graph),
-            )?;
-            registry.register_host(
-                HostOpKind("coupled:convergence_advance"),
-                config.coupled_convergence_advance.unwrap_or(noop_host),
             )?;
 
             registry.register_host(
@@ -281,18 +253,14 @@ mod tests {
         let registry = build_unified_registry(&recipe, config).expect("should build registry");
 
         // Registry should have the expected ops registered
-        assert!(registry.has_cond(&CondOpKind("coupled:enabled")));
-        assert!(registry.has_cond(&CondOpKind("coupled:should_continue")));
-        assert!(registry.has_count(&CountOpKind("coupled:max_iters")));
+        assert!(registry.has_count(&CountOpKind("coupled:outer_iters")));
 
         assert!(registry.has_host(&HostOpKind("coupled:begin_step")));
         assert!(registry.has_graph(&GraphOpKind("coupled:init_prepare")));
         assert!(registry.has_host(&HostOpKind("coupled:before_iter")));
         assert!(registry.has_graph(&GraphOpKind("coupled:assembly")));
         assert!(registry.has_host(&HostOpKind("coupled:solve")));
-        assert!(registry.has_host(&HostOpKind("coupled:clear_max_diff")));
         assert!(registry.has_graph(&GraphOpKind("coupled:update")));
-        assert!(registry.has_host(&HostOpKind("coupled:convergence_advance")));
         assert!(registry.has_host(&HostOpKind("coupled:finalize_step")));
     }
 }

@@ -57,12 +57,6 @@ impl KernelId {
     pub const GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE: KernelId =
         KernelId("generic_coupled_schur_setup/build_diag_and_pressure");
 
-    pub const PRECONDITIONER_BUILD_SCHUR_RHS: KernelId = KernelId("preconditioner/build_schur_rhs");
-    pub const PRECONDITIONER_FINALIZE_PRECOND: KernelId =
-        KernelId("preconditioner/finalize_precond");
-    pub const PRECONDITIONER_SPMV_PHAT_V: KernelId = KernelId("preconditioner/spmv_phat_v");
-    pub const PRECONDITIONER_SPMV_SHAT_T: KernelId = KernelId("preconditioner/spmv_shat_t");
-
     pub const GMRES_OPS_SPMV: KernelId = KernelId("gmres_ops/spmv");
     pub const GMRES_OPS_AXPY: KernelId = KernelId("gmres_ops/axpy");
     pub const GMRES_OPS_AXPY_FROM_Y: KernelId = KernelId("gmres_ops/axpy_from_y");

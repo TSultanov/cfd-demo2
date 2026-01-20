@@ -45,8 +45,10 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Structural cleanup (rename and collapse transitional modules)
-- Align naming to reflect the “one universal backend” reality (reduce `generic_coupled` vs `universal` vs `plans` confusion).
+### 1) UI responsiveness (optional surface)
+- Eliminate UI-thread blocking while the solver is running (no blocking `Mutex` waits in the UI thread).
+- Decouple visualization/readback cadence from console logging cadence.
+- Make solver re-init / solver-kind switching reliable (stop current worker, then init) without appearing to hang.
 
 ### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).

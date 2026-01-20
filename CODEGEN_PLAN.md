@@ -46,10 +46,19 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) UI surface pruning (optional surface)
-- Remove always-disabled controls and derive enabled/disabled state from `ModelSpec` (named params + boundary fields), not solver-family switches.
+### 1) UI: model selection + zero solver-family branching (optional surface)
+- Replace `SolverKind` with selecting a model by `ModelSpec.id` (from `crate::solver::model::all_models()`), and derive UI controls + defaults from `ModelSpec` (modules/named params/state layout/boundary spec).
+- Remove remaining “compressible vs incompressible” switches from the UI worker loop (adaptive `dt`, stats display, stop conditions, inlet update path) by keying off model capabilities instead.
+- Ensure UI repaint cadence is independent of console logging frequency (readback throttling + worker-driven snapshots).
 
-### 2) Ongoing hardening (evergreen)
+### 2) Meshgen: move experiments out of the core tree (optional surface)
+- Keep `src/solver/mesh/*` minimal (core structs + structured mesh constructors used by OpenFOAM reference tests).
+- Move the experimental `meshgen` algorithms out of `src/solver/mesh/*` into a separate crate or a dedicated `src/meshgen/*` module, and delete anything not referenced by `ui_meshgen`, benches, or `dev-tests`.
+
+### 3) Repro / profiling harness quarantine (optional surface)
+- Move `examples/reproduce_*` and long-running profiling entrypoints behind explicit features (or into a separate crate) so core builds stay fast and uncluttered.
+
+### 4) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

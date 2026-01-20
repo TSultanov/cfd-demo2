@@ -72,7 +72,6 @@ impl ScalarCgModule {
         bg_dot_p_v: &wgpu::BindGroup,
         bg_dot_r_r: &wgpu::BindGroup,
         bg_scalars: &wgpu::BindGroup,
-        bgl_dot_pair_inputs: &wgpu::BindGroupLayout,
         pipeline_spmv_p_v: &wgpu::ComputePipeline,
         pipeline_dot: &wgpu::ComputePipeline,
         pipeline_dot_pair: &wgpu::ComputePipeline,
@@ -83,6 +82,7 @@ impl ScalarCgModule {
         pipeline_reduce_rho_new_r_r: &wgpu::ComputePipeline,
         device: &wgpu::Device,
     ) -> Self {
+        let bgl_dot_pair_inputs = pipeline_dot_pair.get_bind_group_layout(1);
         let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
             .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
         let registry = ResourceRegistry::new()
@@ -95,7 +95,7 @@ impl ScalarCgModule {
         let bg_dot_pair_r0r_rr = wgsl_reflect::create_bind_group_from_bindings(
             device,
             "Dot Pair R0R RR Bind Group (CG module)",
-            bgl_dot_pair_inputs,
+            &bgl_dot_pair_inputs,
             dot_pair_src.bindings,
             1,
             |name| registry.resolve(name),

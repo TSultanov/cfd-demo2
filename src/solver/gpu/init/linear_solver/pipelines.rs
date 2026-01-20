@@ -6,31 +6,16 @@ use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
 pub struct PipelineResources {
-    pub bg_solver: wgpu::BindGroup,
     pub bg_linear_matrix: wgpu::BindGroup,
     pub bg_linear_state: wgpu::BindGroup,
     pub bg_dot_params: wgpu::BindGroup,
-    pub bg_dot_r0_v: wgpu::BindGroup,
     pub bg_dot_p_v: wgpu::BindGroup,
     pub bg_dot_r_r: wgpu::BindGroup,
-    pub bg_dot_pair_r0r_rr: wgpu::BindGroup,
-    pub bg_dot_pair_tstt: wgpu::BindGroup,
-    pub bgl_solver: wgpu::BindGroupLayout,
-    pub bgl_linear_matrix: wgpu::BindGroupLayout,
-    pub bgl_linear_state: wgpu::BindGroupLayout,
     pub pipeline_spmv_p_v: wgpu::ComputePipeline,
-    pub pipeline_spmv_s_t: wgpu::ComputePipeline,
     pub pipeline_dot: wgpu::ComputePipeline,
     pub pipeline_dot_pair: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_x_r: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_p: wgpu::ComputePipeline,
-    pub pipeline_bicgstab_update_s: wgpu::ComputePipeline,
     pub pipeline_cg_update_x_r: wgpu::ComputePipeline,
     pub pipeline_cg_update_p: wgpu::ComputePipeline,
-
-    pub bgl_dot_params: wgpu::BindGroupLayout,
-    pub bgl_dot_inputs: wgpu::BindGroupLayout,
-    pub bgl_dot_pair_inputs: wgpu::BindGroupLayout,
 }
 
 pub fn init_pipelines(
@@ -42,13 +27,6 @@ pub fn init_pipelines(
     let linear_src = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
         .unwrap_or_else(|err| panic!("missing linear_solver/spmv_p_v kernel: {err}"));
     let pipeline_spmv_p_v = (linear_src.create_pipeline)(device);
-    let pipeline_spmv_s_t = {
-        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_S_T)
-            .unwrap_or_else(|err| {
-                panic!("missing linear_solver/spmv_s_t kernel registry entry: {err}")
-            });
-        (source.create_pipeline)(device)
-    };
 
     let dot_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
         .unwrap_or_else(|err| panic!("missing dot_product kernel: {err}"));
@@ -57,33 +35,6 @@ pub fn init_pipelines(
     let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
         .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
     let pipeline_dot_pair = (dot_pair_src.create_pipeline)(device);
-
-    let pipeline_bicgstab_update_x_r = {
-        let source = kernel_registry::kernel_source_by_id(
-            "",
-            KernelId::LINEAR_SOLVER_BICGSTAB_UPDATE_X_R,
-        )
-        .unwrap_or_else(|err| {
-            panic!("missing linear_solver/bicgstab_update_x_r kernel registry entry: {err}")
-        });
-        (source.create_pipeline)(device)
-    };
-    let pipeline_bicgstab_update_p = {
-        let source =
-            kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_BICGSTAB_UPDATE_P)
-                .unwrap_or_else(|err| {
-                    panic!("missing linear_solver/bicgstab_update_p kernel registry entry: {err}")
-                });
-        (source.create_pipeline)(device)
-    };
-    let pipeline_bicgstab_update_s = {
-        let source =
-            kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_BICGSTAB_UPDATE_S)
-                .unwrap_or_else(|err| {
-                    panic!("missing linear_solver/bicgstab_update_s kernel registry entry: {err}")
-                });
-        (source.create_pipeline)(device)
-    };
     let pipeline_cg_update_x_r = {
         let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)
             .unwrap_or_else(|err| {
@@ -104,7 +55,6 @@ pub fn init_pipelines(
 
     let bgl_dot_params = pipeline_dot.get_bind_group_layout(0);
     let bgl_dot_inputs = pipeline_dot.get_bind_group_layout(1);
-    let bgl_dot_pair_inputs = pipeline_dot_pair.get_bind_group_layout(1);
 
     let linear_registry = ResourceRegistry::new()
         .with_buffer("x", &state.b_x)
@@ -150,22 +100,6 @@ pub fn init_pipelines(
     )
     .unwrap_or_else(|err| panic!("failed to create dot params bind group: {err}"));
 
-    let bg_dot_r0_v = {
-        let registry = ResourceRegistry::new()
-            .with_buffer("dot_result", &state.b_dot_result)
-            .with_buffer("dot_a", &state.b_r0)
-            .with_buffer("dot_b", &state.b_v);
-        wgsl_reflect::create_bind_group_from_bindings(
-            device,
-            "Dot R0 V Bind Group",
-            &bgl_dot_inputs,
-            dot_src.bindings,
-            1,
-            |name| registry.resolve(name),
-        )
-        .unwrap_or_else(|err| panic!("failed to create dot r0_v bind group: {err}"))
-    };
-
     let bg_dot_p_v = {
         let registry = ResourceRegistry::new()
             .with_buffer("dot_result", &state.b_dot_result)
@@ -198,68 +132,16 @@ pub fn init_pipelines(
         .unwrap_or_else(|err| panic!("failed to create dot r_r bind group: {err}"))
     };
 
-    let bg_dot_pair_r0r_rr = {
-        let registry = ResourceRegistry::new()
-            .with_buffer("dot_result_a", &state.b_dot_result)
-            .with_buffer("dot_result_b", &state.b_dot_result_2)
-            .with_buffer("dot_a0", &state.b_r0)
-            .with_buffer("dot_b0", &state.b_r)
-            .with_buffer("dot_a1", &state.b_r)
-            .with_buffer("dot_b1", &state.b_r);
-        wgsl_reflect::create_bind_group_from_bindings(
-            device,
-            "Dot Pair R0R & RR Bind Group",
-            &bgl_dot_pair_inputs,
-            dot_pair_src.bindings,
-            1,
-            |name| registry.resolve(name),
-        )
-        .unwrap_or_else(|err| panic!("failed to create dot pair r0r_rr bind group: {err}"))
-    };
-
-    let bg_dot_pair_tstt = {
-        let registry = ResourceRegistry::new()
-            .with_buffer("dot_result_a", &state.b_dot_result)
-            .with_buffer("dot_result_b", &state.b_dot_result_2)
-            .with_buffer("dot_a0", &state.b_t)
-            .with_buffer("dot_b0", &state.b_s)
-            .with_buffer("dot_a1", &state.b_t)
-            .with_buffer("dot_b1", &state.b_t);
-        wgsl_reflect::create_bind_group_from_bindings(
-            device,
-            "Dot Pair TS & TT Bind Group",
-            &bgl_dot_pair_inputs,
-            dot_pair_src.bindings,
-            1,
-            |name| registry.resolve(name),
-        )
-        .unwrap_or_else(|err| panic!("failed to create dot pair tstt bind group: {err}"))
-    };
-
     PipelineResources {
-        bg_solver: bg_linear_state.clone(),
         bg_linear_matrix,
-        bg_linear_state: bg_linear_state.clone(),
+        bg_linear_state,
         bg_dot_params,
-        bg_dot_r0_v,
         bg_dot_p_v,
         bg_dot_r_r,
-        bg_dot_pair_r0r_rr,
-        bg_dot_pair_tstt,
-        bgl_solver: bgl_linear_state.clone(),
-        bgl_linear_matrix,
-        bgl_linear_state,
         pipeline_spmv_p_v,
-        pipeline_spmv_s_t,
         pipeline_dot,
         pipeline_dot_pair,
-        pipeline_bicgstab_update_x_r,
-        pipeline_bicgstab_update_p,
-        pipeline_bicgstab_update_s,
         pipeline_cg_update_x_r,
         pipeline_cg_update_p,
-        bgl_dot_params,
-        bgl_dot_inputs,
-        bgl_dot_pair_inputs,
     }
 }

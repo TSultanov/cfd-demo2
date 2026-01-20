@@ -174,10 +174,16 @@ fn main() {
 
     enforce_codegen_ir_boundary(&manifest_dir);
 
+    let mut model_codegen_inputs: Vec<PathBuf> = Vec::new();
+
     println!("cargo:rerun-if-changed=src/solver/scheme.rs");
+    model_codegen_inputs.push(PathBuf::from("src/solver/scheme.rs"));
     for entry in glob("src/solver/model/**/*.rs").expect("Failed to read model glob") {
         match entry {
-            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
+            Ok(path) => {
+                println!("cargo:rerun-if-changed={}", path.display());
+                model_codegen_inputs.push(path);
+            }
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
@@ -185,13 +191,19 @@ fn main() {
         glob("crates/cfd2_codegen/src/solver/codegen/**/*.rs").expect("Failed to read codegen glob")
     {
         match entry {
-            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
+            Ok(path) => {
+                println!("cargo:rerun-if-changed={}", path.display());
+                model_codegen_inputs.push(path);
+            }
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
     for entry in glob("crates/cfd2_ir/src/solver/**/*.rs").expect("Failed to read ir glob") {
         match entry {
-            Ok(path) => println!("cargo:rerun-if-changed={}", path.display()),
+            Ok(path) => {
+                println!("cargo:rerun-if-changed={}", path.display());
+                model_codegen_inputs.push(path);
+            }
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
@@ -209,27 +221,42 @@ fn main() {
 
     let models = solver::model::all_models();
 
-    let shared_kernels = solver::model::kernel::emit_shared_kernels_wgsl_with_ids_for_models(
-        &manifest_dir,
-        &models,
-        &schemes,
-    )
-    .unwrap_or_else(|err| panic!("codegen failed for shared kernels: {err}"));
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
+    let model_codegen_fingerprint = fingerprint_files(&model_codegen_inputs);
+    let model_codegen_fingerprint_path =
+        PathBuf::from(&out_dir).join("cfd2_model_codegen_fingerprint.txt");
+    let prev_model_codegen_fingerprint = read_u64_hex(&model_codegen_fingerprint_path);
 
-    let mut per_model_kernels: Vec<(String, solver::model::KernelId, PathBuf)> = Vec::new();
-    for model in &models {
-        let emitted = solver::model::kernel::emit_model_kernels_wgsl_with_ids(
+    let shader_dir = PathBuf::from(&manifest_dir)
+        .join("src")
+        .join("solver")
+        .join("gpu")
+        .join("shaders");
+    let generated_dir = shader_dir.join("generated");
+    let has_generated_kernels = !list_wgsl_files_recursive(&generated_dir).is_empty();
+
+    let should_regenerate_model_kernels = !has_generated_kernels
+        || prev_model_codegen_fingerprint
+            .map(|prev| prev != model_codegen_fingerprint)
+            .unwrap_or(true);
+
+    if should_regenerate_model_kernels {
+        solver::model::kernel::emit_shared_kernels_wgsl_with_ids_for_models(
             &manifest_dir,
-            model,
+            &models,
             &schemes,
         )
-        .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
-        for (kernel_id, path) in emitted {
-            per_model_kernels.push((model.id.to_string(), kernel_id, path));
+        .unwrap_or_else(|err| panic!("codegen failed for shared kernels: {err}"));
+
+        for model in &models {
+            solver::model::kernel::emit_model_kernels_wgsl_with_ids(&manifest_dir, model, &schemes)
+                .unwrap_or_else(|err| panic!("codegen failed for model '{}': {err}", model.id));
         }
+
+        write_u64_hex(&model_codegen_fingerprint_path, model_codegen_fingerprint);
     }
 
-    generate_kernel_registry_map(&manifest_dir, &shared_kernels, &per_model_kernels);
+    generate_kernel_registry_map(&manifest_dir, &models);
     generate_named_param_registry(&manifest_dir);
 
     for entry in glob("src/solver/gpu/shaders/**/*.wgsl").expect("Failed to read glob pattern") {
@@ -312,37 +339,42 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
 
 fn generate_kernel_registry_map(
     manifest_dir: &str,
-    shared_kernels: &[(solver::model::KernelId, PathBuf)],
-    per_model_kernels: &[(String, solver::model::KernelId, PathBuf)],
+    models: &[solver::model::ModelSpec],
 ) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("kernel_registry_map.rs");
 
     let mut per_model_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> = Vec::new();
-    for (model_id, kernel_id, path) in per_model_kernels {
-        let src = fs::read_to_string(path)
-            .unwrap_or_else(|err| panic!("failed to read generated WGSL '{}': {err}", path.display()));
-        let bindings = parse_wgsl_bindings(&src);
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
-        let module_name = sanitize_rust_ident(stem);
-        per_model_entries.push((
-            model_id.to_string(),
-            kernel_id.as_str().to_string(),
-            module_name,
-            bindings,
-        ));
+    let mut shared_entries: Vec<(String, String, Vec<(u32, u32, String)>)> = Vec::new();
+
+    let shader_dir = PathBuf::from(manifest_dir)
+        .join("src")
+        .join("solver")
+        .join("gpu")
+        .join("shaders");
+    let generated_dir = shader_dir.join("generated");
+
+    let mut shared_kernel_ids: std::collections::HashSet<solver::model::KernelId> =
+        std::collections::HashSet::new();
+    for model in models {
+        for module in &model.modules {
+            let module: &dyn solver::model::module::ModelModule = module;
+            for gen in module.kernel_generators() {
+                if gen.scope == solver::model::kernel::KernelWgslScope::Shared {
+                    shared_kernel_ids.insert(gen.id);
+                }
+            }
+        }
     }
 
-    per_model_entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    per_model_entries.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    let mut shared_kernel_ids: Vec<solver::model::KernelId> = shared_kernel_ids.into_iter().collect();
+    shared_kernel_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
-    // Shared generated kernels (global, no model id suffix).
-    let mut shared_entries: Vec<(String, String, Vec<(u32, u32, String)>)> = Vec::new();
-    for (kernel_id, path) in shared_kernels {
-        let src = fs::read_to_string(path)
+    for kernel_id in shared_kernel_ids {
+        let filename = solver::model::kernel::kernel_output_name_for_model("", kernel_id)
+            .unwrap_or_else(|err| panic!("failed to compute shared kernel output name: {err}"));
+        let path = generated_dir.join(filename);
+        let src = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("failed to read generated WGSL '{}': {err}", path.display()));
         let bindings = parse_wgsl_bindings(&src);
         let stem = path
@@ -352,15 +384,53 @@ fn generate_kernel_registry_map(
         let module_name = sanitize_rust_ident(stem);
         shared_entries.push((kernel_id.as_str().to_string(), module_name, bindings));
     }
+
+    for model in models {
+        let mut seen: std::collections::HashSet<solver::model::KernelId> =
+            std::collections::HashSet::new();
+        for module in &model.modules {
+            let module: &dyn solver::model::module::ModelModule = module;
+            for gen in module.kernel_generators() {
+                if gen.scope != solver::model::kernel::KernelWgslScope::PerModel {
+                    continue;
+                }
+                if !seen.insert(gen.id) {
+                    continue;
+                }
+                let filename =
+                    solver::model::kernel::kernel_output_name_for_model(model.id, gen.id)
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "failed to compute per-model kernel output name for model '{}': {err}",
+                                model.id
+                            )
+                        });
+                let path = generated_dir.join(filename);
+                let src = fs::read_to_string(&path).unwrap_or_else(|err| {
+                    panic!("failed to read generated WGSL '{}': {err}", path.display())
+                });
+                let bindings = parse_wgsl_bindings(&src);
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
+                let module_name = sanitize_rust_ident(stem);
+                per_model_entries.push((
+                    model.id.to_string(),
+                    gen.id.as_str().to_string(),
+                    module_name,
+                    bindings,
+                ));
+            }
+        }
+    }
+
+    per_model_entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    per_model_entries.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+
     shared_entries.sort_by(|a, b| a.0.cmp(&b.0));
     shared_entries.dedup_by(|a, b| a.0 == b.0);
 
-    let shader_dir = PathBuf::from(manifest_dir)
-        .join("src")
-        .join("solver")
-        .join("gpu")
-        .join("shaders");
-    let generated_dir = shader_dir.join("generated");
     let mut handwritten_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> = Vec::new();
     for path in list_wgsl_files_recursive(&shader_dir) {
         // Handwritten kernels only: generated WGSL is mapped separately via per-model/shared entries.
@@ -747,4 +817,45 @@ fn write_if_changed(path: &PathBuf, contents: &str) {
         let _ = fs::create_dir_all(parent);
     }
     fs::write(path, contents).expect("Failed to write generated registry file");
+}
+
+fn fingerprint_files(paths: &[PathBuf]) -> u64 {
+    const FNV_OFFSET: u64 = 14695981039346656037;
+    const FNV_PRIME: u64 = 1099511628211;
+
+    let mut sorted: Vec<&PathBuf> = paths.iter().collect();
+    sorted.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
+
+    let mut hash = FNV_OFFSET;
+    for path in sorted {
+        let bytes = path.to_string_lossy();
+        for b in bytes.as_bytes() {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(FNV_PRIME);
+
+        let data = fs::read(path)
+            .unwrap_or_else(|err| panic!("failed to read fingerprint input '{}': {err}", path.display()));
+        for b in &data {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        hash ^= 0xfe;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+fn read_u64_hex(path: &PathBuf) -> Option<u64> {
+    let raw = fs::read_to_string(path).ok()?;
+    u64::from_str_radix(raw.trim(), 16).ok()
+}
+
+fn write_u64_hex(path: &PathBuf, value: u64) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(path, format!("{value:016x}\n")).expect("Failed to write fingerprint file");
 }

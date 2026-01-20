@@ -1,9 +1,9 @@
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
-use crate::solver::gpu::plans::build_plan_instance;
-use crate::solver::gpu::plans::plan_instance::{
+use crate::solver::gpu::program::build_program_plan;
+use crate::solver::gpu::program::plan_instance::{
     PlanAction, PlanInitConfig, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::plans::program::GpuProgramPlan;
+use crate::solver::gpu::program::plan::GpuProgramPlan;
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
@@ -13,7 +13,7 @@ use crate::solver::model::backend::FieldKind;
 use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
-pub use crate::solver::gpu::plans::plan_instance::FgmresSizing;
+pub use crate::solver::gpu::program::plan_instance::FgmresSizing;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SolverConfig {
@@ -54,7 +54,7 @@ impl GpuUnifiedSolver {
             config.preconditioner,
         )?;
 
-        let plan = build_plan_instance(
+        let plan = build_program_plan(
             mesh,
             &model,
             PlanInitConfig {

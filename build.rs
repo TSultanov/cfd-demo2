@@ -533,7 +533,7 @@ fn generate_named_param_registry(manifest_dir: &str) {
     code.push_str("pub(crate) fn named_param_handler_for_key(\n");
     code.push_str("    module: &str,\n");
     code.push_str("    key: &'static str,\n");
-    code.push_str(") -> Option<crate::solver::gpu::plans::program::ProgramParamHandler> {\n");
+    code.push_str(") -> Option<crate::solver::gpu::program::plan::ProgramParamHandler> {\n");
     code.push_str("    match module {\n");
     for (name, ident) in &modules {
         code.push_str(&format!(

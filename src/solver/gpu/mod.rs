@@ -8,7 +8,7 @@ pub mod init;
 pub mod linear_solver;
 pub(crate) mod lowering;
 pub mod modules;
-pub(crate) mod plans;
+pub(crate) mod program;
 pub mod profiling;
 pub mod readback;
 pub mod recipe;

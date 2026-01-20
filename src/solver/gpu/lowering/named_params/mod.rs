@@ -1,4 +1,4 @@
-use crate::solver::gpu::plans::program::ProgramParamHandler;
+use crate::solver::gpu::program::plan::ProgramParamHandler;
 use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
 

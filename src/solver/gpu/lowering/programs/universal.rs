@@ -1,11 +1,9 @@
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
-use crate::solver::gpu::lowering::models::generic_coupled as generic_coupled_model;
-use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
+use super::generic_coupled as generic_coupled_program;
+use super::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
-use crate::solver::gpu::plans::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug, PlanStepStats,
-};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanStepStats};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::LinearSolverStats;
 
@@ -104,8 +102,8 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
                 coupled_should_continue: Some(coupled_should_continue),
                 coupled_max_iters: Some(coupled_max_iters),
 
-                assembly_graph: Some(generic_coupled_model::assembly_graph_run),
-                update_graph: Some(generic_coupled_model::update_graph_run),
+                assembly_graph: Some(generic_coupled_program::assembly_graph_run),
+                update_graph: Some(generic_coupled_program::update_graph_run),
                 ..Default::default()
             }
         }
@@ -119,26 +117,26 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
 // --- Universal program spec callbacks ---
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
-    generic_coupled_model::spec_num_cells(plan)
+    generic_coupled_program::spec_num_cells(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_time(plan: &GpuProgramPlan) -> f32 {
-    generic_coupled_model::spec_time(plan)
+    generic_coupled_program::spec_time(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_dt(plan: &GpuProgramPlan) -> f32 {
-    generic_coupled_model::spec_dt(plan)
+    generic_coupled_program::spec_dt(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
-    generic_coupled_model::spec_state_buffer(plan)
+    generic_coupled_program::spec_state_buffer(plan)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     plan: &GpuProgramPlan,
     bytes: &[u8],
 ) -> Result<(), String> {
-    generic_coupled_model::spec_write_state_bytes(plan, bytes)
+    generic_coupled_program::spec_write_state_bytes(plan, bytes)
 }
 
 pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
@@ -147,7 +145,7 @@ pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
     unknown_component: u32,
     value: f32,
 ) -> Result<(), String> {
-    generic_coupled_model::spec_set_bc_value(plan, boundary, unknown_component, value)
+    generic_coupled_program::spec_set_bc_value(plan, boundary, unknown_component, value)
 }
 
 pub(in crate::solver::gpu::lowering) fn step_stats(_plan: &GpuProgramPlan) -> PlanStepStats {
@@ -164,7 +162,7 @@ pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
 // --- Generic-coupled handlers (explicit/implicit) ---
 
 fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_prepare_step(plan);
+    generic_coupled_program::host_prepare_step(plan);
 }
 
 fn explicit_graph_run(
@@ -172,19 +170,19 @@ fn explicit_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_model::explicit_graph_run(plan, context, mode)
+    generic_coupled_program::explicit_graph_run(plan, context, mode)
 }
 
 fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_finalize_step(plan);
+    generic_coupled_program::host_finalize_step(plan);
 }
 
 fn implicit_outer_iters(plan: &GpuProgramPlan) -> usize {
-    generic_coupled_model::count_outer_iters(plan)
+    generic_coupled_program::count_outer_iters(plan)
 }
 
 fn host_implicit_prepare(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_prepare_step(plan);
+    generic_coupled_program::host_prepare_step(plan);
 }
 
 fn host_implicit_set_iter_params(_plan: &mut GpuProgramPlan) {}
@@ -194,11 +192,11 @@ fn implicit_grad_assembly_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_model::assembly_graph_run(plan, context, mode)
+    generic_coupled_program::assembly_graph_run(plan, context, mode)
 }
 
 fn host_implicit_solve_fgmres(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_solve_linear_system(plan);
+    generic_coupled_program::host_solve_linear_system(plan);
 }
 
 fn host_implicit_record_stats(_plan: &mut GpuProgramPlan) {}
@@ -208,11 +206,11 @@ fn implicit_snapshot_run(
     context: &crate::solver::gpu::context::GpuContext,
     _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_model::implicit_snapshot_run(plan, context, GraphExecMode::SingleSubmit)
+    generic_coupled_program::implicit_snapshot_run(plan, context, GraphExecMode::SingleSubmit)
 }
 
 fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_implicit_set_alpha_for_apply(plan);
+    generic_coupled_program::host_implicit_set_alpha_for_apply(plan);
 }
 
 fn implicit_apply_graph_run(
@@ -220,11 +218,11 @@ fn implicit_apply_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_model::apply_graph_run(plan, context, mode)
+    generic_coupled_program::apply_graph_run(plan, context, mode)
 }
 
 fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_implicit_restore_alpha(plan);
+    generic_coupled_program::host_implicit_restore_alpha(plan);
 }
 
 fn host_implicit_advance_outer_idx(_plan: &mut GpuProgramPlan) {}
@@ -234,11 +232,11 @@ fn primitive_update_graph_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_model::update_graph_run(plan, context, mode)
+    generic_coupled_program::update_graph_run(plan, context, mode)
 }
 
 fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_finalize_step(plan);
+    generic_coupled_program::host_finalize_step(plan);
 }
 
 // --- Coupled handlers ---
@@ -253,13 +251,13 @@ fn coupled_graph_init_prepare_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_model::init_prepare_graph_run(plan, context, mode)
+    generic_coupled_program::init_prepare_graph_run(plan, context, mode)
 }
 
 fn coupled_max_iters(plan: &GpuProgramPlan) -> usize {
     // Use the same `OuterIters` knob as the implicit path so tests/UI can control the number of
     // nonlinear corrector iterations per step for coupled methods (e.g. incompressible SIMPLE).
-    generic_coupled_model::count_outer_iters(plan)
+    generic_coupled_program::count_outer_iters(plan)
 }
 
 fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
@@ -268,18 +266,18 @@ fn coupled_should_continue(plan: &GpuProgramPlan) -> bool {
 }
 
 fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_prepare_step(plan);
+    generic_coupled_program::host_prepare_step(plan);
 }
 
 fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     // After the first iteration begins, we can stop running one-time preparation
     // kernels (e.g. `dp_init`) on subsequent steps unless a parameter change
     // re-enables them.
-    generic_coupled_model::clear_dp_init_needed(plan);
+    generic_coupled_program::clear_dp_init_needed(plan);
 }
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_solve_linear_system(plan);
+    generic_coupled_program::host_solve_linear_system(plan);
 }
 
 fn host_coupled_clear_max_diff(plan: &mut GpuProgramPlan) {
@@ -291,5 +289,5 @@ fn host_coupled_convergence_and_advance(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {
-    generic_coupled_model::host_finalize_step(plan);
+    generic_coupled_program::host_finalize_step(plan);
 }

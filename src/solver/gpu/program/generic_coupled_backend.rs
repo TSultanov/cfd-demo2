@@ -2,7 +2,7 @@ use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::lowering::models::generic_coupled::GenericCoupledProgramResources;
+use crate::solver::gpu::lowering::programs::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;

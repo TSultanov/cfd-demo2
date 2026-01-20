@@ -1,10 +1,10 @@
-use crate::solver::gpu::plans::plan_instance::{PlanInitConfig, PlanParamValue};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramOpRegistry};
+use crate::solver::gpu::program::plan_instance::{PlanInitConfig, PlanParamValue};
 use crate::solver::gpu::recipe::SolverRecipe;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 
-use super::models;
+use super::programs;
 use super::types::{LoweredProgramParts, ModelGpuProgramSpecParts};
 
 pub(crate) async fn lower_program_model_driven(
@@ -97,7 +97,7 @@ async fn lower_parts_for_model(
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
     // Otherwise, select the runtime backend based on the derived recipe structure.
-    let built = crate::solver::gpu::plans::generic_coupled::build_generic_coupled_backend(
+    let built = crate::solver::gpu::program::generic_coupled_backend::build_generic_coupled_backend(
         mesh,
         model.clone(),
         recipe.clone(),
@@ -107,14 +107,14 @@ async fn lower_parts_for_model(
     .await?;
 
     let mut ops = ProgramOpRegistry::new();
-    models::universal::register_ops_from_recipe(&recipe, &mut ops)?;
+    programs::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
-    let mut resources = crate::solver::gpu::plans::program::ProgramResources::new();
-    resources.insert(models::universal::UniversalProgramResources::new_generic_coupled(
+    let mut resources = crate::solver::gpu::program::plan::ProgramResources::new();
+    resources.insert(programs::universal::UniversalProgramResources::new_generic_coupled(
         built.backend,
     ));
 
-    let named_params = models::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
+    let named_params = programs::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
 
     Ok(LoweredProgramParts {
         model: built.model,
@@ -123,18 +123,18 @@ async fn lower_parts_for_model(
         resources,
         spec: ModelGpuProgramSpecParts {
             ops,
-            num_cells: models::universal::spec_num_cells,
-            time: models::universal::spec_time,
-            dt: models::universal::spec_dt,
-            state_buffer: models::universal::spec_state_buffer,
-            write_state_bytes: models::universal::spec_write_state_bytes,
-            set_bc_value: Some(models::universal::spec_set_bc_value),
+            num_cells: programs::universal::spec_num_cells,
+            time: programs::universal::spec_time,
+            dt: programs::universal::spec_dt,
+            state_buffer: programs::universal::spec_state_buffer,
+            write_state_bytes: programs::universal::spec_write_state_bytes,
+            set_bc_value: Some(programs::universal::spec_set_bc_value),
             initialize_history: None,
             named_params,
             set_named_param_fallback: None,
-            step_stats: Some(models::universal::step_stats),
+            step_stats: Some(programs::universal::step_stats),
             step_with_stats: None,
-            linear_debug: Some(models::universal::linear_debug_provider),
+            linear_debug: Some(programs::universal::linear_debug_provider),
         },
     })
 }

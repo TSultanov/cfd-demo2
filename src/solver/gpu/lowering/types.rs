@@ -1,5 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::plans::program::{
+use crate::solver::gpu::program::plan::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
     ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources, ProgramSetBcValueFn,
     ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn,

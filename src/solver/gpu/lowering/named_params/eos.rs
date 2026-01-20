@@ -1,7 +1,7 @@
-use crate::solver::gpu::plans::program::ProgramParamHandler;
+use crate::solver::gpu::program::plan::ProgramParamHandler;
 
 pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> {
-    use crate::solver::gpu::lowering::models::generic_coupled;
+    use crate::solver::gpu::lowering::programs::generic_coupled;
 
     match key {
         "eos.gamma" => Some(generic_coupled::param_eos_gamma),

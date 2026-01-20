@@ -464,9 +464,9 @@ impl SolverRecipe {
     ///
     /// This generates the execution sequence (prepare → assembly → solve → update → finalize)
     /// based on the stepping mode and kernel requirements.
-    pub(crate) fn build_program_spec(&self) -> crate::solver::gpu::plans::program::ProgramSpec {
+    pub(crate) fn build_program_spec(&self) -> crate::solver::gpu::program::plan::ProgramSpec {
         use crate::solver::gpu::execution_plan::GraphExecMode;
-        use crate::solver::gpu::plans::program::{
+        use crate::solver::gpu::program::plan::{
             CondOpKind, CountOpKind, GraphOpKind, HostOpKind, ProgramSpecBuilder, ProgramSpecNode,
         };
 
@@ -689,7 +689,7 @@ impl SolverRecipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::gpu::plans::program::ProgramSpecNode;
+    use crate::solver::gpu::program::plan::ProgramSpecNode;
     use crate::solver::model::generic_diffusion_demo_model;
     use crate::solver::model::{
         compressible_model, incompressible_momentum_generic_model, incompressible_momentum_model,

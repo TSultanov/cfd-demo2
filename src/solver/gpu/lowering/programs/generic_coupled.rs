@@ -1,6 +1,6 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
-use crate::solver::gpu::lowering::models::universal::UniversalProgramResources;
+use super::universal::UniversalProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
 use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
@@ -15,8 +15,8 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
-use crate::solver::gpu::plans::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
-use crate::solver::gpu::plans::program::{GpuProgramPlan, ProgramParamHandler};
+use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramParamHandler};
+use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{

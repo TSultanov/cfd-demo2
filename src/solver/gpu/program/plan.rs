@@ -1,8 +1,6 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
-use crate::solver::gpu::plans::plan_instance::{
-    PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats,
-};
+use super::plan_instance::{PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 use crate::solver::gpu::structs::LinearSolverStats;

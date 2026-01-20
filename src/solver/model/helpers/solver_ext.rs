@@ -1,4 +1,4 @@
-use crate::solver::gpu::plans::plan_instance::PlanParamValue;
+use crate::solver::gpu::program::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};

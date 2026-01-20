@@ -2,7 +2,7 @@ use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
 
 use super::geometry::Geometry;
-use super::Mesh;
+use crate::solver::mesh::Mesh;
 
 impl Mesh {
     pub fn smooth<G: Geometry + Sync>(&mut self, geo: &G, target_skew: f64, max_iterations: usize) {

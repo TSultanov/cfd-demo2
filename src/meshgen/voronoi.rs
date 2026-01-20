@@ -1,6 +1,6 @@
 use super::delaunay::{triangulate, Edge};
 use super::geometry::Geometry;
-use super::structs::{BoundaryType, Mesh};
+use crate::solver::mesh::{BoundaryType, Mesh};
 use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};

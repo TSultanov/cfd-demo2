@@ -27,4 +27,3 @@ pub(super) fn intersect_lines(
 
     Some(Point2::new(x, y))
 }
-

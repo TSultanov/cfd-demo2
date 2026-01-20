@@ -1,7 +1,6 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
-use cfd2::solver::mesh::geometry::ChannelWithObstacle;
-use cfd2::solver::mesh::{generate_cut_cell_mesh, Mesh};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
     SolverInletVelocityExt, SolverRuntimeParamsExt,

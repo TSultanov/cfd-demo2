@@ -2,7 +2,7 @@ use nalgebra::{Point2, Vector2};
 use std::collections::{HashMap, HashSet};
 
 use super::geometry::Geometry;
-use super::structs::{BoundaryType, Mesh};
+use crate::solver::mesh::{BoundaryType, Mesh};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Edge {

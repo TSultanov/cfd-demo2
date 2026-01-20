@@ -59,6 +59,7 @@ pub struct FgmresCore<'a> {
     pub bg_cgs: &'a wgpu::BindGroup,
 
     pub bgl_vectors: &'a wgpu::BindGroupLayout,
+    pub vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
 
     pub pipeline_spmv: &'a wgpu::ComputePipeline,
     pub pipeline_scale: &'a wgpu::ComputePipeline,
@@ -118,6 +119,7 @@ pub struct FgmresWorkspace {
     b_staging_scalar: wgpu::Buffer,
 
     bgl_vectors: wgpu::BindGroupLayout,
+    vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
     bgl_matrix: wgpu::BindGroupLayout,
     bgl_precond: wgpu::BindGroupLayout,
     bgl_params: wgpu::BindGroupLayout,
@@ -507,6 +509,7 @@ impl FgmresWorkspace {
             b_y,
             b_staging_scalar,
             bgl_vectors,
+            vector_bindings: ops_bindings,
             bgl_matrix,
             bgl_precond,
             bgl_params,
@@ -581,6 +584,7 @@ impl FgmresWorkspace {
             bg_logic_params: &self.bg_logic_params,
             bg_cgs: &self.bg_cgs,
             bgl_vectors: &self.bgl_vectors,
+            vector_bindings: self.vector_bindings,
             pipeline_spmv: &self.pipeline_spmv,
             pipeline_scale: &self.pipeline_scale,
             pipeline_norm_sq: &self.pipeline_norm_sq,
@@ -899,7 +903,7 @@ impl FgmresWorkspace {
         z: wgpu::BindingResource<'a>,
         label: &str,
     ) -> wgpu::BindGroup {
-        create_vector_bind_group(device, &self.bgl_vectors, x, y, z, label)
+        create_vector_bind_group(device, &self.bgl_vectors, self.vector_bindings, x, y, z, label)
     }
 
     pub fn gpu_norm<'a>(
@@ -919,6 +923,7 @@ impl FgmresWorkspace {
         let vector_bg = create_vector_bind_group(
             device,
             self.vectors_layout(),
+            self.vector_bindings,
             x,
             self.temp_buffer().as_entire_binding(),
             self.dot_partial_buffer().as_entire_binding(),
@@ -928,6 +933,7 @@ impl FgmresWorkspace {
         let reduce_bg = create_vector_bind_group(
             device,
             self.vectors_layout(),
+            self.vector_bindings,
             self.dot_partial_buffer().as_entire_binding(),
             self.temp_buffer().as_entire_binding(),
             self.temp_buffer().as_entire_binding(),
@@ -1083,29 +1089,21 @@ pub fn basis_binding<'a>(
 pub fn create_vector_bind_group<'a>(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
+    bindings: &[wgsl_reflect::WgslBindingDesc],
     x: wgpu::BindingResource<'a>,
     y: wgpu::BindingResource<'a>,
     z: wgpu::BindingResource<'a>,
     label: &str,
 ) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some(label),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: x,
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: y,
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: z,
-            },
-        ],
+    wgsl_reflect::create_bind_group_from_bindings(device, label, layout, bindings, 0, |name| {
+        match name {
+            "vec_x" => Some(x.clone()),
+            "vec_y" => Some(y.clone()),
+            "vec_z" => Some(z.clone()),
+            _ => None,
+        }
     })
+    .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
 }
 
 pub fn dispatch_vector_pipeline(
@@ -1247,6 +1245,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         let spmv_bg = create_vector_bind_group(
             core.device,
             core.bgl_vectors,
+            core.vector_bindings,
             z_buf.as_entire_binding(),
             core.b_w.as_entire_binding(),
             core.b_temp.as_entire_binding(),
@@ -1313,6 +1312,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         let norm_bg = create_vector_bind_group(
             core.device,
             core.bgl_vectors,
+            core.vector_bindings,
             core.b_w.as_entire_binding(),
             core.b_temp.as_entire_binding(),
             core.b_dot_partial.as_entire_binding(),
@@ -1338,6 +1338,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         let reduce_bg = create_vector_bind_group(
             core.device,
             core.bgl_vectors,
+            core.vector_bindings,
             core.b_dot_partial.as_entire_binding(),
             core.b_temp.as_entire_binding(),
             core.b_temp.as_entire_binding(),
@@ -1360,6 +1361,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         let scale_bg = create_vector_bind_group(
             core.device,
             core.bgl_vectors,
+            core.vector_bindings,
             core.b_w.as_entire_binding(),
             v_next,
             core.b_temp.as_entire_binding(),
@@ -1413,6 +1415,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         let axpy_bg = create_vector_bind_group(
             core.device,
             core.bgl_vectors,
+            core.vector_bindings,
             core.z_vectors[i].as_entire_binding(),
             x.as_entire_binding(),
             core.b_temp.as_entire_binding(),

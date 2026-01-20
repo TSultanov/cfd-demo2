@@ -20,7 +20,6 @@ use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -40,7 +39,6 @@ struct RuntimeParams {
     density: f32,
     viscosity: f32,
     eos: crate::solver::model::eos::EosSpec,
-    solver_params_revision: u64,
 }
 
 /// Rendering mode for the mesh visualization
@@ -78,8 +76,6 @@ enum SolverKind {
     Incompressible,
     Compressible,
 }
-
-type SharedResults = Arc<Mutex<Option<(Vec<(f64, f64)>, Vec<f64>)>>>;
 
 #[derive(Default, Clone)]
 struct ModelUiCaps {
@@ -142,18 +138,66 @@ struct CachedGpuStats {
     step_time_ms: f32,
 }
 
+enum SolverWorkerCommand {
+    SetSolver {
+        solver: UnifiedSolver,
+        solver_kind: SolverKind,
+        min_cell_size: f64,
+    },
+    ClearSolver,
+    SetRunning(bool),
+    UpdateParams(RuntimeParams),
+    Shutdown,
+}
+
+enum SolverWorkerEvent {
+    Snapshot {
+        u: Vec<(f64, f64)>,
+        p: Vec<f64>,
+        stats: CachedGpuStats,
+    },
+    Error(String),
+    Running(bool),
+}
+
+struct SolverWorkerHandle {
+    tx: mpsc::Sender<SolverWorkerCommand>,
+    rx: mpsc::Receiver<SolverWorkerEvent>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl SolverWorkerHandle {
+    fn spawn() -> Self {
+        let (tx, cmd_rx) = mpsc::channel::<SolverWorkerCommand>();
+        let (evt_tx, rx) = mpsc::channel::<SolverWorkerEvent>();
+        let thread = thread::spawn(move || solver_worker_main(cmd_rx, evt_tx));
+        Self {
+            tx,
+            rx,
+            thread: Some(thread),
+        }
+    }
+
+    fn send(&self, cmd: SolverWorkerCommand) {
+        let _ = self.tx.send(cmd);
+    }
+}
+
+impl Drop for SolverWorkerHandle {
+    fn drop(&mut self) {
+        let _ = self.tx.send(SolverWorkerCommand::Shutdown);
+        if let Some(handle) = self.thread.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 pub struct CFDApp {
-    gpu_unified_solver: Option<Arc<Mutex<UnifiedSolver>>>,
-    gpu_solver_running: Arc<AtomicBool>,
-    gpu_solver_thread: Option<thread::JoinHandle<()>>,
+    solver_worker: SolverWorkerHandle,
     pending_init_request: Option<SolverInitRequest>,
     init_rx: Option<mpsc::Receiver<SolverInitResponse>>,
     init_in_flight: Option<u64>,
     next_init_generation: u64,
-    shared_results: SharedResults,
-    shared_gpu_stats: Arc<Mutex<CachedGpuStats>>,
-    shared_error: Arc<Mutex<Option<String>>>,
-    shared_params: Arc<Mutex<RuntimeParams>>,
     cached_u: Vec<(f64, f64)>,
     cached_p: Vec<f64>,
     cached_gpu_stats: CachedGpuStats,
@@ -265,33 +309,11 @@ impl CFDApp {
         let default_fluid = Fluid::presets()[1].clone();
 
         let mut app = Self {
-            gpu_unified_solver: None,
-            gpu_solver_running: Arc::new(AtomicBool::new(false)),
-            gpu_solver_thread: None,
+            solver_worker: SolverWorkerHandle::spawn(),
             pending_init_request: None,
             init_rx: None,
             init_in_flight: None,
             next_init_generation: 1,
-            shared_results: Arc::new(Mutex::new(None)),
-            shared_gpu_stats: Arc::new(Mutex::new(CachedGpuStats::default())),
-            shared_error: Arc::new(Mutex::new(None)),
-            shared_params: Arc::new(Mutex::new(RuntimeParams {
-                adaptive_dt: true,
-                target_cfl: 0.95,
-                requested_dt: 0.001,
-                log_convergence: false,
-                log_every_steps: 25,
-                advection_scheme: Scheme::Upwind,
-                time_scheme: GpuTimeScheme::Euler,
-                preconditioner: PreconditionerType::Jacobi,
-                alpha_u: 0.7,
-                alpha_p: 0.3,
-                inlet_velocity: 1.0,
-                density: default_fluid.density as f32,
-                viscosity: default_fluid.viscosity as f32,
-                eos: default_fluid.eos,
-                solver_params_revision: 0,
-            })),
             cached_u: Vec::new(),
             cached_p: Vec::new(),
             cached_gpu_stats: CachedGpuStats::default(),
@@ -328,18 +350,32 @@ impl CFDApp {
             cfd_renderer: None,
         };
         app.refresh_model_caps();
+        app.sync_worker_params();
         app
     }
 
-    fn with_unified_solver<F>(&self, f: F)
-    where
-        F: FnOnce(&mut UnifiedSolver),
-    {
-        if let Some(solver) = &self.gpu_unified_solver {
-            if let Ok(mut guard) = solver.try_lock() {
-                f(&mut guard);
-            }
+    fn current_runtime_params(&self) -> RuntimeParams {
+        RuntimeParams {
+            adaptive_dt: self.adaptive_dt,
+            target_cfl: self.target_cfl,
+            requested_dt: self.timestep as f32,
+            log_convergence: self.log_convergence,
+            log_every_steps: self.log_every_steps.max(1),
+            advection_scheme: self.selected_scheme,
+            time_scheme: self.time_scheme,
+            preconditioner: self.selected_preconditioner,
+            alpha_u: self.alpha_u as f32,
+            alpha_p: self.alpha_p as f32,
+            inlet_velocity: self.inlet_velocity,
+            density: self.current_fluid.density as f32,
+            viscosity: self.current_fluid.viscosity as f32,
+            eos: self.current_fluid.eos,
         }
+    }
+
+    fn sync_worker_params(&self) {
+        self.solver_worker
+            .send(SolverWorkerCommand::UpdateParams(self.current_runtime_params()));
     }
 
     fn refresh_model_caps(&mut self) {
@@ -392,23 +428,16 @@ impl CFDApp {
     }
 
     fn update_renderer_field(&self) {
-        if let (Some(renderer), Some(device)) = (&self.cfd_renderer, &self.wgpu_device) {
-            if let Ok(mut renderer) = renderer.lock() {
-                if let Some(solver) = &self.gpu_unified_solver {
-                    if let Ok(solver) = solver.try_lock() {
-                        renderer.update_bind_group(device, solver.state_buffer());
-                    }
-                }
-            }
-        }
+        // No-op: the renderer bind group is created at solver init time and always points at the
+        // solver's state buffer; field selection is driven by uniforms (stride/offset/mode).
     }
 
     fn init_solver(&mut self) {
         self.is_running = false;
-        self.gpu_solver_running.store(false, Ordering::Relaxed);
+        self.solver_worker.send(SolverWorkerCommand::SetRunning(false));
+        self.solver_worker.send(SolverWorkerCommand::ClearSolver);
         self.refresh_model_caps();
         self.pending_init_request = Some(self.make_init_request());
-        self.gpu_unified_solver = None;
         self.mesh = None;
         self.cached_cells.clear();
         self.cfd_renderer = None;
@@ -416,9 +445,6 @@ impl CFDApp {
         self.cached_p.clear();
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
-        if let Ok(mut err) = self.shared_error.lock() {
-            *err = None;
-        }
     }
 
     fn build_mesh_with(
@@ -569,15 +595,6 @@ impl CFDApp {
         if self.pending_init_request.is_none() {
             return;
         }
-        if let Some(handle) = &self.gpu_solver_thread {
-            if !handle.is_finished() {
-                return;
-            }
-        }
-
-        if let Some(handle) = self.gpu_solver_thread.take() {
-            let _ = handle.join();
-        }
 
         let request = self.pending_init_request.take().unwrap();
         self.init_in_flight = Some(request.generation);
@@ -611,13 +628,13 @@ impl CFDApp {
                         self.apply_init_outcome(outcome);
                     }
                     Err(err) => {
-                        self.gpu_unified_solver = None;
                         self.mesh = None;
                         self.cached_cells.clear();
                         self.cfd_renderer = None;
-                        if let Ok(mut e) = self.shared_error.lock() {
-                            *e = Some(err);
-                        }
+                        self.cached_u.clear();
+                        self.cached_p.clear();
+                        self.cached_gpu_stats = CachedGpuStats::default();
+                        self.cached_error = Some(err);
                     }
                 }
             }
@@ -625,8 +642,26 @@ impl CFDApp {
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.init_rx = None;
                 self.init_in_flight = None;
-                if let Ok(mut e) = self.shared_error.lock() {
-                    *e = Some("Solver init thread disconnected".to_string());
+                self.cached_error = Some("Solver init thread disconnected".to_string());
+            }
+        }
+    }
+
+    fn poll_solver_worker(&mut self) {
+        while let Ok(evt) = self.solver_worker.rx.try_recv() {
+            match evt {
+                SolverWorkerEvent::Snapshot { u, p, stats } => {
+                    self.cached_u = u;
+                    self.cached_p = p;
+                    self.cached_gpu_stats = stats;
+                    self.cached_error = None;
+                }
+                SolverWorkerEvent::Error(err) => {
+                    self.cached_error = Some(err);
+                    self.is_running = false;
+                }
+                SolverWorkerEvent::Running(running) => {
+                    self.is_running = running;
                 }
             }
         }
@@ -634,42 +669,28 @@ impl CFDApp {
 
     fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
         self.is_running = false;
-        self.gpu_solver_running.store(false, Ordering::Relaxed);
+        self.solver_worker.send(SolverWorkerCommand::SetRunning(false));
 
         self.model_caps = outcome.model_caps;
         self.cached_cells = outcome.cached_cells;
         self.actual_min_cell_size = outcome.actual_min_cell_size;
         self.cached_u = outcome.cached_u;
         self.cached_p = outcome.cached_p;
-        self.gpu_unified_solver = Some(Arc::new(Mutex::new(outcome.solver)));
         self.mesh = Some(outcome.mesh);
 
         self.cfd_renderer = outcome
             .renderer
             .map(|r| Arc::new(Mutex::new(r)));
 
-        self.shared_results = Arc::new(Mutex::new(None));
-        self.shared_gpu_stats = Arc::new(Mutex::new(CachedGpuStats::default()));
-        self.shared_error = Arc::new(Mutex::new(None));
-        self.shared_params = Arc::new(Mutex::new(RuntimeParams {
-            adaptive_dt: self.adaptive_dt,
-            target_cfl: self.target_cfl,
-            requested_dt: self.timestep as f32,
-            log_convergence: self.log_convergence,
-            log_every_steps: self.log_every_steps,
-            advection_scheme: self.selected_scheme,
-            time_scheme: self.time_scheme,
-            preconditioner: self.selected_preconditioner,
-            alpha_u: self.alpha_u as f32,
-            alpha_p: self.alpha_p as f32,
-            inlet_velocity: self.inlet_velocity,
-            density: self.current_fluid.density as f32,
-            viscosity: self.current_fluid.viscosity as f32,
-            eos: self.current_fluid.eos,
-            solver_params_revision: 0,
-        }));
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
+
+        self.solver_worker.send(SolverWorkerCommand::SetSolver {
+            solver: outcome.solver,
+            solver_kind: self.solver_kind,
+            min_cell_size: self.actual_min_cell_size,
+        });
+        self.sync_worker_params();
     }
 
     fn build_init_outcome(request: SolverInitRequest) -> Result<SolverInitOutcome, String> {
@@ -856,98 +877,35 @@ impl CFDApp {
     }
 
     fn update_gpu_fluid(&self) {
-        self.with_unified_solver(|solver| {
-            let _ = solver.set_density(self.current_fluid.density as f32);
-            let _ = solver.set_viscosity(self.current_fluid.viscosity as f32);
-            let _ = solver.set_eos(&self.current_fluid.eos);
-
-            if matches!(self.solver_kind, SolverKind::Compressible) {
-                let _ = solver.set_compressible_inlet_isothermal_x(
-                    self.current_fluid.density as f32,
-                    self.inlet_velocity,
-                    &self.current_fluid.eos,
-                );
-            }
-        });
-
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.density = self.current_fluid.density as f32;
-            params.viscosity = self.current_fluid.viscosity as f32;
-            params.eos = self.current_fluid.eos;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_dt(&self) {
-        self.with_unified_solver(|solver| solver.set_dt(self.timestep as f32));
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.requested_dt = self.timestep as f32;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_scheme(&self) {
-        self.with_unified_solver(|solver| solver.set_advection_scheme(self.selected_scheme));
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.advection_scheme = self.selected_scheme;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_alpha_u(&self) {
-        self.with_unified_solver(|solver| {
-            let _ = solver.set_alpha_u(self.alpha_u as f32);
-        });
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.alpha_u = self.alpha_u as f32;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_alpha_p(&self) {
-        if matches!(self.solver_kind, SolverKind::Incompressible) {
-            self.with_unified_solver(|solver| {
-                let _ = solver.set_alpha_p(self.alpha_p as f32);
-            });
-        }
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.alpha_p = self.alpha_p as f32;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_time_scheme(&self) {
-        self.with_unified_solver(|solver| solver.set_time_scheme(self.time_scheme));
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.time_scheme = self.time_scheme;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_inlet_velocity(&self) {
-        self.with_unified_solver(|solver| {
-            if matches!(self.solver_kind, SolverKind::Compressible) {
-                let _ = solver.set_compressible_inlet_isothermal_x(
-                    self.current_fluid.density as f32,
-                    self.inlet_velocity,
-                    &self.current_fluid.eos,
-                );
-            } else {
-                let _ = solver.set_inlet_velocity(self.inlet_velocity);
-            }
-        });
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.inlet_velocity = self.inlet_velocity;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 
     fn update_gpu_preconditioner(&self) {
-        self.with_unified_solver(|solver| solver.set_preconditioner(self.selected_preconditioner));
-        if let Ok(mut params) = self.shared_params.lock() {
-            params.preconditioner = self.selected_preconditioner;
-            params.solver_params_revision = params.solver_params_revision.wrapping_add(1);
-        }
+        self.sync_worker_params();
     }
 }
 
@@ -955,25 +913,10 @@ impl eframe::App for CFDApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_init();
         self.spawn_pending_init();
+        self.poll_solver_worker();
         let init_in_progress = self.init_rx.is_some();
         let init_pending = self.pending_init_request.is_some();
         let is_initializing = init_in_progress || init_pending;
-
-        // Sync running state from background thread
-        if self.is_running && !self.gpu_solver_running.load(Ordering::Relaxed) {
-            self.is_running = false;
-        }
-        if let Some(handle) = &self.gpu_solver_thread {
-            if handle.is_finished() {
-                if let Some(handle) = self.gpu_solver_thread.take() {
-                    if handle.join().is_err() {
-                        if let Ok(mut err) = self.shared_error.lock() {
-                            *err = Some("Solver thread panicked".to_string());
-                        }
-                    }
-                }
-            }
-        }
 
         if self.is_running || is_initializing {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
@@ -1111,7 +1054,7 @@ impl eframe::App for CFDApp {
                         // - Mesh coordinates/volumes are in meters.
                         // - `timestep` is seconds.
                         // - CFL is dimensionless: (wave_speed * dt / dx).
-                        let dt_for_cfl = if self.gpu_unified_solver.is_some()
+                        let dt_for_cfl = if self.mesh.is_some()
                             && self.cached_gpu_stats.dt.is_finite()
                             && self.cached_gpu_stats.dt > 0.0
                         {
@@ -1155,9 +1098,7 @@ impl eframe::App for CFDApp {
                             .checkbox(&mut self.adaptive_dt, "Adaptive Timestep")
                             .changed()
                         {
-                            if let Ok(mut params) = self.shared_params.lock() {
-                                params.adaptive_dt = self.adaptive_dt;
-                            }
+                            self.sync_worker_params();
                         }
                         if self.adaptive_dt {
                             if ui
@@ -1167,9 +1108,7 @@ impl eframe::App for CFDApp {
                                 )
                                 .changed()
                             {
-                                if let Ok(mut params) = self.shared_params.lock() {
-                                    params.target_cfl = self.target_cfl;
-                                }
+                                self.sync_worker_params();
                             }
                         }
 
@@ -1179,9 +1118,7 @@ impl eframe::App for CFDApp {
                             .checkbox(&mut self.log_convergence, "Log convergence to console")
                             .changed()
                         {
-                            if let Ok(mut params) = self.shared_params.lock() {
-                                params.log_convergence = self.log_convergence;
-                            }
+                            self.sync_worker_params();
                         }
                         ui.add_enabled_ui(self.log_convergence, |ui| {
                             if ui
@@ -1191,9 +1128,7 @@ impl eframe::App for CFDApp {
                                 )
                                 .changed()
                             {
-                                if let Ok(mut params) = self.shared_params.lock() {
-                                    params.log_every_steps = self.log_every_steps.max(1);
-                                }
+                                self.sync_worker_params();
                             }
                         });
 
@@ -1387,7 +1322,7 @@ impl eframe::App for CFDApp {
                         }
                     });
 
-                    let has_solver = self.gpu_unified_solver.is_some();
+                    let has_solver = self.mesh.is_some();
 
                     if ui
                         .add_enabled(
@@ -1399,326 +1334,21 @@ impl eframe::App for CFDApp {
                         self.is_running = !self.is_running;
 
                         if self.is_running {
-                            self.gpu_solver_running.store(true, Ordering::Relaxed);
-                            let running_flag = self.gpu_solver_running.clone();
-                            let shared_results = self.shared_results.clone();
-                            let shared_gpu_stats = self.shared_gpu_stats.clone();
-                            let shared_error = self.shared_error.clone();
-                            let shared_params = self.shared_params.clone();
-                            let ctx_clone = ctx.clone();
-                            let min_cell_size_clone = self.actual_min_cell_size;
-
-                            if let Some(gpu_solver) = &self.gpu_unified_solver {
-                                let solver_arc = gpu_solver.clone();
-                                let solver_kind = self.solver_kind;
-                                let handle = thread::spawn(move || {
-                                    let run_loop = std::panic::AssertUnwindSafe(|| {
-                                        let mut step_idx: u64 = 0;
-                                        let mut prev_max_vel = 0.0f64;
-                                        let mut last_params_revision: u64 = 0;
-                                        let mut last_publish = std::time::Instant::now();
-                                        let publish_interval =
-                                            std::time::Duration::from_millis(16);
-                                        while running_flag.load(Ordering::Relaxed) {
-                                            let mut solver = match solver_arc.lock() {
-                                                Ok(guard) => guard,
-                                                Err(_) => {
-                                                    running_flag.store(false, Ordering::Relaxed);
-                                                    if let Ok(mut err) = shared_error.lock() {
-                                                        *err = Some(
-                                                            "Solver thread stopped: solver lock poisoned (panic in worker)."
-                                                                .to_string(),
-                                                        );
-                                                    }
-                                                    ctx_clone.request_repaint();
-                                                    break;
-                                                }
-                                            };
-
-                                            if step_idx == 0 {
-                                                solver.incompressible_set_should_stop(false);
-                                            }
-
-                                            let params = if let Ok(params) = shared_params.lock() {
-                                                *params
-                                            } else {
-                                                RuntimeParams {
-                                                    adaptive_dt: false,
-                                                    target_cfl: 0.9,
-                                                    requested_dt: solver.dt(),
-                                                    log_convergence: false,
-                                                    log_every_steps: 50,
-                                                    advection_scheme: Scheme::Upwind,
-                                                    time_scheme: GpuTimeScheme::Euler,
-                                                    preconditioner: PreconditionerType::Jacobi,
-                                                    alpha_u: 1.0,
-                                                    alpha_p: 1.0,
-                                                    inlet_velocity: 0.0,
-                                                    density: 1.0,
-                                                    viscosity: 0.0,
-                                                    eos: crate::solver::model::eos::EosSpec::Constant,
-                                                    solver_params_revision: last_params_revision,
-                                                }
-                                            };
-
-                                            if params.solver_params_revision != last_params_revision {
-                                                solver.set_dt(params.requested_dt);
-                                                let _ = solver.set_density(params.density);
-                                                let _ = solver.set_viscosity(params.viscosity);
-                                                let _ = solver.set_eos(&params.eos);
-                                                solver.set_advection_scheme(params.advection_scheme);
-                                                solver.set_time_scheme(params.time_scheme);
-                                                solver.set_preconditioner(params.preconditioner);
-
-                                                match solver_kind {
-                                                    SolverKind::Incompressible => {
-                                                        let _ = solver.set_alpha_u(params.alpha_u);
-                                                        let _ = solver.set_alpha_p(params.alpha_p);
-                                                        let _ = solver.set_inlet_velocity(
-                                                            params.inlet_velocity,
-                                                        );
-                                                    }
-                                                    SolverKind::Compressible => {
-                                                        let _ = solver.set_compressible_inlet_isothermal_x(
-                                                            params.density,
-                                                            params.inlet_velocity,
-                                                            &params.eos,
-                                                        );
-                                                    }
-                                                }
-
-                                                last_params_revision = params.solver_params_revision;
-                                            }
-
-                                            if params.adaptive_dt {
-                                                let sound_speed = match solver_kind {
-                                                    SolverKind::Compressible => {
-                                                        params.eos.sound_speed(params.density as f64)
-                                                    }
-                                                    SolverKind::Incompressible => 0.0,
-                                                };
-                                                let wave_speed = match solver_kind {
-                                                    SolverKind::Compressible => {
-                                                        prev_max_vel + sound_speed
-                                                    }
-                                                    SolverKind::Incompressible => prev_max_vel,
-                                                };
-                                                if min_cell_size_clone > 1e-12
-                                                    && wave_speed.is_finite()
-                                                    && wave_speed > 1e-12
-                                                {
-                                                    let current_dt = solver.dt() as f64;
-                                                    let mut next_dt =
-                                                        params.target_cfl * min_cell_size_clone / wave_speed;
-
-                                                    if next_dt > current_dt * 1.2 {
-                                                        next_dt = current_dt * 1.2;
-                                                    }
-
-                                                    next_dt = next_dt.clamp(1e-9, 100.0);
-                                                    solver.set_dt(next_dt as f32);
-                                                }
-                                            } else {
-                                                solver.set_dt(params.requested_dt);
-                                            }
-
-                                            let start = std::time::Instant::now();
-                                            let step_linear_stats =
-                                                match solver.step_with_stats() {
-                                                    Ok(stats) => stats,
-                                                    Err(err) => {
-                                                        running_flag
-                                                            .store(false, Ordering::Relaxed);
-                                                        if let Ok(mut e) = shared_error.lock() {
-                                                            *e = Some(format!(
-                                                                "Solver step failed: {err}"
-                                                            ));
-                                                        }
-                                                        ctx_clone.request_repaint();
-                                                        break;
-                                                    }
-                                                };
-
-                                            if solver.incompressible_should_stop() {
-                                                running_flag.store(false, Ordering::Relaxed);
-                                            }
-
-                                            let step_time = start.elapsed().as_secs_f32() * 1000.0;
-                                            let u = pollster::block_on(solver.get_u());
-                                            let p = pollster::block_on(solver.get_p());
-
-                                            let mut max_vel = 0.0f64;
-                                            let mut nonfinite_u = 0usize;
-                                            for (vx, vy) in &u {
-                                                if !(vx.is_finite() && vy.is_finite()) {
-                                                    nonfinite_u += 1;
-                                                    continue;
-                                                }
-                                                let v = (vx.powi(2) + vy.powi(2)).sqrt();
-                                                if v > max_vel {
-                                                    max_vel = v;
-                                                }
-                                            }
-                                            prev_max_vel = max_vel;
-
-                                            let mut min_p = f64::INFINITY;
-                                            let mut max_p = f64::NEG_INFINITY;
-                                            let mut nonfinite_p = 0usize;
-                                            for &pv in &p {
-                                                if !pv.is_finite() {
-                                                    nonfinite_p += 1;
-                                                    continue;
-                                                }
-                                                min_p = min_p.min(pv);
-                                                max_p = max_p.max(pv);
-                                            }
-
-                                            let linear_solves = step_linear_stats.len() as u32;
-                                            let linear_last =
-                                                step_linear_stats.last().copied().unwrap_or_default();
-                                            let linear_diverged = step_linear_stats.iter().any(|s| {
-                                                s.diverged || !s.residual.is_finite() || s.residual > 1e12
-                                            });
-
-                                            let log_every_steps = params.log_every_steps.max(1);
-                                            let should_log = params.log_convergence
-                                                && step_idx % (log_every_steps as u64) == 0;
-
-                                            if should_log || nonfinite_u > 0 || nonfinite_p > 0 || linear_diverged {
-                                                let (res0, resn) = step_linear_stats
-                                                    .first()
-                                                    .zip(step_linear_stats.last())
-                                                    .map(|(a, b)| (a.residual, b.residual))
-                                                    .unwrap_or((f32::NAN, f32::NAN));
-                                                let outer_str = if matches!(solver_kind, SolverKind::Incompressible) {
-                                                    solver
-                                                        .incompressible_outer_stats()
-                                                        .map(|(iters, res_u, res_p)| {
-                                                            format!(
-                                                                " outer(iters={}, u={:.3e}, p={:.3e})",
-                                                                iters, res_u, res_p
-                                                            )
-                                                        })
-                                                        .unwrap_or_default()
-                                                } else {
-                                                    String::new()
-                                                };
-
-                                                eprintln!(
-                                                    "[cfd2][{:?}] step={} t={:.4e} dt={:.2e} max|u|={:.3e} p=[{:.3e},{:.3e}] solves={} res={:.3e}->{:.3e} last(iters={}, res={:.3e}, conv={}, div={}){} nonfinite(u={}, p={})",
-                                                    solver_kind,
-                                                    step_idx,
-                                                    solver.time(),
-                                                    solver.dt(),
-                                                    max_vel,
-                                                    min_p,
-                                                    max_p,
-                                                    linear_solves,
-                                                    res0,
-                                                    resn,
-                                                    linear_last.iterations,
-                                                    linear_last.residual,
-                                                    linear_last.converged,
-                                                    linear_last.diverged,
-                                                    outer_str,
-                                                    nonfinite_u,
-                                                    nonfinite_p,
-                                                );
-                                            }
-
-                                            if nonfinite_u > 0 || nonfinite_p > 0 || linear_diverged {
-                                                running_flag.store(false, Ordering::Relaxed);
-                                                if let Ok(mut e) = shared_error.lock() {
-                                                    *e = Some(format!(
-                                                        "Divergence detected (nonfinite u={nonfinite_u}, p={nonfinite_p}, linear={linear_diverged})."
-                                                    ));
-                                                }
-                                                ctx_clone.request_repaint();
-                                                break;
-                                            }
-
-                                            let mut stats = CachedGpuStats {
-                                                time: solver.time(),
-                                                dt: solver.dt(),
-                                                step_time_ms: step_time,
-                                                linear_solves,
-                                                linear_last,
-                                                ..Default::default()
-                                            };
-
-                                            if matches!(solver_kind, SolverKind::Incompressible) {
-                                                if let Some((iters, res_u, res_p)) =
-                                                    solver.incompressible_outer_stats()
-                                                {
-                                                    stats.outer_iterations = iters;
-                                                    stats.outer_residual_u = res_u;
-                                                    stats.outer_residual_p = res_p;
-                                                }
-                                                if step_linear_stats.len() == 3 {
-                                                    stats.stats_ux = step_linear_stats[0];
-                                                    stats.stats_uy = step_linear_stats[1];
-                                                    stats.stats_p = step_linear_stats[2];
-                                                }
-                                            }
-
-                                            let should_publish = step_idx == 0
-                                                || last_publish.elapsed() >= publish_interval;
-                                            if should_publish {
-                                                last_publish = std::time::Instant::now();
-                                                if let Ok(mut results) = shared_results.lock() {
-                                                    *results = Some((u, p));
-                                                }
-                                                if let Ok(mut gpu_stats) = shared_gpu_stats.lock() {
-                                                    *gpu_stats = stats;
-                                                }
-                                                if let Ok(mut err) = shared_error.lock() {
-                                                    *err = None;
-                                                }
-
-                                                ctx_clone.request_repaint();
-                                            }
-                                            thread::sleep(std::time::Duration::from_millis(1));
-                                            step_idx = step_idx.wrapping_add(1);
-                                        }
-                                        ctx_clone.request_repaint();
-                                    });
-
-                                    if let Err(payload) = std::panic::catch_unwind(run_loop) {
-                                        running_flag.store(false, Ordering::Relaxed);
-                                        let message = payload
-                                            .downcast_ref::<&str>()
-                                            .map(|s| (*s).to_string())
-                                            .or_else(|| payload.downcast_ref::<String>().cloned())
-                                            .unwrap_or_else(|| "unknown panic".to_string());
-                                        if let Ok(mut err) = shared_error.lock() {
-                                            *err = Some(format!(
-                                                "Solver thread panicked: {message}"
-                                            ));
-                                        }
-                                        ctx_clone.request_repaint();
-                                    }
-                                });
-                                self.gpu_solver_thread = Some(handle);
-                            }
+                            self.cached_error = None;
+                            self.sync_worker_params();
+                            self.solver_worker.send(SolverWorkerCommand::SetRunning(true));
                         } else {
-                            self.gpu_solver_running.store(false, Ordering::Relaxed);
+                            self.solver_worker.send(SolverWorkerCommand::SetRunning(false));
                         }
                     }
 
                     ui.separator();
 
-                    if let Ok(err) = self.shared_error.try_lock() {
-                        self.cached_error = err.clone();
-                    }
                     if let Some(err) = &self.cached_error {
                         ui.colored_label(egui::Color32::RED, err);
                     }
 
                     if has_solver {
-                        if let Ok(stats) = self.shared_gpu_stats.try_lock() {
-                            self.cached_gpu_stats = stats.clone();
-                        }
-
                         let stats = &self.cached_gpu_stats;
                         ui.label(format!("dt: {:.2e}", stats.dt));
                         if stats.linear_solves > 0 {
@@ -1752,16 +1382,9 @@ impl eframe::App for CFDApp {
                 });
         });
 
-        let has_solver = self.gpu_unified_solver.is_some();
+        let has_solver = self.mesh.is_some();
 
         let (min_val, max_val, values) = if has_solver {
-            if let Ok(mut results) = self.shared_results.try_lock() {
-                if let Some((u, p)) = results.take() {
-                    self.cached_u = u;
-                    self.cached_p = p;
-                }
-            }
-
             let u = &self.cached_u;
             let p = &self.cached_p;
 
@@ -1960,6 +1583,366 @@ impl eframe::App for CFDApp {
                 });
             }
         });
+    }
+}
+
+fn solver_worker_apply_params(solver: &mut UnifiedSolver, solver_kind: SolverKind, params: RuntimeParams) {
+    solver.set_dt(params.requested_dt);
+    let _ = solver.set_density(params.density);
+    let _ = solver.set_viscosity(params.viscosity);
+    let _ = solver.set_eos(&params.eos);
+    solver.set_advection_scheme(params.advection_scheme);
+    solver.set_time_scheme(params.time_scheme);
+    solver.set_preconditioner(params.preconditioner);
+
+    match solver_kind {
+        SolverKind::Incompressible => {
+            let _ = solver.set_alpha_u(params.alpha_u);
+            let _ = solver.set_alpha_p(params.alpha_p);
+            let _ = solver.set_inlet_velocity(params.inlet_velocity);
+        }
+        SolverKind::Compressible => {
+            let _ = solver.set_compressible_inlet_isothermal_x(
+                params.density,
+                params.inlet_velocity,
+                &params.eos,
+            );
+        }
+    }
+}
+
+fn solver_worker_main(
+    cmd_rx: mpsc::Receiver<SolverWorkerCommand>,
+    evt_tx: mpsc::Sender<SolverWorkerEvent>,
+) {
+    let mut solver: Option<UnifiedSolver> = None;
+    let mut solver_kind = SolverKind::Incompressible;
+    let mut min_cell_size = 0.0_f64;
+    let mut params = RuntimeParams {
+        adaptive_dt: false,
+        target_cfl: 0.9,
+        requested_dt: 0.001,
+        log_convergence: false,
+        log_every_steps: 50,
+        advection_scheme: Scheme::Upwind,
+        time_scheme: GpuTimeScheme::Euler,
+        preconditioner: PreconditionerType::Jacobi,
+        alpha_u: 1.0,
+        alpha_p: 1.0,
+        inlet_velocity: 0.0,
+        density: 1.0,
+        viscosity: 0.0,
+        eos: crate::solver::model::eos::EosSpec::Constant,
+    };
+
+    let mut running = false;
+    let mut step_idx: u64 = 0;
+    let mut prev_max_vel = 0.0_f64;
+    let mut last_publish = std::time::Instant::now();
+    let publish_interval = std::time::Duration::from_millis(16);
+
+    loop {
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            match cmd {
+                SolverWorkerCommand::SetSolver {
+                    solver: next,
+                    solver_kind: next_kind,
+                    min_cell_size: next_min_cell_size,
+                } => {
+                    solver = Some(next);
+                    solver_kind = next_kind;
+                    min_cell_size = next_min_cell_size;
+                    running = false;
+                    step_idx = 0;
+                    prev_max_vel = 0.0;
+                    last_publish = std::time::Instant::now();
+                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+
+                    if let Some(s) = solver.as_mut() {
+                        solver_worker_apply_params(s, solver_kind, params);
+                    }
+                }
+                SolverWorkerCommand::ClearSolver => {
+                    solver = None;
+                    running = false;
+                    step_idx = 0;
+                    prev_max_vel = 0.0;
+                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                }
+                SolverWorkerCommand::SetRunning(next_running) => {
+                    if next_running && solver.is_none() {
+                        let _ = evt_tx.send(SolverWorkerEvent::Error(
+                            "cannot start solver: no solver is initialized".to_string(),
+                        ));
+                        let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                        running = false;
+                        continue;
+                    }
+                    if next_running {
+                        step_idx = 0;
+                        last_publish = std::time::Instant::now();
+                    }
+                    running = next_running;
+                    let _ = evt_tx.send(SolverWorkerEvent::Running(running));
+                }
+                SolverWorkerCommand::UpdateParams(next_params) => {
+                    params = next_params;
+                    if let Some(s) = solver.as_mut() {
+                        solver_worker_apply_params(s, solver_kind, params);
+                    }
+                }
+                SolverWorkerCommand::Shutdown => {
+                    return;
+                }
+            }
+        }
+
+        if !running {
+            match cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
+                Ok(cmd) => {
+                    // Re-process command on next loop so try_recv drains any coalesced updates.
+                    match cmd {
+                        SolverWorkerCommand::Shutdown => return,
+                        other => {
+                            // Put it back via local handling.
+                            match other {
+                                SolverWorkerCommand::SetSolver {
+                                    solver: next,
+                                    solver_kind: next_kind,
+                                    min_cell_size: next_min_cell_size,
+                                } => {
+                                    solver = Some(next);
+                                    solver_kind = next_kind;
+                                    min_cell_size = next_min_cell_size;
+                                    running = false;
+                                    step_idx = 0;
+                                    prev_max_vel = 0.0;
+                                    last_publish = std::time::Instant::now();
+                                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+
+                                    if let Some(s) = solver.as_mut() {
+                                        solver_worker_apply_params(s, solver_kind, params);
+                                    }
+                                }
+                                SolverWorkerCommand::ClearSolver => {
+                                    solver = None;
+                                    running = false;
+                                    step_idx = 0;
+                                    prev_max_vel = 0.0;
+                                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                                }
+                                SolverWorkerCommand::SetRunning(next_running) => {
+                                    if next_running && solver.is_none() {
+                                        let _ = evt_tx.send(SolverWorkerEvent::Error(
+                                            "cannot start solver: no solver is initialized"
+                                                .to_string(),
+                                        ));
+                                        let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                                        running = false;
+                                    } else {
+                                        if next_running {
+                                            step_idx = 0;
+                                            last_publish = std::time::Instant::now();
+                                        }
+                                        running = next_running;
+                                        let _ = evt_tx.send(SolverWorkerEvent::Running(running));
+                                    }
+                                }
+                                SolverWorkerCommand::UpdateParams(next_params) => {
+                                    params = next_params;
+                                    if let Some(s) = solver.as_mut() {
+                                        solver_worker_apply_params(s, solver_kind, params);
+                                    }
+                                }
+                                SolverWorkerCommand::Shutdown => return,
+                            }
+                        }
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            continue;
+        }
+
+        let Some(solver) = solver.as_mut() else {
+            running = false;
+            let _ = evt_tx.send(SolverWorkerEvent::Error(
+                "solver worker entered running state without an initialized solver".to_string(),
+            ));
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            continue;
+        };
+
+        if step_idx == 0 && matches!(solver_kind, SolverKind::Incompressible) {
+            solver.incompressible_set_should_stop(false);
+        }
+
+        if params.adaptive_dt {
+            let sound_speed = match solver_kind {
+                SolverKind::Compressible => params.eos.sound_speed(params.density as f64),
+                SolverKind::Incompressible => 0.0,
+            };
+            let wave_speed = match solver_kind {
+                SolverKind::Compressible => prev_max_vel + sound_speed,
+                SolverKind::Incompressible => prev_max_vel,
+            };
+            if min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+                let current_dt = solver.dt() as f64;
+                let mut next_dt = params.target_cfl * min_cell_size / wave_speed;
+                if next_dt > current_dt * 1.2 {
+                    next_dt = current_dt * 1.2;
+                }
+                next_dt = next_dt.clamp(1e-9, 100.0);
+                solver.set_dt(next_dt as f32);
+            }
+        } else {
+            solver.set_dt(params.requested_dt);
+        }
+
+        let start = std::time::Instant::now();
+        let step_linear_stats = match solver.step_with_stats() {
+            Ok(stats) => stats,
+            Err(err) => {
+                running = false;
+                let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
+                    "solver step failed: {err}"
+                )));
+                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                continue;
+            }
+        };
+        let step_time_ms = start.elapsed().as_secs_f32() * 1000.0;
+
+        if matches!(solver_kind, SolverKind::Incompressible) && solver.incompressible_should_stop() {
+            running = false;
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            continue;
+        }
+
+        let linear_solves = step_linear_stats.len() as u32;
+        let linear_last = step_linear_stats.last().copied().unwrap_or_default();
+        let linear_diverged = step_linear_stats
+            .iter()
+            .any(|s| s.diverged || !s.residual.is_finite() || s.residual > 1e12);
+
+        if linear_diverged {
+            running = false;
+            let _ = evt_tx.send(SolverWorkerEvent::Error(
+                "divergence detected (linear solver)".to_string(),
+            ));
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            continue;
+        }
+
+        let mut stats = CachedGpuStats {
+            time: solver.time(),
+            dt: solver.dt(),
+            step_time_ms,
+            linear_solves,
+            linear_last,
+            ..Default::default()
+        };
+
+        if matches!(solver_kind, SolverKind::Incompressible) {
+            if let Some((iters, res_u, res_p)) = solver.incompressible_outer_stats() {
+                stats.outer_iterations = iters;
+                stats.outer_residual_u = res_u;
+                stats.outer_residual_p = res_p;
+            }
+            if step_linear_stats.len() == 3 {
+                stats.stats_ux = step_linear_stats[0];
+                stats.stats_uy = step_linear_stats[1];
+                stats.stats_p = step_linear_stats[2];
+            }
+        }
+
+        let log_every_steps = params.log_every_steps.max(1) as u64;
+        let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
+
+        let should_readback =
+            step_idx == 0 || last_publish.elapsed() >= publish_interval || should_log;
+
+        if should_readback {
+            last_publish = std::time::Instant::now();
+            let u = pollster::block_on(solver.get_u());
+            let p = pollster::block_on(solver.get_p());
+
+            let mut max_vel = 0.0f64;
+            let mut nonfinite_u = 0usize;
+            for (vx, vy) in &u {
+                if !(vx.is_finite() && vy.is_finite()) {
+                    nonfinite_u += 1;
+                    continue;
+                }
+                let v = (vx.powi(2) + vy.powi(2)).sqrt();
+                if v > max_vel {
+                    max_vel = v;
+                }
+            }
+            prev_max_vel = max_vel;
+
+            let mut min_p = f64::INFINITY;
+            let mut max_p = f64::NEG_INFINITY;
+            let mut nonfinite_p = 0usize;
+            for &pv in &p {
+                if !pv.is_finite() {
+                    nonfinite_p += 1;
+                    continue;
+                }
+                min_p = min_p.min(pv);
+                max_p = max_p.max(pv);
+            }
+
+            if should_log || nonfinite_u > 0 || nonfinite_p > 0 {
+                let outer_str = if matches!(solver_kind, SolverKind::Incompressible) {
+                    solver
+                        .incompressible_outer_stats()
+                        .map(|(iters, res_u, res_p)| {
+                            format!(
+                                " outer(iters={}, u={:.3e}, p={:.3e})",
+                                iters, res_u, res_p
+                            )
+                        })
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                eprintln!(
+                    "[cfd2][{:?}] step={} t={:.4e} dt={:.2e} max|u|={:.3e} p=[{:.3e},{:.3e}] solves={} last(iters={}, res={:.3e}, conv={}, div={}){} nonfinite(u={}, p={})",
+                    solver_kind,
+                    step_idx,
+                    solver.time(),
+                    solver.dt(),
+                    max_vel,
+                    min_p,
+                    max_p,
+                    linear_solves,
+                    linear_last.iterations,
+                    linear_last.residual,
+                    linear_last.converged,
+                    linear_last.diverged,
+                    outer_str,
+                    nonfinite_u,
+                    nonfinite_p,
+                );
+            }
+
+            if nonfinite_u > 0 || nonfinite_p > 0 {
+                running = false;
+                let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
+                    "divergence detected (nonfinite u={nonfinite_u}, p={nonfinite_p})"
+                )));
+                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                continue;
+            }
+
+            let _ = evt_tx.send(SolverWorkerEvent::Snapshot { u, p, stats });
+        }
+
+        step_idx = step_idx.wrapping_add(1);
+        thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 

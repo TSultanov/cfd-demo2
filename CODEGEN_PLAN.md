@@ -40,15 +40,11 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
   - Core-only mode: `CFD2_CORE_ONLY=1 bash scripts/run_openfoam_reference_tests.sh` (runs with `--no-default-features`)
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
 
-## Current Audit Notes (concrete simplification targets)
-- The recipe-driven solver path now only uses `Host | Graph | Repeat` nodes (no conditional/while orchestration surface).
-- `meshgen` is quarantined under `src/meshgen/*` (keep `src/solver/mesh/*` core-only).
-
 ## Remaining Gaps (simplification + pruning plan)
 
 ### 1) Optional-surface pruning (meshgen/profiling/repro)
-- Keep `src/solver/mesh/*` core-only; move or delete `src/meshgen/*`, profiling examples, and reproduction harnesses once they stop paying for themselves.
-- Prefer moving optional surfaces into separate workspace crates to shrink the main crate’s module graph.
+- Move or delete `src/meshgen/*` and stop re-exporting meshgen APIs from `src/solver/mesh/*`.
+- Remove or relocate meshgen/profiling benches + `examples/reproduce_*` harnesses (keep the repo focused on the core solver + reference tests).
 
 ### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).

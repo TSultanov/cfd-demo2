@@ -1,16 +1,15 @@
-use crate::solver::mesh::{generate_structured_backwards_step_mesh, Mesh};
 #[cfg(feature = "meshgen")]
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle,
 };
+use crate::solver::mesh::{generate_structured_backwards_step_mesh, Mesh};
 use crate::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
-    SolverIncompressibleControlsExt, SolverIncompressibleStatsExt, SolverInletVelocityExt,
-    SolverRuntimeParamsExt,
+    SolverIncompressibleStatsExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use crate::solver::model::{
-    compressible_model_with_eos, incompressible_momentum_model, ModelPreconditionerSpec,
+    all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
@@ -97,12 +96,6 @@ enum PlotField {
     VelocityMag,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
-enum SolverKind {
-    Incompressible,
-    Compressible,
-}
-
 #[derive(Default, Clone)]
 struct ModelUiCaps {
     plot_stride: u32,
@@ -122,7 +115,7 @@ struct ModelUiCaps {
 
 struct SolverInitRequest {
     generation: u64,
-    solver_kind: SolverKind,
+    model_id: &'static str,
     selected_geometry: GeometryType,
     mesh_type: MeshType,
     min_cell_size: f64,
@@ -177,7 +170,6 @@ struct CachedGpuStats {
 enum SolverWorkerCommand {
     SetSolver {
         solver: UnifiedSolver,
-        solver_kind: SolverKind,
         min_cell_size: f64,
     },
     ClearSolver,
@@ -264,7 +256,7 @@ pub struct CFDApp {
     time_scheme: GpuTimeScheme,
     inlet_velocity: f32,
     selected_preconditioner: PreconditionerType,
-    solver_kind: SolverKind,
+    model_id: &'static str,
     model_caps: ModelUiCaps,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
@@ -381,7 +373,7 @@ impl CFDApp {
             time_scheme: GpuTimeScheme::Euler,
             inlet_velocity: 1.0,
             selected_preconditioner: PreconditionerType::Jacobi,
-            solver_kind: SolverKind::Incompressible,
+            model_id: "incompressible_momentum",
             model_caps: ModelUiCaps::default(),
             wgpu_device,
             wgpu_queue,
@@ -413,14 +405,56 @@ impl CFDApp {
     }
 
     fn sync_worker_params(&self) {
-        self.solver_worker
-            .send(SolverWorkerCommand::UpdateParams(self.current_runtime_params()));
+        self.solver_worker.send(SolverWorkerCommand::UpdateParams(
+            self.current_runtime_params(),
+        ));
+    }
+
+    fn model_label(model_id: &'static str) -> &'static str {
+        match model_id {
+            "incompressible_momentum" => "Incompressible momentum",
+            "incompressible_momentum_generic" => "Incompressible momentum (generic)",
+            "compressible" => "Compressible",
+            other => other,
+        }
+    }
+
+    fn supported_ui_models() -> Vec<(&'static str, &'static str)> {
+        let mut out = Vec::new();
+        for model in all_models() {
+            let layout = &model.state_layout;
+            let has_u = layout
+                .offset_for("U")
+                .or_else(|| layout.offset_for("u"))
+                .is_some();
+            let has_p = layout.offset_for("p").is_some();
+            if !has_u || !has_p {
+                continue;
+            }
+            out.push((model.id, CFDApp::model_label(model.id)));
+        }
+        out.sort_by_key(|(id, _)| *id);
+        out
+    }
+
+    fn build_selected_model(&self) -> Result<ModelSpec, String> {
+        if self.model_id == "compressible" {
+            return Ok(compressible_model_with_eos(self.current_fluid.eos));
+        }
+        all_models()
+            .into_iter()
+            .find(|m| m.id == self.model_id)
+            .ok_or_else(|| format!("unknown model id '{}'", self.model_id))
     }
 
     fn refresh_model_caps(&mut self) {
-        let model = match self.solver_kind {
-            SolverKind::Incompressible => incompressible_momentum_model(),
-            SolverKind::Compressible => compressible_model_with_eos(self.current_fluid.eos),
+        let model = match self.build_selected_model() {
+            Ok(m) => m,
+            Err(_) => {
+                self.model_id = "incompressible_momentum";
+                self.build_selected_model()
+                    .expect("default UI model must exist")
+            }
         };
 
         let named_params = model.named_param_keys();
@@ -446,8 +480,10 @@ impl CFDApp {
         self.model_caps.plot_p_offset = p_off.unwrap_or(0);
 
         const UI_MAX_BLOCK_JACOBI: u32 = 16;
-        if matches!(self.selected_preconditioner, PreconditionerType::BlockJacobi)
-            && self.model_caps.unknowns_per_cell > UI_MAX_BLOCK_JACOBI
+        if matches!(
+            self.selected_preconditioner,
+            PreconditionerType::BlockJacobi
+        ) && self.model_caps.unknowns_per_cell > UI_MAX_BLOCK_JACOBI
         {
             self.selected_preconditioner = PreconditionerType::Jacobi;
         }
@@ -458,7 +494,7 @@ impl CFDApp {
         self.next_init_generation = self.next_init_generation.wrapping_add(1);
         SolverInitRequest {
             generation,
-            solver_kind: self.solver_kind,
+            model_id: self.model_id,
             selected_geometry: self.selected_geometry,
             mesh_type: self.mesh_type,
             min_cell_size: self.min_cell_size,
@@ -485,7 +521,8 @@ impl CFDApp {
 
     fn init_solver(&mut self) {
         self.is_running = false;
-        self.solver_worker.send(SolverWorkerCommand::SetRunning(false));
+        self.solver_worker
+            .send(SolverWorkerCommand::SetRunning(false));
         self.solver_worker.send(SolverWorkerCommand::ClearSolver);
         self.refresh_model_caps();
         self.pending_init_request = Some(self.make_init_request());
@@ -519,8 +556,7 @@ impl CFDApp {
                         let target = min_cell_size.clamp(1e-6, 1e3);
                         let mut nx = ((length / target).round() as i64).max(1) as usize;
                         nx = ((nx + 6) / 7).max(1) * 7;
-                        let mut ny =
-                            ((height_outlet / target).round() as i64).max(1) as usize;
+                        let mut ny = ((height_outlet / target).round() as i64).max(1) as usize;
                         if ny % 2 != 0 {
                             ny += 1;
                         }
@@ -762,7 +798,8 @@ impl CFDApp {
 
     fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
         self.is_running = false;
-        self.solver_worker.send(SolverWorkerCommand::SetRunning(false));
+        self.solver_worker
+            .send(SolverWorkerCommand::SetRunning(false));
 
         self.model_caps = outcome.model_caps;
         self.cached_cells = outcome.cached_cells;
@@ -771,16 +808,13 @@ impl CFDApp {
         self.cached_p = outcome.cached_p;
         self.mesh = Some(outcome.mesh);
 
-        self.cfd_renderer = outcome
-            .renderer
-            .map(|r| Arc::new(Mutex::new(r)));
+        self.cfd_renderer = outcome.renderer.map(|r| Arc::new(Mutex::new(r)));
 
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
 
         self.solver_worker.send(SolverWorkerCommand::SetSolver {
             solver: outcome.solver,
-            solver_kind: self.solver_kind,
             min_cell_size: self.actual_min_cell_size,
         });
         self.sync_worker_params();
@@ -802,24 +836,13 @@ impl CFDApp {
         );
         let initial_p = vec![0.0; n_cells];
 
-        let (model, initial_u, initial_p, cached_p) = match request.solver_kind {
-            SolverKind::Incompressible => (
-                incompressible_momentum_model(),
-                Some(initial_u),
-                Some(initial_p),
-                None,
-            ),
-            SolverKind::Compressible => {
-                let p_ref = request
-                    .current_fluid
-                    .pressure_for_density(request.current_fluid.density);
-                (
-                    compressible_model_with_eos(request.current_fluid.eos),
-                    None,
-                    None,
-                    Some(p_ref),
-                )
-            }
+        let model = if request.model_id == "compressible" {
+            compressible_model_with_eos(request.current_fluid.eos)
+        } else {
+            all_models()
+                .into_iter()
+                .find(|m| m.id == request.model_id)
+                .ok_or_else(|| format!("unknown model id '{}'", request.model_id))?
         };
 
         const UI_MAX_BLOCK_JACOBI: u32 = 16;
@@ -862,9 +885,10 @@ impl CFDApp {
             advection_scheme: request.selected_scheme,
             time_scheme: request.time_scheme,
             preconditioner: effective_preconditioner,
-            stepping: match request.solver_kind {
-                SolverKind::Incompressible => SteppingMode::Coupled,
-                SolverKind::Compressible => SteppingMode::Implicit { outer_iters: 1 },
+            stepping: if model_caps.supports_eos_tuning {
+                SteppingMode::Implicit { outer_iters: 1 }
+            } else {
+                SteppingMode::Coupled
             },
         };
 
@@ -886,52 +910,66 @@ impl CFDApp {
             gpu_solver.set_preconditioner(effective_preconditioner);
         }
 
-        let (cached_u, cached_p) = match request.solver_kind {
-            SolverKind::Incompressible => {
-                let _ = gpu_solver.set_density(request.current_fluid.density as f32);
-                let _ = gpu_solver.set_alpha_u(request.alpha_u as f32);
-                let _ = gpu_solver.set_alpha_p(request.alpha_p as f32);
-                let _ = gpu_solver.set_inlet_velocity(request.inlet_velocity);
-                gpu_solver.set_u(initial_u.as_ref().unwrap());
-                gpu_solver.set_p(initial_p.as_ref().unwrap());
-                (initial_u.unwrap(), initial_p.unwrap())
+        let model = gpu_solver.model();
+        let mut has_rho = false;
+        let mut has_rho_u = false;
+        let mut has_rho_e = false;
+        let mut has_u = false;
+        for eqn in model.system.equations() {
+            match eqn.target().name() {
+                "rho" => has_rho = true,
+                "rho_u" => has_rho_u = true,
+                "rho_e" => has_rho_e = true,
+                "u" => has_u = true,
+                _ => {}
             }
-            SolverKind::Compressible => {
-                let p_ref = cached_p.unwrap();
-                let _ = gpu_solver.set_density(request.current_fluid.density as f32);
-                let _ = gpu_solver.set_compressible_inlet_isothermal_x(
-                    request.current_fluid.density as f32,
-                    request.inlet_velocity,
-                    &request.current_fluid.eos,
-                );
-                gpu_solver.set_uniform_state(
-                    request.current_fluid.density as f32,
-                    [0.0, 0.0],
-                    p_ref as f32,
-                );
-                (vec![(0.0, 0.0); n_cells], vec![p_ref; n_cells])
-            }
+        }
+
+        let (cached_u, cached_p) = if has_rho && has_rho_u && has_rho_e && has_u {
+            let p_ref = request
+                .current_fluid
+                .pressure_for_density(request.current_fluid.density);
+            let _ = gpu_solver.set_density(request.current_fluid.density as f32);
+            let _ = gpu_solver.set_compressible_inlet_isothermal_x(
+                request.current_fluid.density as f32,
+                request.inlet_velocity,
+                &request.current_fluid.eos,
+            );
+            gpu_solver.set_uniform_state(
+                request.current_fluid.density as f32,
+                [0.0, 0.0],
+                p_ref as f32,
+            );
+            (vec![(0.0, 0.0); n_cells], vec![p_ref; n_cells])
+        } else {
+            let _ = gpu_solver.set_density(request.current_fluid.density as f32);
+            let _ = gpu_solver.set_alpha_u(request.alpha_u as f32);
+            let _ = gpu_solver.set_alpha_p(request.alpha_p as f32);
+            let _ = gpu_solver.set_inlet_velocity(request.inlet_velocity);
+            gpu_solver.set_u(&initial_u);
+            gpu_solver.set_p(&initial_p);
+            (initial_u, initial_p)
         };
 
         gpu_solver.initialize_history();
 
         let cached_cells = CFDApp::cache_cells(&mesh);
 
-        let renderer = if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue)
-        {
-            let mut renderer = cfd_renderer::CfdRenderResources::new(
-                device,
-                request.target_format,
-                mesh.num_cells() * 10,
-            );
-            let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
-            let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
-            renderer.update_mesh(queue, &vertices, &line_vertices);
-            renderer.update_bind_group(device, gpu_solver.state_buffer());
-            Some(renderer)
-        } else {
-            None
-        };
+        let renderer =
+            if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue) {
+                let mut renderer = cfd_renderer::CfdRenderResources::new(
+                    device,
+                    request.target_format,
+                    mesh.num_cells() * 10,
+                );
+                let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
+                let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
+                renderer.update_mesh(queue, &vertices, &line_vertices);
+                renderer.update_bind_group(device, gpu_solver.state_buffer());
+                Some(renderer)
+            } else {
+                None
+            };
 
         let actual_min_cell_size = mesh
             .cell_vol
@@ -1387,23 +1425,16 @@ impl eframe::App for CFDApp {
                             });
 
                         ui.separator();
-                        ui.label("Solver Type");
-                        let prev_solver_kind = self.solver_kind;
-                        egui::ComboBox::from_label("Solver")
-                            .selected_text(format!("{:?}", self.solver_kind))
+                        ui.label("Model");
+                        let prev_model_id = self.model_id;
+                        egui::ComboBox::from_label("Model")
+                            .selected_text(CFDApp::model_label(self.model_id))
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.solver_kind,
-                                    SolverKind::Incompressible,
-                                    "Incompressible (Coupled)",
-                                );
-                                ui.selectable_value(
-                                    &mut self.solver_kind,
-                                    SolverKind::Compressible,
-                                    "Compressible (KT)",
-                                );
+                                for (id, label) in CFDApp::supported_ui_models() {
+                                    ui.selectable_value(&mut self.model_id, id, label);
+                                }
                             });
-                        if prev_solver_kind != self.solver_kind {
+                        if prev_model_id != self.model_id {
                             self.refresh_model_caps();
                             self.init_solver();
                         }
@@ -1464,7 +1495,7 @@ impl eframe::App for CFDApp {
                                 status
                             ));
                         }
-                        if matches!(self.solver_kind, SolverKind::Incompressible) {
+                        if stats.outer_iterations > 0 {
                             ui.label(format!(
                                 "Coupled: {} iters, U:{:.2e} P:{:.2e}",
                                 stats.outer_iterations,
@@ -1744,7 +1775,8 @@ fn solver_worker_main(
     evt_tx: mpsc::Sender<SolverWorkerEvent>,
 ) {
     let mut solver: Option<UnifiedSolver> = None;
-    let mut solver_kind = SolverKind::Incompressible;
+    let mut model_id: &'static str = "<uninitialized>";
+    let mut supports_sound_speed = false;
     let mut min_cell_size = 0.0_f64;
     let mut params = RuntimeParams {
         adaptive_dt: false,
@@ -1771,125 +1803,43 @@ fn solver_worker_main(
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
-            match cmd {
-                SolverWorkerCommand::SetSolver {
-                    solver: next,
-                    solver_kind: next_kind,
-                    min_cell_size: next_min_cell_size,
-                } => {
-                    solver = Some(next);
-                    solver_kind = next_kind;
-                    min_cell_size = next_min_cell_size;
-                    running = false;
-                    step_idx = 0;
-                    prev_max_vel = 0.0;
-                    last_publish = std::time::Instant::now();
-                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-
-                    if let Some(s) = solver.as_mut() {
-                        solver_worker_apply_params(s, params);
-                    }
-                }
-                SolverWorkerCommand::ClearSolver => {
-                    solver = None;
-                    running = false;
-                    step_idx = 0;
-                    prev_max_vel = 0.0;
-                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-                    let _ = evt_tx.send(SolverWorkerEvent::Cleared);
-                }
-                SolverWorkerCommand::SetRunning(next_running) => {
-                    if next_running && solver.is_none() {
-                        let _ = evt_tx.send(SolverWorkerEvent::Error(
-                            "cannot start solver: no solver is initialized".to_string(),
-                        ));
-                        let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-                        running = false;
-                        continue;
-                    }
-                    if next_running {
-                        step_idx = 0;
-                        last_publish = std::time::Instant::now();
-                    }
-                    running = next_running;
-                    let _ = evt_tx.send(SolverWorkerEvent::Running(running));
-                }
-                SolverWorkerCommand::UpdateParams(next_params) => {
-                    params = next_params;
-                    if let Some(s) = solver.as_mut() {
-                        solver_worker_apply_params(s, params);
-                    }
-                }
-                SolverWorkerCommand::Shutdown => {
-                    return;
-                }
+            if !solver_worker_handle_cmd(
+                cmd,
+                &mut solver,
+                &mut model_id,
+                &mut supports_sound_speed,
+                &mut min_cell_size,
+                &mut params,
+                &mut running,
+                &mut step_idx,
+                &mut prev_max_vel,
+                &mut last_publish,
+                &evt_tx,
+            ) {
+                return;
             }
         }
 
         if !running {
             match cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
                 Ok(cmd) => {
-                    // Re-process command on next loop so try_recv drains any coalesced updates.
-                    match cmd {
-                        SolverWorkerCommand::Shutdown => return,
-                        other => {
-                            // Put it back via local handling.
-                            match other {
-                                SolverWorkerCommand::SetSolver {
-                                    solver: next,
-                                    solver_kind: next_kind,
-                                    min_cell_size: next_min_cell_size,
-                                } => {
-                                    solver = Some(next);
-                                    solver_kind = next_kind;
-                                    min_cell_size = next_min_cell_size;
-                                    running = false;
-                                    step_idx = 0;
-                                    prev_max_vel = 0.0;
-                                    last_publish = std::time::Instant::now();
-                                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-
-                                    if let Some(s) = solver.as_mut() {
-                                        solver_worker_apply_params(s, params);
-                                    }
-                                }
-                                SolverWorkerCommand::ClearSolver => {
-                                    solver = None;
-                                    running = false;
-                                    step_idx = 0;
-                                    prev_max_vel = 0.0;
-                                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-                                    let _ = evt_tx.send(SolverWorkerEvent::Cleared);
-                                }
-                                SolverWorkerCommand::SetRunning(next_running) => {
-                                    if next_running && solver.is_none() {
-                                        let _ = evt_tx.send(SolverWorkerEvent::Error(
-                                            "cannot start solver: no solver is initialized"
-                                                .to_string(),
-                                        ));
-                                        let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-                                        running = false;
-                                    } else {
-                                        if next_running {
-                                            step_idx = 0;
-                                            last_publish = std::time::Instant::now();
-                                        }
-                                        running = next_running;
-                                        let _ = evt_tx.send(SolverWorkerEvent::Running(running));
-                                    }
-                                }
-                                SolverWorkerCommand::UpdateParams(next_params) => {
-                                    params = next_params;
-                                    if let Some(s) = solver.as_mut() {
-                                        solver_worker_apply_params(s, params);
-                                    }
-                                }
-                                SolverWorkerCommand::Shutdown => return,
-                            }
-                        }
+                    if !solver_worker_handle_cmd(
+                        cmd,
+                        &mut solver,
+                        &mut model_id,
+                        &mut supports_sound_speed,
+                        &mut min_cell_size,
+                        &mut params,
+                        &mut running,
+                        &mut step_idx,
+                        &mut prev_max_vel,
+                        &mut last_publish,
+                        &evt_tx,
+                    ) {
+                        return;
                     }
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
             continue;
@@ -1904,19 +1854,13 @@ fn solver_worker_main(
             continue;
         };
 
-        if step_idx == 0 && matches!(solver_kind, SolverKind::Incompressible) {
-            solver.incompressible_set_should_stop(false);
-        }
-
         if params.adaptive_dt {
-            let sound_speed = match solver_kind {
-                SolverKind::Compressible => params.eos.sound_speed(params.density as f64),
-                SolverKind::Incompressible => 0.0,
+            let sound_speed = if supports_sound_speed {
+                params.eos.sound_speed(params.density as f64)
+            } else {
+                0.0
             };
-            let wave_speed = match solver_kind {
-                SolverKind::Compressible => prev_max_vel + sound_speed,
-                SolverKind::Incompressible => prev_max_vel,
-            };
+            let wave_speed = prev_max_vel + sound_speed;
             if min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
                 let current_dt = solver.dt() as f64;
                 let mut next_dt = params.target_cfl * min_cell_size / wave_speed;
@@ -1944,7 +1888,7 @@ fn solver_worker_main(
         };
         let step_time_ms = start.elapsed().as_secs_f32() * 1000.0;
 
-        if matches!(solver_kind, SolverKind::Incompressible) && solver.incompressible_should_stop() {
+        if solver.incompressible_should_stop() {
             running = false;
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
             continue;
@@ -1974,17 +1918,15 @@ fn solver_worker_main(
             ..Default::default()
         };
 
-        if matches!(solver_kind, SolverKind::Incompressible) {
-            if let Some((iters, res_u, res_p)) = solver.incompressible_outer_stats() {
-                stats.outer_iterations = iters;
-                stats.outer_residual_u = res_u;
-                stats.outer_residual_p = res_p;
-            }
-            if step_linear_stats.len() == 3 {
-                stats.stats_ux = step_linear_stats[0];
-                stats.stats_uy = step_linear_stats[1];
-                stats.stats_p = step_linear_stats[2];
-            }
+        if let Some((iters, res_u, res_p)) = solver.incompressible_outer_stats() {
+            stats.outer_iterations = iters;
+            stats.outer_residual_u = res_u;
+            stats.outer_residual_p = res_p;
+        }
+        if step_linear_stats.len() == 3 {
+            stats.stats_ux = step_linear_stats[0];
+            stats.stats_uy = step_linear_stats[1];
+            stats.stats_p = step_linear_stats[2];
         }
 
         let log_every_steps = params.log_every_steps.max(1) as u64;
@@ -2025,23 +1967,16 @@ fn solver_worker_main(
             }
 
             if should_log || nonfinite_u > 0 || nonfinite_p > 0 {
-                let outer_str = if matches!(solver_kind, SolverKind::Incompressible) {
-                    solver
-                        .incompressible_outer_stats()
-                        .map(|(iters, res_u, res_p)| {
-                            format!(
-                                " outer(iters={}, u={:.3e}, p={:.3e})",
-                                iters, res_u, res_p
-                            )
-                        })
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                };
+                let outer_str = solver
+                    .incompressible_outer_stats()
+                    .map(|(iters, res_u, res_p)| {
+                        format!(" outer(iters={}, u={:.3e}, p={:.3e})", iters, res_u, res_p)
+                    })
+                    .unwrap_or_default();
 
                 eprintln!(
-                    "[cfd2][{:?}] step={} t={:.4e} dt={:.2e} max|u|={:.3e} p=[{:.3e},{:.3e}] solves={} last(iters={}, res={:.3e}, conv={}, div={}){} nonfinite(u={}, p={})",
-                    solver_kind,
+                    "[cfd2][{}] step={} t={:.4e} dt={:.2e} max|u|={:.3e} p=[{:.3e},{:.3e}] solves={} last(iters={}, res={:.3e}, conv={}, div={}){} nonfinite(u={}, p={})",
+                    model_id,
                     step_idx,
                     solver.time(),
                     solver.dt(),
@@ -2074,6 +2009,79 @@ fn solver_worker_main(
         step_idx = step_idx.wrapping_add(1);
         thread::sleep(std::time::Duration::from_millis(1));
     }
+}
+
+fn solver_worker_handle_cmd(
+    cmd: SolverWorkerCommand,
+    solver: &mut Option<UnifiedSolver>,
+    model_id: &mut &'static str,
+    supports_sound_speed: &mut bool,
+    min_cell_size: &mut f64,
+    params: &mut RuntimeParams,
+    running: &mut bool,
+    step_idx: &mut u64,
+    prev_max_vel: &mut f64,
+    last_publish: &mut std::time::Instant,
+    evt_tx: &mpsc::Sender<SolverWorkerEvent>,
+) -> bool {
+    match cmd {
+        SolverWorkerCommand::SetSolver {
+            solver: next,
+            min_cell_size: next_min_cell_size,
+        } => {
+            *model_id = next.model().id;
+            *supports_sound_speed = next
+                .model()
+                .named_param_keys()
+                .iter()
+                .any(|&k| k == "eos.gamma");
+            *solver = Some(next);
+            *min_cell_size = next_min_cell_size;
+            *running = false;
+            *step_idx = 0;
+            *prev_max_vel = 0.0;
+            *last_publish = std::time::Instant::now();
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+
+            if let Some(s) = solver.as_mut() {
+                solver_worker_apply_params(s, *params);
+            }
+        }
+        SolverWorkerCommand::ClearSolver => {
+            *solver = None;
+            *model_id = "<uninitialized>";
+            *supports_sound_speed = false;
+            *running = false;
+            *step_idx = 0;
+            *prev_max_vel = 0.0;
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Cleared);
+        }
+        SolverWorkerCommand::SetRunning(next_running) => {
+            if next_running && solver.is_none() {
+                let _ = evt_tx.send(SolverWorkerEvent::Error(
+                    "cannot start solver: no solver is initialized".to_string(),
+                ));
+                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                *running = false;
+                return true;
+            }
+            if next_running {
+                *step_idx = 0;
+                *last_publish = std::time::Instant::now();
+            }
+            *running = next_running;
+            let _ = evt_tx.send(SolverWorkerEvent::Running(*running));
+        }
+        SolverWorkerCommand::UpdateParams(next_params) => {
+            *params = next_params;
+            if let Some(s) = solver.as_mut() {
+                solver_worker_apply_params(s, *params);
+            }
+        }
+        SolverWorkerCommand::Shutdown => return false,
+    }
+    true
 }
 
 fn get_color(t: f64) -> egui::Color32 {

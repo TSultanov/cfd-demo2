@@ -1,6 +1,6 @@
 use crate::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_structured_backwards_step_mesh,
-    generate_voronoi_mesh, BackwardsStep, ChannelWithObstacle, Mesh,
+    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
+    ChannelWithObstacle, Mesh,
 };
 use crate::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
@@ -62,7 +62,6 @@ impl Default for GeometryType {
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum MeshType {
-    Structured,
     CutCell,
     Delaunay,
     Voronoi,
@@ -549,24 +548,6 @@ impl CFDApp {
                 let step_x = 0.5;
 
                 match mesh_type {
-                    MeshType::Structured => {
-                        let target = min_cell_size.clamp(1e-6, 1e3);
-                        let mut nx = ((length / target).round() as i64).max(1) as usize;
-                        nx = ((nx + 6) / 7).max(1) * 7;
-                        let mut ny = ((height_outlet / target).round() as i64).max(1) as usize;
-                        if ny % 2 != 0 {
-                            ny += 1;
-                        }
-                        ny = ny.max(2);
-                        generate_structured_backwards_step_mesh(
-                            nx,
-                            ny,
-                            length,
-                            height_outlet,
-                            height_inlet,
-                            step_x,
-                        )
-                    }
                     MeshType::CutCell | MeshType::Delaunay | MeshType::Voronoi => {
                         let domain_size = Vector2::new(length, height_outlet);
                         let geo = BackwardsStep {
@@ -597,7 +578,6 @@ impl CFDApp {
                                 growth_rate,
                                 domain_size,
                             ),
-                            MeshType::Structured => unreachable!("handled above"),
                         };
                         mesh.smooth(&geo, 0.3, 50);
                         mesh
@@ -612,10 +592,6 @@ impl CFDApp {
                     height: 1.0,
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.1,
-                };
-                let mesh_type = match mesh_type {
-                    MeshType::Structured => MeshType::CutCell,
-                    other => other,
                 };
                 let mesh = match mesh_type {
                     MeshType::CutCell => {
@@ -651,7 +627,6 @@ impl CFDApp {
                         mesh.smooth(&geo, 0.3, 50);
                         mesh
                     }
-                    MeshType::Structured => unreachable!("mapped above"),
                 };
 
                 mesh
@@ -1165,18 +1140,6 @@ impl eframe::App for CFDApp {
                         );
                         ui.separator();
                         ui.label("Mesh Type");
-                        let structured_enabled =
-                            matches!(self.selected_geometry, GeometryType::BackwardsStep);
-                        ui.add_enabled_ui(structured_enabled, |ui| {
-                            ui.radio_value(
-                                &mut self.mesh_type,
-                                MeshType::Structured,
-                                "Structured (BackwardsStep only)",
-                            );
-                        });
-                        if !structured_enabled && matches!(self.mesh_type, MeshType::Structured) {
-                            self.mesh_type = MeshType::CutCell;
-                        }
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
                         ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");

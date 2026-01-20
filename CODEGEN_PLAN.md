@@ -46,10 +46,23 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Prune unused `preconditioner.wgsl` path
-- Remove the unused `src/solver/gpu/shaders/preconditioner.wgsl` kernels + matching `KernelId` constants and regenerate `src/solver/gpu/bindings.rs`.
+### 1) Speed up `build.rs` for handwritten shader edits
+- Today, *any* edit under `src/solver/gpu/shaders/**` forces full model WGSL codegen for all models + kernel registry regeneration, even when model/codegen/IR inputs are unchanged.
+- Add a fingerprint/cache so that handwritten shader-only changes only regenerate:
+  - `src/solver/gpu/bindings.rs` (wgsl_bindgen output)
+  - handwritten portions of `OUT_DIR/kernel_registry_map.rs`
+  - (and skip expensive model kernel emission + generated-kernel re-parse when inputs are unchanged)
 
-### 2) Ongoing hardening (evergreen)
+### 2) UI: fix responsiveness + state correctness (optional surface)
+- Run compute off the UI thread and push progress snapshots over a channel (UI should repaint on updates, not on log frequency).
+- Ensure changing solver type cancels in-flight work and never hangs.
+- Remove/repair controls that are permanently disabled by stale state or mismatched `enabled` conditions.
+
+### 3) Optional-surface pruning (meshgen/profiling/repro)
+- Keep `src/solver/mesh/*` core-only; move or delete `src/meshgen/*`, profiling examples, and reproduction harnesses once they stop paying for themselves.
+- Prefer moving optional surfaces into separate workspace crates to shrink the main crate’s module graph.
+
+### 4) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

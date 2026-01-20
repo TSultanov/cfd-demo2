@@ -46,8 +46,8 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Prune unused linear-solver init artifacts
-- Remove unused pipelines/bind groups from `src/solver/gpu/init/linear_solver/pipelines.rs` (e.g. BiCGStab + unused dot-pair BGS) so the scalar CG path only constructs what `ScalarCgModule` actually uses.
+### 1) Prune unused scalar init artifacts
+- Remove unused pipelines from `src/solver/gpu/init/scalars.rs` so the scalar CG path only constructs what `ScalarCgModule` actually uses.
 
 ### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).

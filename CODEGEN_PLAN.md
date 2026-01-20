@@ -41,20 +41,15 @@ This is intentionally **not a changelog**: once a gap is closed, remove it from 
 - Prefer a short, targeted test before/after each patch (e.g. `cargo test contract_` or the specific failing test), but do not skip OpenFOAM when the change can affect numerics/orchestration.
 
 ## Current Audit Notes (concrete simplification targets)
-- `ui` currently pulls in `meshgen`: consider splitting so the UI can build without meshgen algorithms unless explicitly enabled.
 - The recipe-driven solver path now only uses `Host | Graph | Repeat` nodes (no conditional/while orchestration surface).
-- `meshgen` contains many experimental algorithms; core behavior gates (OpenFOAM) only require structured meshes + minimal mesh structs.
+- `meshgen` contains many experimental algorithms; consider moving them out of `src/solver/mesh/*` (or deleting) once core/UI no longer depend on them.
 
 ## Remaining Gaps (simplification + pruning plan)
 
-### 1) Meshgen quarantine (optional surface)
-- Keep only structured meshes + minimal mesh structs in core; isolate meshgen algorithms so core builds don’t compile them.
-- Move meshgen-heavy tests/benches behind `meshgen + dev-tests` (or delete if unused).
-
-### 2) UI surface pruning (optional surface)
+### 1) UI surface pruning (optional surface)
 - Remove always-disabled controls and derive enabled/disabled state from `ModelSpec` (named params + boundary fields), not solver-family switches.
 
-### 3) Ongoing hardening (evergreen)
+### 2) Ongoing hardening (evergreen)
 - Add/expand contract tests as new invariants are introduced (keep “no special casing” gaps closed).
 - Prefer binding/manifest-driven derivation for optional resources/stages (no solver-side aliases/special cases).
 

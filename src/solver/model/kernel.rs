@@ -21,23 +21,11 @@ impl KernelId {
     pub const DOT_PRODUCT: KernelId = KernelId("dot_product");
     pub const DOT_PRODUCT_PAIR: KernelId = KernelId("dot_product_pair");
 
-    pub const SCALARS_INIT: KernelId = KernelId("scalars/init_scalars");
     pub const SCALARS_INIT_CG: KernelId = KernelId("scalars/init_cg_scalars");
     pub const SCALARS_REDUCE_RHO_NEW_R_R: KernelId = KernelId("scalars/reduce_rho_new_r_r");
     pub const SCALARS_REDUCE_R0_V: KernelId = KernelId("scalars/reduce_r0_v");
-    pub const SCALARS_REDUCE_T_S_T_T: KernelId = KernelId("scalars/reduce_t_s_t_t");
-    pub const SCALARS_UPDATE_CG_ALPHA: KernelId = KernelId("scalars/update_cg_alpha");
-    pub const SCALARS_UPDATE_CG_BETA: KernelId = KernelId("scalars/update_cg_beta");
-    pub const SCALARS_UPDATE_RHO_OLD: KernelId = KernelId("scalars/update_rho_old");
 
     pub const LINEAR_SOLVER_SPMV_P_V: KernelId = KernelId("linear_solver/spmv_p_v");
-    pub const LINEAR_SOLVER_SPMV_S_T: KernelId = KernelId("linear_solver/spmv_s_t");
-    pub const LINEAR_SOLVER_BICGSTAB_UPDATE_X_R: KernelId =
-        KernelId("linear_solver/bicgstab_update_x_r");
-    pub const LINEAR_SOLVER_BICGSTAB_UPDATE_P: KernelId =
-        KernelId("linear_solver/bicgstab_update_p");
-    pub const LINEAR_SOLVER_BICGSTAB_UPDATE_S: KernelId =
-        KernelId("linear_solver/bicgstab_update_s");
     pub const LINEAR_SOLVER_CG_UPDATE_X_R: KernelId = KernelId("linear_solver/cg_update_x_r");
     pub const LINEAR_SOLVER_CG_UPDATE_P: KernelId = KernelId("linear_solver/cg_update_p");
 

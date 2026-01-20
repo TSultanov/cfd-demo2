@@ -61,8 +61,6 @@ pub fn init_pipelines(
         .with_buffer("r", &state.b_r)
         .with_buffer("p", &state.b_p_solver)
         .with_buffer("v", &state.b_v)
-        .with_buffer("s", &state.b_s)
-        .with_buffer("t", &state.b_t)
         .with_buffer("row_offsets", &matrix.b_row_offsets)
         .with_buffer("col_indices", &matrix.b_col_indices)
         .with_buffer("matrix_values", &matrix.b_matrix_values)

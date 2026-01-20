@@ -8,8 +8,6 @@ pub struct StateResources {
     pub b_r0: wgpu::Buffer,
     pub b_p_solver: wgpu::Buffer,
     pub b_v: wgpu::Buffer,
-    pub b_s: wgpu::Buffer,
-    pub b_t: wgpu::Buffer,
     pub b_dot_result: wgpu::Buffer,
     pub b_dot_result_2: wgpu::Buffer,
     pub b_scalars: wgpu::Buffer,
@@ -66,24 +64,6 @@ pub fn init_state(device: &wgpu::Device, num_cells: u32) -> StateResources {
 
     let b_v = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("V Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_s = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("S Buffer"),
-        size: (num_cells as u64) * 4,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let b_t = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("T Buffer"),
         size: (num_cells as u64) * 4,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_SRC
@@ -149,8 +129,6 @@ pub fn init_state(device: &wgpu::Device, num_cells: u32) -> StateResources {
         b_r0,
         b_p_solver,
         b_v,
-        b_s,
-        b_t,
         b_dot_result,
         b_dot_result_2,
         b_scalars,

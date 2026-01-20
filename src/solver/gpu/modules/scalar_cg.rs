@@ -19,8 +19,6 @@ pub struct ScalarCgModule {
     b_r0: wgpu::Buffer,
     b_p: wgpu::Buffer,
     b_v: wgpu::Buffer,
-    b_s: wgpu::Buffer,
-    b_t: wgpu::Buffer,
 
     b_dot_result: wgpu::Buffer,
     b_dot_result_2: wgpu::Buffer,
@@ -59,8 +57,6 @@ impl ScalarCgModule {
         b_r0: &wgpu::Buffer,
         b_p: &wgpu::Buffer,
         b_v: &wgpu::Buffer,
-        b_s: &wgpu::Buffer,
-        b_t: &wgpu::Buffer,
         b_dot_result: &wgpu::Buffer,
         b_dot_result_2: &wgpu::Buffer,
         b_scalars: &wgpu::Buffer,
@@ -111,8 +107,6 @@ impl ScalarCgModule {
             b_r0: b_r0.clone(),
             b_p: b_p.clone(),
             b_v: b_v.clone(),
-            b_s: b_s.clone(),
-            b_t: b_t.clone(),
             b_dot_result: b_dot_result.clone(),
             b_dot_result_2: b_dot_result_2.clone(),
             b_scalars: b_scalars.clone(),
@@ -162,14 +156,6 @@ impl ScalarCgModule {
 
     pub fn v(&self) -> &wgpu::Buffer {
         &self.b_v
-    }
-
-    pub fn s(&self) -> &wgpu::Buffer {
-        &self.b_s
-    }
-
-    pub fn t(&self) -> &wgpu::Buffer {
-        &self.b_t
     }
 
     pub fn dot_result(&self) -> &wgpu::Buffer {
@@ -383,7 +369,7 @@ impl ScalarCgModule {
         rx.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
         let values: &[f32] = bytemuck::cast_slice(&data);
-        let r_r = values.get(8).copied().unwrap_or(0.0);
+        let r_r = values.get(5).copied().unwrap_or(0.0);
         drop(data);
         self.b_staging_scalar.unmap();
         r_r

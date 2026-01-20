@@ -3,10 +3,7 @@ struct GpuScalars {
     rho_new: f32,
     alpha: f32,
     beta: f32,
-    omega: f32,
     r0_v: f32,
-    t_s: f32,
-    t_t: f32,
     r_r: f32,
 }
 
@@ -80,51 +77,6 @@ fn reduce_r0_v(@builtin(local_invocation_id) local_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(64)
-fn reduce_t_s_t_t(@builtin(local_invocation_id) local_id: vec3<u32>) {
-    let n = params.num_groups;
-    let lid = local_id.x;
-    
-    var sum1 = 0.0;
-    var sum2 = 0.0;
-    
-    for (var i = lid; i < n; i += 64u) {
-        sum1 += dot_result_1[i];
-        sum2 += dot_result_2[i];
-    }
-    
-    scratch1[lid] = sum1;
-    scratch2[lid] = sum2;
-    workgroupBarrier();
-    
-    for (var i = 32u; i > 0u; i >>= 1u) {
-        if (lid < i) {
-            scratch1[lid] += scratch1[lid + i];
-            scratch2[lid] += scratch2[lid + i];
-        }
-        workgroupBarrier();
-    }
-    
-    if (lid == 0u) {
-        scalars.t_s = scratch1[0];
-        scalars.t_t = scratch2[0];
-    }
-}
-
-
-@compute @workgroup_size(1)
-fn init_scalars() {
-    scalars.rho_old = 1.0;
-    scalars.alpha = 1.0;
-    scalars.omega = 1.0;
-    scalars.beta = 0.0;
-}
-
-@compute @workgroup_size(1)
-fn update_rho_old() {
-    scalars.rho_old = scalars.rho_new;
-}
-
-@compute @workgroup_size(64)
 fn init_cg_scalars(@builtin(local_invocation_id) local_id: vec3<u32>) {
     let n = params.num_groups;
     let lid = local_id.x;
@@ -148,23 +100,5 @@ fn init_cg_scalars(@builtin(local_invocation_id) local_id: vec3<u32>) {
         scalars.rho_old = scratch1[0];
         scalars.alpha = 0.0;
         scalars.beta = 0.0;
-    }
-}
-
-@compute @workgroup_size(1)
-fn update_cg_alpha() {
-    if (abs(scalars.r0_v) < 1e-20) {
-        scalars.alpha = 0.0;
-    } else {
-        scalars.alpha = scalars.rho_old / scalars.r0_v;
-    }
-}
-
-@compute @workgroup_size(1)
-fn update_cg_beta() {
-    if (abs(scalars.rho_old) < 1e-20) {
-        scalars.beta = 0.0;
-    } else {
-        scalars.beta = scalars.rho_new / scalars.rho_old;
     }
 }

@@ -184,13 +184,14 @@ fn base_state_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
             AccessMode::Read,
         ),
         uniform_var("constants", Type::Custom("Constants".to_string()), 1, 3),
+        storage_var("state_iter", Type::array(Type::F32), 1, 4, AccessMode::Read),
     ];
     if needs_gradients {
         items.push(storage_var(
             "grad_state",
             Type::array(Type::Custom("Vector2".to_string())),
             1,
-            4,
+            5,
             AccessMode::Read,
         ));
     }
@@ -199,7 +200,7 @@ fn base_state_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
             "fluxes",
             Type::array(Type::F32),
             1,
-            5,
+            6,
             AccessMode::ReadWrite,
         ));
     }
@@ -434,6 +435,8 @@ fn main_assembly_fn(
                 equation.target.name(),
                 component,
             );
+            let phi_iter =
+                state_component(layout, "state_iter", "idx", equation.target.name(), component);
 
             // Default BDF1
             stmts.push(dsl::assign_op_expr(
@@ -479,14 +482,22 @@ fn main_assembly_fn(
             ));
 
             // Optional pseudo-time continuation (dual-time stepping):
-            // Add a diagonal `rho/dtau` term without modifying the physical-time RHS.
+            // Add a diagonal `rho/dtau` term along with the matching RHS term so the
+            // converged physical-time solution remains unchanged.
             stmts.push(dsl::if_block_expr(
                 dtau.clone().gt(0.0),
-                dsl::block(vec![dsl::assign_op_expr(
-                    AssignOp::Add,
-                    Expr::ident(format!("diag_{u_idx}")),
-                    dual_time_coeff.clone(),
-                )]),
+                dsl::block(vec![
+                    dsl::assign_op_expr(
+                        AssignOp::Add,
+                        Expr::ident(format!("diag_{u_idx}")),
+                        dual_time_coeff.clone(),
+                    ),
+                    dsl::assign_op_expr(
+                        AssignOp::Add,
+                        Expr::ident(format!("rhs_{u_idx}")),
+                        dual_time_coeff.clone() * phi_iter,
+                    ),
+                ]),
                 None,
             ));
         }

@@ -80,7 +80,10 @@ var<storage, read> state_old_old: array<f32>;
 @group(1) @binding(3) 
 var<uniform> constants: Constants;
 
-@group(1) @binding(5) 
+@group(1) @binding(4) 
+var<storage, read> state_iter: array<f32>;
+
+@group(1) @binding(6) 
 var<storage, read_write> fluxes: array<f32>;
 
 // Group 2: Solver (block CSR values + RHS)
@@ -148,6 +151,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_0 += vol * constants.density / constants.dtau;
+        rhs_0 += vol * constants.density / constants.dtau * state_iter[idx * 8u + 0u];
     }
     diag_1 += vol * constants.density / constants.dt;
     rhs_1 += vol * constants.density / constants.dt * state_old[idx * 8u + 1u];
@@ -161,6 +165,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_1 += vol * constants.density / constants.dtau;
+        rhs_1 += vol * constants.density / constants.dtau * state_iter[idx * 8u + 1u];
     }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];

@@ -307,6 +307,55 @@ fn euler_central_upwind(
 
     let c_eff = |side: FaceSide| S::Sqrt(Box::new(c_eff2(side)));
 
+    // --- Low-Mach pressure coupling ---
+    //
+    // At low Mach numbers, a purely density-based continuity flux can decouple pressure on
+    // collocated grids and produce checkerboarding. Add a preconditioning-gated pressure
+    // perturbation contribution to the density state used by the central-upwind dissipation
+    // term (leaves the physical mass flux unchanged).
+    let pressure_coupling_alpha = S::low_mach_pressure_coupling_alpha();
+    let low_mach_enabled = S::Sub(Box::new(S::lit(1.0)), Box::new(w_off.clone()));
+
+    let p_base = |side: FaceSide| {
+        // Base thermodynamic pressure used to form a perturbation:
+        // - Ideal gas: p_base = rho * theta_ref
+        // - Linear compressibility: p_base = dp_drho * rho - p_offset (since theta_ref = 0)
+        let rho_side = rho(side);
+        let p_base = S::Sub(
+            Box::new(S::Add(
+                Box::new(S::Mul(
+                    Box::new(rho_side.clone()),
+                    Box::new(S::constant("eos_theta_ref")),
+                )),
+                Box::new(S::Mul(
+                    Box::new(rho_side),
+                    Box::new(S::constant("eos_dp_drho")),
+                )),
+            )),
+            Box::new(S::constant("eos_p_offset")),
+        );
+        p_base
+    };
+
+    let p_pert = |side: FaceSide| S::Sub(Box::new(p(side)), Box::new(p_base(side)));
+    let c_eff2_safe = |side: FaceSide| S::Max(Box::new(c_eff2(side)), Box::new(S::lit(1e-12)));
+    let rho_diss = |side: FaceSide| {
+        let coupling = S::Mul(
+            Box::new(low_mach_enabled.clone()),
+            Box::new(pressure_coupling_alpha.clone()),
+        );
+        S::Add(
+            Box::new(rho(side)),
+            Box::new(S::Mul(
+                Box::new(coupling),
+                Box::new(S::Div(
+                    Box::new(p_pert(side)),
+                    Box::new(c_eff2_safe(side)),
+                )),
+            )),
+        )
+    };
+
     let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
     let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
 
@@ -337,8 +386,8 @@ fn euler_central_upwind(
 
     for name in &components {
         if name == rho_name {
-            u_left.push(rho(FaceSide::Owner));
-            u_right.push(rho(FaceSide::Neighbor));
+            u_left.push(rho_diss(FaceSide::Owner));
+            u_right.push(rho_diss(FaceSide::Neighbor));
             flux_left.push(flux_mass(FaceSide::Owner));
             flux_right.push(flux_mass(FaceSide::Neighbor));
         } else if name == &format!("{rho_u_name}_x") {

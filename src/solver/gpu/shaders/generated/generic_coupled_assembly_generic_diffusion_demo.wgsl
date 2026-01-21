@@ -80,6 +80,9 @@ var<storage, read> state_old_old: array<f32>;
 @group(1) @binding(3) 
 var<uniform> constants: Constants;
 
+@group(1) @binding(4) 
+var<storage, read> state_iter: array<f32>;
+
 // Group 2: Solver (block CSR values + RHS)
 
 @group(2) @binding(0) 
@@ -131,6 +134,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_0 += vol * 1.0 / constants.dtau;
+        rhs_0 += vol * 1.0 / constants.dtau * state_iter[idx * 1u + 0u];
     }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];

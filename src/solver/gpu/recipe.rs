@@ -333,16 +333,6 @@ impl SolverRecipe {
                     _ => {}
                 }
             }
-            if matches!(stepping, SteppingMode::Explicit) {
-                if binds_solution_x {
-                    break;
-                }
-            } else if binds_fluxes
-                && (!matches!(stepping, SteppingMode::Implicit { .. }) || binds_state_iter)
-                && (!binds_low_mach_params || requires_low_mach_params)
-            {
-                break;
-            }
         }
 
         if matches!(stepping, SteppingMode::Explicit) && binds_solution_x {
@@ -369,8 +359,10 @@ impl SolverRecipe {
             None
         };
 
-        let requires_iteration_snapshot =
-            matches!(stepping, SteppingMode::Implicit { .. }) && binds_state_iter;
+        // Some kernels may bind `state_iter` as an optional dual-time / outer-iteration reference.
+        // Allocate the backing buffer regardless of stepping mode so the bind group layout is
+        // always satisfiable (even when the shader gates the feature on `dtau > 0`).
+        let requires_iteration_snapshot = binds_state_iter;
 
         // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();
@@ -499,7 +491,7 @@ impl SolverRecipe {
             }
 
             SteppingMode::Implicit { outer_iters: _ } => {
-                // Implicit: prepare → outer loop (before_iter → assembly → solve → after_solve → snapshot? → before_apply → apply → after_apply → advance_outer_idx) → update → finalize
+                // Implicit: prepare → outer loop (before_iter → assembly → solve → after_solve → snapshot? → before_apply → update → after_apply → advance_outer_idx) → finalize
                 let iter_block = program.new_block();
 
                 program.push(
@@ -559,8 +551,8 @@ impl SolverRecipe {
                 program.push(
                     iter_block,
                     ProgramSpecNode::Graph {
-                        label: "implicit:apply",
-                        kind: GraphOpKind("implicit:apply"),
+                        label: "implicit:update",
+                        kind: GraphOpKind("implicit:update"),
                         mode: GraphExecMode::SingleSubmit,
                     },
                 );
@@ -585,15 +577,6 @@ impl SolverRecipe {
                         label: "implicit:outer_loop",
                         times: CountOpKind("implicit:outer_iters"),
                         body: iter_block,
-                    },
-                );
-
-                program.push(
-                    root,
-                    ProgramSpecNode::Graph {
-                        label: "implicit:update",
-                        kind: GraphOpKind("implicit:update"),
-                        mode: GraphExecMode::SingleSubmit,
                     },
                 );
 

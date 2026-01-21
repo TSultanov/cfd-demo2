@@ -724,6 +724,9 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
         label: Some("generic_coupled:pre_step_copy"),
     });
     encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
+    if r.fields.constants.values().dtau > 0.0 {
+        r.fields.snapshot_for_iteration(&mut encoder);
+    }
     queue.submit(Some(encoder.finish()));
     r.time_integration
         .prepare_step(&mut r.fields.constants, &queue);
@@ -924,6 +927,9 @@ pub(crate) fn implicit_snapshot_run(
     _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
+    if r.fields.constants.values().dtau <= 0.0 {
+        return (0.0, None);
+    }
     let mut encoder = context
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {

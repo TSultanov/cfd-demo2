@@ -80,7 +80,10 @@ var<storage, read> state_old_old: array<f32>;
 @group(1) @binding(3) 
 var<uniform> constants: Constants;
 
-@group(1) @binding(5) 
+@group(1) @binding(4) 
+var<storage, read> state_iter: array<f32>;
+
+@group(1) @binding(6) 
 var<storage, read_write> fluxes: array<f32>;
 
 // Group 2: Solver (block CSR values + RHS)
@@ -218,6 +221,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_0 += vol * 1.0 / constants.dtau;
+        rhs_0 += vol * 1.0 / constants.dtau * state_iter[idx * 8u + 0u];
     }
     diag_1 += vol * 1.0 / constants.dt;
     rhs_1 += vol * 1.0 / constants.dt * state_old[idx * 8u + 1u];
@@ -231,6 +235,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_1 += vol * 1.0 / constants.dtau;
+        rhs_1 += vol * 1.0 / constants.dtau * state_iter[idx * 8u + 1u];
     }
     diag_2 += vol * 1.0 / constants.dt;
     rhs_2 += vol * 1.0 / constants.dt * state_old[idx * 8u + 2u];
@@ -244,6 +249,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_2 += vol * 1.0 / constants.dtau;
+        rhs_2 += vol * 1.0 / constants.dtau * state_iter[idx * 8u + 2u];
     }
     diag_3 += vol * 1.0 / constants.dt;
     rhs_3 += vol * 1.0 / constants.dt * state_old[idx * 8u + 3u];
@@ -257,6 +263,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     if (constants.dtau > 0.0) {
         diag_3 += vol * 1.0 / constants.dtau;
+        rhs_3 += vol * 1.0 / constants.dtau * state_iter[idx * 8u + 3u];
     }
     diag_4 -= -1.0 * state[idx * 8u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     diag_5 -= -1.0 * state[idx * 8u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;

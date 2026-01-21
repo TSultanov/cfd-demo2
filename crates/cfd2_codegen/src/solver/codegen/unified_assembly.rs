@@ -408,7 +408,10 @@ fn main_assembly_fn(
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(layout, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff = Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
+        let base_coeff =
+            Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
+        let dtau = Expr::ident("constants").field("dtau");
+        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
 
         let dt = Expr::ident("constants").field("dt");
         let dt_old = Expr::ident("constants").field("dt_old");
@@ -472,6 +475,18 @@ fn main_assembly_fn(
                                     - Expr::ident("factor_nm1") * phi_nm1),
                     ),
                 ]),
+                None,
+            ));
+
+            // Optional pseudo-time continuation (dual-time stepping):
+            // Add a diagonal `rho/dtau` term without modifying the physical-time RHS.
+            stmts.push(dsl::if_block_expr(
+                dtau.clone().gt(0.0),
+                dsl::block(vec![dsl::assign_op_expr(
+                    AssignOp::Add,
+                    Expr::ident(format!("diag_{u_idx}")),
+                    dual_time_coeff.clone(),
+                )]),
                 None,
             ));
         }

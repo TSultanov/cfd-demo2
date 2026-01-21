@@ -62,6 +62,40 @@ pub fn generate_generic_coupled_apply_wgsl() -> String {
     module.to_wgsl()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::codegen::ir::lower_system;
+    use crate::solver::ir::{fvm, Equation, EquationSystem, SchemeRegistry, StateLayout, vol_scalar};
+    use crate::solver::scheme::Scheme;
+    use crate::solver::units::si;
+
+    #[test]
+    fn generic_coupled_ddt_adds_dtau_diagonal_when_enabled() {
+        let u = vol_scalar("u", si::VELOCITY);
+
+        let mut eqn = Equation::new(u.clone());
+        eqn.add_term(fvm::ddt(u.clone()));
+
+        let mut system = EquationSystem::new();
+        system.add_equation(eqn);
+
+        let layout = StateLayout::new(vec![u]);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let wgsl = generate_generic_coupled_assembly_wgsl(&discrete, &layout, false);
+        assert!(
+            wgsl.contains("constants.dtau > 0.0"),
+            "expected assembly WGSL to gate dual-time term on constants.dtau"
+        );
+        assert!(
+            wgsl.contains("/ constants.dtau"),
+            "expected assembly WGSL to include a 1/dtau diagonal contribution"
+        );
+    }
+}
+
 fn vector2_struct() -> StructDef {
     StructDef::new(
         "Vector2",
@@ -471,7 +505,10 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(layout, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff = Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
+        let base_coeff =
+            Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
+        let dtau = Expr::ident("constants").field("dtau");
+        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
 
         let dt = Expr::ident("constants").field("dt");
         let dt_old = Expr::ident("constants").field("dt_old");
@@ -535,6 +572,18 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
                                     - Expr::ident("factor_nm1") * phi_nm1),
                     ),
                 ]),
+                None,
+            ));
+
+            // Optional pseudo-time continuation (dual-time stepping):
+            // Add a diagonal `rho/dtau` term without modifying the physical-time RHS.
+            stmts.push(dsl::if_block_expr(
+                dtau.clone().gt(0.0),
+                dsl::block(vec![dsl::assign_op_expr(
+                    AssignOp::Add,
+                    Expr::ident(format!("diag_{u_idx}")),
+                    dual_time_coeff.clone(),
+                )]),
                 None,
             ));
         }

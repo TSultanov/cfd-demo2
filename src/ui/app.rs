@@ -11,8 +11,8 @@ use crate::solver::model::{
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
-    LinearSolverStats, PreconditionerType, SolverConfig, SteppingMode, TimeScheme as GpuTimeScheme,
-    UnifiedSolver,
+    GpuLowMachPrecondModel, LinearSolverStats, PreconditionerType, SolverConfig, SteppingMode,
+    TimeScheme as GpuTimeScheme, UnifiedSolver,
 };
 use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
@@ -26,11 +26,15 @@ struct RuntimeParams {
     adaptive_dt: bool,
     target_cfl: f64,
     requested_dt: f32,
+    dtau: f32,
     log_convergence: bool,
     log_every_steps: u32,
     advection_scheme: Scheme,
     time_scheme: GpuTimeScheme,
     preconditioner: PreconditionerType,
+    outer_iters: u32,
+    low_mach_model: GpuLowMachPrecondModel,
+    low_mach_theta_floor: f32,
     alpha_u: f32,
     alpha_p: f32,
     inlet_velocity: f32,
@@ -101,6 +105,9 @@ struct ModelUiCaps {
     model_owns_preconditioner: bool,
     unknowns_per_cell: u32,
 
+    supports_outer_iters: bool,
+    supports_dtau: bool,
+    supports_low_mach: bool,
     supports_alpha_u: bool,
     supports_alpha_p: bool,
     supports_eos_tuning: bool,
@@ -242,12 +249,17 @@ pub struct CFDApp {
     show_mesh_lines: bool,
     adaptive_dt: bool,
     target_cfl: f64,
+    dual_time: bool,
+    dtau: f64,
     log_convergence: bool,
     log_every_steps: u32,
     render_mode: RenderMode,
     alpha_u: f64,
     alpha_p: f64,
     time_scheme: GpuTimeScheme,
+    outer_iters: u32,
+    low_mach_model: GpuLowMachPrecondModel,
+    low_mach_theta_floor: f32,
     inlet_velocity: f32,
     selected_preconditioner: PreconditionerType,
     model_id: &'static str,
@@ -360,12 +372,17 @@ impl CFDApp {
             show_mesh_lines: true,
             adaptive_dt: true,
             target_cfl: 0.95,
+            dual_time: false,
+            dtau: 1e-5,
             log_convergence: false,
             log_every_steps: 25,
             render_mode: RenderMode::GpuDirect,
             alpha_u: 0.7,
             alpha_p: 0.3,
             time_scheme: GpuTimeScheme::Euler,
+            outer_iters: 1,
+            low_mach_model: GpuLowMachPrecondModel::Off,
+            low_mach_theta_floor: 1e-6,
             inlet_velocity: 1.0,
             selected_preconditioner: PreconditionerType::Jacobi,
             model_id: "incompressible_momentum",
@@ -385,11 +402,19 @@ impl CFDApp {
             adaptive_dt: self.adaptive_dt,
             target_cfl: self.target_cfl,
             requested_dt: self.timestep as f32,
+            dtau: if self.dual_time {
+                self.dtau.max(0.0) as f32
+            } else {
+                0.0
+            },
             log_convergence: self.log_convergence,
             log_every_steps: self.log_every_steps.max(1),
             advection_scheme: self.selected_scheme,
             time_scheme: self.time_scheme,
             preconditioner: self.selected_preconditioner,
+            outer_iters: self.outer_iters.max(1),
+            low_mach_model: self.low_mach_model,
+            low_mach_theta_floor: self.low_mach_theta_floor,
             alpha_u: self.alpha_u as f32,
             alpha_p: self.alpha_p as f32,
             inlet_velocity: self.inlet_velocity,
@@ -464,6 +489,9 @@ impl CFDApp {
         self.model_caps.supports_alpha_u = named_params.iter().any(|&k| k == "alpha_u");
         self.model_caps.supports_alpha_p = named_params.iter().any(|&k| k == "alpha_p");
         self.model_caps.supports_eos_tuning = named_params.iter().any(|&k| k == "eos.gamma");
+        self.model_caps.supports_outer_iters = named_params.iter().any(|&k| k == "outer_iters");
+        self.model_caps.supports_dtau = named_params.iter().any(|&k| k == "dtau");
+        self.model_caps.supports_low_mach = named_params.iter().any(|&k| k == "low_mach.model");
 
         let layout = model.state_layout;
         self.model_caps.plot_stride = layout.stride();
@@ -851,6 +879,9 @@ impl CFDApp {
                 .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
                 .unwrap_or(false),
             unknowns_per_cell: model.system.unknowns_per_cell(),
+            supports_outer_iters: named_params.iter().any(|&k| k == "outer_iters"),
+            supports_dtau: named_params.iter().any(|&k| k == "dtau"),
+            supports_low_mach: named_params.iter().any(|&k| k == "low_mach.model"),
             supports_alpha_u: named_params.iter().any(|&k| k == "alpha_u"),
             supports_alpha_p: named_params.iter().any(|&k| k == "alpha_p"),
             supports_eos_tuning: named_params.iter().any(|&k| k == "eos.gamma"),
@@ -1058,6 +1089,10 @@ impl CFDApp {
         self.sync_worker_params();
     }
 
+    fn update_gpu_dtau(&self) {
+        self.sync_worker_params();
+    }
+
     fn update_gpu_scheme(&self) {
         self.sync_worker_params();
     }
@@ -1071,6 +1106,14 @@ impl CFDApp {
     }
 
     fn update_gpu_time_scheme(&self) {
+        self.sync_worker_params();
+    }
+
+    fn update_gpu_outer_iters(&self) {
+        self.sync_worker_params();
+    }
+
+    fn update_gpu_low_mach(&self) {
         self.sync_worker_params();
     }
 
@@ -1247,7 +1290,20 @@ impl eframe::App for CFDApp {
                         } else {
                             0.0
                         };
-                        let wave_speed = adv_speed + sound_speed;
+                        let effective_sound_speed = if self.model_caps.supports_low_mach {
+                            match self.low_mach_model {
+                                GpuLowMachPrecondModel::Off => sound_speed,
+                                GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
+                                GpuLowMachPrecondModel::WeissSmith => {
+                                    let theta = (self.low_mach_theta_floor as f64).max(0.0);
+                                    let c_floor = sound_speed * theta.sqrt();
+                                    sound_speed.min(adv_speed.max(c_floor))
+                                }
+                            }
+                        } else {
+                            sound_speed
+                        };
+                        let wave_speed = adv_speed + effective_sound_speed;
                         let (recommended_dt, cfl) = if self.min_cell_size > 0.0 && wave_speed > 1e-12
                         {
                             (
@@ -1286,6 +1342,117 @@ impl eframe::App for CFDApp {
                             }
                         }
 
+                        if self.model_caps.supports_outer_iters
+                            || self.model_caps.supports_low_mach
+                            || self.model_caps.supports_dtau
+                        {
+                            ui.separator();
+                            ui.label("Coupled/Implicit Controls");
+                            if self.model_caps.supports_outer_iters
+                                && ui
+                                    .add(
+                                        egui::Slider::new(&mut self.outer_iters, 1..=100)
+                                            .text("Outer Iterations"),
+                                    )
+                                    .changed()
+                            {
+                                self.update_gpu_outer_iters();
+                            }
+                            if self.model_caps.supports_dtau {
+                                ui.separator();
+                                ui.label("Dual Time Stepping");
+                                if ui
+                                    .checkbox(&mut self.dual_time, "Enable pseudo-time (dtau)")
+                                    .changed()
+                                {
+                                    self.update_gpu_dtau();
+                                }
+                                ui.add_enabled_ui(self.dual_time, |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut self.dtau, 1e-8..=0.1)
+                                                .logarithmic(true)
+                                                .text("dtau (s)"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.update_gpu_dtau();
+                                    }
+
+                                    let acoustic_speed = adv_speed + sound_speed;
+                                    if self.min_cell_size > 0.0 && acoustic_speed > 1e-12 {
+                                        let pseudo_cfl = acoustic_speed * self.dtau
+                                            / self.min_cell_size.max(1e-12);
+                                        ui.label(format!("Pseudo acoustic CFL≈{:.2}", pseudo_cfl));
+                                    }
+                                });
+                            }
+                            if self.model_caps.supports_low_mach {
+                                ui.separator();
+                                ui.label("Low-Mach Preconditioning");
+                                let prev_model = self.low_mach_model;
+                                egui::ComboBox::from_label("Model")
+                                    .selected_text(match self.low_mach_model {
+                                        GpuLowMachPrecondModel::Off => "Off",
+                                        GpuLowMachPrecondModel::Legacy => "Legacy",
+                                        GpuLowMachPrecondModel::WeissSmith => "Weiss-Smith",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut self.low_mach_model,
+                                            GpuLowMachPrecondModel::Off,
+                                            "Off",
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.low_mach_model,
+                                            GpuLowMachPrecondModel::Legacy,
+                                            "Legacy",
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.low_mach_model,
+                                            GpuLowMachPrecondModel::WeissSmith,
+                                            "Weiss-Smith",
+                                        );
+                                    });
+                                if self.low_mach_model != prev_model {
+                                    self.update_gpu_low_mach();
+                                }
+
+                                let theta_enabled = matches!(
+                                    self.low_mach_model,
+                                    GpuLowMachPrecondModel::WeissSmith
+                                );
+                                ui.add_enabled_ui(theta_enabled, |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.low_mach_theta_floor,
+                                                1e-8f32..=1e-2f32,
+                                            )
+                                            .logarithmic(true)
+                                            .text("θ floor"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.update_gpu_low_mach();
+                                    }
+                                });
+                                if !theta_enabled {
+                                    ui.weak("θ floor is used by Weiss-Smith.");
+                                }
+
+                                if sound_speed > 1e-12 {
+                                    let mach = adv_speed / sound_speed;
+                                    ui.label(format!("Estimated Mach: {:.3e}", mach));
+                                    if mach < 0.3
+                                        && matches!(self.low_mach_model, GpuLowMachPrecondModel::Off)
+                                    {
+                                        ui.weak("Tip: enable preconditioning for low Mach.");
+                                    }
+                                }
+                            }
+                        }
+
                         ui.separator();
                         ui.label("Debug");
                         if ui
@@ -1307,14 +1474,21 @@ impl eframe::App for CFDApp {
                         });
 
                         if cfl > 1.0 {
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                format!("⚠ CFL≈{:.1} (>1, may be unstable!)", cfl),
-                            );
-                            ui.colored_label(
-                                egui::Color32::YELLOW,
-                                format!("Recommended dt ≤ {:.4}", recommended_dt),
-                            );
+                            if self.model_caps.supports_dtau && self.dual_time {
+                                ui.colored_label(
+                                    egui::Color32::YELLOW,
+                                    format!("Acoustic CFL≈{:.1} (>1) (dual time enabled)", cfl),
+                                );
+                            } else {
+                                ui.colored_label(
+                                    egui::Color32::RED,
+                                    format!("⚠ CFL≈{:.1} (>1, may be unstable!)", cfl),
+                                );
+                                ui.colored_label(
+                                    egui::Color32::YELLOW,
+                                    format!("Recommended dt ≤ {:.4}", recommended_dt),
+                                );
+                            }
                         } else if cfl > 0.5 {
                             ui.colored_label(
                                 egui::Color32::YELLOW,
@@ -1748,6 +1922,9 @@ fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams)
     let named_params = solver.model().named_param_keys();
     let has_param = |key: &str| named_params.iter().any(|&k| k == key);
 
+    if has_param("dtau") {
+        let _ = solver.set_dtau(params.dtau);
+    }
     if has_param("density") {
         let _ = solver.set_density(params.density);
     }
@@ -1756,6 +1933,15 @@ fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams)
     }
     if has_param("eos.gamma") {
         let _ = solver.set_eos(&params.eos);
+    }
+    if has_param("outer_iters") {
+        let _ = solver.set_outer_iters(params.outer_iters as usize);
+    }
+    if has_param("low_mach.model") {
+        let _ = solver.set_precond_model(params.low_mach_model);
+    }
+    if has_param("low_mach.theta_floor") {
+        let _ = solver.set_precond_theta_floor(params.low_mach_theta_floor);
     }
 
     if has_param("advection_scheme") {
@@ -1813,11 +1999,15 @@ fn solver_worker_main(
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: 0.001,
+        dtau: 0.0,
         log_convergence: false,
         log_every_steps: 50,
         advection_scheme: Scheme::Upwind,
         time_scheme: GpuTimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
+        outer_iters: 1,
+        low_mach_model: GpuLowMachPrecondModel::Off,
+        low_mach_theta_floor: 1e-6,
         alpha_u: 1.0,
         alpha_p: 1.0,
         inlet_velocity: 0.0,
@@ -1895,7 +2085,22 @@ fn solver_worker_main(
             } else {
                 0.0
             };
-            let wave_speed = prev_max_vel + sound_speed;
+            let adv_speed = prev_max_vel.max(params.inlet_velocity.abs() as f64);
+            let effective_sound_speed = match params.low_mach_model {
+                GpuLowMachPrecondModel::Off => sound_speed,
+                GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
+                GpuLowMachPrecondModel::WeissSmith => {
+                    let theta = (params.low_mach_theta_floor as f64).max(0.0);
+                    let c_floor = sound_speed * theta.sqrt();
+                    sound_speed.min(adv_speed.max(c_floor))
+                }
+            };
+            let wave_speed = if params.dtau > 0.0 {
+                // Dual time stepping lets the physical dt exceed the acoustic CFL limit.
+                adv_speed
+            } else {
+                adv_speed + effective_sound_speed
+            };
             if min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
                 let current_dt = solver.dt() as f64;
                 let mut next_dt = params.target_cfl * min_cell_size / wave_speed;

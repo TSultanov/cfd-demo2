@@ -132,6 +132,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0 = diag_0 - vol * 1.0 / constants.dt + diag_bdf2;
         rhs_0 = rhs_0 - vol * 1.0 / constants.dt * state_old[idx * 1u + 0u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 1u + 0u] - factor_nm1 * state_old_old[idx * 1u + 0u]);
     }
+    if (constants.dtau > 0.0) {
+        diag_0 += vol * 1.0 / constants.dtau;
+    }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];

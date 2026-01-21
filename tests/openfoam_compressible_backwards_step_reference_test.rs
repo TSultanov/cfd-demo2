@@ -80,6 +80,17 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     let ux_idx = common::column_idx(&table.header, "u_x");
     let uy_idx = common::column_idx(&table.header, "u_y");
 
+    let (u_ref_field, p_ref_field) =
+        common::reference_fields_from_csv(&mesh, &table, x_idx, y_idx, ux_idx, Some(uy_idx), p_idx);
+    common::save_openfoam_field_plots(
+        "compressible_backwards_step",
+        &mesh,
+        &u_ref_field,
+        &p_ref_field,
+        &u,
+        &p,
+    );
+
     assert_eq!(
         table.rows.len(),
         mesh.num_cells(),

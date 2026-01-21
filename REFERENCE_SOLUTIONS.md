@@ -6,6 +6,21 @@ To run the reference suite (and fail loudly if it accidentally runs 0 tests):
 
 - `bash scripts/run_openfoam_reference_tests.sh`
 
+## Visual sanity check (required)
+
+In addition to the numerical error metrics, always do a quick *visual* comparison of the
+OpenFOAM reference fields vs the `cfd2` fields.
+
+Each OpenFOAM reference test writes plots into:
+
+- `target/test_plots/openfoam/<case>/`
+
+The directory contains `u_x`, `u_y`, `u_mag`, and `p` images for both the reference and solver
+output (pressure is plotted mean-free).
+
+If a metric regresses or a reference CSV is regenerated, open the images side-by-side and sanity
+check that the field structure matches (not just the norms).
+
 The OpenFOAM case templates live in:
 
 - `reference/openfoam/incompressible_channel`

@@ -164,6 +164,11 @@ path = "tests/gpu_low_mach_equivalence_test.rs"
 required-features = ["meshgen", "dev-tests"]
 
 [[test]]
+name = "gpu_low_mach_equivalence_cases_test"
+path = "tests/gpu_low_mach_equivalence_cases_test.rs"
+required-features = ["meshgen", "dev-tests"]
+
+[[test]]
 name = "gpu_solver_scaling_test"
 path = "tests/gpu_solver_scaling_test.rs"
 required-features = ["meshgen", "dev-tests"]

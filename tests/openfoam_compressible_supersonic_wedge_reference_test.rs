@@ -109,6 +109,34 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
         sol_map.insert(yx_key(mesh.cell_cx[i], mesh.cell_cy[i]), (p[i], u[i].0, u[i].1));
     }
 
+    let mut ref_map: HashMap<(i64, i64), (f64, f64, f64)> = HashMap::with_capacity(mesh.num_cells());
+    for row in &table.rows {
+        let x = row[x_idx];
+        let y = row[y_idx];
+        ref_map.insert(yx_key(x, y), (row[p_idx], row[ux_idx], row[uy_idx]));
+    }
+    let mut u_ref_field = vec![(0.0f64, 0.0f64); mesh.num_cells()];
+    let mut p_ref_field = vec![0.0f64; mesh.num_cells()];
+    for i in 0..mesh.num_cells() {
+        let key = yx_key(mesh.cell_cx[i], mesh.cell_cy[i]);
+        let Some((p_r, ux_r, uy_r)) = ref_map.get(&key).copied() else {
+            panic!(
+                "reference mesh does not contain a cell near (x={}, y={}) (key={key:?})",
+                mesh.cell_cx[i], mesh.cell_cy[i]
+            );
+        };
+        p_ref_field[i] = p_r;
+        u_ref_field[i] = (ux_r, uy_r);
+    }
+    common::save_openfoam_field_plots(
+        "compressible_supersonic_wedge",
+        &mesh,
+        &u_ref_field,
+        &p_ref_field,
+        &u,
+        &p,
+    );
+
     let mut p_sol = Vec::with_capacity(mesh.num_cells());
     let mut ux_sol = Vec::with_capacity(mesh.num_cells());
     let mut uy_sol = Vec::with_capacity(mesh.num_cells());

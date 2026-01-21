@@ -219,6 +219,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0 = diag_0 - vol * 1.0 / constants.dt + diag_bdf2;
         rhs_0 = rhs_0 - vol * 1.0 / constants.dt * state_old[idx * 8u + 0u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 0u] - factor_nm1 * state_old_old[idx * 8u + 0u]);
     }
+    if (constants.dtau > 0.0) {
+        diag_0 += vol * 1.0 / constants.dtau;
+    }
     diag_1 += vol * 1.0 / constants.dt;
     rhs_1 += vol * 1.0 / constants.dt * state_old[idx * 8u + 1u];
     if (constants.time_scheme == 1u) {
@@ -228,6 +231,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1 = r * r / (r + 1.0);
         diag_1 = diag_1 - vol * 1.0 / constants.dt + diag_bdf2;
         rhs_1 = rhs_1 - vol * 1.0 / constants.dt * state_old[idx * 8u + 1u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 1u] - factor_nm1 * state_old_old[idx * 8u + 1u]);
+    }
+    if (constants.dtau > 0.0) {
+        diag_1 += vol * 1.0 / constants.dtau;
     }
     diag_2 += vol * 1.0 / constants.dt;
     rhs_2 += vol * 1.0 / constants.dt * state_old[idx * 8u + 2u];
@@ -239,6 +245,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_2 = diag_2 - vol * 1.0 / constants.dt + diag_bdf2;
         rhs_2 = rhs_2 - vol * 1.0 / constants.dt * state_old[idx * 8u + 2u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 2u] - factor_nm1 * state_old_old[idx * 8u + 2u]);
     }
+    if (constants.dtau > 0.0) {
+        diag_2 += vol * 1.0 / constants.dtau;
+    }
     diag_3 += vol * 1.0 / constants.dt;
     rhs_3 += vol * 1.0 / constants.dt * state_old[idx * 8u + 3u];
     if (constants.time_scheme == 1u) {
@@ -248,6 +257,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1 = r * r / (r + 1.0);
         diag_3 = diag_3 - vol * 1.0 / constants.dt + diag_bdf2;
         rhs_3 = rhs_3 - vol * 1.0 / constants.dt * state_old[idx * 8u + 3u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 8u + 3u] - factor_nm1 * state_old_old[idx * 8u + 3u]);
+    }
+    if (constants.dtau > 0.0) {
+        diag_3 += vol * 1.0 / constants.dtau;
     }
     diag_4 -= -1.0 * state[idx * 8u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     diag_5 -= -1.0 * state[idx * 8u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;

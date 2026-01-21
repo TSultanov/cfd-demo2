@@ -146,6 +146,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0 = diag_0 - vol * constants.density / constants.dt + diag_bdf2;
         rhs_0 = rhs_0 - vol * constants.density / constants.dt * state_old[idx * 8u + 0u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 0u] - factor_nm1 * state_old_old[idx * 8u + 0u]);
     }
+    if (constants.dtau > 0.0) {
+        diag_0 += vol * constants.density / constants.dtau;
+    }
     diag_1 += vol * constants.density / constants.dt;
     rhs_1 += vol * constants.density / constants.dt * state_old[idx * 8u + 1u];
     if (constants.time_scheme == 1u) {
@@ -155,6 +158,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1 = r * r / (r + 1.0);
         diag_1 = diag_1 - vol * constants.density / constants.dt + diag_bdf2;
         rhs_1 = rhs_1 - vol * constants.density / constants.dt * state_old[idx * 8u + 1u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 1u] - factor_nm1 * state_old_old[idx * 8u + 1u]);
+    }
+    if (constants.dtau > 0.0) {
+        diag_1 += vol * constants.density / constants.dtau;
     }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];

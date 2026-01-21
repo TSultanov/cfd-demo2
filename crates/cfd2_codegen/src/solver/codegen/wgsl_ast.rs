@@ -831,6 +831,19 @@ enum Precedence {
     Postfix,
 }
 
+fn next_precedence(prec: Precedence) -> Precedence {
+    match prec {
+        Precedence::Lowest => Precedence::Or,
+        Precedence::Or => Precedence::And,
+        Precedence::And => Precedence::Equality,
+        Precedence::Equality => Precedence::Comparison,
+        Precedence::Comparison => Precedence::Sum,
+        Precedence::Sum => Precedence::Product,
+        Precedence::Product => Precedence::Prefix,
+        Precedence::Prefix | Precedence::Postfix => Precedence::Postfix,
+    }
+}
+
 fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) -> fmt::Result {
     expr.with_node(|node| match node {
         ExprNode::Literal(lit) => write!(f, "{}", lit),
@@ -880,7 +893,12 @@ fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) 
             }
             render_expr(*left, f, prec)?;
             write!(f, " {} ", op)?;
-            render_expr(*right, f, prec)?;
+            // Subtraction and division are not associative; preserve RHS grouping.
+            let right_prec = match op {
+                BinaryOp::Sub | BinaryOp::Div => next_precedence(prec),
+                _ => prec,
+            };
+            render_expr(*right, f, right_prec)?;
             if needs_paren {
                 write!(f, ")")?;
             }
@@ -1292,6 +1310,17 @@ mod tests {
 
         let expr = Expr::ident("cond") & true;
         assert_eq!(expr.to_string(), "cond && true");
+    }
+
+    #[test]
+    fn expr_renders_non_associative_rhs_with_parentheses() {
+        let a = Expr::ident("a");
+        let b = Expr::ident("b");
+        let c = Expr::ident("c");
+
+        assert_eq!((a - (b - c)).to_string(), "a - (b - c)");
+        assert_eq!((a / (b / c)).to_string(), "a / (b / c)");
+        assert_eq!((a / (b * c)).to_string(), "a / (b * c)");
     }
 
     #[test]

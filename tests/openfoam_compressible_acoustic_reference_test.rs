@@ -186,6 +186,17 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     let p_idx = common::column_idx(&table.header, "p");
     let ux_idx = common::column_idx(&table.header, "u_x");
 
+    let (u_ref_field, p_ref_field) =
+        common::reference_fields_from_csv(&mesh, &table, x_idx, y_idx, ux_idx, None, p_idx);
+    common::save_openfoam_field_plots(
+        "compressible_acoustic_box",
+        &mesh,
+        &u_ref_field,
+        &p_ref_field,
+        &u_out,
+        &p_out,
+    );
+
     assert_eq!(
         table.rows.len(),
         mesh.num_cells(),

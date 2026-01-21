@@ -300,7 +300,10 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
 
     let method = crate::solver::model::method::MethodSpec::Coupled(
         crate::solver::model::method::CoupledCapabilities {
-            apply_relaxation_in_update: false,
+            // Dual-time stepping can require under-relaxation to stabilize pseudo-time iterations
+            // at high acoustic CFL. Keep standard implicit stepping (dtau=0) unchanged.
+            apply_relaxation_in_update: true,
+            relaxation_requires_dtau: true,
             requires_flux_module: true,
             gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
         },

@@ -471,8 +471,9 @@ impl GpuProgramPlan {
         if let Some((a, b, c)) = stats.linear_stats {
             return Ok(vec![a, b, c]);
         }
-        Ok(if self.last_linear_stats.iterations > 0 {
-            vec![self.last_linear_stats]
+        let last = self.last_linear_stats;
+        Ok(if last.iterations > 0 || last.converged || last.diverged {
+            vec![last]
         } else {
             Vec::new()
         })

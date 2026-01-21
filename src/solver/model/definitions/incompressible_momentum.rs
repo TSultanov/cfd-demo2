@@ -157,6 +157,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     let method = crate::solver::model::method::MethodSpec::Coupled(
         crate::solver::model::method::CoupledCapabilities {
             apply_relaxation_in_update: true,
+            relaxation_requires_dtau: false,
             requires_flux_module: true,
             gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
         },

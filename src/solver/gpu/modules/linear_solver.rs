@@ -23,10 +23,16 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
 ) -> LinearSolverStats {
     let start = Instant::now();
 
-    // 1. Zero initial guess (assuming x0 = 0 for now).
-    zero_buffer(context, system.x(), n);
+    let debug_fgmres = std::env::var("CFD2_DEBUG_FGMRES")
+        .map(|v| v != "0")
+        .unwrap_or(false);
 
     let rhs_norm = krylov.rhs_norm(context, system, n);
+    if debug_fgmres {
+        eprintln!(
+            "[cfd2][fgmres] n={n} rhs_norm={rhs_norm:.3e} tol={tol:.3e} tol_abs={tol_abs:.3e} precond={precond_label}"
+        );
+    }
     if !rhs_norm.is_finite() {
         let stats = LinearSolverStats {
             iterations: 0,
@@ -35,7 +41,9 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
             diverged: true,
             time: start.elapsed(),
         };
-        debug_log(0, rhs_norm, rhs_norm, false);
+        if debug_fgmres {
+            eprintln!("[cfd2][fgmres] early-exit: rhs_norm non-finite");
+        }
         return stats;
     }
     if rhs_norm <= tol_abs {
@@ -46,9 +54,17 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
             diverged: false,
             time: start.elapsed(),
         };
-        debug_log(0, rhs_norm, rhs_norm, true);
+        if debug_fgmres {
+            eprintln!("[cfd2][fgmres] early-exit: rhs_norm <= tol_abs");
+        }
         return stats;
     }
+
+    // 1. Zero initial guess (assuming x0 = 0 for now).
+    //
+    // IMPORTANT: this must happen *after* any early-exit checks so we don't clobber the last
+    // solution estimate in cases where the RHS is non-finite or already converged.
+    zero_buffer(context, system.x(), n);
 
     let max_iters = max_iters.max(1);
     let capacity = krylov.fgmres.max_restart();
@@ -103,7 +119,9 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
                 diverged: true,
                 time: start.elapsed(),
             };
-            debug_log(total_iters, rhs_norm, residual, false);
+            if debug_fgmres {
+                eprintln!("[cfd2][fgmres] diverged: residual non-finite at iters={total_iters}");
+            }
             return stats;
         }
         if residual <= tol * rhs_norm || residual <= tol_abs {
@@ -179,7 +197,12 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         diverged: false,
         time: start.elapsed(),
     };
-    debug_log(stats.iterations, rhs_norm, stats.residual, stats.converged);
+    if debug_fgmres {
+        eprintln!(
+            "[cfd2][fgmres] done: iters={} rhs_norm={:.3e} residual={:.3e} converged={}",
+            stats.iterations, rhs_norm, stats.residual, stats.converged
+        );
+    }
     stats
 }
 
@@ -190,12 +213,4 @@ fn zero_buffer(context: &GpuContext, buffer: &wgpu::Buffer, n: u32) {
         .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
 }
 
-fn debug_log(iters: u32, rhs_norm: f32, residual: f32, converged: bool) {
-    const DEBUG_FGMRES: bool = false;
-    if DEBUG_FGMRES {
-        eprintln!(
-            "fgmres: iters={} rhs_norm={:.3e} residual={:.3e} converged={}",
-            iters, rhs_norm, residual, converged
-        );
-    }
-}
+// NOTE: Prefer `CFD2_DEBUG_FGMRES=1` over hardcoded debug logging.

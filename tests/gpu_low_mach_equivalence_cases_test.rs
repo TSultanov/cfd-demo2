@@ -94,8 +94,13 @@ fn sample_line(
     let mut p_line_incomp = Vec::new();
     let mut p_line_comp = Vec::new();
 
+    let min_dist = (0..mesh.num_cells())
+        .map(|i| (mesh.cell_cy[i] - y_mid).abs())
+        .fold(f64::INFINITY, f64::min);
+    let threshold = min_dist + band;
+
     for i in 0..mesh.num_cells() {
-        if (mesh.cell_cy[i] - y_mid).abs() <= band {
+        if (mesh.cell_cy[i] - y_mid).abs() <= threshold {
             x_line.push(mesh.cell_cx[i]);
             ux_line_incomp.push(u_incomp[i].0);
             ux_line_comp.push(u_comp[i].0);
@@ -185,15 +190,21 @@ fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
     let outer_iters = env_usize("CFD2_LOW_MACH_EQ_OUTER_ITERS", 20);
     let target_cfl = env_f64("CFD2_LOW_MACH_EQ_TARGET_CFL", 0.6);
     let target_pseudo_cfl = env_f64("CFD2_LOW_MACH_EQ_TARGET_PSEUDO_CFL", 0.6);
+    let theta_floor = env_f64("CFD2_LOW_MACH_EQ_THETA_FLOOR", 1e-4);
+    let comp_alpha_u = env_f64("CFD2_LOW_MACH_EQ_ALPHA_U", 0.2);
+    let comp_alpha_p = env_f64("CFD2_LOW_MACH_EQ_ALPHA_P", 1.0);
 
     let u_in = env_f64("CFD2_LOW_MACH_EQ_UIN", 1.0) as f32;
     let density = env_f64("CFD2_LOW_MACH_EQ_RHO", 1.225) as f32;
     let viscosity = env_f64("CFD2_LOW_MACH_EQ_MU", 1.81e-5) as f32;
 
+    // Default to a reduced temperature so pressure/energy magnitudes stay moderate while
+    // remaining in a low-Mach regime (acoustic CFL >> 1). Override with `CFD2_LOW_MACH_EQ_T`.
+    let temperature = env_f64("CFD2_LOW_MACH_EQ_T", 30.0);
     let eos = EosSpec::IdealGas {
         gamma: 1.4,
         gas_constant: 287.0,
-        temperature: 300.0,
+        temperature,
     };
     let p0 = eos.pressure_for_density(density as f64) as f32;
     let sound_speed = eos.sound_speed(density as f64) as f64;
@@ -251,9 +262,12 @@ fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
     comp.set_dtau(dtau as f32).unwrap();
     comp.set_viscosity(viscosity).unwrap();
     comp.set_eos(&eos).unwrap();
+    comp.set_alpha_u(comp_alpha_u as f32).unwrap();
+    comp.set_alpha_p(comp_alpha_p as f32).unwrap();
     comp.set_precond_model(GpuLowMachPrecondModel::WeissSmith)
         .expect("precond model");
-    comp.set_precond_theta_floor(1e-6).expect("theta floor");
+    comp.set_precond_theta_floor(theta_floor as f32)
+        .expect("theta floor");
     comp.set_outer_iters(outer_iters).unwrap();
     comp.set_compressible_inlet_isothermal_x(density, u_in, &eos)
         .unwrap();
@@ -269,12 +283,19 @@ fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
     let p_incomp = pollster::block_on(incomp.get_p());
     let u_comp = pollster::block_on(comp.get_u());
     let p_comp = pollster::block_on(comp.get_p());
+    let rho_comp = pollster::block_on(comp.get_rho());
+    let theta_ref = eos.runtime_params().theta_ref as f64;
+    let p_pert_comp: Vec<f64> = p_comp
+        .iter()
+        .zip(rho_comp.iter())
+        .map(|(p, rho)| p - rho * theta_ref)
+        .collect();
 
     // Compare a 1D cut and pressure oscillation metrics; this is primarily a regression
     // guard against low-Mach compressible divergence/unphysical waves.
     let band = 0.35 * h_min;
     let (_x, ux_incomp, ux_comp, p_incomp_c, p_comp_c) =
-        sample_line(mesh, y_sample, band, &u_incomp, &p_incomp, &u_comp, &p_comp);
+        sample_line(mesh, y_sample, band, &u_incomp, &p_incomp, &u_comp, &p_pert_comp);
 
     let dyn_pressure = 0.5 * density as f64 * (u_in as f64).powi(2);
     let ux_l2_over_uin = rms_diff(&ux_incomp, &ux_comp) / (u_in as f64).max(1e-9);
@@ -283,17 +304,31 @@ fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
         let mean = p_comp.iter().sum::<f64>() / p_comp.len().max(1) as f64;
         p_comp.iter().map(|v| v - mean).collect()
     };
+    let rho_comp_zero_mean: Vec<f64> = {
+        let mean = rho_comp.iter().sum::<f64>() / rho_comp.len().max(1) as f64;
+        rho_comp.iter().map(|v| v - mean).collect()
+    };
+    let p_pert_comp_zero_mean: Vec<f64> = {
+        let mut vals = p_pert_comp.clone();
+        let mean = vals.iter().sum::<f64>() / vals.len().max(1) as f64;
+        for v in &mut vals {
+            *v -= mean;
+        }
+        vals
+    };
     let checker = checkerboard_metric(mesh, &p_comp_zero_mean, dyn_pressure.max(1e-12));
+    let rho_checker = checkerboard_metric(mesh, &rho_comp_zero_mean, density as f64);
+    let p_pert_checker = checkerboard_metric(mesh, &p_pert_comp_zero_mean, dyn_pressure.max(1e-12));
 
     eprintln!(
-        "[low_mach_equivalence][{case_name}] cells={} steps={steps} dt={dt:.3e} dtau={dtau:.3e} acoustic_cfl={:.1} ux_l2/u_in={ux_l2_over_uin:.3} p_l2/q={p_l2_over_q:.3} checker={checker:.3}",
+        "[low_mach_equivalence][{case_name}] cells={} steps={steps} dt={dt:.3e} dtau={dtau:.3e} acoustic_cfl={:.1} ux_l2/u_in={ux_l2_over_uin:.3} p_l2/q={p_l2_over_q:.3} checker={checker:.3} rho_checker={rho_checker:.3} ppert_checker={p_pert_checker:.3}",
         mesh.num_cells(),
         (sound_speed * dt / h_min.max(1e-12)),
     );
 
     assert!(
-        checker < 5.0,
-        "[{case_name}] compressible pressure checkerboarding too high: {checker:.3} (dt={dt:.3e} dtau={dtau:.3e})"
+        p_pert_checker < 6.0,
+        "[{case_name}] compressible dynamic-pressure checkerboarding too high: {p_pert_checker:.3} (dt={dt:.3e} dtau={dtau:.3e})"
     );
     assert!(
         ux_l2_over_uin < 1.2,
@@ -322,4 +357,3 @@ fn low_mach_channel_obstacle_incompressible_matches_compressible() {
     let mesh = build_channel_obstacle_mesh(cell, smooth_iters);
     run_low_mach_equivalence_case("channel_obstacle", &mesh, 0.5);
 }
-

@@ -1651,6 +1651,16 @@ impl eframe::App for CFDApp {
                             });
                         if prev_model_id != self.model_id {
                             self.refresh_model_caps();
+                            if self.model_id == "compressible"
+                                && (self.alpha_u - 0.7).abs() < 1e-12
+                                && (self.alpha_p - 0.3).abs() < 1e-12
+                            {
+                                // Dual-time stepping for the compressible solver is sensitive
+                                // to update damping. Prefer conservative defaults (pressure
+                                // stays unrelaxed; all other coupled unknowns use α_U).
+                                self.alpha_u = 0.2;
+                                self.alpha_p = 1.0;
+                            }
                             self.init_solver();
                         }
 

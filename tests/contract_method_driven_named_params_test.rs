@@ -6,8 +6,8 @@ fn contract_relaxation_named_params_follow_method_capabilities() {
     let keys = compressible.named_param_keys();
     for key in ["alpha_u", "alpha_p", "nonconverged_relax"] {
         assert!(
-            !keys.contains(&key),
-            "compressible must not expose relaxation param '{key}' (apply_relaxation_in_update=false)"
+            keys.contains(&key),
+            "compressible must expose relaxation param '{key}' (dual-time stabilization)"
         );
     }
 
@@ -20,4 +20,3 @@ fn contract_relaxation_named_params_follow_method_capabilities() {
         );
     }
 }
-

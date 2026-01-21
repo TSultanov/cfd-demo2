@@ -269,6 +269,12 @@ impl SolverRecipe {
         initial_constants.eos_theta_ref = eos_params.theta_ref;
         initial_constants.scheme = advection_scheme.gpu_id();
         initial_constants.time_scheme = time_scheme as u32;
+        if model.id == "compressible" {
+            // Compressible dual-time stepping is most stable with conservative relaxation by
+            // default. These parameters are only applied in the update kernel when `dtau > 0`.
+            initial_constants.alpha_u = 0.2;
+            initial_constants.alpha_p = 1.0;
+        }
 
         // Emit kernel specs in terms of stable KernelIds.
         //
@@ -531,16 +537,6 @@ impl SolverRecipe {
                         kind: HostOpKind("implicit:after_solve"),
                     },
                 );
-                if self.requires_iteration_snapshot {
-                    program.push(
-                        iter_block,
-                        ProgramSpecNode::Graph {
-                        label: "implicit:snapshot",
-                        kind: GraphOpKind("implicit:snapshot"),
-                        mode: GraphExecMode::SingleSubmit,
-                        },
-                    );
-                }
                 program.push(
                     iter_block,
                     ProgramSpecNode::Host {
@@ -556,6 +552,16 @@ impl SolverRecipe {
                         mode: GraphExecMode::SingleSubmit,
                     },
                 );
+                if self.requires_iteration_snapshot {
+                    program.push(
+                        iter_block,
+                        ProgramSpecNode::Graph {
+                            label: "implicit:snapshot",
+                            kind: GraphOpKind("implicit:snapshot"),
+                            mode: GraphExecMode::SingleSubmit,
+                        },
+                    );
+                }
                 program.push(
                     iter_block,
                     ProgramSpecNode::Host {

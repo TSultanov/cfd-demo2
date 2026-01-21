@@ -35,6 +35,7 @@ pub fn generate_generic_coupled_update_wgsl(
     layout: &StateLayout,
     primitives: &[(String, PrimitiveExpr)],
     apply_relaxation: bool,
+    relaxation_requires_dtau: bool,
 ) -> String {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -47,6 +48,7 @@ pub fn generate_generic_coupled_update_wgsl(
         layout,
         primitives,
         apply_relaxation,
+        relaxation_requires_dtau,
     )));
     module.to_wgsl()
 }
@@ -875,6 +877,7 @@ fn main_update_fn(
     layout: &StateLayout,
     primitives: &[(String, PrimitiveExpr)],
     apply_relaxation: bool,
+    relaxation_requires_dtau: bool,
 ) -> Function {
     let stride = layout.stride();
     let unknowns = coupled_unknown_components(system);
@@ -912,10 +915,24 @@ fn main_update_fn(
         //
         // Only apply when enabled by the caller (e.g. incompressible pressure–velocity coupling).
         let alpha = if apply_relaxation {
-            match field.name() {
+            // Under-relax all non-pressure unknowns with alpha_u; treat pressure as a separate knob.
+            let base_alpha = match field.name() {
                 "p" => Expr::ident("constants").field("alpha_p"),
-                "U" | "u" => Expr::ident("constants").field("alpha_u"),
-                _ => Expr::lit_f32(1.0),
+                _ => Expr::ident("constants").field("alpha_u"),
+            };
+
+            if relaxation_requires_dtau {
+                // Preserve dtau=0 implicit stepping semantics: only apply relaxation in
+                // pseudo-time (dual-time) iterations.
+                dsl::select(
+                    Expr::lit_f32(1.0),
+                    base_alpha,
+                    Expr::ident("constants")
+                        .field("dtau")
+                        .gt(Expr::lit_f32(0.0)),
+                )
+            } else {
+                base_alpha
             }
         } else {
             Expr::lit_f32(1.0)

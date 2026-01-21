@@ -338,7 +338,19 @@ fn euler_central_upwind(
     };
 
     let p_pert = |side: FaceSide| S::Sub(Box::new(p(side)), Box::new(p_base(side)));
-    let c_eff2_safe = |side: FaceSide| S::Max(Box::new(c_eff2(side)), Box::new(S::lit(1e-12)));
+
+    // Scale the pressure perturbation contribution with the *preconditioned* stiffness used by
+    // the low-Mach model (c_eff^2). This boosts pressure-velocity coupling in the continuity
+    // dissipation term, reducing checkerboarding on collocated grids.
+    //
+    // Guard against extreme amplification by enforcing the Weiss-Smith theta floor (even for
+    // "legacy") and a tiny absolute epsilon.
+    let c_couple2 = |side: FaceSide| {
+        let c2_side = c2(side);
+        let floor = S::Mul(Box::new(low_mach_theta_floor.clone()), Box::new(c2_side.clone()));
+        S::Max(Box::new(c_eff2(side)), Box::new(floor))
+    };
+    let c_couple2_safe = |side: FaceSide| S::Max(Box::new(c_couple2(side)), Box::new(S::lit(1e-12)));
     let rho_diss = |side: FaceSide| {
         let coupling = S::Mul(
             Box::new(low_mach_enabled.clone()),
@@ -350,7 +362,7 @@ fn euler_central_upwind(
                 Box::new(coupling),
                 Box::new(S::Div(
                     Box::new(p_pert(side)),
-                    Box::new(c_eff2_safe(side)),
+                    Box::new(c_couple2_safe(side)),
                 )),
             )),
         )

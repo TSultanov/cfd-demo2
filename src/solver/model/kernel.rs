@@ -384,14 +384,18 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
         .primitives
         .ordered()
         .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
-    let apply_relaxation = match model.method().map_err(|e| e.to_string())? {
-        crate::solver::model::method::MethodSpec::Coupled(caps) => caps.apply_relaxation_in_update,
+    let (apply_relaxation, relaxation_requires_dtau) = match model.method().map_err(|e| e.to_string())?
+    {
+        crate::solver::model::method::MethodSpec::Coupled(caps) => {
+            (caps.apply_relaxation_in_update, caps.relaxation_requires_dtau)
+        }
     };
     Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
         &discrete,
         &model.state_layout,
         &prims,
         apply_relaxation,
+        relaxation_requires_dtau,
     ))
 }
 

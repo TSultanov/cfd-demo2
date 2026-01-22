@@ -6,6 +6,9 @@ To run the reference suite (and fail loudly if it accidentally runs 0 tests):
 
 - `bash scripts/run_openfoam_reference_tests.sh`
 
+Note: the OpenFOAM reference tests are marked `#[ignore]` so `cargo test` stays fast; the script
+runs them with `-- --ignored`.
+
 ## Visual sanity check (required)
 
 In addition to the numerical error metrics, always do a quick *visual* comparison of the

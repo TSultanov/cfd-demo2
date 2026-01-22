@@ -13,6 +13,7 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 use std::collections::HashMap;
 
 #[test]
+#[ignore]
 fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     std::env::set_var("CFD2_QUIET", "1");
 

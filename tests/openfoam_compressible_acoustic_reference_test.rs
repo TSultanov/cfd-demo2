@@ -12,6 +12,7 @@ use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
 #[test]
+#[ignore]
 fn openfoam_compressible_acoustic_matches_reference_profile() {
     std::env::set_var("CFD2_QUIET", "1");
 

@@ -36,7 +36,7 @@ done
 
 # Sanity-check we have at least one OpenFOAM test name to execute.
 list_out="$("${cmd[@]}" -- --list)"
-num_openfoam_tests="$(printf '%s\n' "${list_out}" | rg -c '^openfoam_.*: test$' || true)"
+num_openfoam_tests="$(printf '%s\n' "${list_out}" | rg -c '^openfoam_.*: test' || true)"
 if [[ "${num_openfoam_tests}" -eq 0 ]]; then
   echo "ERROR: OpenFOAM reference test gate did not find any tests to run." >&2
   echo "" >&2
@@ -47,6 +47,6 @@ fi
 
 echo "==> OpenFOAM reference test binaries: ${#test_targets[@]}" 
 echo "==> OpenFOAM reference tests discovered: ${num_openfoam_tests}" 
-echo "==> Running: ${cmd[*]} -- --nocapture $*"
+echo "==> Running: ${cmd[*]} -- --ignored --nocapture $*"
 
-"${cmd[@]}" -- --nocapture "$@"
+"${cmd[@]}" -- --ignored --nocapture "$@"

@@ -36,7 +36,7 @@ impl Default for GpuLowMachParams {
             // grids. This term is gated by `model != Off`, so it has no effect on fully
             // compressible runs unless preconditioning is enabled.
             //
-            // Alpha=1.0 corresponds to adding `ρ' = p'/c_eff^2` into the dissipation state's
+            // Alpha=1.0 corresponds to adding `ρ' = p'/c^2` into the dissipation state's
             // density reconstruction.
             pressure_coupling_alpha: 1.0,
             _pad0: 0.0,

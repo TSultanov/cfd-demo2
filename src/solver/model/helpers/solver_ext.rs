@@ -65,6 +65,7 @@ pub trait SolverRuntimeParamsExt {
     fn set_outer_iters(&mut self, iters: usize) -> Result<(), String>;
     fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String>;
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
+    fn set_precond_pressure_coupling_alpha(&mut self, alpha: f32) -> Result<(), String>;
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
     fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String>;
 }
@@ -100,6 +101,13 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
 
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String> {
         self.set_named_param("low_mach.theta_floor", PlanParamValue::F32(theta))
+    }
+
+    fn set_precond_pressure_coupling_alpha(&mut self, alpha: f32) -> Result<(), String> {
+        self.set_named_param(
+            "low_mach.pressure_coupling_alpha",
+            PlanParamValue::F32(alpha),
+        )
     }
 
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {

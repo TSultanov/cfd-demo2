@@ -12,6 +12,9 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "eos.theta_ref" => Some(generic_coupled::param_eos_theta_ref),
         "low_mach.model" => Some(generic_coupled::param_low_mach_model),
         "low_mach.theta_floor" => Some(generic_coupled::param_low_mach_theta_floor),
+        "low_mach.pressure_coupling_alpha" => {
+            Some(generic_coupled::param_low_mach_pressure_coupling_alpha)
+        }
         _ => None,
     }
 }

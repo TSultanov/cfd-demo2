@@ -1333,6 +1333,23 @@ pub(crate) fn param_low_mach_theta_floor(
     Ok(())
 }
 
+pub(crate) fn param_low_mach_pressure_coupling_alpha(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(alpha) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    let Some(_) = r.fields.low_mach_params_buffer() else {
+        return Err("model does not allocate low-mach params".to_string());
+    };
+    r.fields.low_mach_params_mut().pressure_coupling_alpha = alpha.max(0.0);
+    r.fields.update_low_mach_params(&queue);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

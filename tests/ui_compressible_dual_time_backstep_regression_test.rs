@@ -146,6 +146,8 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         None => GpuLowMachPrecondModel::WeissSmith,
     };
     let low_mach_theta_floor = env_f64("CFD2_UI_DUAL_TIME_THETA_FLOOR", 1e-6) as f32;
+    let low_mach_pressure_coupling_alpha =
+        env_f64("CFD2_UI_DUAL_TIME_PRESSURE_COUPLING_ALPHA", -1.0) as f32;
     let dtau = env_f64("CFD2_UI_DUAL_TIME_DTAU", 1.0e-5) as f32;
     let alpha_u = env_f64("CFD2_UI_DUAL_TIME_ALPHA_U", -1.0);
     let alpha_p = env_f64("CFD2_UI_DUAL_TIME_ALPHA_P", -1.0);
@@ -168,6 +170,11 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     solver
         .set_precond_theta_floor(low_mach_theta_floor)
         .expect("theta floor");
+    if low_mach_pressure_coupling_alpha >= 0.0 {
+        solver
+            .set_precond_pressure_coupling_alpha(low_mach_pressure_coupling_alpha)
+            .expect("pressure coupling alpha");
+    }
     solver.set_dtau(dtau).expect("dtau");
     solver.set_outer_iters(outer_iters).unwrap();
     solver
@@ -194,8 +201,8 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         );
     }
 
-    // Mirror the UI adaptive-dt behavior with dual time stepping enabled:
-    // - dt chosen from advective speed only (allows acoustic CFL >> 1)
+    // Mirror the UI adaptive-dt behavior:
+    // - dt chosen from the preconditioned wave speed (allows acoustic CFL >> 1 at low Mach)
     // - limited growth by 20% per step
     let steps = env_usize("CFD2_UI_DUAL_TIME_STEPS", 2);
 
@@ -220,11 +227,7 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
                 sound_speed.min(adv_speed.max(c_floor))
             }
         };
-        let wave_speed = if dtau > 0.0 {
-            adv_speed
-        } else {
-            adv_speed + effective_sound_speed
-        };
+        let wave_speed = adv_speed + effective_sound_speed;
         if h_min > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
             let current_dt = solver.dt() as f64;
             let mut next_dt = target_cfl * h_min / wave_speed;

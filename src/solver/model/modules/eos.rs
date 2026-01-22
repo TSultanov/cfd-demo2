@@ -23,6 +23,7 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
             NamedParamKey::Key("eos.theta_ref"),
             NamedParamKey::Key("low_mach.model"),
             NamedParamKey::Key("low_mach.theta_floor"),
+            NamedParamKey::Key("low_mach.pressure_coupling_alpha"),
         ];
     }
 

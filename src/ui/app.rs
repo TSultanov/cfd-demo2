@@ -35,6 +35,7 @@ struct RuntimeParams {
     outer_iters: u32,
     low_mach_model: GpuLowMachPrecondModel,
     low_mach_theta_floor: f32,
+    low_mach_pressure_coupling_alpha: f32,
     alpha_u: f32,
     alpha_p: f32,
     inlet_velocity: f32,
@@ -260,6 +261,7 @@ pub struct CFDApp {
     outer_iters: u32,
     low_mach_model: GpuLowMachPrecondModel,
     low_mach_theta_floor: f32,
+    low_mach_pressure_coupling_alpha: f32,
     inlet_velocity: f32,
     selected_preconditioner: PreconditionerType,
     model_id: &'static str,
@@ -383,6 +385,7 @@ impl CFDApp {
             outer_iters: 1,
             low_mach_model: GpuLowMachPrecondModel::Off,
             low_mach_theta_floor: 1e-6,
+            low_mach_pressure_coupling_alpha: 1.0,
             inlet_velocity: 1.0,
             selected_preconditioner: PreconditionerType::Jacobi,
             model_id: "incompressible_momentum",
@@ -415,6 +418,7 @@ impl CFDApp {
             outer_iters: self.outer_iters.max(1),
             low_mach_model: self.low_mach_model,
             low_mach_theta_floor: self.low_mach_theta_floor,
+            low_mach_pressure_coupling_alpha: self.low_mach_pressure_coupling_alpha,
             alpha_u: self.alpha_u as f32,
             alpha_p: self.alpha_p as f32,
             inlet_velocity: self.inlet_velocity,
@@ -1456,6 +1460,28 @@ impl eframe::App for CFDApp {
                                     ui.weak("θ floor is used by Weiss-Smith.");
                                 }
 
+                                let coupling_enabled = !matches!(
+                                    self.low_mach_model,
+                                    GpuLowMachPrecondModel::Off
+                                );
+                                ui.add_enabled_ui(coupling_enabled, |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.low_mach_pressure_coupling_alpha,
+                                                0.0f32..=1.0f32,
+                                            )
+                                            .text("Pressure coupling α"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.update_gpu_low_mach();
+                                    }
+                                });
+                                if !coupling_enabled {
+                                    ui.weak("Pressure coupling is active when preconditioning is on.");
+                                }
+
                                 if sound_speed > 1e-12 {
                                     let mach = adv_speed / sound_speed;
                                     ui.label(format!("Estimated Mach: {:.3e}", mach));
@@ -1982,6 +2008,11 @@ fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams)
     if has_param("low_mach.theta_floor") {
         let _ = solver.set_precond_theta_floor(params.low_mach_theta_floor);
     }
+    if has_param("low_mach.pressure_coupling_alpha") {
+        let _ = solver.set_precond_pressure_coupling_alpha(
+            params.low_mach_pressure_coupling_alpha,
+        );
+    }
 
     if has_param("advection_scheme") {
         solver.set_advection_scheme(params.advection_scheme);
@@ -2047,6 +2078,7 @@ fn solver_worker_main(
         outer_iters: 1,
         low_mach_model: GpuLowMachPrecondModel::Off,
         low_mach_theta_floor: 1e-6,
+        low_mach_pressure_coupling_alpha: 1.0,
         alpha_u: 1.0,
         alpha_p: 1.0,
         inlet_velocity: 0.0,
@@ -2134,12 +2166,11 @@ fn solver_worker_main(
                     sound_speed.min(adv_speed.max(c_floor))
                 }
             };
-            let wave_speed = if params.dtau > 0.0 {
-                // Dual time stepping lets the physical dt exceed the acoustic CFL limit.
-                adv_speed
-            } else {
-                adv_speed + effective_sound_speed
-            };
+            // Even in dual-time mode, keep the physical timestep tied to the wave speed of the
+            // *preconditioned* system. Low-Mach preconditioning reduces `effective_sound_speed`
+            // so low-Mach flows can take acoustic CFL >> 1 without making `dt` so large that the
+            // pseudo-time iterations destabilize.
+            let wave_speed = adv_speed + effective_sound_speed;
             if min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
                 let current_dt = solver.dt() as f64;
                 let mut next_dt = params.target_cfl * min_cell_size / wave_speed;

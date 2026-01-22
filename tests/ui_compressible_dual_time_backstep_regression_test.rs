@@ -14,6 +14,45 @@ use cfd2::solver::{
 };
 use nalgebra::Vector2;
 
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn env_str(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+fn parse_scheme(name: &str) -> Option<Scheme> {
+    match name.trim().to_lowercase().as_str() {
+        "upwind" => Some(Scheme::Upwind),
+        "sou" => Some(Scheme::SecondOrderUpwind),
+        "sou_minmod" | "sou-minmod" => Some(Scheme::SecondOrderUpwindMinMod),
+        "sou_vanleer" | "sou-vanleer" => Some(Scheme::SecondOrderUpwindVanLeer),
+        "quick" => Some(Scheme::QUICK),
+        "quick_minmod" | "quick-minmod" => Some(Scheme::QUICKMinMod),
+        "quick_vanleer" | "quick-vanleer" => Some(Scheme::QUICKVanLeer),
+        _ => None,
+    }
+}
+
+fn parse_time_scheme(name: &str) -> Option<TimeScheme> {
+    match name.trim().to_lowercase().as_str() {
+        "euler" => Some(TimeScheme::Euler),
+        "bdf2" => Some(TimeScheme::BDF2),
+        _ => None,
+    }
+}
+
 fn min_cell_size(mesh: &cfd2::solver::mesh::Mesh) -> f64 {
     mesh.cell_vol
         .iter()
@@ -38,10 +77,13 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         step_x: 0.5,
     };
 
-    let cell = 0.025;
+    let cell = env_f64("CFD2_UI_DUAL_TIME_CELL", 0.025);
     let mut mesh = generate_cut_cell_mesh(&geo, cell, cell, 1.2, domain_size);
-    mesh.smooth(&geo, 0.3, 50);
-    assert_eq!(mesh.num_cells(), 5200, "expected UI-like 5200-cell mesh");
+    let smooth_iters = env_usize("CFD2_UI_DUAL_TIME_SMOOTH_ITERS", 50);
+    mesh.smooth(&geo, 0.3, smooth_iters);
+    if (cell - 0.025).abs() < 1e-12 {
+        assert_eq!(mesh.num_cells(), 5200, "expected UI-like 5200-cell mesh");
+    }
     let (mut inlet_faces, mut outlet_faces, mut wall_faces, mut slip_faces) = (0usize, 0usize, 0usize, 0usize);
     for b in &mesh.face_boundary {
         match b {
@@ -88,13 +130,33 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
         .expect("clear state");
 
-    // UI-like runtime params.
-    let requested_dt = 0.001f32;
-    let target_cfl = 0.95f64;
-    let outer_iters = 30usize;
-    let low_mach_model = GpuLowMachPrecondModel::WeissSmith;
-    let low_mach_theta_floor = 1e-6f32;
-    let dtau = 1.0e-5f32; // matches the UI default slider value
+    // UI-like runtime params (override via `CFD2_UI_*` env vars).
+    let requested_dt = env_f64("CFD2_UI_DUAL_TIME_DT", 0.001) as f32;
+    let target_cfl = env_f64("CFD2_UI_DUAL_TIME_TARGET_CFL", 0.95);
+    let outer_iters = env_usize("CFD2_UI_DUAL_TIME_OUTER_ITERS", 30);
+    let low_mach_model = match env_str("CFD2_UI_DUAL_TIME_LOW_MACH_MODEL")
+        .as_deref()
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("off") => GpuLowMachPrecondModel::Off,
+        Some("legacy") => GpuLowMachPrecondModel::Legacy,
+        Some("weiss" | "weiss-smith" | "weiss_smith") => GpuLowMachPrecondModel::WeissSmith,
+        Some(other) => panic!("unknown CFD2_UI_DUAL_TIME_LOW_MACH_MODEL={other}"),
+        None => GpuLowMachPrecondModel::WeissSmith,
+    };
+    let low_mach_theta_floor = env_f64("CFD2_UI_DUAL_TIME_THETA_FLOOR", 1e-6) as f32;
+    let dtau = env_f64("CFD2_UI_DUAL_TIME_DTAU", 1.0e-5) as f32;
+    let alpha_u = env_f64("CFD2_UI_DUAL_TIME_ALPHA_U", -1.0);
+    let alpha_p = env_f64("CFD2_UI_DUAL_TIME_ALPHA_P", -1.0);
+    let scheme = env_str("CFD2_UI_DUAL_TIME_SCHEME")
+        .as_deref()
+        .and_then(parse_scheme)
+        .unwrap_or(Scheme::SecondOrderUpwind);
+    let time_scheme = env_str("CFD2_UI_DUAL_TIME_TIME_SCHEME")
+        .as_deref()
+        .and_then(parse_time_scheme)
+        .unwrap_or(TimeScheme::BDF2);
 
     solver.set_dt(requested_dt);
     solver.set_density(density).unwrap();
@@ -135,8 +197,19 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     // Mirror the UI adaptive-dt behavior with dual time stepping enabled:
     // - dt chosen from advective speed only (allows acoustic CFL >> 1)
     // - limited growth by 20% per step
+    let steps = env_usize("CFD2_UI_DUAL_TIME_STEPS", 2);
+
+    solver.set_advection_scheme(scheme);
+    solver.set_time_scheme(time_scheme);
+    if alpha_u >= 0.0 {
+        solver.set_alpha_u(alpha_u as f32).unwrap();
+    }
+    if alpha_p >= 0.0 {
+        solver.set_alpha_p(alpha_p as f32).unwrap();
+    }
+
     let mut prev_max_vel = 0.0f64;
-    for step in 0..2 {
+    for step in 0..steps {
         let adv_speed = prev_max_vel.max(inlet_u as f64);
         let effective_sound_speed = match low_mach_model {
             GpuLowMachPrecondModel::Off => sound_speed,

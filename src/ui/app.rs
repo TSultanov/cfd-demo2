@@ -1366,6 +1366,21 @@ impl eframe::App for CFDApp {
                                     .changed()
                                 {
                                     self.update_gpu_dtau();
+                                    if self.dual_time && self.model_id == "compressible" {
+                                        // Pressure under-relaxation is destabilizing for the
+                                        // compressible solver in dual-time mode (unphysical striping
+                                        // + runaway velocities). Keep pressure unrelaxed.
+                                        if (self.alpha_p - 1.0).abs() > 1e-12 {
+                                            self.alpha_p = 1.0;
+                                            self.update_gpu_alpha_p();
+                                        }
+                                        // Provide conservative defaults if the UI is still at the
+                                        // typical incompressible starting point.
+                                        if (self.alpha_u - 0.7).abs() < 1e-12 {
+                                            self.alpha_u = 0.2;
+                                            self.update_gpu_alpha_u();
+                                        }
+                                    }
                                 }
                                 ui.add_enabled_ui(self.dual_time, |ui| {
                                     if ui
@@ -1588,7 +1603,13 @@ impl eframe::App for CFDApp {
                         if self.model_caps.supports_alpha_u || self.model_caps.supports_alpha_p {
                             ui.separator();
                             ui.label("Under-Relaxation Factors");
-                            ui.weak("Tip: start with α_U≈0.7 and α_P≈0.3; α=1 can diverge at high Re.");
+                            let compressible_dual_time =
+                                self.model_id == "compressible" && self.dual_time;
+                            ui.weak(if compressible_dual_time {
+                                "Tip: for compressible dual-time, start with α_U≈0.2; α_P is fixed to 1.0 for stability."
+                            } else {
+                                "Tip: start with α_U≈0.7 and α_P≈0.3; α=1 can diverge at high Re."
+                            });
                             if self.model_caps.supports_alpha_u
                                 && ui
                                     .add(
@@ -1600,14 +1621,22 @@ impl eframe::App for CFDApp {
                                 self.update_gpu_alpha_u();
                             }
                             if self.model_caps.supports_alpha_p
-                                && ui
+                            {
+                                if compressible_dual_time {
+                                    if (self.alpha_p - 1.0).abs() > 1e-12 {
+                                        self.alpha_p = 1.0;
+                                        self.update_gpu_alpha_p();
+                                    }
+                                    ui.label("α_P (Pressure): 1.0 (locked)");
+                                } else if ui
                                     .add(
                                         egui::Slider::new(&mut self.alpha_p, 0.1..=1.0)
                                             .text("α_P (Pressure)"),
                                     )
                                     .changed()
-                            {
-                                self.update_gpu_alpha_p();
+                                {
+                                    self.update_gpu_alpha_p();
+                                }
                             }
                         }
                         });

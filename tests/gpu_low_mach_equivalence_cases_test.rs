@@ -186,8 +186,8 @@ fn build_channel_obstacle_mesh(cell: f64, smooth_iters: usize) -> Mesh {
 fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
     std::env::set_var("CFD2_QUIET", "1");
 
-    let steps = env_usize("CFD2_LOW_MACH_EQ_STEPS", 12);
-    let outer_iters = env_usize("CFD2_LOW_MACH_EQ_OUTER_ITERS", 20);
+    let steps = env_usize("CFD2_LOW_MACH_EQ_STEPS", 24);
+    let outer_iters = env_usize("CFD2_LOW_MACH_EQ_OUTER_ITERS", 40);
     let target_cfl = env_f64("CFD2_LOW_MACH_EQ_TARGET_CFL", 0.6);
     let target_pseudo_cfl = env_f64("CFD2_LOW_MACH_EQ_TARGET_PSEUDO_CFL", 0.6);
     let theta_floor = env_f64("CFD2_LOW_MACH_EQ_THETA_FLOOR", 1e-4);

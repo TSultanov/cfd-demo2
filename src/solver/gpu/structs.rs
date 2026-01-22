@@ -31,11 +31,14 @@ impl Default for GpuLowMachParams {
             // Default to no low-Mach preconditioning so transient acoustics behave like rhoCentralFoam.
             model: 2,
             theta_floor: 1e-6,
-            // Pressure coupling term is scaled by low-Mach stiffness in the flux dissipation.
-            // Keep the default modest to avoid injecting noise in pseudo-transient iterations.
-            // Off by default: the low-Mach pressure coupling term is experimental and can
-            // destabilize pseudo-time iterations on some cases.
-            pressure_coupling_alpha: 0.0,
+            // Low-Mach pressure coupling term (Rhie-Chow style) used by the compressible
+            // central-upwind flux dissipation to prevent pressure checkerboarding on collocated
+            // grids. This term is gated by `model != Off`, so it has no effect on fully
+            // compressible runs unless preconditioning is enabled.
+            //
+            // Alpha=1.0 corresponds to adding `ρ' = p'/c_eff^2` into the dissipation state's
+            // density reconstruction.
+            pressure_coupling_alpha: 1.0,
             _pad0: 0.0,
         }
     }

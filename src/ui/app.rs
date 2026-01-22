@@ -1394,11 +1394,11 @@ impl eframe::App for CFDApp {
                                         self.update_gpu_dtau();
                                     }
 
-                                    let acoustic_speed = adv_speed + sound_speed;
-                                    if self.min_cell_size > 0.0 && acoustic_speed > 1e-12 {
-                                        let pseudo_cfl = acoustic_speed * self.dtau
+                                    let pseudo_wave_speed = adv_speed + effective_sound_speed;
+                                    if self.min_cell_size > 0.0 && pseudo_wave_speed > 1e-12 {
+                                        let pseudo_cfl = pseudo_wave_speed * self.dtau
                                             / self.min_cell_size.max(1e-12);
-                                        ui.label(format!("Pseudo acoustic CFL≈{:.2}", pseudo_cfl));
+                                        ui.label(format!("Pseudo CFL≈{:.2}", pseudo_cfl));
                                     }
                                 });
                             }

@@ -132,7 +132,7 @@ fn contract_unified_solver_has_no_model_specific_helpers() {
 
 #[test]
 fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
-    let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let path = repo_root().join("src/solver/gpu/lowering/programs/generic_coupled.rs");
     let src = read_utf8(&path);
 
     // Gap 3: named-parameter handler registration must be module-owned and manifest-driven.
@@ -142,7 +142,7 @@ fn contract_named_param_handlers_are_not_centralized_in_generic_coupled() {
 
 #[test]
 fn contract_preconditioner_named_param_is_not_ignored() {
-    let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let path = repo_root().join("src/solver/gpu/lowering/programs/generic_coupled.rs");
     let src = read_utf8(&path);
 
     // Runtime preconditioner selection should be derived from (recipe + config) and the
@@ -182,7 +182,7 @@ fn contract_jacobi_preconditioner_is_diagonal_scaled() {
     assert_contains(&shader_src, "fn extract_diag_inv", "gmres_ops.wgsl");
     assert_contains(&shader_src, "fn apply_diag_inv", "gmres_ops.wgsl");
 
-    let coupled_path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let coupled_path = repo_root().join("src/solver/gpu/lowering/programs/generic_coupled.rs");
     let coupled_src = read_utf8(&coupled_path);
     assert_contains(
         &coupled_src,
@@ -279,7 +279,7 @@ fn contract_named_param_handlers_are_module_discovered() {
 
 #[test]
 fn contract_generic_coupled_graphs_have_no_assembly_fallback() {
-    let path = repo_root().join("src/solver/gpu/lowering/models/generic_coupled.rs");
+    let path = repo_root().join("src/solver/gpu/lowering/programs/generic_coupled.rs");
     let src = read_utf8(&path);
 
     // Kernel scheduling must be recipe-driven. Avoid hard-coded fallback graphs that can mask

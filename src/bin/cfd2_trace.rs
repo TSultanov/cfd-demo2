@@ -4,10 +4,13 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 use cfd2::trace as tracefmt;
 use std::collections::BTreeMap;
 use std::io::BufRead;
+use std::time::Instant;
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 
 fn usage() -> &'static str {
     "Usage:
   cfd2_trace info <trace.jsonl>
+  cfd2_trace init [--model <id>] [--nx N] [--ny N]
   cfd2_trace replay <trace.jsonl> [--steps N] [--report-every N] [--no-collect-trace] [--no-profiling]
 
 Notes:
@@ -258,7 +261,12 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
     let model = build_model(&trace.header.case)?;
     let config = build_config(&trace, &model);
 
+    let mut init_events: Vec<tracefmt::TraceInitEvent> = Vec::new();
+    let init_start = Instant::now();
+    let init_guard = tracefmt::install_init_collector(&mut init_events);
     let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))?;
+    drop(init_guard);
+    let init_ms = init_start.elapsed().as_secs_f64() * 1000.0;
 
     // Match UI behavior: start from a zeroed state buffer.
     let stride = solver.model().state_layout.stride() as usize;
@@ -295,10 +303,8 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
     } else {
         trace.step_meta.len() as u64
     };
-    if steps == 0 {
-        return Err(
-            "no steps to replay (pass --steps N if the trace contains no Step events)".into(),
-        );
+    if steps == 0 && trace.step_meta.is_empty() && opts.steps_override.is_none() {
+        return Err("no steps to replay (pass --steps N)".into());
     }
 
     let mut recorded_total_ms: f64 = 0.0;
@@ -315,8 +321,13 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
         "Replaying {} step(s) from '{}' (baseline step={})",
         steps, path, trace.baseline_step
     );
+    print_init_report(init_ms, &mut init_events);
     if recorded_total_ms > 0.0 {
         println!("Recorded wall time: {:.3} ms", recorded_total_ms);
+    }
+
+    if steps == 0 {
+        return Ok(());
     }
 
     let start_total = std::time::Instant::now();
@@ -390,6 +401,140 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
     Ok(())
 }
 
+fn print_init_report(init_ms: f64, init_events: &mut Vec<tracefmt::TraceInitEvent>) {
+    println!("Init wall time: {:.3} ms", init_ms);
+    if init_events.is_empty() {
+        return;
+    }
+
+    init_events.sort_by(|a, b| {
+        b.wall_time_ms
+            .partial_cmp(&a.wall_time_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    println!("Init slowest:");
+    for ev in init_events.iter().take(10) {
+        let pct = if init_ms > 0.0 {
+            ev.wall_time_ms as f64 / init_ms * 100.0
+        } else {
+            0.0
+        };
+        let detail = ev.detail.as_deref().unwrap_or("");
+        if detail.is_empty() {
+            println!("  {:10.3} ms ({:5.1}%)  {}", ev.wall_time_ms, pct, ev.stage);
+        } else {
+            println!(
+                "  {:10.3} ms ({:5.1}%)  {}  {}",
+                ev.wall_time_ms, pct, ev.stage, detail
+            );
+        }
+    }
+}
+
+struct InitOpts {
+    model_id: String,
+    nx: usize,
+    ny: usize,
+}
+
+fn parse_init_opts(args: &[String]) -> Result<InitOpts, String> {
+    let mut model_id = "compressible".to_string();
+    let mut nx: usize = 64;
+    let mut ny: usize = 32;
+
+    let mut it = args.iter().peekable();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--model" => {
+                let Some(v) = it.next() else {
+                    return Err("missing value after --model".into());
+                };
+                model_id = v.to_string();
+            }
+            "--nx" => {
+                let Some(v) = it.next() else {
+                    return Err("missing value after --nx".into());
+                };
+                nx = v
+                    .parse::<usize>()
+                    .map_err(|_| format!("invalid --nx value '{v}'"))?
+                    .max(1);
+            }
+            "--ny" => {
+                let Some(v) = it.next() else {
+                    return Err("missing value after --ny".into());
+                };
+                ny = v
+                    .parse::<usize>()
+                    .map_err(|_| format!("invalid --ny value '{v}'"))?
+                    .max(1);
+            }
+            v if v.starts_with('-') => return Err(format!("unknown option '{v}'")),
+            v => return Err(format!("unexpected positional argument '{v}'")),
+        }
+    }
+
+    Ok(InitOpts { model_id, nx, ny })
+}
+
+fn cmd_init(opts: InitOpts) -> Result<(), String> {
+    let mesh = generate_structured_rect_mesh(
+        opts.nx,
+        opts.ny,
+        10.0,
+        1.0,
+        BoundaryType::Inlet,
+        BoundaryType::Outlet,
+        BoundaryType::Wall,
+        BoundaryType::Wall,
+    );
+
+    let model = if opts.model_id == "compressible" {
+        compressible_model_with_eos(cfd2::solver::model::EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        })
+    } else {
+        all_models()
+            .into_iter()
+            .find(|m| m.id == opts.model_id)
+            .ok_or_else(|| format!("unknown model id '{}'", opts.model_id))?
+    };
+
+    let named_params = model.named_param_keys();
+    let stepping = if named_params.iter().any(|&k| k == "eos.gamma") {
+        SteppingMode::Implicit { outer_iters: 1 }
+    } else {
+        SteppingMode::Coupled
+    };
+
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::Euler,
+        preconditioner: PreconditionerType::Jacobi,
+        stepping,
+    };
+
+    let mut init_events: Vec<tracefmt::TraceInitEvent> = Vec::new();
+    let init_start = Instant::now();
+    let init_guard = tracefmt::install_init_collector(&mut init_events);
+    let _solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))?;
+    drop(init_guard);
+
+    let init_ms = init_start.elapsed().as_secs_f64() * 1000.0;
+    println!(
+        "Init case: model_id={} mesh={}x{} (cells={})",
+        opts.model_id,
+        opts.nx,
+        opts.ny,
+        mesh.num_cells()
+    );
+    print_init_report(init_ms, &mut init_events);
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -405,6 +550,10 @@ fn main() {
                 cmd_info(&args[2])
             }
         }
+        "init" => match parse_init_opts(&args[2..]) {
+            Ok(opts) => cmd_init(opts),
+            Err(err) => Err(err),
+        },
         "replay" => {
             match parse_replay_opts(&args[2..]) {
                 Ok((path, opts)) => cmd_replay(&path, opts),

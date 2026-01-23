@@ -849,6 +849,14 @@ fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) 
         ExprNode::Literal(lit) => write!(f, "{}", lit),
         ExprNode::Ident(name) => write!(f, "{}", name),
         ExprNode::Field { base, field } => {
+            if let Some(axis) = axis_from_field(field) {
+                if let Some((dim, args)) = try_vec_ctor(*base) {
+                    if axis < dim {
+                        return render_expr(args[axis], f, parent_prec);
+                    }
+                }
+            }
+
             let needs_paren = expr_precedence(*base) < Precedence::Postfix;
             if needs_paren {
                 write!(f, "(")?;
@@ -886,6 +894,12 @@ fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) 
             Ok(())
         }
         ExprNode::Binary { left, op, right } => {
+            if let Some(simplified) =
+                simplify_binary_expr(*left, *op, *right, f, parent_prec)
+            {
+                return simplified;
+            }
+
             let prec = op.precedence();
             let needs_paren = prec < parent_prec;
             if needs_paren {
@@ -905,6 +919,18 @@ fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) 
             Ok(())
         }
         ExprNode::Call { callee, args } => {
+            if args.len() == 2 && is_ident(*callee, "dot") {
+                let lhs = args[0];
+                let rhs = args[1];
+
+                if let Some((axis, sign)) = unit_vector_axis(rhs) {
+                    return render_component(lhs, axis, sign, f, parent_prec);
+                }
+                if let Some((axis, sign)) = unit_vector_axis(lhs) {
+                    return render_component(rhs, axis, sign, f, parent_prec);
+                }
+            }
+
             let needs_paren = expr_precedence(*callee) < Precedence::Postfix;
             if needs_paren {
                 write!(f, "(")?;
@@ -923,6 +949,177 @@ fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) 
             write!(f, ")")
         }
     })
+}
+
+fn simplify_binary_expr(
+    left: Expr,
+    op: BinaryOp,
+    right: Expr,
+    f: &mut fmt::Formatter<'_>,
+    parent_prec: Precedence,
+) -> Option<fmt::Result> {
+    match op {
+        BinaryOp::Add => {
+            if right.try_f32_literal() == Some(0.0) {
+                return Some(render_expr(left, f, parent_prec));
+            }
+            if left.try_f32_literal() == Some(0.0) {
+                return Some(render_expr(right, f, parent_prec));
+            }
+        }
+        BinaryOp::Sub => {
+            if right.try_f32_literal() == Some(0.0) {
+                return Some(render_expr(left, f, parent_prec));
+            }
+        }
+        BinaryOp::Mul => {
+            if let Some(v) = left.try_f32_literal() {
+                if v == 1.0 {
+                    return Some(render_expr(right, f, parent_prec));
+                }
+                if v == -1.0 {
+                    return Some(render_negated_expr(right, f, parent_prec));
+                }
+            }
+            if let Some(v) = right.try_f32_literal() {
+                if v == 1.0 {
+                    return Some(render_expr(left, f, parent_prec));
+                }
+                if v == -1.0 {
+                    return Some(render_negated_expr(left, f, parent_prec));
+                }
+            }
+        }
+        BinaryOp::Div => {
+            if let Some(v) = right.try_f32_literal() {
+                if v == 1.0 {
+                    return Some(render_expr(left, f, parent_prec));
+                }
+                if v == -1.0 {
+                    return Some(render_negated_expr(left, f, parent_prec));
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn render_negated_expr(
+    expr: Expr,
+    f: &mut fmt::Formatter<'_>,
+    parent_prec: Precedence,
+) -> fmt::Result {
+    let prec = Precedence::Prefix;
+    let needs_paren = prec < parent_prec;
+    if needs_paren {
+        write!(f, "(")?;
+    }
+    write!(f, "-")?;
+    render_expr(expr, f, prec)?;
+    if needs_paren {
+        write!(f, ")")?;
+    }
+    Ok(())
+}
+
+fn axis_from_field(field: &str) -> Option<usize> {
+    match field {
+        "x" => Some(0),
+        "y" => Some(1),
+        "z" => Some(2),
+        "w" => Some(3),
+        _ => None,
+    }
+}
+
+fn is_ident(expr: Expr, name: &str) -> bool {
+    expr.with_node(|node| matches!(node, ExprNode::Ident(id) if id == name))
+}
+
+fn try_vec_ctor(expr: Expr) -> Option<(usize, Vec<Expr>)> {
+    expr.with_node(|node| match node {
+        ExprNode::Call { callee, args } => callee.with_node(|callee_node| match callee_node {
+            ExprNode::Ident(name) => match name.as_str() {
+                "vec2<f32>" if args.len() == 2 => Some((2, args.clone())),
+                "vec3<f32>" if args.len() == 3 => Some((3, args.clone())),
+                "vec4<f32>" if args.len() == 4 => Some((4, args.clone())),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
+    })
+}
+
+fn unit_vector_axis(expr: Expr) -> Option<(usize, f32)> {
+    let (dim, args) = try_vec_ctor(expr)?;
+    let mut axis: Option<usize> = None;
+    let mut sign: f32 = 1.0;
+
+    for (idx, arg) in args.iter().enumerate() {
+        let v = arg.try_f32_literal()?;
+        if v == 0.0 {
+            continue;
+        }
+        if v == 1.0 || v == -1.0 {
+            if axis.is_some() {
+                return None;
+            }
+            axis = Some(idx);
+            sign = v.signum();
+            continue;
+        }
+        return None;
+    }
+
+    axis.and_then(|axis| (axis < dim).then_some((axis, sign)))
+}
+
+fn render_component(
+    vec: Expr,
+    axis: usize,
+    sign: f32,
+    f: &mut fmt::Formatter<'_>,
+    parent_prec: Precedence,
+) -> fmt::Result {
+    if sign == -1.0 {
+        let prec = Precedence::Prefix;
+        let needs_paren = prec < parent_prec;
+        if needs_paren {
+            write!(f, "(")?;
+        }
+        write!(f, "-")?;
+        render_component(vec, axis, 1.0, f, prec)?;
+        if needs_paren {
+            write!(f, ")")?;
+        }
+        return Ok(());
+    }
+
+    if let Some((dim, args)) = try_vec_ctor(vec) {
+        if axis < dim {
+            return render_expr(args[axis], f, parent_prec);
+        }
+    }
+
+    let field = match axis {
+        0 => "x",
+        1 => "y",
+        2 => "z",
+        3 => "w",
+        _ => return render_expr(vec, f, parent_prec),
+    };
+
+    let needs_paren = expr_precedence(vec) < Precedence::Postfix;
+    if needs_paren {
+        write!(f, "(")?;
+    }
+    render_expr(vec, f, Precedence::Postfix)?;
+    if needs_paren {
+        write!(f, ")")?;
+    }
+    write!(f, ".{field}")
 }
 
 fn expr_precedence(expr: Expr) -> Precedence {
@@ -1289,6 +1486,32 @@ mod tests {
             .field("u")
             .field("x");
         assert_eq!(expr.to_string(), "state[idx].u.x");
+    }
+
+    #[test]
+    fn expr_simplifies_vec_ctor_field_access() {
+        let v = Expr::call_named("vec2<f32>", vec![Expr::ident("a"), Expr::ident("b")]);
+        assert_eq!(v.field("x").to_string(), "a");
+        assert_eq!(v.field("y").to_string(), "b");
+    }
+
+    #[test]
+    fn expr_simplifies_dot_with_unit_vectors() {
+        let v = Expr::call_named("vec2<f32>", vec![Expr::ident("a"), Expr::ident("b")]);
+        let ex = Expr::call_named("vec2<f32>", vec![1.0.into(), 0.0.into()]);
+        let ey = Expr::call_named("vec2<f32>", vec![0.0.into(), 1.0.into()]);
+
+        assert_eq!(Expr::call_named("dot", vec![v, ex]).to_string(), "a");
+
+        let v2 = Expr::call_named("vec2<f32>", vec![Expr::ident("a"), Expr::ident("b")]);
+        assert_eq!(Expr::call_named("dot", vec![ey, v2]).to_string(), "b");
+
+        let vx = Expr::call_named(
+            "vec2<f32>",
+            vec![Expr::ident("a") + Expr::ident("b"), Expr::ident("c")],
+        );
+        let expr = Expr::ident("k") * Expr::call_named("dot", vec![vx, ex]);
+        assert_eq!(expr.to_string(), "k * (a + b)");
     }
 
     #[test]

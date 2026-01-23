@@ -122,19 +122,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     var diag_0: f32 = 0.0;
     var rhs_0: f32 = 0.0;
-    diag_0 += vol * 1.0 / constants.dt;
-    rhs_0 += vol * 1.0 / constants.dt * state_old[idx * 1u + 0u];
+    diag_0 += vol / constants.dt;
+    rhs_0 += vol / constants.dt * state_old[idx * 1u + 0u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
-        let diag_bdf2 = vol * 1.0 / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
+        let diag_bdf2 = vol / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        diag_0 = diag_0 - vol * 1.0 / constants.dt + diag_bdf2;
-        rhs_0 = rhs_0 - vol * 1.0 / constants.dt * state_old[idx * 1u + 0u] + vol * 1.0 / constants.dt * (factor_n * state_old[idx * 1u + 0u] - factor_nm1 * state_old_old[idx * 1u + 0u]);
+        diag_0 = diag_0 - vol / constants.dt + diag_bdf2;
+        rhs_0 = rhs_0 - vol / constants.dt * state_old[idx * 1u + 0u] + vol / constants.dt * (factor_n * state_old[idx * 1u + 0u] - factor_nm1 * state_old_old[idx * 1u + 0u]);
     }
     if (constants.dtau > 0.0) {
-        diag_0 += vol * 1.0 / constants.dtau;
-        rhs_0 += vol * 1.0 / constants.dtau * state_iter[idx * 1u + 0u];
+        diag_0 += vol / constants.dtau;
+        rhs_0 += vol / constants.dtau * state_iter[idx * 1u + 0u];
     }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
@@ -173,7 +173,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
-        let diff_coeff_phi = 1.0 * area / dist;
+        let diff_coeff_phi = area / dist;
         if (!is_boundary) {
             diag_0 += diff_coeff_phi;
             matrix_values[start_row_0 + neighbor_rank * 1u + 0u] -= diff_coeff_phi;
@@ -183,7 +183,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_0 += diff_coeff_phi * bc_value[face_idx * 1u + 0u];
             } else {
                 if (bc_kind[face_idx * 1u + 0u] == 2u) {
-                    rhs_0 += -(1.0 * area * bc_value[face_idx * 1u + 0u]);
+                    rhs_0 += -(area * bc_value[face_idx * 1u + 0u]);
                 }
             }
         }

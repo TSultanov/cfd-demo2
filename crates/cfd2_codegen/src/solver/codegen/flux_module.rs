@@ -194,6 +194,7 @@ fn base_items(include_low_mach_params: bool) -> Vec<Item> {
         "Group 2: Boundary conditions (per face x unknown)".to_string(),
     ));
     items.extend(boundary_bindings());
+    items.push(Item::Function(bc_neighbor_scalar_fn()));
     items
 }
 
@@ -243,6 +244,46 @@ fn low_mach_params_struct() -> StructDef {
             StructField::new("pressure_coupling_alpha", Type::F32),
             StructField::new("_pad0", Type::F32),
         ],
+    )
+}
+
+fn bc_neighbor_scalar_fn() -> Function {
+    Function::new(
+        "bc_neighbor_scalar",
+        vec![
+            Param::new("interior", Type::F32, Vec::new()),
+            Param::new("owner", Type::F32, Vec::new()),
+            Param::new("kind", Type::U32, Vec::new()),
+            Param::new("value", Type::F32, Vec::new()),
+            Param::new("d_own", Type::F32, Vec::new()),
+            Param::new("is_boundary", Type::Bool, Vec::new()),
+        ],
+        Some(Type::F32),
+        Vec::new(),
+        Block::new(vec![
+            dsl::var_typed_expr("boundary", Type::F32, Some(Expr::ident("owner"))),
+            dsl::if_block_expr(
+                Expr::ident("kind").eq(Expr::from(1u32)),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("boundary"),
+                    Expr::ident("value"),
+                )]),
+                None,
+            ),
+            dsl::if_block_expr(
+                Expr::ident("kind").eq(Expr::from(2u32)),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("boundary"),
+                    Expr::ident("owner") + Expr::ident("value") * Expr::ident("d_own"),
+                )]),
+                None,
+            ),
+            Stmt::Return(Some(dsl::select(
+                Expr::ident("interior"),
+                Expr::ident("boundary"),
+                Expr::ident("is_boundary"),
+            ))),
+        ]),
     )
 }
 
@@ -1214,23 +1255,25 @@ fn state_component_at_side(
         }
     };
 
-        let boundary_neighbor = if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
-            let bc_table_idx = Expr::ident("idx") * Expr::from(flux_layout.stride)
-                + Expr::from(unknown_offset);
+    if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
+        let bc_table_idx =
+            Expr::ident("idx") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
         let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
         let value = dsl::array_access("bc_value", bc_table_idx);
+        return Expr::call_named(
+            "bc_neighbor_scalar",
+            vec![
+                interior,
+                owner,
+                kind,
+                value,
+                Expr::ident("d_own"),
+                Expr::ident("is_boundary"),
+            ],
+        );
+    }
 
-        // GpuBcKind: ZeroGradient=0, Dirichlet=1, Neumann=2 (value is dphi/dn).
-        dsl::select(
-            dsl::select(owner.clone(), value.clone(), kind.eq(Expr::from(1u32))),
-            owner.clone() + value * Expr::ident("d_own"),
-            kind.eq(Expr::from(2u32)),
-        )
-    } else {
-        owner.clone()
-    };
-
-    dsl::select(interior, boundary_neighbor, Expr::ident("is_boundary"))
+    dsl::select(interior, owner, Expr::ident("is_boundary"))
 }
 
 fn lower_scalar(

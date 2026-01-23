@@ -1905,10 +1905,50 @@ impl eframe::App for CFDApp {
                             self.update_gpu_scheme();
                         }
                         if ui
+                            .radio(
+                                matches!(self.selected_scheme, Scheme::SecondOrderUpwindMinMod),
+                                "SOU (MinMod limiter)",
+                            )
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::SecondOrderUpwindMinMod;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(
+                                matches!(self.selected_scheme, Scheme::SecondOrderUpwindVanLeer),
+                                "SOU (VanLeer limiter)",
+                            )
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::SecondOrderUpwindVanLeer;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
                             .radio(matches!(self.selected_scheme, Scheme::QUICK), "QUICK")
                             .clicked()
                         {
                             self.selected_scheme = Scheme::QUICK;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(
+                                matches!(self.selected_scheme, Scheme::QUICKMinMod),
+                                "QUICK (MinMod limiter)",
+                            )
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::QUICKMinMod;
+                            self.update_gpu_scheme();
+                        }
+                        if ui
+                            .radio(
+                                matches!(self.selected_scheme, Scheme::QUICKVanLeer),
+                                "QUICK (VanLeer limiter)",
+                            )
+                            .clicked()
+                        {
+                            self.selected_scheme = Scheme::QUICKVanLeer;
                             self.update_gpu_scheme();
                         }
 

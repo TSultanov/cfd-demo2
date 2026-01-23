@@ -241,6 +241,13 @@ pub(crate) enum ProgramSpecNode {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct StepGraphTiming {
+    pub label: &'static str,
+    pub seconds: f64,
+    pub detail: Option<GraphDetail>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ProgramBlock {
     pub nodes: Vec<ProgramSpecNode>,
@@ -355,6 +362,14 @@ pub(crate) struct GpuProgramPlan {
     pub resources: ProgramResources,
     pub spec: ModelGpuProgramSpec,
     pub last_linear_stats: LinearSolverStats,
+    pub collect_convergence_stats: bool,
+    pub collect_trace: bool,
+    pub step_linear_stats: Vec<LinearSolverStats>,
+    pub step_graph_timings: Vec<StepGraphTiming>,
+    pub outer_iterations: u32,
+    pub outer_residual_u: Option<f32>,
+    pub outer_residual_p: Option<f32>,
+    pub outer_field_residuals: Vec<(String, f32)>,
 }
 
 impl GpuProgramPlan {
@@ -373,6 +388,14 @@ impl GpuProgramPlan {
             resources,
             spec,
             last_linear_stats: LinearSolverStats::default(),
+            collect_convergence_stats: false,
+            collect_trace: false,
+            step_linear_stats: Vec::new(),
+            step_graph_timings: Vec::new(),
+            outer_iterations: 0,
+            outer_residual_u: None,
+            outer_residual_p: None,
+            outer_field_residuals: Vec::new(),
         }
     }
 
@@ -466,10 +489,14 @@ impl GpuProgramPlan {
             return step(self);
         }
         self.last_linear_stats = LinearSolverStats::default();
+        self.step_linear_stats.clear();
         self.step();
         let stats = self.step_stats();
         if let Some((a, b, c)) = stats.linear_stats {
             return Ok(vec![a, b, c]);
+        }
+        if !self.step_linear_stats.is_empty() {
+            return Ok(std::mem::take(&mut self.step_linear_stats));
         }
         let last = self.last_linear_stats;
         Ok(if last.iterations > 0 || last.converged || last.diverged {
@@ -512,8 +539,19 @@ impl GpuProgramPlan {
         let nodes = self.spec.program.block(block).nodes.clone();
         for node in nodes {
             match node {
-                ProgramSpecNode::Graph { kind, mode, .. } => {
-                    let _ = self.spec.ops.run_graph(kind, &*self, &self.context, mode);
+                ProgramSpecNode::Graph {
+                    label,
+                    kind,
+                    mode,
+                } => {
+                    let (seconds, detail) = self.spec.ops.run_graph(kind, &*self, &self.context, mode);
+                    if self.collect_trace {
+                        self.step_graph_timings.push(StepGraphTiming {
+                            label,
+                            seconds,
+                            detail,
+                        });
+                    }
                 }
                 ProgramSpecNode::Host { kind, .. } => {
                     let ops = Arc::clone(&self.spec.ops);

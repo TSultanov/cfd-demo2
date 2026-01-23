@@ -772,6 +772,8 @@ dependencies = [
  "pollster 0.3.0",
  "rand 0.8.5",
  "rayon",
+ "serde",
+ "serde_json",
  "wgpu",
  "wgsl_bindgen",
  "wide 0.8.3",

@@ -14,6 +14,7 @@ use crate::solver::{
     GpuLowMachPrecondModel, LinearSolverStats, PreconditionerType, SolverConfig, SteppingMode,
     TimeScheme as GpuTimeScheme, UnifiedSolver,
 };
+use crate::trace as tracefmt;
 use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
@@ -144,6 +145,7 @@ struct SolverInitOutcome {
     cached_p: Vec<f64>,
     model_caps: ModelUiCaps,
     renderer: Option<cfd_renderer::CfdRenderResources>,
+    trace_init_events: Vec<tracefmt::TraceInitEvent>,
 }
 
 struct SolverInitResponse {
@@ -176,6 +178,14 @@ enum SolverWorkerCommand {
     ClearSolver,
     SetRunning(bool),
     UpdateParams(RuntimeParams),
+    StartTrace {
+        path: String,
+        header: tracefmt::TraceHeader,
+    },
+    AppendTraceInit {
+        events: Vec<tracefmt::TraceInitEvent>,
+    },
+    StopTrace,
     Shutdown,
 }
 
@@ -186,8 +196,14 @@ enum SolverWorkerEvent {
         p: Vec<f64>,
         stats: CachedGpuStats,
     },
+    Message(String),
     Error(String),
     Running(bool),
+}
+
+struct SolverTraceSession {
+    writer: tracefmt::TraceWriter,
+    profiling_enabled: bool,
 }
 
 struct SolverWorkerHandle {
@@ -234,6 +250,8 @@ pub struct CFDApp {
     plot_cache: Option<PlotCache>,
     cached_gpu_stats: CachedGpuStats,
     cached_error: Option<String>,
+    cached_message: Option<String>,
+    last_init_trace_events: Vec<tracefmt::TraceInitEvent>,
     mesh: Option<Mesh>,
     cached_cells: Vec<Vec<[f64; 2]>>,
     actual_min_cell_size: f64,
@@ -254,6 +272,9 @@ pub struct CFDApp {
     dtau: f64,
     log_convergence: bool,
     log_every_steps: u32,
+    trace_enabled: bool,
+    trace_path: String,
+    trace_pending_start: bool,
     render_mode: RenderMode,
     alpha_u: f64,
     alpha_p: f64,
@@ -358,6 +379,8 @@ impl CFDApp {
             plot_cache: None,
             cached_gpu_stats: CachedGpuStats::default(),
             cached_error: None,
+            cached_message: None,
+            last_init_trace_events: Vec::new(),
             mesh: None,
             cached_cells: Vec::new(),
             actual_min_cell_size: 0.01,
@@ -378,6 +401,9 @@ impl CFDApp {
             dtau: 1e-5,
             log_convergence: false,
             log_every_steps: 25,
+            trace_enabled: false,
+            trace_path: "cfd2_trace.jsonl".to_string(),
+            trace_pending_start: false,
             render_mode: RenderMode::GpuDirect,
             alpha_u: 0.7,
             alpha_p: 0.3,
@@ -432,6 +458,110 @@ impl CFDApp {
         self.solver_worker.send(SolverWorkerCommand::UpdateParams(
             self.current_runtime_params(),
         ));
+    }
+
+    fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
+        tracefmt::TraceRuntimeParams {
+            adaptive_dt: self.adaptive_dt,
+            target_cfl: self.target_cfl,
+            requested_dt: self.timestep as f32,
+            dtau: if self.dual_time {
+                self.dtau.max(0.0) as f32
+            } else {
+                0.0
+            },
+            advection_scheme: tracefmt::TraceScheme::from(self.selected_scheme),
+            time_scheme: tracefmt::TraceTimeScheme::from(self.time_scheme),
+            preconditioner: tracefmt::TracePreconditioner::from(self.selected_preconditioner),
+            outer_iters: self.outer_iters.max(1),
+            low_mach_model: tracefmt::TraceLowMachModel::from(self.low_mach_model),
+            low_mach_theta_floor: self.low_mach_theta_floor,
+            low_mach_pressure_coupling_alpha: self.low_mach_pressure_coupling_alpha,
+            alpha_u: self.alpha_u as f32,
+            alpha_p: self.alpha_p as f32,
+            inlet_velocity: self.inlet_velocity,
+            density: self.current_fluid.density as f32,
+            viscosity: self.current_fluid.viscosity as f32,
+            eos: tracefmt::TraceEosSpec::from(self.current_fluid.eos),
+        }
+    }
+
+    fn build_trace_header(&self, mesh: &Mesh) -> Result<tracefmt::TraceHeader, String> {
+        let mesh = tracefmt::TraceMesh::from_mesh(mesh)?;
+
+        let geometry = match self.selected_geometry {
+            GeometryType::BackwardsStep => tracefmt::TraceGeometry::BackwardsStep,
+            GeometryType::ChannelObstacle => tracefmt::TraceGeometry::ChannelObstacle,
+        };
+        let mesh_type = match self.mesh_type {
+            MeshType::CutCell => tracefmt::TraceMeshType::CutCell,
+            MeshType::Delaunay => tracefmt::TraceMeshType::Delaunay,
+            MeshType::Voronoi => tracefmt::TraceMeshType::Voronoi,
+        };
+
+        let stepping_mode = if self.model_caps.supports_eos_tuning {
+            tracefmt::TraceSteppingMode::Implicit
+        } else {
+            tracefmt::TraceSteppingMode::Coupled
+        };
+
+        let fluid = tracefmt::TraceFluid {
+            name: Some(self.current_fluid.name.clone()),
+            density: self.current_fluid.density,
+            viscosity: self.current_fluid.viscosity,
+            eos: tracefmt::TraceEosSpec::from(self.current_fluid.eos),
+        };
+
+        let case = tracefmt::TraceCase {
+            model_id: self.model_id.to_string(),
+            geometry,
+            mesh_type,
+            min_cell_size: self.min_cell_size,
+            max_cell_size: self.max_cell_size,
+            growth_rate: self.growth_rate,
+            fluid,
+            stepping_mode,
+            mesh,
+        };
+
+        Ok(tracefmt::make_header(
+            case,
+            self.current_trace_runtime_params(),
+            cfg!(feature = "profiling"),
+        ))
+    }
+
+    fn start_trace(&mut self) {
+        let Some(mesh) = &self.mesh else {
+            self.trace_pending_start = true;
+            return;
+        };
+
+        let header = match self.build_trace_header(mesh) {
+            Ok(v) => v,
+            Err(err) => {
+                self.trace_enabled = false;
+                self.trace_pending_start = false;
+                self.cached_error = Some(format!("failed to start trace: {err}"));
+                return;
+            }
+        };
+
+        self.trace_pending_start = false;
+        self.solver_worker.send(SolverWorkerCommand::StartTrace {
+            path: self.trace_path.clone(),
+            header,
+        });
+        if !self.last_init_trace_events.is_empty() {
+            self.solver_worker.send(SolverWorkerCommand::AppendTraceInit {
+                events: self.last_init_trace_events.clone(),
+            });
+        }
+    }
+
+    fn stop_trace(&mut self) {
+        self.trace_pending_start = false;
+        self.solver_worker.send(SolverWorkerCommand::StopTrace);
     }
 
     fn model_label(model_id: &'static str) -> &'static str {
@@ -550,6 +680,8 @@ impl CFDApp {
         self.is_running = false;
         self.solver_worker
             .send(SolverWorkerCommand::SetRunning(false));
+        self.solver_worker.send(SolverWorkerCommand::StopTrace);
+        self.trace_pending_start = self.trace_enabled;
         self.solver_worker.send(SolverWorkerCommand::ClearSolver);
         self.refresh_model_caps();
         self.pending_init_request = Some(self.make_init_request());
@@ -562,6 +694,8 @@ impl CFDApp {
         self.invalidate_plot_cache();
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
+        self.cached_message = None;
+        self.last_init_trace_events.clear();
     }
 
     fn build_mesh_with(
@@ -570,51 +704,89 @@ impl CFDApp {
         min_cell_size: f64,
         max_cell_size: f64,
         growth_rate: f64,
+        trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
     ) -> Mesh {
-        let _ = (max_cell_size, growth_rate);
-        match selected_geometry {
+        fn mesh_type_id(mesh_type: MeshType) -> &'static str {
+            match mesh_type {
+                MeshType::CutCell => "cutcell",
+                MeshType::Delaunay => "delaunay",
+                MeshType::Voronoi => "voronoi",
+            }
+        }
+
+        fn geometry_id(geometry: GeometryType) -> &'static str {
+            match geometry {
+                GeometryType::BackwardsStep => "backwards_step",
+                GeometryType::ChannelObstacle => "channel_obstacle",
+            }
+        }
+
+        let geometry = geometry_id(selected_geometry);
+        let mesh_kind = mesh_type_id(mesh_type);
+        let total_start = std::time::Instant::now();
+
+        let mesh = match selected_geometry {
             GeometryType::BackwardsStep => {
                 let length = 3.5;
                 let height_outlet = 1.0;
                 let height_inlet = 0.5;
                 let step_x = 0.5;
 
-                match mesh_type {
-                    MeshType::CutCell | MeshType::Delaunay | MeshType::Voronoi => {
-                        let domain_size = Vector2::new(length, height_outlet);
-                        let geo = BackwardsStep {
-                            length,
-                            height_inlet,
-                            height_outlet,
-                            step_x,
-                        };
-                        let mut mesh = match mesh_type {
-                            MeshType::CutCell => generate_cut_cell_mesh(
-                                &geo,
-                                min_cell_size,
-                                max_cell_size,
-                                growth_rate,
-                                domain_size,
-                            ),
-                            MeshType::Delaunay => generate_delaunay_mesh(
-                                &geo,
-                                min_cell_size,
-                                max_cell_size,
-                                growth_rate,
-                                domain_size,
-                            ),
-                            MeshType::Voronoi => generate_voronoi_mesh(
-                                &geo,
-                                min_cell_size,
-                                max_cell_size,
-                                growth_rate,
-                                domain_size,
-                            ),
-                        };
-                        mesh.smooth(&geo, 0.3, 50);
-                        mesh
-                    }
-                }
+                let domain_size = Vector2::new(length, height_outlet);
+                let geo = BackwardsStep {
+                    length,
+                    height_inlet,
+                    height_outlet,
+                    step_x,
+                };
+
+                let gen_start = std::time::Instant::now();
+                let mut mesh = match mesh_type {
+                    MeshType::CutCell => generate_cut_cell_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                    ),
+                    MeshType::Delaunay => generate_delaunay_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                    ),
+                    MeshType::Voronoi => generate_voronoi_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                    ),
+                };
+
+                CFDApp::push_trace_init_event(
+                    trace_init_events,
+                    format!("mesh.generate.{geometry}.{mesh_kind}"),
+                    gen_start.elapsed(),
+                    Some(format!(
+                        "min={min_cell_size:.4e} max={max_cell_size:.4e} growth={growth_rate:.3} cells={} faces={} vertices={}",
+                        mesh.num_cells(),
+                        mesh.num_faces(),
+                        mesh.num_vertices()
+                    )),
+                );
+
+                let smooth_start = std::time::Instant::now();
+                mesh.smooth(&geo, 0.3, 50);
+                CFDApp::push_trace_init_event(
+                    trace_init_events,
+                    format!("mesh.smooth.{geometry}.{mesh_kind}"),
+                    smooth_start.elapsed(),
+                    Some("factor=0.3 iters=50".to_string()),
+                );
+
+                mesh
             }
             GeometryType::ChannelObstacle => {
                 let length = 3.0;
@@ -625,45 +797,88 @@ impl CFDApp {
                     obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
                     obstacle_radius: 0.1,
                 };
-                let mesh = match mesh_type {
-                    MeshType::CutCell => {
-                        let mut mesh = generate_cut_cell_mesh(
-                            &geo,
-                            min_cell_size,
-                            max_cell_size,
-                            growth_rate,
-                            domain_size,
-                        );
-                        mesh.smooth(&geo, 0.3, 100);
-                        mesh
-                    }
-                    MeshType::Delaunay => {
-                        let mut mesh = generate_delaunay_mesh(
-                            &geo,
-                            min_cell_size,
-                            max_cell_size,
-                            growth_rate,
-                            domain_size,
-                        );
-                        mesh.smooth(&geo, 0.3, 50);
-                        mesh
-                    }
-                    MeshType::Voronoi => {
-                        let mut mesh = generate_voronoi_mesh(
-                            &geo,
-                            min_cell_size,
-                            max_cell_size,
-                            growth_rate,
-                            domain_size,
-                        );
-                        mesh.smooth(&geo, 0.3, 50);
-                        mesh
-                    }
+
+                let gen_start = std::time::Instant::now();
+                let mut mesh = match mesh_type {
+                    MeshType::CutCell => generate_cut_cell_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                    ),
+                    MeshType::Delaunay => generate_delaunay_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                    ),
+                    MeshType::Voronoi => generate_voronoi_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                    ),
                 };
+
+                CFDApp::push_trace_init_event(
+                    trace_init_events,
+                    format!("mesh.generate.{geometry}.{mesh_kind}"),
+                    gen_start.elapsed(),
+                    Some(format!(
+                        "min={min_cell_size:.4e} max={max_cell_size:.4e} growth={growth_rate:.3} cells={} faces={} vertices={}",
+                        mesh.num_cells(),
+                        mesh.num_faces(),
+                        mesh.num_vertices()
+                    )),
+                );
+
+                let smooth_iters = match mesh_type {
+                    MeshType::CutCell => 100,
+                    MeshType::Delaunay | MeshType::Voronoi => 50,
+                };
+
+                let smooth_start = std::time::Instant::now();
+                mesh.smooth(&geo, 0.3, smooth_iters);
+                CFDApp::push_trace_init_event(
+                    trace_init_events,
+                    format!("mesh.smooth.{geometry}.{mesh_kind}"),
+                    smooth_start.elapsed(),
+                    Some(format!("factor=0.3 iters={smooth_iters}")),
+                );
 
                 mesh
             }
-        }
+        };
+
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            format!("mesh.total.{geometry}.{mesh_kind}"),
+            total_start.elapsed(),
+            Some(format!(
+                "cells={} faces={} vertices={}",
+                mesh.num_cells(),
+                mesh.num_faces(),
+                mesh.num_vertices()
+            )),
+        );
+
+        mesh
+    }
+
+    fn push_trace_init_event(
+        events: &mut Vec<tracefmt::TraceInitEvent>,
+        stage: impl Into<String>,
+        elapsed: std::time::Duration,
+        detail: Option<String>,
+    ) {
+        events.push(tracefmt::TraceInitEvent {
+            stage: stage.into(),
+            wall_time_ms: elapsed.as_secs_f32() * 1000.0,
+            detail,
+        });
     }
 
     fn cache_cells(mesh: &Mesh) -> Vec<Vec<[f64; 2]>> {
@@ -790,8 +1005,12 @@ impl CFDApp {
                     self.cached_gpu_stats = stats;
                     self.cached_error = None;
                 }
+                SolverWorkerEvent::Message(message) => {
+                    self.cached_message = Some(message);
+                }
                 SolverWorkerEvent::Error(err) => {
                     self.cached_error = Some(err);
+                    self.cached_message = None;
                     self.is_running = false;
                 }
                 SolverWorkerEvent::Running(running) => {
@@ -802,39 +1021,65 @@ impl CFDApp {
     }
 
     fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
+        let SolverInitOutcome {
+            solver,
+            mesh,
+            cached_cells,
+            actual_min_cell_size,
+            cached_u,
+            cached_p,
+            model_caps,
+            renderer,
+            trace_init_events,
+        } = outcome;
+
         self.is_running = false;
         self.solver_worker
             .send(SolverWorkerCommand::SetRunning(false));
 
-        self.model_caps = outcome.model_caps;
-        self.cached_cells = outcome.cached_cells;
-        self.actual_min_cell_size = outcome.actual_min_cell_size;
-        self.cached_u = outcome.cached_u;
-        self.cached_p = outcome.cached_p;
+        self.model_caps = model_caps;
+        self.cached_cells = cached_cells;
+        self.actual_min_cell_size = actual_min_cell_size;
+        self.cached_u = cached_u;
+        self.cached_p = cached_p;
         self.snapshot_seq = self.snapshot_seq.wrapping_add(1);
         self.invalidate_plot_cache();
-        self.mesh = Some(outcome.mesh);
+        self.mesh = Some(mesh);
 
-        self.cfd_renderer = outcome.renderer.map(|r| Arc::new(Mutex::new(r)));
+        self.cfd_renderer = renderer.map(|r| Arc::new(Mutex::new(r)));
+        self.last_init_trace_events = trace_init_events;
 
         self.cached_gpu_stats = CachedGpuStats::default();
         self.cached_error = None;
+        self.cached_message = None;
 
         self.solver_worker.send(SolverWorkerCommand::SetSolver {
-            solver: outcome.solver,
+            solver,
             min_cell_size: self.actual_min_cell_size,
         });
         self.sync_worker_params();
+
+        if self.trace_enabled {
+            self.start_trace();
+        } else {
+            self.trace_pending_start = false;
+        }
     }
 
     fn build_init_outcome(request: SolverInitRequest) -> Result<SolverInitOutcome, String> {
+        let init_start = std::time::Instant::now();
+        let mut trace_init_events: Vec<tracefmt::TraceInitEvent> = Vec::new();
+
         let mesh = CFDApp::build_mesh_with(
             request.selected_geometry,
             request.mesh_type,
             request.min_cell_size,
             request.max_cell_size,
             request.growth_rate,
+            &mut trace_init_events,
         );
+
+        let fields_start = std::time::Instant::now();
         let n_cells = mesh.num_cells();
         let initial_u = CFDApp::build_initial_velocity_with(
             &mesh,
@@ -842,6 +1087,12 @@ impl CFDApp {
             request.max_cell_size,
         );
         let initial_p = vec![0.0; n_cells];
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "init.fields",
+            fields_start.elapsed(),
+            Some(format!("cells={n_cells}")),
+        );
 
         let model = if request.model_id == "compressible" {
             compressible_model_with_eos(request.current_fluid.eos)
@@ -902,6 +1153,8 @@ impl CFDApp {
             },
         };
 
+        let solver_start = std::time::Instant::now();
+        let init_guard = tracefmt::install_init_collector(&mut trace_init_events);
         let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
             &mesh,
             model,
@@ -909,6 +1162,15 @@ impl CFDApp {
             request.wgpu_device.clone(),
             request.wgpu_queue.clone(),
         ))?;
+        drop(init_guard);
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "solver.new",
+            solver_start.elapsed(),
+            Some(format!("model_id={} cells={}", request.model_id, n_cells)),
+        );
+
+        let solver_setup_start = std::time::Instant::now();
         let stride = gpu_solver.model().state_layout.stride() as usize;
         let _ = gpu_solver.write_state_f32(&vec![0.0f32; n_cells * stride]);
         gpu_solver.set_dt(request.timestep as f32);
@@ -919,6 +1181,12 @@ impl CFDApp {
         if supports_preconditioner {
             gpu_solver.set_preconditioner(effective_preconditioner);
         }
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "solver.setup",
+            solver_setup_start.elapsed(),
+            None,
+        );
 
         let model = gpu_solver.model();
         let mut has_rho = false;
@@ -935,6 +1203,7 @@ impl CFDApp {
             }
         }
 
+        let initial_state_start = std::time::Instant::now();
         let (cached_u, cached_p) = if has_rho && has_rho_u && has_rho_e && has_u {
             let p_ref = request
                 .current_fluid
@@ -960,11 +1229,36 @@ impl CFDApp {
             gpu_solver.set_p(&initial_p);
             (initial_u, initial_p)
         };
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "solver.initial_state",
+            initial_state_start.elapsed(),
+            Some(if has_rho && has_rho_u && has_rho_e && has_u {
+                "compressible".to_string()
+            } else {
+                "incompressible".to_string()
+            }),
+        );
 
+        let history_start = std::time::Instant::now();
         gpu_solver.initialize_history();
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "solver.initialize_history",
+            history_start.elapsed(),
+            None,
+        );
 
+        let cache_start = std::time::Instant::now();
         let cached_cells = CFDApp::cache_cells(&mesh);
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "mesh.cache_cells",
+            cache_start.elapsed(),
+            Some(format!("cells={}", mesh.num_cells())),
+        );
 
+        let renderer_start = std::time::Instant::now();
         let renderer =
             if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue) {
                 let mut renderer = cfd_renderer::CfdRenderResources::new(
@@ -980,12 +1274,36 @@ impl CFDApp {
             } else {
                 None
             };
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "renderer.init",
+            renderer_start.elapsed(),
+            Some(if renderer.is_some() {
+                format!("mesh_vertices_cap={}", mesh.num_cells() * 10)
+            } else {
+                "skipped".to_string()
+            }),
+        );
 
+        let min_cell_start = std::time::Instant::now();
         let actual_min_cell_size = mesh
             .cell_vol
             .iter()
             .map(|&v| v.sqrt())
             .fold(f64::INFINITY, f64::min);
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "mesh.actual_min_cell_size",
+            min_cell_start.elapsed(),
+            Some(format!("{actual_min_cell_size:.4e}")),
+        );
+
+        CFDApp::push_trace_init_event(
+            &mut trace_init_events,
+            "init.total",
+            init_start.elapsed(),
+            Some(format!("cells={n_cells}")),
+        );
 
         Ok(SolverInitOutcome {
             solver: gpu_solver,
@@ -996,6 +1314,7 @@ impl CFDApp {
             cached_p,
             model_caps,
             renderer,
+            trace_init_events,
         })
     }
 
@@ -1514,6 +1833,35 @@ impl eframe::App for CFDApp {
                             }
                         });
 
+                        ui.separator();
+                        ui.label("Tracing / Profiling");
+                        let prev_trace = self.trace_enabled;
+                        if ui
+                            .checkbox(
+                                &mut self.trace_enabled,
+                                "Save trace to file (for replay + performance)",
+                            )
+                            .changed()
+                        {
+                            if self.trace_enabled {
+                                self.start_trace();
+                            } else {
+                                self.stop_trace();
+                            }
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label("Trace file");
+                            ui.text_edit_singleline(&mut self.trace_path);
+                        });
+                        if prev_trace && self.trace_path.is_empty() {
+                            ui.weak("Tip: set a path before restarting the trace.");
+                        } else if self.trace_pending_start {
+                            ui.weak("Trace will start after initialization.");
+                        } else if self.trace_enabled && !cfg!(feature = "profiling") {
+                            ui.weak("Built without `profiling` feature: trace has timings, but no GPU-CPU profiling counters.");
+                        }
+
                         if cfl > 1.0 {
                             if self.model_caps.supports_dtau && self.dual_time {
                                 ui.colored_label(
@@ -1741,6 +2089,7 @@ impl eframe::App for CFDApp {
 
                         if self.is_running {
                             self.cached_error = None;
+                            self.cached_message = None;
                             self.sync_worker_params();
                             self.solver_worker.send(SolverWorkerCommand::SetRunning(true));
                         } else {
@@ -1752,6 +2101,9 @@ impl eframe::App for CFDApp {
 
                     if let Some(err) = &self.cached_error {
                         ui.colored_label(egui::Color32::RED, err);
+                    }
+                    if let Some(message) = &self.cached_message {
+                        ui.colored_label(egui::Color32::YELLOW, message);
                     }
 
                     if has_solver {
@@ -1983,6 +2335,7 @@ impl eframe::App for CFDApp {
 }
 
 fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams) {
+    solver.set_collect_convergence_stats(params.log_convergence);
     solver.set_dt(params.requested_dt);
     let named_params = solver.model().named_param_keys();
     let has_param = |key: &str| named_params.iter().any(|&k| k == key);
@@ -2057,11 +2410,158 @@ fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams)
     }
 }
 
+fn trace_runtime_params_from_worker(params: RuntimeParams) -> tracefmt::TraceRuntimeParams {
+    tracefmt::TraceRuntimeParams {
+        adaptive_dt: params.adaptive_dt,
+        target_cfl: params.target_cfl,
+        requested_dt: params.requested_dt,
+        dtau: params.dtau,
+        advection_scheme: tracefmt::TraceScheme::from(params.advection_scheme),
+        time_scheme: tracefmt::TraceTimeScheme::from(params.time_scheme),
+        preconditioner: tracefmt::TracePreconditioner::from(params.preconditioner),
+        outer_iters: params.outer_iters,
+        low_mach_model: tracefmt::TraceLowMachModel::from(params.low_mach_model),
+        low_mach_theta_floor: params.low_mach_theta_floor,
+        low_mach_pressure_coupling_alpha: params.low_mach_pressure_coupling_alpha,
+        alpha_u: params.alpha_u,
+        alpha_p: params.alpha_p,
+        inlet_velocity: params.inlet_velocity,
+        density: params.density,
+        viscosity: params.viscosity,
+        eos: tracefmt::TraceEosSpec::from(params.eos),
+    }
+}
+
+fn solver_worker_stop_trace(trace: &mut Option<SolverTraceSession>, solver: &mut Option<UnifiedSolver>) {
+    let Some(mut session) = trace.take() else {
+        return;
+    };
+
+    if let Some(s) = solver.as_mut() {
+        s.set_collect_trace(false);
+        let _ = s.enable_detailed_profiling(false);
+        if session.profiling_enabled {
+            let _ = s.end_profiling_session();
+            if let Ok(stats) = s.get_profiling_stats() {
+                let categories = stats
+                    .get_all_stats()
+                    .into_iter()
+                    .map(|(category, s)| {
+                        (
+                            category.name().to_string(),
+                            tracefmt::TraceCategoryStats {
+                                total_seconds: s.total_time.as_secs_f64(),
+                                call_count: s.call_count,
+                                min_seconds: s.min_time.as_secs_f64(),
+                                max_seconds: s.max_time.as_secs_f64(),
+                                total_bytes: s.total_bytes,
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut locations = stats.get_location_stats();
+                locations.sort_by(|a, b| b.1.total_time.cmp(&a.1.total_time));
+
+                let locations = locations
+                    .into_iter()
+                    .take(200)
+                    .map(|(name, s)| {
+                        (
+                            name,
+                            tracefmt::TraceCategoryStats {
+                                total_seconds: s.total_time.as_secs_f64(),
+                                call_count: s.call_count,
+                                min_seconds: s.min_time.as_secs_f64(),
+                                max_seconds: s.max_time.as_secs_f64(),
+                                total_bytes: s.total_bytes,
+                            },
+                        )
+                    })
+                    .collect();
+
+                let (mem_cpu, mem_gpu) = stats.get_memory_stats();
+                let memory_cpu = tracefmt::TraceMemoryStats {
+                    alloc_bytes: mem_cpu.alloc_bytes,
+                    alloc_count: mem_cpu.alloc_count,
+                    free_bytes: mem_cpu.free_bytes,
+                    free_count: mem_cpu.free_count,
+                    max_alloc_request: mem_cpu.max_alloc_request,
+                };
+                let memory_gpu = tracefmt::TraceMemoryStats {
+                    alloc_bytes: mem_gpu.alloc_bytes,
+                    alloc_count: mem_gpu.alloc_count,
+                    free_bytes: mem_gpu.free_bytes,
+                    free_count: mem_gpu.free_count,
+                    max_alloc_request: mem_gpu.max_alloc_request,
+                };
+
+                let memory_locations_cpu = stats
+                    .get_memory_location_stats(crate::solver::gpu::profiling::MemoryDomain::Cpu)
+                    .into_iter()
+                    .map(|(name, s)| {
+                        (
+                            name,
+                            tracefmt::TraceMemoryStats {
+                                alloc_bytes: s.alloc_bytes,
+                                alloc_count: s.alloc_count,
+                                free_bytes: s.free_bytes,
+                                free_count: s.free_count,
+                                max_alloc_request: s.max_alloc_request,
+                            },
+                        )
+                    })
+                    .collect();
+                let memory_locations_gpu = stats
+                    .get_memory_location_stats(crate::solver::gpu::profiling::MemoryDomain::Gpu)
+                    .into_iter()
+                    .map(|(name, s)| {
+                        (
+                            name,
+                            tracefmt::TraceMemoryStats {
+                                alloc_bytes: s.alloc_bytes,
+                                alloc_count: s.alloc_count,
+                                free_bytes: s.free_bytes,
+                                free_count: s.free_count,
+                                max_alloc_request: s.max_alloc_request,
+                            },
+                        )
+                    })
+                    .collect();
+
+                let profiling = tracefmt::TraceProfilingEvent {
+                    session_total_seconds: stats.get_session_total().as_secs_f64(),
+                    iteration_count: stats.get_iteration_count(),
+                    categories,
+                    locations,
+                    memory_cpu,
+                    memory_gpu,
+                    memory_locations_cpu,
+                    memory_locations_gpu,
+                };
+
+                let _ = session
+                    .writer
+                    .write_event(&tracefmt::TraceEvent::Profiling(profiling));
+            }
+        }
+    }
+
+    let _ = session.writer.write_event(&tracefmt::TraceEvent::Footer(tracefmt::TraceFooter {
+        closed_unix_ms: tracefmt::now_unix_ms(),
+    }));
+
+    let path = session.writer.path().display().to_string();
+    let _ = session.writer.close();
+    eprintln!("[cfd2][trace] closed {}", path);
+}
+
 fn solver_worker_main(
     cmd_rx: mpsc::Receiver<SolverWorkerCommand>,
     evt_tx: mpsc::Sender<SolverWorkerEvent>,
 ) {
     let mut solver: Option<UnifiedSolver> = None;
+    let mut trace: Option<SolverTraceSession> = None;
     let mut model_id: &'static str = "<uninitialized>";
     let mut supports_sound_speed = false;
     let mut min_cell_size = 0.0_f64;
@@ -2100,6 +2600,7 @@ fn solver_worker_main(
             if !solver_worker_handle_cmd(
                 cmd,
                 &mut solver,
+                &mut trace,
                 &mut model_id,
                 &mut supports_sound_speed,
                 &mut min_cell_size,
@@ -2121,6 +2622,7 @@ fn solver_worker_main(
                     if !solver_worker_handle_cmd(
                         cmd,
                         &mut solver,
+                        &mut trace,
                         &mut model_id,
                         &mut supports_sound_speed,
                         &mut min_cell_size,
@@ -2228,9 +2730,14 @@ fn solver_worker_main(
             ..Default::default()
         };
 
-        if let Some((iters, res_u, res_p)) = solver.incompressible_outer_stats() {
+        let step_stats = solver.step_stats();
+        if let Some(iters) = step_stats.outer_iterations {
             stats.outer_iterations = iters;
+        }
+        if let Some(res_u) = step_stats.outer_residual_u {
             stats.outer_residual_u = res_u;
+        }
+        if let Some(res_p) = step_stats.outer_residual_p {
             stats.outer_residual_p = res_p;
         }
         if step_linear_stats.len() == 3 {
@@ -2245,6 +2752,10 @@ fn solver_worker_main(
         let should_readback = step_idx == 0
             || last_snapshot_publish.elapsed() >= snapshot_publish_interval
             || should_log;
+
+        let mut trace_max_u: Option<f64> = None;
+        let mut trace_p_min: Option<f64> = None;
+        let mut trace_p_max: Option<f64> = None;
 
         if should_readback {
             let now = std::time::Instant::now();
@@ -2266,6 +2777,7 @@ fn solver_worker_main(
                 }
             }
             prev_max_vel = max_vel;
+            trace_max_u = Some(max_vel);
 
             let mut min_p = f64::INFINITY;
             let mut max_p = f64::NEG_INFINITY;
@@ -2278,12 +2790,28 @@ fn solver_worker_main(
                 min_p = min_p.min(pv);
                 max_p = max_p.max(pv);
             }
+            trace_p_min = Some(min_p);
+            trace_p_max = Some(max_p);
 
             if should_log || nonfinite_u > 0 || nonfinite_p > 0 {
-                let outer_str = solver
-                    .incompressible_outer_stats()
-                    .map(|(iters, res_u, res_p)| {
-                        format!(" outer(iters={}, u={:.3e}, p={:.3e})", iters, res_u, res_p)
+                let step_stats = solver.step_stats();
+                let outer_str = step_stats
+                    .outer_iterations
+                    .map(|iters| {
+                        if let Some(fields) = solver.outer_field_residuals() {
+                            let fields = fields
+                                .iter()
+                                .map(|(name, res)| format!("{name}={res:.3e}"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!(" outer(iters={iters}, res=[{fields}])")
+                        } else if let (Some(res_u), Some(res_p)) =
+                            (step_stats.outer_residual_u, step_stats.outer_residual_p)
+                        {
+                            format!(" outer(iters={iters}, u={res_u:.3e}, p={res_p:.3e})")
+                        } else {
+                            format!(" outer(iters={iters})")
+                        }
                     })
                     .unwrap_or_default();
 
@@ -2322,6 +2850,51 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Stats { stats });
         }
 
+        if let Some(trace) = trace.as_mut() {
+            let linear_solves = step_linear_stats
+                .iter()
+                .copied()
+                .map(tracefmt::TraceLinearSolverStats::from)
+                .collect::<Vec<_>>();
+
+            let graph = solver
+                .step_graph_timings()
+                .iter()
+                .map(|t| {
+                    let nodes = t.detail.as_ref().and_then(|detail| match detail {
+                        crate::solver::gpu::execution_plan::GraphDetail::Module(detail) => Some(
+                            detail
+                                .nodes
+                                .iter()
+                                .map(|n| tracefmt::TraceGraphNodeTiming {
+                                    label: n.label.to_string(),
+                                    seconds: n.seconds,
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                    });
+                    tracefmt::TraceGraphTiming {
+                        label: t.label.to_string(),
+                        seconds: t.seconds,
+                        nodes,
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let event = tracefmt::TraceEvent::Step(tracefmt::TraceStepEvent {
+                step: step_idx,
+                sim_time: solver.time(),
+                dt: solver.dt(),
+                wall_time_ms: step_time_ms,
+                linear_solves,
+                graph,
+                max_u: trace_max_u,
+                p_min: trace_p_min,
+                p_max: trace_p_max,
+            });
+            let _ = trace.writer.write_event(&event);
+        }
+
         step_idx = step_idx.wrapping_add(1);
         thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -2330,6 +2903,7 @@ fn solver_worker_main(
 fn solver_worker_handle_cmd(
     cmd: SolverWorkerCommand,
     solver: &mut Option<UnifiedSolver>,
+    trace: &mut Option<SolverTraceSession>,
     model_id: &mut &'static str,
     supports_sound_speed: &mut bool,
     min_cell_size: &mut f64,
@@ -2346,6 +2920,9 @@ fn solver_worker_handle_cmd(
             solver: next,
             min_cell_size: next_min_cell_size,
         } => {
+            if trace.is_some() {
+                solver_worker_stop_trace(trace, solver);
+            }
             *model_id = next.model().id;
             *supports_sound_speed = next
                 .model()
@@ -2367,6 +2944,7 @@ fn solver_worker_handle_cmd(
             }
         }
         SolverWorkerCommand::ClearSolver => {
+            solver_worker_stop_trace(trace, solver);
             *solver = None;
             *model_id = "<uninitialized>";
             *supports_sound_speed = false;
@@ -2401,6 +2979,56 @@ fn solver_worker_handle_cmd(
             if let Some(s) = solver.as_mut() {
                 solver_worker_apply_params(s, *params);
             }
+            if let (Some(trace), Some(s)) = (trace.as_mut(), solver.as_ref()) {
+                let event = tracefmt::TraceEvent::Params(tracefmt::TraceParamsEvent {
+                    step: *step_idx,
+                    sim_time: s.time(),
+                    params: trace_runtime_params_from_worker(*params),
+                });
+                let _ = trace.writer.write_event(&event);
+            }
+        }
+        SolverWorkerCommand::StartTrace { path, header } => {
+            solver_worker_stop_trace(trace, solver);
+
+            match tracefmt::TraceWriter::create(&path) {
+                Ok(mut writer) => {
+                    let profiling_enabled = header.ui.profiling_enabled;
+                    let event = tracefmt::TraceEvent::Header(header);
+                    let _ = writer.write_event(&event);
+
+                    if let Some(s) = solver.as_mut() {
+                        s.set_collect_trace(true);
+                        let _ = s.enable_detailed_profiling(profiling_enabled);
+                        if profiling_enabled {
+                            let _ = s.start_profiling_session();
+                        }
+                    }
+
+                    *trace = Some(SolverTraceSession {
+                        writer,
+                        profiling_enabled,
+                    });
+                    eprintln!("[cfd2][trace] recording to {}", path);
+                }
+                Err(err) => {
+                    let _ = evt_tx.send(SolverWorkerEvent::Message(format!(
+                        "failed to start trace: {err}"
+                    )));
+                }
+            }
+        }
+        SolverWorkerCommand::AppendTraceInit { events } => {
+            if let Some(trace) = trace.as_mut() {
+                for init in events {
+                    let _ = trace
+                        .writer
+                        .write_event(&tracefmt::TraceEvent::Init(init));
+                }
+            }
+        }
+        SolverWorkerCommand::StopTrace => {
+            solver_worker_stop_trace(trace, solver);
         }
         SolverWorkerCommand::Shutdown => return false,
     }

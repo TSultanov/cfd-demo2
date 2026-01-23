@@ -3,7 +3,7 @@ use crate::solver::gpu::program::build_program_plan;
 use crate::solver::gpu::program::plan_instance::{
     PlanAction, PlanInitConfig, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::program::plan::GpuProgramPlan;
+use crate::solver::gpu::program::plan::{GpuProgramPlan, StepGraphTiming};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
@@ -97,6 +97,26 @@ impl GpuUnifiedSolver {
 
     pub fn step_stats(&self) -> PlanStepStats {
         self.plan.step_stats()
+    }
+
+    pub fn set_collect_convergence_stats(&mut self, enable: bool) {
+        self.plan.collect_convergence_stats = enable;
+    }
+
+    pub fn set_collect_trace(&mut self, enable: bool) {
+        self.plan.collect_trace = enable;
+    }
+
+    pub fn outer_field_residuals(&self) -> Option<&[(String, f32)]> {
+        if self.plan.outer_field_residuals.is_empty() {
+            None
+        } else {
+            Some(&self.plan.outer_field_residuals)
+        }
+    }
+
+    pub fn step_graph_timings(&self) -> &[StepGraphTiming] {
+        &self.plan.step_graph_timings
     }
 
     pub fn state_buffer(&self) -> &wgpu::Buffer {

@@ -707,6 +707,13 @@ pub(crate) fn spec_set_bc_value(
 }
 
 pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
+    plan.step_linear_stats.clear();
+    plan.step_graph_timings.clear();
+    plan.outer_iterations = 0;
+    plan.outer_residual_u = None;
+    plan.outer_residual_p = None;
+    plan.outer_field_residuals.clear();
+
     let device = plan.context.device.clone();
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
@@ -773,6 +780,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
             "generic_coupled:schur",
         );
         plan.last_linear_stats = stats;
+        plan.step_linear_stats.push(stats);
         return;
     }
 
@@ -801,12 +809,15 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
             "generic_coupled:fgmres",
         );
         plan.last_linear_stats = stats;
+        plan.step_linear_stats.push(stats);
         return;
     }
 
-    plan.last_linear_stats = r
+    let stats = r
         .runtime
         .solve_linear_system_cg(r.linear_solver.max_iters, r.linear_solver.tolerance);
+    plan.last_linear_stats = stats;
+    plan.step_linear_stats.push(stats);
 }
 
 pub(crate) fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {

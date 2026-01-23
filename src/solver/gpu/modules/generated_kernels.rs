@@ -8,6 +8,7 @@ use crate::solver::model::KernelId;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 struct KernelBindGroups {
     groups_ping_pong: Vec<Vec<wgpu::BindGroup>>,
@@ -28,6 +29,9 @@ impl GeneratedKernelsModule {
         registry: &ResourceRegistry<'_>,
         state_step_index: Arc<AtomicUsize>,
     ) -> Result<Self, String> {
+        let total_start = Instant::now();
+        let stage_prefix = format!("solver.new.kernels.{model_id}");
+
         let max_compute_workgroups_per_dimension = device.limits().max_compute_workgroups_per_dimension;
         let mut pipelines = HashMap::new();
         let mut bind_groups = HashMap::new();
@@ -35,7 +39,15 @@ impl GeneratedKernelsModule {
         for kernel in &recipe.kernels {
             let id = kernel.id;
             let source = kernel_registry::kernel_source_by_id(model_id, id)?;
+            let id_str = id.as_str();
+
+            let pipeline_start = Instant::now();
             let pipeline = (source.create_pipeline)(device);
+            crate::trace::record_init_event(
+                format!("{stage_prefix}.pipeline.{id_str}"),
+                pipeline_start.elapsed(),
+                None,
+            );
 
             let max_group = source
                 .bindings
@@ -44,13 +56,16 @@ impl GeneratedKernelsModule {
                 .max()
                 .unwrap_or(0);
 
+            let bind_start = Instant::now();
             let mut groups_ping_pong = Vec::with_capacity((max_group as usize) + 1);
+            let mut bound_group_count = 0usize;
             for group in 0..=max_group {
                 if !source.bindings.iter().any(|b| b.group == group) {
                     groups_ping_pong.push(Vec::new());
                     continue;
                 }
 
+                bound_group_count += 1;
                 let bgl = pipeline.get_bind_group_layout(group);
                 let mut ping_pong = Vec::with_capacity(3);
                 for phase in 0..3 {
@@ -68,10 +83,24 @@ impl GeneratedKernelsModule {
                 }
                 groups_ping_pong.push(ping_pong);
             }
+            crate::trace::record_init_event(
+                format!("{stage_prefix}.bind_groups.{id_str}"),
+                bind_start.elapsed(),
+                Some(format!(
+                    "groups={bound_group_count}/{} phases=3",
+                    (max_group as usize) + 1
+                )),
+            );
 
             pipelines.insert(id, pipeline);
             bind_groups.insert(id, KernelBindGroups { groups_ping_pong });
         }
+
+        crate::trace::record_init_event(
+            format!("{stage_prefix}.total"),
+            total_start.elapsed(),
+            Some(format!("kernels={}", recipe.kernels.len())),
+        );
 
         Ok(Self {
             state_step_index,

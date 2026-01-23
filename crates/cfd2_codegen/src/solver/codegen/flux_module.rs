@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::dsl as typed;
 use super::wgsl_ast::{
@@ -734,9 +734,15 @@ fn face_stmts(
     ));
     body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
 
+    let mut state_keys = HashSet::new();
+    collect_state_keys_from_flux_spec(spec, primitives, layout, &mut state_keys);
+    let (state_vars, state_var_stmts) = precompute_state_vars(layout, flux_layout, &state_keys);
+    body.extend(state_var_stmts);
+    let ctx = LowerCtx::new(layout, primitives, flux_layout, state_vars);
+
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => {
-            let phi_expr = lower_scalar(phi, layout, primitives, flux_layout);
+            let phi_expr = lower_scalar(phi, &ctx);
             body.push(dsl::var_typed_expr("phi", Type::F32, Some(phi_expr)));
 
             for u_idx in 0..flux_stride {
@@ -767,8 +773,8 @@ fn face_stmts(
                 panic!("CentralUpwind spec arrays must match component count");
             }
 
-            let a_p = lower_scalar(a_plus, layout, primitives, flux_layout);
-            let a_m = lower_scalar(a_minus, layout, primitives, flux_layout);
+            let a_p = lower_scalar(a_plus, &ctx);
+            let a_m = lower_scalar(a_minus, &ctx);
             body.push(dsl::let_expr("a_plus", a_p));
             body.push(dsl::let_expr("a_minus", a_m));
             body.push(dsl::let_expr(
@@ -780,10 +786,10 @@ fn face_stmts(
                 let off = flux_layout
                     .offset_for(comp_name)
                     .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
-                let u_l = lower_scalar(&u_left[i], layout, primitives, flux_layout);
-                let u_r = lower_scalar(&u_right[i], layout, primitives, flux_layout);
-                let f_l = lower_scalar(&flux_left[i], layout, primitives, flux_layout);
-                let f_r = lower_scalar(&flux_right[i], layout, primitives, flux_layout);
+                let u_l = lower_scalar(&u_left[i], &ctx);
+                let u_r = lower_scalar(&u_right[i], &ctx);
+                let f_l = lower_scalar(&flux_left[i], &ctx);
+                let f_r = lower_scalar(&flux_right[i], &ctx);
 
                 let num = Expr::ident("a_plus") * f_l - Expr::ident("a_minus") * f_r
                     + (Expr::ident("a_plus") * Expr::ident("a_minus")) * (u_r - u_l);
@@ -883,6 +889,14 @@ fn face_stmts_runtime_scheme(
     ));
     body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
 
+    let mut state_keys = HashSet::new();
+    for (_, spec) in variants {
+        collect_state_keys_from_flux_spec(spec, primitives, layout, &mut state_keys);
+    }
+    let (state_vars, state_var_stmts) = precompute_state_vars(layout, flux_layout, &state_keys);
+    body.extend(state_var_stmts);
+    let ctx = LowerCtx::new(layout, primitives, flux_layout, state_vars);
+
     // --- Runtime scheme selection ---
     if variants.is_empty() {
         panic!("runtime scheme flux module requires at least one variant spec");
@@ -952,22 +966,12 @@ fn face_stmts_runtime_scheme(
     body.push(dsl::var_typed_expr(
         "a_plus",
         Type::F32,
-        Some(lower_scalar(
-            upwind.a_plus,
-            layout,
-            primitives,
-            flux_layout,
-        )),
+        Some(lower_scalar(upwind.a_plus, &ctx)),
     ));
     body.push(dsl::var_typed_expr(
         "a_minus",
         Type::F32,
-        Some(lower_scalar(
-            upwind.a_minus,
-            layout,
-            primitives,
-            flux_layout,
-        )),
+        Some(lower_scalar(upwind.a_minus, &ctx)),
     ));
 
     for scheme in [
@@ -983,16 +987,16 @@ fn face_stmts_runtime_scheme(
         };
 
         let cond = cond_for(scheme);
-        let a_p = lower_scalar(v.a_plus, layout, primitives, flux_layout);
-        let a_m = lower_scalar(v.a_minus, layout, primitives, flux_layout);
+        let a_p = lower_scalar(v.a_plus, &ctx);
+        let a_m = lower_scalar(v.a_minus, &ctx);
 
-        body.push(dsl::assign_expr(
-            Expr::ident("a_plus"),
-            dsl::select(Expr::ident("a_plus"), a_p, cond.clone()),
-        ));
-        body.push(dsl::assign_expr(
-            Expr::ident("a_minus"),
-            dsl::select(Expr::ident("a_minus"), a_m, cond),
+        body.push(dsl::if_block_expr(
+            cond,
+            dsl::block(vec![
+                dsl::assign_expr(Expr::ident("a_plus"), a_p),
+                dsl::assign_expr(Expr::ident("a_minus"), a_m),
+            ]),
+            None,
         ));
     }
 
@@ -1014,42 +1018,22 @@ fn face_stmts_runtime_scheme(
         body.push(dsl::var_typed_expr(
             &u_l,
             Type::F32,
-            Some(lower_scalar(
-                &upwind.u_left[i],
-                layout,
-                primitives,
-                flux_layout,
-            )),
+            Some(lower_scalar(&upwind.u_left[i], &ctx)),
         ));
         body.push(dsl::var_typed_expr(
             &u_r,
             Type::F32,
-            Some(lower_scalar(
-                &upwind.u_right[i],
-                layout,
-                primitives,
-                flux_layout,
-            )),
+            Some(lower_scalar(&upwind.u_right[i], &ctx)),
         ));
         body.push(dsl::var_typed_expr(
             &f_l,
             Type::F32,
-            Some(lower_scalar(
-                &upwind.flux_left[i],
-                layout,
-                primitives,
-                flux_layout,
-            )),
+            Some(lower_scalar(&upwind.flux_left[i], &ctx)),
         ));
         body.push(dsl::var_typed_expr(
             &f_r,
             Type::F32,
-            Some(lower_scalar(
-                &upwind.flux_right[i],
-                layout,
-                primitives,
-                flux_layout,
-            )),
+            Some(lower_scalar(&upwind.flux_right[i], &ctx)),
         ));
 
         for scheme in [
@@ -1065,38 +1049,20 @@ fn face_stmts_runtime_scheme(
             };
 
             let cond = cond_for(scheme);
+            let u_l_expr = lower_scalar(&v.u_left[i], &ctx);
+            let u_r_expr = lower_scalar(&v.u_right[i], &ctx);
+            let f_l_expr = lower_scalar(&v.flux_left[i], &ctx);
+            let f_r_expr = lower_scalar(&v.flux_right[i], &ctx);
 
-            body.push(dsl::assign_expr(
-                Expr::ident(&u_l),
-                dsl::select(
-                    Expr::ident(&u_l),
-                    lower_scalar(&v.u_left[i], layout, primitives, flux_layout),
-                    cond.clone(),
-                ),
-            ));
-            body.push(dsl::assign_expr(
-                Expr::ident(&u_r),
-                dsl::select(
-                    Expr::ident(&u_r),
-                    lower_scalar(&v.u_right[i], layout, primitives, flux_layout),
-                    cond.clone(),
-                ),
-            ));
-            body.push(dsl::assign_expr(
-                Expr::ident(&f_l),
-                dsl::select(
-                    Expr::ident(&f_l),
-                    lower_scalar(&v.flux_left[i], layout, primitives, flux_layout),
-                    cond.clone(),
-                ),
-            ));
-            body.push(dsl::assign_expr(
-                Expr::ident(&f_r),
-                dsl::select(
-                    Expr::ident(&f_r),
-                    lower_scalar(&v.flux_right[i], layout, primitives, flux_layout),
-                    cond,
-                ),
+            body.push(dsl::if_block_expr(
+                cond,
+                dsl::block(vec![
+                    dsl::assign_expr(Expr::ident(&u_l), u_l_expr),
+                    dsl::assign_expr(Expr::ident(&u_r), u_r_expr),
+                    dsl::assign_expr(Expr::ident(&f_l), f_l_expr),
+                    dsl::assign_expr(Expr::ident(&f_r), f_r_expr),
+                ]),
+                None,
             ));
         }
 
@@ -1114,12 +1080,286 @@ fn face_stmts_runtime_scheme(
     body
 }
 
-fn lower_vec2(
-    expr: &FaceVec2Expr,
-    layout: &StateLayout,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
-    flux_layout: &FluxLayout,
-) -> typed::VecExpr<2> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct StateKey<'a> {
+    side: FaceSide,
+    field: &'a str,
+    component: u32,
+}
+
+fn sanitize_ident(raw: &str) -> String {
+    let mut out: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit())
+    {
+        out.insert(0, '_');
+    }
+    out
+}
+
+fn state_var_name(layout: &StateLayout, key: StateKey<'_>) -> String {
+    let side = match key.side {
+        FaceSide::Owner => "own",
+        FaceSide::Neighbor => "neigh",
+    };
+
+    let mut name = format!("s_{side}_{}", sanitize_ident(key.field));
+
+    let suffix = layout.field(key.field).map(|f| f.kind());
+    match suffix {
+        Some(FieldKind::Vector2) => {
+            name.push_str(match key.component {
+                0 => "_x",
+                1 => "_y",
+                _ => return format!("{name}_c{}", key.component),
+            });
+        }
+        Some(FieldKind::Vector3) => {
+            name.push_str(match key.component {
+                0 => "_x",
+                1 => "_y",
+                2 => "_z",
+                _ => return format!("{name}_c{}", key.component),
+            });
+        }
+        _ => {
+            if key.component != 0 {
+                name.push_str(&format!("_c{}", key.component));
+            }
+        }
+    }
+
+    name
+}
+
+fn collect_state_keys_from_flux_spec<'a>(
+    spec: &'a FluxModuleKernelSpec,
+    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    state_layout: &'a StateLayout,
+    out: &mut HashSet<StateKey<'a>>,
+) {
+    match spec {
+        FluxModuleKernelSpec::ScalarReplicated { phi } => {
+            collect_state_keys_from_scalar(phi, primitives, state_layout, out);
+        }
+        FluxModuleKernelSpec::CentralUpwind {
+            u_left,
+            u_right,
+            flux_left,
+            flux_right,
+            a_plus,
+            a_minus,
+            ..
+        } => {
+            for expr in u_left {
+                collect_state_keys_from_scalar(expr, primitives, state_layout, out);
+            }
+            for expr in u_right {
+                collect_state_keys_from_scalar(expr, primitives, state_layout, out);
+            }
+            for expr in flux_left {
+                collect_state_keys_from_scalar(expr, primitives, state_layout, out);
+            }
+            for expr in flux_right {
+                collect_state_keys_from_scalar(expr, primitives, state_layout, out);
+            }
+            collect_state_keys_from_scalar(a_plus, primitives, state_layout, out);
+            collect_state_keys_from_scalar(a_minus, primitives, state_layout, out);
+        }
+    }
+}
+
+fn collect_state_keys_from_vec2<'a>(
+    expr: &'a FaceVec2Expr,
+    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    state_layout: &'a StateLayout,
+    out: &mut HashSet<StateKey<'a>>,
+) {
+    match expr {
+        FaceVec2Expr::Builtin(_) => {}
+        FaceVec2Expr::Vec2(x, y) => {
+            collect_state_keys_from_scalar(x, primitives, state_layout, out);
+            collect_state_keys_from_scalar(y, primitives, state_layout, out);
+        }
+        FaceVec2Expr::StateVec2 { side, field } => {
+            // `FaceVec2Expr` is always `vec2`, so we only materialize x/y.
+            out.insert(StateKey {
+                side: *side,
+                field: field.as_str(),
+                component: 0,
+            });
+            out.insert(StateKey {
+                side: *side,
+                field: field.as_str(),
+                component: 1,
+            });
+        }
+        FaceVec2Expr::Add(a, b) | FaceVec2Expr::Sub(a, b) | FaceVec2Expr::Lerp(a, b) => {
+            collect_state_keys_from_vec2(a, primitives, state_layout, out);
+            collect_state_keys_from_vec2(b, primitives, state_layout, out);
+        }
+        FaceVec2Expr::Neg(a) => collect_state_keys_from_vec2(a, primitives, state_layout, out),
+        FaceVec2Expr::MulScalar(v, s) => {
+            collect_state_keys_from_vec2(v, primitives, state_layout, out);
+            collect_state_keys_from_scalar(s, primitives, state_layout, out);
+        }
+    }
+}
+
+fn collect_state_keys_from_primitive_expr<'a>(
+    expr: &'a PrimitiveExpr,
+    side: FaceSide,
+    state_layout: &'a StateLayout,
+    out: &mut HashSet<StateKey<'a>>,
+) {
+    match expr {
+        PrimitiveExpr::Literal(_) => {}
+        PrimitiveExpr::Field(name) => {
+            let (base, component) = resolve_state_field_component(state_layout, name);
+            out.insert(StateKey {
+                side,
+                field: base,
+                component,
+            });
+        }
+        PrimitiveExpr::Add(a, b)
+        | PrimitiveExpr::Sub(a, b)
+        | PrimitiveExpr::Mul(a, b)
+        | PrimitiveExpr::Div(a, b) => {
+            collect_state_keys_from_primitive_expr(a, side, state_layout, out);
+            collect_state_keys_from_primitive_expr(b, side, state_layout, out);
+        }
+        PrimitiveExpr::Sqrt(inner) | PrimitiveExpr::Neg(inner) => {
+            collect_state_keys_from_primitive_expr(inner, side, state_layout, out);
+        }
+    }
+}
+
+fn collect_state_keys_from_scalar<'a>(
+    expr: &'a FaceScalarExpr,
+    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    state_layout: &'a StateLayout,
+    out: &mut HashSet<StateKey<'a>>,
+) {
+    match expr {
+        FaceScalarExpr::Literal(_)
+        | FaceScalarExpr::Builtin(_)
+        | FaceScalarExpr::Constant { .. }
+        | FaceScalarExpr::LowMachParam(_) => {}
+        FaceScalarExpr::State { side, name } => {
+            out.insert(StateKey {
+                side: *side,
+                field: name.as_str(),
+                component: 0,
+            });
+        }
+        FaceScalarExpr::Primitive { side, name } => {
+            let prim = primitives.get(name.as_str()).unwrap_or_else(|| {
+                panic!("primitive '{}' not found in PrimitiveDerivations", name)
+            });
+            collect_state_keys_from_primitive_expr(prim, *side, state_layout, out);
+        }
+        FaceScalarExpr::Add(a, b)
+        | FaceScalarExpr::Sub(a, b)
+        | FaceScalarExpr::Mul(a, b)
+        | FaceScalarExpr::Div(a, b)
+        | FaceScalarExpr::Max(a, b)
+        | FaceScalarExpr::Min(a, b)
+        | FaceScalarExpr::Lerp(a, b) => {
+            collect_state_keys_from_scalar(a, primitives, state_layout, out);
+            collect_state_keys_from_scalar(b, primitives, state_layout, out);
+        }
+        FaceScalarExpr::Neg(a) | FaceScalarExpr::Abs(a) | FaceScalarExpr::Sqrt(a) => {
+            collect_state_keys_from_scalar(a, primitives, state_layout, out);
+        }
+        FaceScalarExpr::Dot(a, b) => {
+            collect_state_keys_from_vec2(a, primitives, state_layout, out);
+            collect_state_keys_from_vec2(b, primitives, state_layout, out);
+        }
+    }
+}
+
+fn precompute_state_vars<'a>(
+    layout: &'a StateLayout,
+    flux_layout: &'a FluxLayout,
+    keys: &HashSet<StateKey<'a>>,
+) -> (HashMap<StateKey<'a>, String>, Vec<Stmt>) {
+    let mut vars = HashMap::new();
+    let mut stmts = Vec::new();
+
+    let mut ordered: Vec<StateKey<'a>> = keys.iter().copied().collect();
+    ordered.sort_by(|a, b| {
+        let side_rank = |s: FaceSide| if s == FaceSide::Owner { 0 } else { 1 };
+        side_rank(a.side)
+            .cmp(&side_rank(b.side))
+            .then_with(|| a.field.cmp(b.field))
+            .then_with(|| a.component.cmp(&b.component))
+    });
+
+    for key in ordered {
+        let name = state_var_name(layout, key);
+        let expr = state_component_at_side(
+            layout,
+            "state",
+            key.side,
+            key.field,
+            key.component,
+            flux_layout,
+        );
+        stmts.push(dsl::let_expr(&name, expr));
+        vars.insert(key, name);
+    }
+
+    (vars, stmts)
+}
+
+struct LowerCtx<'a> {
+    layout: &'a StateLayout,
+    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    flux_layout: &'a FluxLayout,
+    state_vars: HashMap<StateKey<'a>, String>,
+}
+
+impl<'a> LowerCtx<'a> {
+    fn new(
+        layout: &'a StateLayout,
+        primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+        flux_layout: &'a FluxLayout,
+        state_vars: HashMap<StateKey<'a>, String>,
+    ) -> Self {
+        Self {
+            layout,
+            primitives,
+            flux_layout,
+            state_vars,
+        }
+    }
+
+    fn state_scalar(&self, side: FaceSide, field: &'a str, component: u32) -> Expr {
+        let key = StateKey {
+            side,
+            field,
+            component,
+        };
+        if let Some(name) = self.state_vars.get(&key) {
+            return Expr::ident(name.clone());
+        }
+        state_component_at_side(self.layout, "state", side, field, component, self.flux_layout)
+    }
+}
+
+fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<2> {
     match expr {
         FaceVec2Expr::Builtin(FaceVec2Builtin::Normal) => {
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
@@ -1135,12 +1375,12 @@ fn lower_vec2(
             face.sub(&center)
         }
         FaceVec2Expr::Vec2(x, y) => typed::VecExpr::<2>::from_components([
-            lower_scalar(x, layout, primitives, flux_layout),
-            lower_scalar(y, layout, primitives, flux_layout),
+            lower_scalar(x, ctx),
+            lower_scalar(y, ctx),
         ]),
         FaceVec2Expr::StateVec2 { side, field } => {
-            let x = state_component_at_side(layout, "state", *side, field, 0, flux_layout);
-            let y = state_component_at_side(layout, "state", *side, field, 1, flux_layout);
+            let x = ctx.state_scalar(*side, field.as_str(), 0);
+            let y = ctx.state_scalar(*side, field.as_str(), 1);
 
             // Boundary regression guard for MUSCL reconstruction:
             //
@@ -1163,21 +1403,22 @@ fn lower_vec2(
             typed::VecExpr::<2>::from_components([x, y])
         }
         FaceVec2Expr::Add(a, b) => {
-            let a = lower_vec2(a, layout, primitives, flux_layout);
-            let b = lower_vec2(b, layout, primitives, flux_layout);
+            let a = lower_vec2(a, ctx);
+            let b = lower_vec2(b, ctx);
             a.add(&b)
         }
         FaceVec2Expr::Sub(a, b) => {
-            let a = lower_vec2(a, layout, primitives, flux_layout);
-            let b = lower_vec2(b, layout, primitives, flux_layout);
+            let a = lower_vec2(a, ctx);
+            let b = lower_vec2(b, ctx);
             a.sub(&b)
         }
-        FaceVec2Expr::Neg(a) => lower_vec2(a, layout, primitives, flux_layout).neg(),
-        FaceVec2Expr::MulScalar(v, s) => lower_vec2(v, layout, primitives, flux_layout)
-            .mul_scalar(lower_scalar(s, layout, primitives, flux_layout)),
+        FaceVec2Expr::Neg(a) => lower_vec2(a, ctx).neg(),
+        FaceVec2Expr::MulScalar(v, s) => {
+            lower_vec2(v, ctx).mul_scalar(lower_scalar(s, ctx))
+        }
         FaceVec2Expr::Lerp(a, b) => {
-            let a = lower_vec2(a, layout, primitives, flux_layout);
-            let b = lower_vec2(b, layout, primitives, flux_layout);
+            let a = lower_vec2(a, ctx);
+            let b = lower_vec2(b, ctx);
             let l = Expr::ident("lambda");
             let lo = Expr::ident("lambda_other");
             a.mul_scalar(l).add(&b.mul_scalar(lo))
@@ -1276,12 +1517,7 @@ fn state_component_at_side(
     dsl::select(interior, owner, Expr::ident("is_boundary"))
 }
 
-fn lower_scalar(
-    expr: &FaceScalarExpr,
-    layout: &StateLayout,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
-    flux_layout: &FluxLayout,
-) -> Expr {
+fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
     match expr {
         FaceScalarExpr::Literal(v) => Expr::lit_f32(*v),
         FaceScalarExpr::Builtin(b) => match b {
@@ -1300,55 +1536,46 @@ fn lower_scalar(
             LowMachParam::PressureCouplingAlpha => Expr::ident("low_mach_params")
                 .field("pressure_coupling_alpha"),
         },
-        FaceScalarExpr::State { side, name } => {
-            state_component_at_side(layout, "state", *side, name, 0, flux_layout)
-        }
+        FaceScalarExpr::State { side, name } => ctx.state_scalar(*side, name.as_str(), 0),
         FaceScalarExpr::Primitive { side, name } => {
-            let prim = primitives.get(name.as_str()).unwrap_or_else(|| {
+            let prim = ctx.primitives.get(name.as_str()).unwrap_or_else(|| {
                 panic!("primitive '{}' not found in PrimitiveDerivations", name)
             });
-            lower_primitive_expr_at_side(prim, layout, *side, flux_layout)
+            lower_primitive_expr_at_side(prim, ctx, *side)
         }
         FaceScalarExpr::Add(a, b) => {
-            lower_scalar(a, layout, primitives, flux_layout)
-                + lower_scalar(b, layout, primitives, flux_layout)
+            lower_scalar(a, ctx) + lower_scalar(b, ctx)
         }
         FaceScalarExpr::Sub(a, b) => {
-            lower_scalar(a, layout, primitives, flux_layout)
-                - lower_scalar(b, layout, primitives, flux_layout)
+            lower_scalar(a, ctx) - lower_scalar(b, ctx)
         }
         FaceScalarExpr::Mul(a, b) => {
-            lower_scalar(a, layout, primitives, flux_layout)
-                * lower_scalar(b, layout, primitives, flux_layout)
+            lower_scalar(a, ctx) * lower_scalar(b, ctx)
         }
         FaceScalarExpr::Div(a, b) => {
-            lower_scalar(a, layout, primitives, flux_layout)
-                / lower_scalar(b, layout, primitives, flux_layout)
+            lower_scalar(a, ctx) / lower_scalar(b, ctx)
         }
-        FaceScalarExpr::Neg(a) => -lower_scalar(a, layout, primitives, flux_layout),
-        FaceScalarExpr::Abs(a) => dsl::abs(lower_scalar(a, layout, primitives, flux_layout)),
+        FaceScalarExpr::Neg(a) => -lower_scalar(a, ctx),
+        FaceScalarExpr::Abs(a) => dsl::abs(lower_scalar(a, ctx)),
         FaceScalarExpr::Sqrt(a) => Expr::call_named(
             "sqrt",
-            vec![lower_scalar(a, layout, primitives, flux_layout)],
+            vec![lower_scalar(a, ctx)],
         ),
         FaceScalarExpr::Max(a, b) => dsl::max(
-            lower_scalar(a, layout, primitives, flux_layout),
-            lower_scalar(b, layout, primitives, flux_layout),
+            lower_scalar(a, ctx),
+            lower_scalar(b, ctx),
         ),
         FaceScalarExpr::Min(a, b) => Expr::call_named(
             "min",
-            vec![
-                lower_scalar(a, layout, primitives, flux_layout),
-                lower_scalar(b, layout, primitives, flux_layout),
-            ],
+            vec![lower_scalar(a, ctx), lower_scalar(b, ctx)],
         ),
         FaceScalarExpr::Lerp(a, b) => {
-            lower_scalar(a, layout, primitives, flux_layout) * Expr::ident("lambda")
-                + lower_scalar(b, layout, primitives, flux_layout) * Expr::ident("lambda_other")
+            lower_scalar(a, ctx) * Expr::ident("lambda")
+                + lower_scalar(b, ctx) * Expr::ident("lambda_other")
         }
         FaceScalarExpr::Dot(a, b) => {
-            let a = lower_vec2(a, layout, primitives, flux_layout);
-            let b = lower_vec2(b, layout, primitives, flux_layout);
+            let a = lower_vec2(a, ctx);
+            let b = lower_vec2(b, ctx);
             a.dot(&b)
         }
     }
@@ -1411,42 +1638,37 @@ fn scalar_uses_low_mach(expr: &FaceScalarExpr) -> bool {
     }
 }
 
-fn lower_primitive_expr_at_side(
-    expr: &PrimitiveExpr,
-    state_layout: &StateLayout,
+fn lower_primitive_expr_at_side<'a>(
+    expr: &'a PrimitiveExpr,
+    ctx: &LowerCtx<'a>,
     side: FaceSide,
-    flux_layout: &FluxLayout,
 ) -> Expr {
     match expr {
         PrimitiveExpr::Literal(val) => Expr::lit_f32(*val),
 
         PrimitiveExpr::Field(name) => {
-            let (base, component) = resolve_state_field_component(state_layout, name);
-            state_component_at_side(state_layout, "state", side, base, component, flux_layout)
+            let (base, component) = resolve_state_field_component(ctx.layout, name);
+            ctx.state_scalar(side, base, component)
         }
 
         PrimitiveExpr::Add(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
-                + lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+            lower_primitive_expr_at_side(lhs, ctx, side) + lower_primitive_expr_at_side(rhs, ctx, side)
         }
         PrimitiveExpr::Sub(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
-                - lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+            lower_primitive_expr_at_side(lhs, ctx, side) - lower_primitive_expr_at_side(rhs, ctx, side)
         }
         PrimitiveExpr::Mul(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
-                * lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+            lower_primitive_expr_at_side(lhs, ctx, side) * lower_primitive_expr_at_side(rhs, ctx, side)
         }
         PrimitiveExpr::Div(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, state_layout, side, flux_layout)
-                / lower_primitive_expr_at_side(rhs, state_layout, side, flux_layout)
+            lower_primitive_expr_at_side(lhs, ctx, side) / lower_primitive_expr_at_side(rhs, ctx, side)
         }
 
         PrimitiveExpr::Sqrt(inner) => Expr::call_named(
             "sqrt",
-            vec![lower_primitive_expr_at_side(inner, state_layout, side, flux_layout)],
+            vec![lower_primitive_expr_at_side(inner, ctx, side)],
         ),
-        PrimitiveExpr::Neg(inner) => -lower_primitive_expr_at_side(inner, state_layout, side, flux_layout),
+        PrimitiveExpr::Neg(inner) => -lower_primitive_expr_at_side(inner, ctx, side),
     }
 }
 

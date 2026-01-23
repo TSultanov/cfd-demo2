@@ -128,7 +128,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
     let dist_proj = abs(dot(d_vec, normal_vec));
     let dist = max(dist_proj, 0.000001);
-    var phi: f32 = constants.density * dot(vec2<f32>(state[owner * 8u + 0u], state[owner * 8u + 1u]) * lambda + vec2<f32>(bc_neighbor_scalar(state[neigh_idx * 8u + 0u], state[owner * 8u + 0u], bc_kind[idx * 3u + 0u], bc_value[idx * 3u + 0u], d_own, is_boundary), bc_neighbor_scalar(state[neigh_idx * 8u + 1u], state[owner * 8u + 1u], bc_kind[idx * 3u + 1u], bc_value[idx * 3u + 1u], d_own, is_boundary)) * lambda_other, normal_vec) * area - constants.density * (state[owner * 8u + 3u] * lambda + select(state[neigh_idx * 8u + 3u], state[owner * 8u + 3u], is_boundary) * lambda_other) * (bc_neighbor_scalar(state[neigh_idx * 8u + 2u], state[owner * 8u + 2u], bc_kind[idx * 3u + 2u], bc_value[idx * 3u + 2u], d_own, is_boundary) - state[owner * 8u + 2u]) / dist * area;
+    let s_own_U_x = state[owner * 8u + 0u];
+    let s_own_U_y = state[owner * 8u + 1u];
+    let s_own_d_p = state[owner * 8u + 3u];
+    let s_own_p = state[owner * 8u + 2u];
+    let s_neigh_U_x = bc_neighbor_scalar(state[neigh_idx * 8u + 0u], state[owner * 8u + 0u], bc_kind[idx * 3u + 0u], bc_value[idx * 3u + 0u], d_own, is_boundary);
+    let s_neigh_U_y = bc_neighbor_scalar(state[neigh_idx * 8u + 1u], state[owner * 8u + 1u], bc_kind[idx * 3u + 1u], bc_value[idx * 3u + 1u], d_own, is_boundary);
+    let s_neigh_d_p = select(state[neigh_idx * 8u + 3u], state[owner * 8u + 3u], is_boundary);
+    let s_neigh_p = bc_neighbor_scalar(state[neigh_idx * 8u + 2u], state[owner * 8u + 2u], bc_kind[idx * 3u + 2u], bc_value[idx * 3u + 2u], d_own, is_boundary);
+    var phi: f32 = constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other, normal_vec) * area - constants.density * (s_own_d_p * lambda + s_neigh_d_p * lambda_other) * (s_neigh_p - s_own_p) / dist * area;
     fluxes[idx * 3u + 0u] = phi;
     fluxes[idx * 3u + 1u] = phi;
     fluxes[idx * 3u + 2u] = phi;

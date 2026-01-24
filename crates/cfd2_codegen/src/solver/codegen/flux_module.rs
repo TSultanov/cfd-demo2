@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::dsl as typed;
 use super::wgsl_ast::{
-    AccessMode, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, Attribute, Block, CseBuilder, Expr, Function, GlobalVar, Item, Module, Param,
+    Stmt, StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::{
@@ -739,6 +739,7 @@ fn face_stmts(
     let (state_vars, state_var_stmts) = precompute_state_vars(layout, flux_layout, &state_keys);
     body.extend(state_var_stmts);
     let ctx = LowerCtx::new(layout, primitives, flux_layout, state_vars);
+    let mut cse = CseBuilder::new("_cse_");
 
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => {
@@ -775,6 +776,11 @@ fn face_stmts(
 
             let a_p = lower_scalar(a_plus, &ctx);
             let a_m = lower_scalar(a_minus, &ctx);
+            let (cse_stmts, exprs) = cse.eliminate(&[a_p, a_m]);
+            body.extend(cse_stmts);
+            let [a_p, a_m] = exprs
+                .try_into()
+                .expect("CSE returned unexpected number of expressions");
             body.push(dsl::let_expr("a_plus", a_p));
             body.push(dsl::let_expr("a_minus", a_m));
             body.push(dsl::let_expr(
@@ -790,6 +796,11 @@ fn face_stmts(
                 let u_r = lower_scalar(&u_right[i], &ctx);
                 let f_l = lower_scalar(&flux_left[i], &ctx);
                 let f_r = lower_scalar(&flux_right[i], &ctx);
+                let (cse_stmts, exprs) = cse.eliminate(&[u_l, u_r, f_l, f_r]);
+                body.extend(cse_stmts);
+                let [u_l, u_r, f_l, f_r] = exprs
+                    .try_into()
+                    .expect("CSE returned unexpected number of expressions");
 
                 let num = Expr::ident("a_plus") * f_l - Expr::ident("a_minus") * f_r
                     + (Expr::ident("a_plus") * Expr::ident("a_minus")) * (u_r - u_l);
@@ -896,6 +907,7 @@ fn face_stmts_runtime_scheme(
     let (state_vars, state_var_stmts) = precompute_state_vars(layout, flux_layout, &state_keys);
     body.extend(state_var_stmts);
     let ctx = LowerCtx::new(layout, primitives, flux_layout, state_vars);
+    let mut cse = CseBuilder::new("_cse_");
 
     // --- Runtime scheme selection ---
     if variants.is_empty() {
@@ -963,15 +975,22 @@ fn face_stmts_runtime_scheme(
     let cond_for = |scheme: Scheme| scheme_lit.eq(scheme) & is_interior;
 
     // Wave speed selection.
+    let a_plus_upwind = lower_scalar(upwind.a_plus, &ctx);
+    let a_minus_upwind = lower_scalar(upwind.a_minus, &ctx);
+    let (cse_stmts, exprs) = cse.eliminate(&[a_plus_upwind, a_minus_upwind]);
+    body.extend(cse_stmts);
+    let [a_plus_upwind, a_minus_upwind] = exprs
+        .try_into()
+        .expect("CSE returned unexpected number of expressions");
     body.push(dsl::var_typed_expr(
         "a_plus",
         Type::F32,
-        Some(lower_scalar(upwind.a_plus, &ctx)),
+        Some(a_plus_upwind),
     ));
     body.push(dsl::var_typed_expr(
         "a_minus",
         Type::F32,
-        Some(lower_scalar(upwind.a_minus, &ctx)),
+        Some(a_minus_upwind),
     ));
 
     for scheme in [
@@ -989,13 +1008,22 @@ fn face_stmts_runtime_scheme(
         let cond = cond_for(scheme);
         let a_p = lower_scalar(v.a_plus, &ctx);
         let a_m = lower_scalar(v.a_minus, &ctx);
+        let (cse_stmts, exprs) = cse.eliminate(&[a_p, a_m]);
+        let [a_p, a_m] = exprs
+            .try_into()
+            .expect("CSE returned unexpected number of expressions");
 
         body.push(dsl::if_block_expr(
             cond,
-            dsl::block(vec![
-                dsl::assign_expr(Expr::ident("a_plus"), a_p),
-                dsl::assign_expr(Expr::ident("a_minus"), a_m),
-            ]),
+            dsl::block(
+                cse_stmts
+                    .into_iter()
+                    .chain([
+                        dsl::assign_expr(Expr::ident("a_plus"), a_p),
+                        dsl::assign_expr(Expr::ident("a_minus"), a_m),
+                    ])
+                    .collect(),
+            ),
             None,
         ));
     }
@@ -1015,25 +1043,35 @@ fn face_stmts_runtime_scheme(
         let f_l = format!("f_l_{off}");
         let f_r = format!("f_r_{off}");
 
+        let u_l_upwind = lower_scalar(&upwind.u_left[i], &ctx);
+        let u_r_upwind = lower_scalar(&upwind.u_right[i], &ctx);
+        let f_l_upwind = lower_scalar(&upwind.flux_left[i], &ctx);
+        let f_r_upwind = lower_scalar(&upwind.flux_right[i], &ctx);
+        let (cse_stmts, exprs) = cse.eliminate(&[u_l_upwind, u_r_upwind, f_l_upwind, f_r_upwind]);
+        body.extend(cse_stmts);
+        let [u_l_upwind, u_r_upwind, f_l_upwind, f_r_upwind] = exprs
+            .try_into()
+            .expect("CSE returned unexpected number of expressions");
+
         body.push(dsl::var_typed_expr(
             &u_l,
             Type::F32,
-            Some(lower_scalar(&upwind.u_left[i], &ctx)),
+            Some(u_l_upwind),
         ));
         body.push(dsl::var_typed_expr(
             &u_r,
             Type::F32,
-            Some(lower_scalar(&upwind.u_right[i], &ctx)),
+            Some(u_r_upwind),
         ));
         body.push(dsl::var_typed_expr(
             &f_l,
             Type::F32,
-            Some(lower_scalar(&upwind.flux_left[i], &ctx)),
+            Some(f_l_upwind),
         ));
         body.push(dsl::var_typed_expr(
             &f_r,
             Type::F32,
-            Some(lower_scalar(&upwind.flux_right[i], &ctx)),
+            Some(f_r_upwind),
         ));
 
         for scheme in [
@@ -1053,15 +1091,25 @@ fn face_stmts_runtime_scheme(
             let u_r_expr = lower_scalar(&v.u_right[i], &ctx);
             let f_l_expr = lower_scalar(&v.flux_left[i], &ctx);
             let f_r_expr = lower_scalar(&v.flux_right[i], &ctx);
+            let (cse_stmts, exprs) =
+                cse.eliminate(&[u_l_expr, u_r_expr, f_l_expr, f_r_expr]);
+            let [u_l_expr, u_r_expr, f_l_expr, f_r_expr] = exprs
+                .try_into()
+                .expect("CSE returned unexpected number of expressions");
 
             body.push(dsl::if_block_expr(
                 cond,
-                dsl::block(vec![
-                    dsl::assign_expr(Expr::ident(&u_l), u_l_expr),
-                    dsl::assign_expr(Expr::ident(&u_r), u_r_expr),
-                    dsl::assign_expr(Expr::ident(&f_l), f_l_expr),
-                    dsl::assign_expr(Expr::ident(&f_r), f_r_expr),
-                ]),
+                dsl::block(
+                    cse_stmts
+                        .into_iter()
+                        .chain([
+                            dsl::assign_expr(Expr::ident(&u_l), u_l_expr),
+                            dsl::assign_expr(Expr::ident(&u_r), u_r_expr),
+                            dsl::assign_expr(Expr::ident(&f_l), f_l_expr),
+                            dsl::assign_expr(Expr::ident(&f_r), f_r_expr),
+                        ])
+                        .collect(),
+                ),
                 None,
             ));
         }
@@ -1408,6 +1456,23 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
             a.add(&b)
         }
         FaceVec2Expr::Sub(a, b) => {
+            // DSL-aware geometry simplification:
+            //   (face - center_a) - (face - center_b) == center_b - center_a
+            // This pattern appears frequently in gradient approximations and QUICK stencils.
+            if let (
+                FaceVec2Expr::Builtin(FaceVec2Builtin::CellToFace { side: a_side }),
+                FaceVec2Expr::Builtin(FaceVec2Builtin::CellToFace { side: b_side }),
+            ) = (&**a, &**b)
+            {
+                let center_for = |side: FaceSide| match side {
+                    FaceSide::Owner => Expr::ident("c_owner_vec"),
+                    FaceSide::Neighbor => Expr::ident("c_neigh_cell_vec"),
+                };
+                let a_center = typed::VecExpr::<2>::from_expr(center_for(*a_side));
+                let b_center = typed::VecExpr::<2>::from_expr(center_for(*b_side));
+                return b_center.sub(&a_center);
+            }
+
             let a = lower_vec2(a, ctx);
             let b = lower_vec2(b, ctx);
             a.sub(&b)

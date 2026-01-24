@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -732,7 +733,7 @@ impl fmt::Display for Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Literal {
     Bool(bool),
     Int(i32),
@@ -751,7 +752,7 @@ impl fmt::Display for Literal {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum UnaryOp {
     Negate,
     Not,
@@ -768,7 +769,7 @@ impl fmt::Display for UnaryOp {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum BinaryOp {
     Add,
     Sub,
@@ -1454,6 +1455,325 @@ impl<'a> RenderContext<'a> {
         self.output.push_str(&self.pending_line);
         self.output.push('\n');
         self.pending_line.clear();
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CseConfig {
+    pub min_occurrences: usize,
+    pub min_nodes: usize,
+    pub max_bindings: usize,
+}
+
+impl Default for CseConfig {
+    fn default() -> Self {
+        Self {
+            min_occurrences: 2,
+            // Avoid flooding with tiny temporaries.
+            min_nodes: 6,
+            // Safety valve: keep temporary explosions under control.
+            max_bindings: 64,
+        }
+    }
+}
+
+/// Common-subexpression elimination (CSE) for a set of WGSL expressions.
+///
+/// Returns a prelude of `let` statements (ordered by dependency) and rewritten roots that
+/// reference those temporaries.
+///
+/// Note: this is purely a codegen size/compile-time optimization; expressions are assumed to be
+/// side-effect free.
+pub(crate) struct CseBuilder {
+    prefix: String,
+    next_id: u32,
+    config: CseConfig,
+}
+
+impl CseBuilder {
+    pub fn new(prefix: impl Into<String>) -> Self {
+        Self::with_config(prefix, CseConfig::default())
+    }
+
+    pub fn with_config(prefix: impl Into<String>, config: CseConfig) -> Self {
+        Self {
+            prefix: prefix.into(),
+            next_id: 0,
+            config,
+        }
+    }
+
+    pub fn eliminate(&mut self, roots: &[Expr]) -> (Vec<Stmt>, Vec<Expr>) {
+        if roots.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        enum NodeKey {
+            Literal(Literal),
+            Ident(String),
+            Field { base: Expr, field: String },
+            Index { base: Expr, index: Expr },
+            Unary { op: UnaryOp, expr: Expr },
+            Binary {
+                left: Expr,
+                op: BinaryOp,
+                right: Expr,
+            },
+            Call { callee: Expr, args: Vec<Expr> },
+        }
+
+        #[derive(Default)]
+        struct Canonicalizer {
+            memo: HashMap<Expr, Expr>,
+            intern: HashMap<NodeKey, Expr>,
+        }
+
+        impl Canonicalizer {
+            fn canon(&mut self, expr: Expr) -> Expr {
+                if let Some(rep) = self.memo.get(&expr).copied() {
+                    return rep;
+                }
+
+                let key = expr.with_node(|node| match node {
+                    ExprNode::Literal(lit) => NodeKey::Literal(lit.clone()),
+                    ExprNode::Ident(name) => NodeKey::Ident(name.clone()),
+                    ExprNode::Field { base, field } => NodeKey::Field {
+                        base: self.canon(*base),
+                        field: field.clone(),
+                    },
+                    ExprNode::Index { base, index } => NodeKey::Index {
+                        base: self.canon(*base),
+                        index: self.canon(*index),
+                    },
+                    ExprNode::Unary { op, expr } => NodeKey::Unary {
+                        op: *op,
+                        expr: self.canon(*expr),
+                    },
+                    ExprNode::Binary { left, op, right } => NodeKey::Binary {
+                        left: self.canon(*left),
+                        op: *op,
+                        right: self.canon(*right),
+                    },
+                    ExprNode::Call { callee, args } => NodeKey::Call {
+                        callee: self.canon(*callee),
+                        args: args.iter().copied().map(|arg| self.canon(arg)).collect(),
+                    },
+                });
+
+                let rep = *self.intern.entry(key).or_insert(expr);
+                self.memo.insert(expr, rep);
+                rep
+            }
+        }
+
+        fn expr_is_trivial(expr: Expr) -> bool {
+            expr.with_node(|node| matches!(node, ExprNode::Literal(_) | ExprNode::Ident(_)))
+        }
+
+        fn expr_size(expr: Expr, canon: &mut Canonicalizer, memo: &mut HashMap<Expr, usize>) -> usize {
+            let rep = canon.canon(expr);
+            if let Some(size) = memo.get(&rep).copied() {
+                return size;
+            }
+            let size = rep.with_node(|node| match node {
+                ExprNode::Literal(_) | ExprNode::Ident(_) => 1,
+                ExprNode::Field { base, .. } => 1 + expr_size(*base, canon, memo),
+                ExprNode::Index { base, index } => {
+                    1 + expr_size(*base, canon, memo) + expr_size(*index, canon, memo)
+                }
+                ExprNode::Unary { expr, .. } => 1 + expr_size(*expr, canon, memo),
+                ExprNode::Binary { left, right, .. } => {
+                    1 + expr_size(*left, canon, memo) + expr_size(*right, canon, memo)
+                }
+                ExprNode::Call { callee, args } => {
+                    1 + expr_size(*callee, canon, memo)
+                        + args
+                            .iter()
+                            .copied()
+                            .map(|arg| expr_size(arg, canon, memo))
+                            .sum::<usize>()
+                }
+            });
+            memo.insert(rep, size);
+            size
+        }
+
+        fn count_subexprs(expr: Expr, canon: &mut Canonicalizer, counts: &mut HashMap<Expr, usize>) {
+            let rep = canon.canon(expr);
+            *counts.entry(rep).or_insert(0) += 1;
+            expr.with_node(|node| match node {
+                ExprNode::Literal(_) | ExprNode::Ident(_) => {}
+                ExprNode::Field { base, .. } => count_subexprs(*base, canon, counts),
+                ExprNode::Index { base, index } => {
+                    count_subexprs(*base, canon, counts);
+                    count_subexprs(*index, canon, counts);
+                }
+                ExprNode::Unary { expr, .. } => count_subexprs(*expr, canon, counts),
+                ExprNode::Binary { left, right, .. } => {
+                    count_subexprs(*left, canon, counts);
+                    count_subexprs(*right, canon, counts);
+                }
+                ExprNode::Call { callee, args } => {
+                    count_subexprs(*callee, canon, counts);
+                    for arg in args {
+                        count_subexprs(*arg, canon, counts);
+                    }
+                }
+            });
+        }
+
+        let mut canon = Canonicalizer::default();
+        let mut counts = HashMap::<Expr, usize>::new();
+        for root in roots {
+            count_subexprs(*root, &mut canon, &mut counts);
+        }
+
+        let mut sizes = HashMap::<Expr, usize>::new();
+        let mut candidates = Vec::new();
+        for (rep, count) in &counts {
+            if *count < self.config.min_occurrences {
+                continue;
+            }
+            if expr_is_trivial(*rep) {
+                continue;
+            }
+            let size = expr_size(*rep, &mut canon, &mut sizes);
+            if size < self.config.min_nodes {
+                continue;
+            }
+
+            // Rough benefit: saves `(count - 1)` re-emissions of this subtree.
+            let benefit = (count.saturating_sub(1)) * size;
+            candidates.push((*rep, benefit));
+        }
+
+        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        candidates.truncate(self.config.max_bindings);
+
+        let extract: HashSet<Expr> = candidates.into_iter().map(|(rep, _)| rep).collect();
+
+        struct Rewriter<'a> {
+            canon: &'a mut Canonicalizer,
+            extract: &'a HashSet<Expr>,
+            names: HashMap<Expr, String>,
+            stmts: Vec<Stmt>,
+            prefix: &'a str,
+            next_id: &'a mut u32,
+        }
+
+        impl<'a> Rewriter<'a> {
+            fn rewrite(&mut self, expr: Expr) -> Expr {
+                let rep = self.canon.canon(expr);
+                if let Some(name) = self.names.get(&rep) {
+                    return Expr::ident(name.clone());
+                }
+
+                if self.extract.contains(&rep) {
+                    let name = format!("{}{}", self.prefix, *self.next_id);
+                    *self.next_id = self.next_id.saturating_add(1);
+                    self.names.insert(rep, name.clone());
+                    let rhs = self.rebuild(rep);
+                    self.stmts.push(Stmt::Let {
+                        name: name.clone(),
+                        ty: None,
+                        expr: rhs,
+                    });
+                    return Expr::ident(name);
+                }
+
+                self.rebuild(expr)
+            }
+
+            fn rebuild(&mut self, expr: Expr) -> Expr {
+                // Important: avoid allocating new `Expr` nodes while holding a borrow of the
+                // arena (which `with_node` uses internally).
+                let node = expr.with_node(|node| node.clone());
+                match node {
+                    ExprNode::Literal(_) | ExprNode::Ident(_) => expr,
+                    ExprNode::Field { base, field } => {
+                        let new_base = self.rewrite(base);
+                        if new_base == base {
+                            expr
+                        } else {
+                            new_base.field(field)
+                        }
+                    }
+                    ExprNode::Index { base, index } => {
+                        let new_base = self.rewrite(base);
+                        let new_index = self.rewrite(index);
+                        if new_base == base && new_index == index {
+                            expr
+                        } else {
+                            new_base.index(new_index)
+                        }
+                    }
+                    ExprNode::Unary { op, expr: inner } => {
+                        let new_inner = self.rewrite(inner);
+                        if new_inner == inner {
+                            return expr;
+                        }
+                        match op {
+                            UnaryOp::Negate => -new_inner,
+                            UnaryOp::Not => !new_inner,
+                            UnaryOp::AddressOf => new_inner.addr_of(),
+                        }
+                    }
+                    ExprNode::Binary { left, op, right } => {
+                        let new_left = self.rewrite(left);
+                        let new_right = self.rewrite(right);
+                        if new_left == left && new_right == right {
+                            return expr;
+                        }
+                        match op {
+                            BinaryOp::Add => new_left + new_right,
+                            BinaryOp::Sub => new_left - new_right,
+                            BinaryOp::Mul => new_left * new_right,
+                            BinaryOp::Div => new_left / new_right,
+                            BinaryOp::Less => new_left.lt(new_right),
+                            BinaryOp::LessEq => new_left.le(new_right),
+                            BinaryOp::Greater => new_left.gt(new_right),
+                            BinaryOp::GreaterEq => new_left.ge(new_right),
+                            BinaryOp::Equal => new_left.eq(new_right),
+                            BinaryOp::NotEqual => new_left.ne(new_right),
+                            BinaryOp::And => new_left & new_right,
+                            BinaryOp::Or => new_left | new_right,
+                        }
+                    }
+                    ExprNode::Call { callee, args } => {
+                        let new_callee = self.rewrite(callee);
+                        let mut changed = new_callee != callee;
+                        let new_args: Vec<Expr> = args
+                            .into_iter()
+                            .map(|arg| {
+                                let new_arg = self.rewrite(arg);
+                                if new_arg != arg {
+                                    changed = true;
+                                }
+                                new_arg
+                            })
+                            .collect();
+                        if !changed {
+                            expr
+                        } else {
+                            Expr::call(new_callee, new_args)
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut rw = Rewriter {
+            canon: &mut canon,
+            extract: &extract,
+            names: HashMap::new(),
+            stmts: Vec::new(),
+            prefix: &self.prefix,
+            next_id: &mut self.next_id,
+        };
+
+        let new_roots = roots.iter().copied().map(|r| rw.rewrite(r)).collect();
+        (rw.stmts, new_roots)
     }
 }
 

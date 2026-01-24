@@ -146,9 +146,9 @@ mod solver {
         #[allow(unused_imports)]
         pub use definitions::{
             all_models, compressible_model, compressible_system, generic_diffusion_demo_model,
-            generic_diffusion_demo_neumann_model, incompressible_momentum_generic_model,
-            incompressible_momentum_model, incompressible_momentum_system, CompressibleFields,
-            GenericCoupledFields, IncompressibleMomentumFields, ModelSpec,
+            generic_diffusion_demo_neumann_model, incompressible_momentum_model,
+            incompressible_momentum_system, CompressibleFields, GenericCoupledFields,
+            IncompressibleMomentumFields, ModelSpec,
         };
         #[allow(unused_imports)]
         pub use eos::EosSpec;

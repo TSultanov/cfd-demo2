@@ -75,11 +75,11 @@ pub(crate) fn validate_model_owned_preconditioner_config(
 mod tests {
     use super::*;
     use crate::solver::gpu::structs::PreconditionerType;
-    use crate::solver::model::{incompressible_momentum_generic_model, ModelPreconditionerSpec};
+    use crate::solver::model::{incompressible_momentum_model, ModelPreconditionerSpec};
 
     #[test]
     fn model_owned_schur_allows_preconditioner_config() {
-        let model = incompressible_momentum_generic_model();
+        let model = incompressible_momentum_model();
         assert!(matches!(
             model.linear_solver.unwrap().preconditioner,
             ModelPreconditionerSpec::Schur { .. }

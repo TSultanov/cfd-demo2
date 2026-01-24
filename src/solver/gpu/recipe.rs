@@ -657,9 +657,7 @@ mod tests {
     use super::*;
     use crate::solver::gpu::program::plan::ProgramSpecNode;
     use crate::solver::model::generic_diffusion_demo_model;
-    use crate::solver::model::{
-        compressible_model, incompressible_momentum_generic_model, incompressible_momentum_model,
-    };
+    use crate::solver::model::{compressible_model, incompressible_momentum_model};
 
     #[test]
     fn recipe_derives_linear_solver_defaults_from_model_and_config() {
@@ -925,8 +923,8 @@ mod tests {
     }
 
     #[test]
-    fn test_recipe_for_incompressible_generic_includes_flux_and_generic_assembly() {
-        let model = incompressible_momentum_generic_model();
+    fn test_recipe_for_incompressible_includes_flux_and_generic_assembly() {
+        let model = incompressible_momentum_model();
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -936,7 +934,10 @@ mod tests {
         )
         .expect("should create recipe");
 
-        assert!(recipe.flux.is_some(), "generic incompressible should allocate flux buffer");
+        assert!(
+            recipe.flux.is_some(),
+            "incompressible should allocate flux buffer"
+        );
         assert_eq!(
             recipe.flux.unwrap().stride,
             model.system.unknowns_per_cell(),

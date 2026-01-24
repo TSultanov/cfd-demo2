@@ -199,12 +199,6 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     model
 }
 
-pub fn incompressible_momentum_generic_model() -> ModelSpec {
-    let mut model = incompressible_momentum_model();
-    model.id = "incompressible_momentum_generic";
-    model
-}
-
 #[derive(Debug, Clone)]
 struct RhieChowFields {
     momentum: String,

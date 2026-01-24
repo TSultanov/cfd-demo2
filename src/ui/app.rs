@@ -567,7 +567,6 @@ impl CFDApp {
     fn model_label(model_id: &'static str) -> &'static str {
         match model_id {
             "incompressible_momentum" => "Incompressible momentum",
-            "incompressible_momentum_generic" => "Incompressible momentum (generic)",
             "compressible" => "Compressible",
             other => other,
         }

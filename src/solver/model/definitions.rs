@@ -487,8 +487,7 @@ pub use generic_diffusion_demo::{
     generic_diffusion_demo_model, generic_diffusion_demo_neumann_model,
 };
 pub use incompressible_momentum::{
-    incompressible_momentum_generic_model, incompressible_momentum_model,
-    incompressible_momentum_system, IncompressibleMomentumFields,
+    incompressible_momentum_model, incompressible_momentum_system, IncompressibleMomentumFields,
 };
 
 /// Build-time model registry.
@@ -497,7 +496,6 @@ pub use incompressible_momentum::{
 pub fn all_models() -> Vec<ModelSpec> {
     vec![
         incompressible_momentum_model(),
-        incompressible_momentum_generic_model(),
         compressible_model(),
         generic_diffusion_demo_model(),
         generic_diffusion_demo_neumann_model(),

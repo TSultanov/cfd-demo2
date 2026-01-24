@@ -18,9 +18,9 @@ pub mod primitives;
 pub use definitions::{
     all_models, compressible_model, compressible_model_with_eos, compressible_system,
     generic_diffusion_demo_model, generic_diffusion_demo_neumann_model,
-    incompressible_momentum_generic_model, incompressible_momentum_model,
-    incompressible_momentum_system, BoundaryCondition, BoundarySpec, CompressibleFields,
-    FieldBoundarySpec, GenericCoupledFields, IncompressibleMomentumFields, ModelSpec,
+    incompressible_momentum_model, incompressible_momentum_system, BoundaryCondition, BoundarySpec,
+    CompressibleFields, FieldBoundarySpec, GenericCoupledFields, IncompressibleMomentumFields,
+    ModelSpec,
 };
 pub use eos::EosSpec;
 pub use flux_layout::{FluxComponent, FluxLayout};

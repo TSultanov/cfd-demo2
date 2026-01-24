@@ -1367,14 +1367,14 @@ mod tests {
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
     use crate::solver::model::{eos, primitives};
     use crate::solver::model::{
-        incompressible_momentum_generic_model, BoundarySpec, ModelLinearSolverSpec,
+        incompressible_momentum_model, BoundarySpec, ModelLinearSolverSpec,
         ModelPreconditionerSpec, SchurBlockLayout,
     };
     use crate::solver::units::si;
 
     #[test]
     fn schur_rejects_invalid_layout_indices() {
-        let mut model = incompressible_momentum_generic_model();
+        let mut model = incompressible_momentum_model();
         let Some(spec) = &mut model.linear_solver else {
             panic!("missing linear_solver spec");
         };

@@ -63,7 +63,7 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     solver
         .set_compressible_inlet_isothermal_x(rho0, u0, &eos)
         .unwrap();
-    solver.set_outer_iters(1).unwrap();
+    solver.set_outer_iters(20).unwrap();
     solver.set_uniform_state(rho0, [u0, 0.0], p0);
     solver.initialize_history();
 
@@ -124,9 +124,21 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     let ux_ref: Vec<f64> = ref_rows.iter().map(|r| r.3).collect();
     let uy_ref: Vec<f64> = ref_rows.iter().map(|r| r.4).collect();
 
-    let p_err = common::rel_l2(&p_sol, &p_ref, 1e-12);
-    let ux_err = common::rel_l2(&ux_sol, &ux_ref, 1e-12);
-    let uy_err = common::rel_l2(&uy_sol, &uy_ref, 1e-12);
+    let u_sol: Vec<(f64, f64)> = ux_sol
+        .iter()
+        .copied()
+        .zip(uy_sol.iter().copied())
+        .collect();
+    let u_ref: Vec<(f64, f64)> = ux_ref
+        .iter()
+        .copied()
+        .zip(uy_ref.iter().copied())
+        .collect();
+
+    let u_scale = common::rms_vec2_mag(&u_ref).max(1e-12);
+    let p_scale = common::rms(&p_ref).max(1e-12);
+    let u_max = common::max_cell_rel_error_vec2(&u_sol, &u_ref, u_scale);
+    let p_max = common::max_cell_rel_error_scalar(&p_sol, &p_ref, p_scale);
 
     // Non-triviality guards.
     let ux_ref_max = common::max_abs(&ux_ref);
@@ -139,11 +151,39 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     assert!(ux_sol_max > 50.0 && uy_sol_max > 5.0 && p_sol_dev > 1e3, "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e} max_abs_centered(p)={p_sol_dev:.3e}");
 
     if common::diag_enabled() {
-        eprintln!("[openfoam][compressible_backstep] rel_l2 p={p_err:.6} u_x={ux_err:.6} u_y={uy_err:.6} | max_abs_ref u_x={ux_ref_max:.3e} u_y={uy_ref_max:.3e} p_dev={p_ref_dev:.3e} | max_abs_sol u_x={ux_sol_max:.3e} u_y={uy_sol_max:.3e} p_dev={p_sol_dev:.3e}");
+        let (x_u, y_u) = (sol_rows[u_max.idx].0, sol_rows[u_max.idx].1);
+        let (x_p, y_p) = (sol_rows[p_max.idx].0, sol_rows[p_max.idx].1);
+        eprintln!(
+            "[openfoam][compressible_backstep] max_cell rel u={:.6} abs={:.6} at (x={:.4}, y={:.4}) | max_cell rel p={:.6} abs={:.3} at (x={:.4}, y={:.4}) | scales u_rms={:.3e} p_rms={:.3e}",
+            u_max.rel,
+            u_max.abs,
+            x_u,
+            y_u,
+            p_max.rel,
+            p_max.abs,
+            x_p,
+            y_p,
+            u_scale,
+            p_scale,
+        );
     }
 
     assert!(
-        p_err < 0.7 && ux_err < 0.8 && uy_err < 2.0,
-        "mismatch vs OpenFOAM: rel_l2(p)={p_err:.3} rel_l2(u_x)={ux_err:.3} rel_l2(u_y)={uy_err:.3}"
+        u_max.rel < common::CELL_REL_TOL_U,
+        "U mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6})",
+        u_max.rel,
+        common::CELL_REL_TOL_U,
+        u_max.abs,
+        sol_rows[u_max.idx].0,
+        sol_rows[u_max.idx].1
+    );
+    assert!(
+        p_max.rel < common::CELL_REL_TOL_P,
+        "p mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6})",
+        p_max.rel,
+        common::CELL_REL_TOL_P,
+        p_max.abs,
+        sol_rows[p_max.idx].0,
+        sol_rows[p_max.idx].1
     );
 }

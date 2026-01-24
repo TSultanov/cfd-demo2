@@ -53,7 +53,7 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     solver.set_inlet_velocity(1.0).unwrap();
     solver.set_alpha_u(0.7).unwrap();
     solver.set_alpha_p(0.3).unwrap();
-    solver.set_outer_iters(3).unwrap();
+    solver.set_outer_iters(50).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
@@ -139,17 +139,56 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     // the velocity field is clearly non-trivial.
     assert!(ux_sol_max > 0.2 && uy_sol_max > 0.05 && p_sol_dev > 1e-4, "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e} max_abs(p-mean)={p_sol_dev:.3e}");
 
-    let u_x_err = common::rel_l2(&u_x_sol, &u_x_ref, 1e-12);
-    let u_y_err = common::rel_l2(&u_y_sol, &u_y_ref, 1e-12);
-    let (p_err_affine, p_scale_affine, p_shift_affine) =
-        common::rel_l2_best_affine(&p_sol, &p_ref, 1e-12);
+    let u_sol: Vec<(f64, f64)> = u_x_sol
+        .iter()
+        .copied()
+        .zip(u_y_sol.iter().copied())
+        .collect();
+    let u_ref: Vec<(f64, f64)> = u_x_ref
+        .iter()
+        .copied()
+        .zip(u_y_ref.iter().copied())
+        .collect();
+
+    let u_scale = common::rms_vec2_mag(&u_ref).max(1e-12);
+    let p_scale = common::rms(&p_ref).max(1e-12);
+    let u_max = common::max_cell_rel_error_vec2(&u_sol, &u_ref, u_scale);
+    let p_max = common::max_cell_rel_error_scalar(&p_sol, &p_ref, p_scale);
 
     if common::diag_enabled() {
-        eprintln!("[openfoam][incompressible_lid] rel_l2 u_x={u_x_err:.6} u_y={u_y_err:.6} p_affine={p_err_affine:.6} | max_abs_ref u_x={ux_ref_max:.3e} u_y={uy_ref_max:.3e} pdev={p_ref_dev:.3e} | max_abs_sol u_x={ux_sol_max:.3e} u_y={uy_sol_max:.3e} pdev={p_sol_dev:.3e} | p_affine scale={p_scale_affine:.3e} shift={p_shift_affine:.3e}");
+        let (x_u, y_u) = (sol_rows[u_max.idx].0, sol_rows[u_max.idx].1);
+        let (x_p, y_p) = (sol_rows[p_max.idx].0, sol_rows[p_max.idx].1);
+        eprintln!(
+            "[openfoam][incompressible_lid] max_cell rel u={:.6} abs={:.6} at (x={:.4}, y={:.4}) | max_cell rel p(mean-free)={:.6} abs={:.3} at (x={:.4}, y={:.4}) | scales u_rms={:.3e} p_rms={:.3e}",
+            u_max.rel,
+            u_max.abs,
+            x_u,
+            y_u,
+            p_max.rel,
+            p_max.abs,
+            x_p,
+            y_p,
+            u_scale,
+            p_scale,
+        );
     }
 
     assert!(
-        u_x_err < 0.6 && u_y_err < 0.9 && p_err_affine < 0.40,
-        "mismatch vs OpenFOAM: rel_l2(u_x)={u_x_err:.3} rel_l2(u_y)={u_y_err:.3} rel_l2(p-mean, affine-fit)={p_err_affine:.3} (scale={p_scale_affine:.3e} shift={p_shift_affine:.3e})"
+        u_max.rel < common::CELL_REL_TOL_U,
+        "U mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6})",
+        u_max.rel,
+        common::CELL_REL_TOL_U,
+        u_max.abs,
+        sol_rows[u_max.idx].0,
+        sol_rows[u_max.idx].1
+    );
+    assert!(
+        p_max.rel < common::CELL_REL_TOL_P,
+        "p mismatch vs OpenFOAM (per-cell, mean-free): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6})",
+        p_max.rel,
+        common::CELL_REL_TOL_P,
+        p_max.abs,
+        sol_rows[p_max.idx].0,
+        sol_rows[p_max.idx].1
     );
 }

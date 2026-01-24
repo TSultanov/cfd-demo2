@@ -52,7 +52,7 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     solver.set_inlet_velocity(1.0).unwrap();
     solver.set_alpha_u(0.7).unwrap();
     solver.set_alpha_p(0.3).unwrap();
-    solver.set_outer_iters(6).unwrap();
+    solver.set_outer_iters(50).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
@@ -115,12 +115,12 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
         u_y_max_abs_err = u_y_max_abs_err.max(d.abs());
     }
     u_y_rms_err = (u_y_rms_err / (u_y.len().max(1) as f64)).sqrt();
-    let (min_u_x, max_u_x) = u_x
+    let (_min_u_x, max_u_x) = u_x
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
             (acc.0.min(v), acc.1.max(v))
         });
-    let (min_u_x_ref, max_u_x_ref) = u_x_ref
+    let (_min_u_x_ref, max_u_x_ref) = u_x_ref
         .iter()
         .fold((f64::INFINITY, f64::NEG_INFINITY), |acc, &v| {
             (acc.0.min(v), acc.1.max(v))
@@ -183,14 +183,44 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     let u_y_ref: Vec<f64> = ref_rows.iter().map(|r| r.3).collect();
     let p_ref: Vec<f64> = ref_rows.iter().map(|r| r.4).collect();
 
-    let u_x_err_full = common::rel_l2(&u_x_sol, &u_x_ref, 1e-12);
-    let u_y_err_full = common::rel_l2(&u_y_sol, &u_y_ref, 1e-12);
-    let (p_err_full, p_shift_full) = common::rel_l2_best_shift(&p_sol, &p_ref, 1e-12);
-    let (p_err_affine, p_scale_affine, p_shift_affine) =
-        common::rel_l2_best_affine(&p_sol, &p_ref, 1e-12);
+    let u_sol_field: Vec<(f64, f64)> = u_x_sol
+        .iter()
+        .copied()
+        .zip(u_y_sol.iter().copied())
+        .collect();
+    let u_ref_field: Vec<(f64, f64)> = u_x_ref
+        .iter()
+        .copied()
+        .zip(u_y_ref.iter().copied())
+        .collect();
+
+    // Pressure gauge is arbitrary; compare mean-free pressure.
+    let p_sol_mean = common::mean(&p_sol);
+    let p_ref_mean = common::mean(&p_ref);
+    let p_sol_c: Vec<f64> = p_sol.iter().map(|v| v - p_sol_mean).collect();
+    let p_ref_c: Vec<f64> = p_ref.iter().map(|v| v - p_ref_mean).collect();
+
+    let u_scale = common::rms_vec2_mag(&u_ref_field).max(1e-12);
+    let p_scale = common::rms(&p_ref_c).max(1e-12);
+    let u_max = common::max_cell_rel_error_vec2(&u_sol_field, &u_ref_field, u_scale);
+    let p_max = common::max_cell_rel_error_scalar(&p_sol_c, &p_ref_c, p_scale);
 
     if common::diag_enabled() {
-        eprintln!("[openfoam][incompressible_channel] centerline rel_l2 u_x={u_x_err:.6} | centerline u_y abs rms={u_y_rms_err:.6} max_abs={u_y_max_abs_err:.6} | full rel_l2 u_x={u_x_err_full:.6} u_y={u_y_err_full:.6} p_affine={p_err_affine:.6} | max_u_x sol={max_u_x:.3e} ref={max_u_x_ref:.3e} | p_affine scale={p_scale_affine:.3e} shift={p_shift_affine:.3e} p_shift={p_shift_full:.3e}");
+        let (x_u, y_u) = (sol_rows[u_max.idx].0, sol_rows[u_max.idx].1);
+        let (x_p, y_p) = (sol_rows[p_max.idx].0, sol_rows[p_max.idx].1);
+        eprintln!(
+            "[openfoam][incompressible_channel] max_cell rel u={:.6} abs={:.6} at (x={:.4}, y={:.4}) | max_cell rel p(mean-free)={:.6} abs={:.3} at (x={:.4}, y={:.4}) | scales u_rms={:.3e} p_rms={:.3e} | centerline rel_l2 u_x={u_x_err:.6} u_y_abs_rms={u_y_rms_err:.6}",
+            u_max.rel,
+            u_max.abs,
+            x_u,
+            y_u,
+            p_max.rel,
+            p_max.abs,
+            x_p,
+            y_p,
+            u_scale,
+            p_scale,
+        );
     }
 
     // Diagnostics: global mass balance over inlet/outlet boundaries (using face geometry).
@@ -227,11 +257,21 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     }
 
     assert!(
-        u_x_err < 0.30
-            && u_y_rms_err < 0.02
-            && u_x_err_full < 0.30
-            && u_y_err_full < 5.0
-            && p_err_affine < 0.20,
-        "mismatch vs OpenFOAM: centerline rel_l2(u_x)={u_x_err:.3} u_y_abs_rms={u_y_rms_err:.3} u_y_abs_max={u_y_max_abs_err:.3} (solver [{min_u_x:.3},{max_u_x:.3}] ref [{min_u_x_ref:.3},{max_u_x_ref:.3}]); full rel_l2(u_x)={u_x_err_full:.3} rel_l2(u_y)={u_y_err_full:.3} rel_l2(p)={p_err_full:.3} (best shift {p_shift_full:.3e}, best affine err={p_err_affine:.3} scale={p_scale_affine:.3e} shift={p_shift_affine:.3e}); mass balance inflow={m_in:.6} outflow={m_out:.6}"
+        u_max.rel < common::CELL_REL_TOL_U,
+        "U mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6}); mass balance inflow={m_in:.6} outflow={m_out:.6}",
+        u_max.rel,
+        common::CELL_REL_TOL_U,
+        u_max.abs,
+        sol_rows[u_max.idx].0,
+        sol_rows[u_max.idx].1
+    );
+    assert!(
+        p_max.rel < common::CELL_REL_TOL_P,
+        "p mismatch vs OpenFOAM (per-cell, mean-free): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6}); mass balance inflow={m_in:.6} outflow={m_out:.6}",
+        p_max.rel,
+        common::CELL_REL_TOL_P,
+        p_max.abs,
+        sol_rows[p_max.idx].0,
+        sol_rows[p_max.idx].1
     );
 }

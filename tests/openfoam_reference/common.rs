@@ -10,6 +10,13 @@ pub fn diag_enabled() -> bool {
     std::env::var("CFD2_OPENFOAM_DIAG").is_ok()
 }
 
+/// Target per-cell relative tolerances for OpenFOAM reference matches.
+///
+/// - Velocity `U`: 0.01% (1e-4)
+/// - Pressure `p`: 0.1% (1e-3)
+pub const CELL_REL_TOL_U: f64 = 1e-4;
+pub const CELL_REL_TOL_P: f64 = 1e-3;
+
 pub struct CsvTable {
     pub header: Vec<String>,
     pub rows: Vec<Vec<f64>>,
@@ -84,6 +91,24 @@ pub fn mean(xs: &[f64]) -> f64 {
     xs.iter().sum::<f64>() / xs.len() as f64
 }
 
+pub fn rms(xs: &[f64]) -> f64 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+    (xs.iter().map(|v| v * v).sum::<f64>() / xs.len() as f64).sqrt()
+}
+
+pub fn rms_vec2_mag(xs: &[(f64, f64)]) -> f64 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    for &(x, y) in xs {
+        sum += x * x + y * y;
+    }
+    (sum / xs.len() as f64).sqrt()
+}
+
 pub fn max_abs(xs: &[f64]) -> f64 {
     xs.iter().map(|v| v.abs()).fold(0.0, f64::max)
 }
@@ -91,6 +116,79 @@ pub fn max_abs(xs: &[f64]) -> f64 {
 pub fn max_abs_centered(xs: &[f64]) -> f64 {
     let m = mean(xs);
     xs.iter().map(|v| (v - m).abs()).fold(0.0, f64::max)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MaxCellError {
+    pub rel: f64,
+    pub abs: f64,
+    pub idx: usize,
+}
+
+pub fn max_cell_rel_error_scalar(sol: &[f64], reference: &[f64], denom_floor: f64) -> MaxCellError {
+    assert_eq!(sol.len(), reference.len());
+    let mut max_rel = 0.0f64;
+    let mut max_abs = 0.0f64;
+    let mut max_idx = 0usize;
+
+    for (i, (&s, &r)) in sol.iter().zip(reference.iter()).enumerate() {
+        let abs = (s - r).abs();
+        let denom = r.abs().max(denom_floor);
+        let rel = if denom > 0.0 { abs / denom } else { 0.0 };
+        if rel > max_rel {
+            max_rel = rel;
+            max_abs = abs;
+            max_idx = i;
+        }
+    }
+
+    MaxCellError {
+        rel: max_rel,
+        abs: max_abs,
+        idx: max_idx,
+    }
+}
+
+pub fn max_cell_rel_error_vec2(
+    sol: &[(f64, f64)],
+    reference: &[(f64, f64)],
+    denom_floor: f64,
+) -> MaxCellError {
+    assert_eq!(sol.len(), reference.len());
+    let mut max_rel = 0.0f64;
+    let mut max_abs = 0.0f64;
+    let mut max_idx = 0usize;
+
+    for (i, (&s, &r)) in sol.iter().zip(reference.iter()).enumerate() {
+        let dx = s.0 - r.0;
+        let dy = s.1 - r.1;
+        let abs = (dx * dx + dy * dy).sqrt();
+        let denom = (r.0 * r.0 + r.1 * r.1).sqrt().max(denom_floor);
+        let rel = if denom > 0.0 { abs / denom } else { 0.0 };
+        if rel > max_rel {
+            max_rel = rel;
+            max_abs = abs;
+            max_idx = i;
+        }
+    }
+
+    MaxCellError {
+        rel: max_rel,
+        abs: max_abs,
+        idx: max_idx,
+    }
+}
+
+pub fn best_shift(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    if a.is_empty() {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        sum += y - x;
+    }
+    sum / a.len() as f64
 }
 
 /// Relative L2 error after applying the best constant offset to `a` (least-squares fit):

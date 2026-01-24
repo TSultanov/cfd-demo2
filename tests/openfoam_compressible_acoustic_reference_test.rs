@@ -81,7 +81,7 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     solver.set_dtau(0.0).unwrap();
     solver.set_viscosity(1.81e-5).unwrap();
     solver.set_inlet_velocity(0.0).unwrap();
-    solver.set_outer_iters(1).unwrap();
+    solver.set_outer_iters(20).unwrap();
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 
@@ -117,20 +117,24 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
         ux_ref.push(row[ux_idx]);
     }
 
-    // Compare perturbations (avoids division by ~1 baseline).
+    let p_out_line: Vec<f64> = p_out.iter().take(nx).copied().collect();
+
+    // Compare perturbations (used for non-triviality guards and plots).
     let p_out_dp: Vec<f64> = p_out.iter().map(|v| v - p0).collect();
     let p_ref_dp: Vec<f64> = p_ref.iter().map(|v| v - p0).collect();
     let ux_out: Vec<f64> = u_out.iter().take(nx).map(|(x, _)| *x).collect();
 
-    let p_rel = common::rel_l2(&p_out_dp, &p_ref_dp, 1e-12);
-    let ux_rel_pos = common::rel_l2(&ux_out, &ux_ref, 1e-12);
     let ux_out_neg: Vec<f64> = ux_out.iter().map(|v| -*v).collect();
-    let ux_rel_neg = common::rel_l2(&ux_out_neg, &ux_ref, 1e-12);
-    let (ux_rel, ux_sign) = if ux_rel_neg < ux_rel_pos {
-        (ux_rel_neg, -1.0)
+    let ux_scale = common::rms(&ux_ref).max(1e-12);
+    let p_scale = common::rms(&p_ref).max(1e-12);
+    let ux_max_pos = common::max_cell_rel_error_scalar(&ux_out, &ux_ref, ux_scale);
+    let ux_max_neg = common::max_cell_rel_error_scalar(&ux_out_neg, &ux_ref, ux_scale);
+    let (ux_max, ux_sign) = if ux_max_neg.rel < ux_max_pos.rel {
+        (ux_max_neg, -1.0)
     } else {
-        (ux_rel_pos, 1.0)
+        (ux_max_pos, 1.0)
     };
+    let p_max = common::max_cell_rel_error_scalar(&p_out_line, &p_ref, p_scale);
 
     // Non-triviality guards (compare perturbations for pressure).
     let p_ref_dp_max = common::max_abs(&p_ref_dp);
@@ -166,17 +170,43 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
             dot += a * b;
         }
 
+        let p_rel = common::rel_l2(&p_out_dp, &p_ref_dp, 1e-12);
+        let ux_rel_pos = common::rel_l2(&ux_out, &ux_ref, 1e-12);
+        let ux_rel_neg = common::rel_l2(&ux_out_neg, &ux_ref, 1e-12);
+        let ux_rel = ux_rel_pos.min(ux_rel_neg);
         eprintln!("[openfoam][compressible_acoustic] rel_l2 dp={p_rel:.6} u_x(best)={ux_rel:.6} (pos={ux_rel_pos:.6} neg={ux_rel_neg:.6}, sign={ux_sign:+.0}) | max_abs dp ref={p_ref_dp_max:.3e} out={p_out_dp_max:.3e} | max_abs u_x ref={ux_ref_max:.3e} out={ux_out_max:.3e}");
         eprintln!("[openfoam][compressible_acoustic] u_x stats: ref(min={ux_ref_min:.3e} max={ux_ref_max_v:.3e} mean={ux_ref_mean:.3e}) out(min={ux_out_min:.3e} max={ux_out_max_v:.3e} mean={ux_out_mean:.3e}) dot(out,ref)={dot:.3e}");
+        let x_u = (ux_max.idx as f64 + 0.5) * (length / nx as f64);
+        let x_p = (p_max.idx as f64 + 0.5) * (length / nx as f64);
+        eprintln!(
+            "[openfoam][compressible_acoustic] max_cell rel u_x(best)={:.6} abs={:.6} at x={:.6} (sign={:+.0}) | max_cell rel p={:.6} abs={:.3} at x={:.6} | scales u_x_rms={:.3e} p_rms={:.3e}",
+            ux_max.rel,
+            ux_max.abs,
+            x_u,
+            ux_sign,
+            p_max.rel,
+            p_max.abs,
+            x_p,
+            ux_scale,
+            p_scale,
+        );
     }
 
     assert!(
-        p_rel < 0.35,
-        "pressure perturbation mismatch vs OpenFOAM: rel_l2={p_rel:.3}"
+        ux_max.rel < common::CELL_REL_TOL_U,
+        "u_x mismatch vs OpenFOAM (per-cell, best sign {ux_sign:+.0}): max_rel={:.6} (tol={:.6}) max_abs={:.6} at x={:.6}",
+        ux_max.rel,
+        common::CELL_REL_TOL_U,
+        ux_max.abs,
+        (ux_max.idx as f64 + 0.5) * (length / nx as f64)
     );
     assert!(
-        ux_rel < 1.5,
-        "u_x mismatch vs OpenFOAM (best sign {ux_sign:+.0}): rel_l2={ux_rel:.3} (pos={ux_rel_pos:.3} neg={ux_rel_neg:.3})"
+        p_max.rel < common::CELL_REL_TOL_P,
+        "p mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.3} at x={:.6}",
+        p_max.rel,
+        common::CELL_REL_TOL_P,
+        p_max.abs,
+        (p_max.idx as f64 + 0.5) * (length / nx as f64)
     );
 
     // Full-field comparison (for Ny=1 this is identical to the centerline, but we keep a
@@ -229,31 +259,56 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
         );
     }
 
-    let p_out_dp: Vec<f64> = sol_rows.iter().map(|r| r.2 - p0).collect();
-    let p_ref_dp: Vec<f64> = ref_rows.iter().map(|r| r.2 - p0).collect();
+    let p_sol: Vec<f64> = sol_rows.iter().map(|r| r.2).collect();
+    let p_ref: Vec<f64> = ref_rows.iter().map(|r| r.2).collect();
     let ux_out: Vec<f64> = sol_rows.iter().map(|r| r.3).collect();
     let ux_ref: Vec<f64> = ref_rows.iter().map(|r| r.3).collect();
 
-    let p_rel = common::rel_l2(&p_out_dp, &p_ref_dp, 1e-12);
-    let ux_rel_pos = common::rel_l2(&ux_out, &ux_ref, 1e-12);
     let ux_out_neg: Vec<f64> = ux_out.iter().map(|v| -*v).collect();
-    let ux_rel_neg = common::rel_l2(&ux_out_neg, &ux_ref, 1e-12);
-    let (ux_rel, ux_sign) = if ux_rel_neg < ux_rel_pos {
-        (ux_rel_neg, -1.0)
+    let ux_scale = common::rms(&ux_ref).max(1e-12);
+    let p_scale = common::rms(&p_ref).max(1e-12);
+    let ux_max_pos = common::max_cell_rel_error_scalar(&ux_out, &ux_ref, ux_scale);
+    let ux_max_neg = common::max_cell_rel_error_scalar(&ux_out_neg, &ux_ref, ux_scale);
+    let (ux_max, ux_sign) = if ux_max_neg.rel < ux_max_pos.rel {
+        (ux_max_neg, -1.0)
     } else {
-        (ux_rel_pos, 1.0)
+        (ux_max_pos, 1.0)
     };
+    let p_max = common::max_cell_rel_error_scalar(&p_sol, &p_ref, p_scale);
 
     if common::diag_enabled() {
-        eprintln!("[openfoam][compressible_acoustic_full] rel_l2 dp={p_rel:.6} u_x(best)={ux_rel:.6} (pos={ux_rel_pos:.6} neg={ux_rel_neg:.6}, sign={ux_sign:+.0})");
+        eprintln!(
+            "[openfoam][compressible_acoustic_full] max_cell rel u_x(best)={:.6} abs={:.6} at (x={:.6}, y={:.6}) (sign={:+.0}) | max_cell rel p={:.6} abs={:.3} at (x={:.6}, y={:.6}) | scales u_x_rms={:.3e} p_rms={:.3e}",
+            ux_max.rel,
+            ux_max.abs,
+            sol_rows[ux_max.idx].0,
+            sol_rows[ux_max.idx].1,
+            ux_sign,
+            p_max.rel,
+            p_max.abs,
+            sol_rows[p_max.idx].0,
+            sol_rows[p_max.idx].1,
+            ux_scale,
+            p_scale,
+        );
     }
 
     assert!(
-        p_rel < 0.35,
-        "pressure full-field perturbation mismatch vs OpenFOAM: rel_l2={p_rel:.3}"
+        ux_max.rel < common::CELL_REL_TOL_U,
+        "u_x full-field mismatch vs OpenFOAM (per-cell, best sign {ux_sign:+.0}): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6})",
+        ux_max.rel,
+        common::CELL_REL_TOL_U,
+        ux_max.abs,
+        sol_rows[ux_max.idx].0,
+        sol_rows[ux_max.idx].1
     );
     assert!(
-        ux_rel < 1.5,
-        "u_x full-field mismatch vs OpenFOAM (best sign {ux_sign:+.0}): rel_l2={ux_rel:.3} (pos={ux_rel_pos:.3} neg={ux_rel_neg:.3})"
+        p_max.rel < common::CELL_REL_TOL_P,
+        "p full-field mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6})",
+        p_max.rel,
+        common::CELL_REL_TOL_P,
+        p_max.abs,
+        sol_rows[p_max.idx].0,
+        sol_rows[p_max.idx].1
     );
 }
